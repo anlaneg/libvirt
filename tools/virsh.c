@@ -77,6 +77,7 @@
 # define SA_SIGINFO 0
 #endif
 
+//记录进程名称
 static char *progname;
 
 static const vshCmdGrp cmdGroups[];
@@ -841,6 +842,7 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
         ctl->imode = true;
     } else {
         /* parse command */
+    	//存在command参数，认为非交互模式
         ctl->imode = false;
         if (argc - optind == 1) {
             vshDebug(ctl, VSH_ERR_INFO, "commands: \"%s\"\n", argv[optind]);
@@ -869,8 +871,10 @@ static const vshCmdDef virshCmds[] = {
     {.name = NULL}
 };
 
+//支持的命令group集合
 static const vshCmdGrp cmdGroups[] = {
     {VIRSH_CMD_GRP_DOM_MANAGEMENT, "domain", domManagementCmds},
+	//'list'命令属于monitor
     {VIRSH_CMD_GRP_DOM_MONITORING, "monitor", domMonitoringCmds},
     {VIRSH_CMD_GRP_HOST_AND_HV, "host", hostAndHypervisorCmds},
     {VIRSH_CMD_GRP_IFACE, "interface", ifaceCmds},
@@ -881,6 +885,7 @@ static const vshCmdGrp cmdGroups[] = {
     {VIRSH_CMD_GRP_SNAPSHOT, "snapshot", snapshotCmds},
     {VIRSH_CMD_GRP_STORAGE_POOL, "pool", storagePoolCmds},
     {VIRSH_CMD_GRP_STORAGE_VOL, "volume", storageVolCmds},
+	//virsh对关的命令行
     {VIRSH_CMD_GRP_VIRSH, "virsh", virshCmds},
     {NULL, NULL, NULL}
 };
@@ -889,6 +894,7 @@ static const vshClientHooks hooks = {
     .connHandler = virshConnectionHandler
 };
 
+//virsh程序入口
 int
 main(int argc, char **argv)
 {
@@ -937,6 +943,7 @@ main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    //初始化libvirt
     if (virInitialize() < 0) {
         vshError(ctl, "%s", _("Failed to initialize libvirt"));
         return EXIT_FAILURE;
@@ -944,7 +951,7 @@ main(int argc, char **argv)
 
     virFileActivateDirOverride(argv[0]);
 
-    if (!vshInit(ctl, cmdGroups, NULL))
+    if (!vshInit(ctl, cmdGroups/*注册的命令行*/, NULL))
         exit(EXIT_FAILURE);
 
     if (!virshParseArgv(ctl, argc, argv) ||
@@ -958,8 +965,10 @@ main(int argc, char **argv)
                                   virGetEnvBlockSUID("VIRSH_DEFAULT_CONNECT_URI"));
 
     if (!ctl->imode) {
+    	//非交互模式，执行指定的cmd
         ret = vshCommandRun(ctl, ctl->cmd);
     } else {
+    	//交互模式处理
         /* interactive mode */
         if (!ctl->quiet) {
             vshPrint(ctl,

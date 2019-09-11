@@ -1803,6 +1803,7 @@ static const vshCmdOptDef opts_list[] = {
 #define FILTER(NAME, FLAG)              \
     if (vshCommandOptBool(cmd, NAME))   \
         flags |= (FLAG)
+//显示所有domain
 static bool
 cmdList(vshControl *ctl, const vshCmd *cmd)
 {
@@ -1854,6 +1855,7 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
     if (!optUUID && !optName)
         optTable = true;
 
+    //收集domain信息
     if (!(list = virshDomainListCollect(ctl, flags)))
         goto cleanup;
 
@@ -2380,6 +2382,7 @@ const vshCmdDef domMonitoringCmds[] = {
      .info = info_domtime,
      .flags = 0
     },
+	//显示所有domain
     {.name = "list",
      .handler = cmdList,
      .opts = opts_list,

@@ -203,6 +203,7 @@ struct _vshControl {
     char *progname;             /* program name */
     vshCmd *cmd;                /* the current command */
     char *cmdstr;               /* string with command */
+    //是否为交互模式
     bool imode;                 /* interactive mode? */
     bool quiet;                 /* quiet mode */
     bool timing;                /* print timing info? */

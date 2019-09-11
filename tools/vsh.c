@@ -554,6 +554,7 @@ vshCmdDefSearchGrp(const char *cmdname)
     const vshCmdGrp *g;
     const vshCmdDef *c;
 
+    //遍历cmdgroup,在group中遍历command，查找匹配的cmd
     for (g = cmdGroups; g->name; g++) {
         for (c = g->commands; c->name; c++) {
             if (STREQ(c->name, cmdname))
@@ -577,10 +578,12 @@ vshCmdDefSearchSet(const char *cmdname)
     return NULL;
 }
 
+//通过cmdname获取cmd结构体
 const vshCmdDef *
 vshCmddefSearch(const char *cmdname)
 {
     if (cmdGroups)
+    	//groups式查找
         return vshCmdDefSearchGrp(cmdname);
     else
         return vshCmdDefSearchSet(cmdname);
@@ -1362,9 +1365,11 @@ typedef enum {
 
 typedef struct _vshCommandParser vshCommandParser;
 struct _vshCommandParser {
+	//取命令行下一个参数
     vshCommandToken(*getNextArg)(vshControl *, vshCommandParser *,
                                  char **, bool);
     /* vshCommandStringGetArg() */
+    //命令行当前解析位置
     char *pos;
     /* vshCommandArgvGetArg() */
     char **arg_pos;
@@ -1401,6 +1406,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser)
             tk = parser->getNextArg(ctl, parser, &tkdata, true);
 
             if (tk == VSH_TK_ERROR)
+            	//解析出错
                 goto syntaxError;
             if (tk != VSH_TK_ARG) {
                 VIR_FREE(tkdata);
@@ -1408,6 +1414,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser)
             }
 
             if (cmd == NULL) {
+            	//首次进入，先利用获得的tkdata(首个参数）查找cmd
                 /* first token must be command name */
                 if (!(cmd = vshCmddefSearch(tkdata))) {
                     vshError(ctl, _("unknown command: '%s'"), tkdata);
@@ -1609,7 +1616,7 @@ vshCommandArgvParse(vshControl *ctl, int nargs, char **argv)
  * Command string parsing
  * ----------------------
  */
-
+//取命令行下一个参数，填充到res中
 static vshCommandToken ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
 vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
                        bool report)
@@ -1618,15 +1625,20 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
     bool double_quote = false;
     int sz = 0;
     char *p = parser->pos;
+    //制作p的副本
     char *q = vshStrdup(ctl, p);
 
     *res = q;
 
+    //跳过空字符
     while (*p && (*p == ' ' || *p == '\t'))
         p++;
 
+    //到家达字符串结尾
     if (*p == '\0')
         return VSH_TK_END;
+
+    //子命令结束
     if (*p == ';') {
         parser->pos = ++p;             /* = \0 or begin of next command */
         return VSH_TK_SUBCMD_END;
@@ -1636,13 +1648,15 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
         /* end of token is blank space or ';' */
         if (!double_quote && !single_quote &&
             (*p == ' ' || *p == '\t' || *p == ';'))
-            break;
+            break;//在分隔行前停下来（非字符串里的情况时）
 
+        //遇到单引号（非双引号内的情况）
         if (!double_quote && *p == '\'') { /* single quote */
             single_quote = !single_quote;
             p++;
             continue;
         } else if (!single_quote && *p == '\\') { /* escape */
+        	//转义处理
             /*
              * The same as the bash, a \ in "" is an escaper,
              * but a \ in '' is not an escaper.
@@ -1654,14 +1668,18 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
                 return VSH_TK_ERROR;
             }
         } else if (!single_quote && *p == '"') { /* double quote */
+        	//双引号处理
             double_quote = !double_quote;
             p++;
             continue;
         }
 
+        //原来输出
         *q++ = *p++;
         sz++;
     }
+
+    //缺少双引号
     if (double_quote) {
         if (report)
             vshError(ctl, "%s", _("missing \""));
@@ -1673,6 +1691,7 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
     return VSH_TK_ARG;
 }
 
+//命令行解析
 bool
 vshCommandStringParse(vshControl *ctl, char *cmdstr)
 {
@@ -3054,12 +3073,14 @@ vshInit(vshControl *ctl, const vshCmdGrp *groups, const vshCmdDef *set)
         return false;
     }
 
+    //groups,set均没有，报错
     if (!groups && !set) {
         vshError(ctl, "%s", _("command groups and command set "
                               "cannot both be NULL"));
         return false;
     }
 
+    //设置两个cmd集合
     cmdGroups = groups;
     cmdSet = set;
 

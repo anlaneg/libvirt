@@ -304,6 +304,7 @@ void virThreadCancel(virThreadPtr thread)
     pthread_cancel(thread->thread);
 }
 
+//创建per core变量
 int virThreadLocalInit(virThreadLocalPtr l,
                        virThreadLocalCleanup c)
 {

@@ -108,7 +108,9 @@ VIR_LOG_INIT("libvirt");
 
 #define MAX_DRIVERS 21
 
+//用于记录已注册的ConnectDriver
 static virConnectDriverPtr virConnectDriverTab[MAX_DRIVERS];
+//已注册的ConnectDriver总数
 static int virConnectDriverTabCount;
 static virStateDriverPtr virStateDriverTab[MAX_DRIVERS];
 static int virStateDriverTabCount;
@@ -466,6 +468,7 @@ virGlobalInit(void)
 int
 virInitialize(void)
 {
+	//执行virGlobalInit完成初始化
     if (virOnce(&virGlobalOnce, virGlobalInit) < 0)
         return -1;
 
@@ -684,6 +687,7 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
               driver ? NULLSTR(driver->hypervisorDriver->name) : "(null)");
 
     virCheckNonNullArgReturn(driver, -1);
+    //注册的连接driver过多
     if (virConnectDriverTabCount >= MAX_DRIVERS) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Too many drivers, cannot register %s"),
@@ -694,6 +698,7 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
     VIR_DEBUG("registering %s as driver %d",
            driver->hypervisorDriver->name, virConnectDriverTabCount);
 
+    //是否使用sharedDriver
     if (setSharedDrivers) {
         if (driver->interfaceDriver == NULL)
             driver->interfaceDriver = virSharedInterfaceDriver;

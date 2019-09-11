@@ -459,6 +459,7 @@
         }                                                                   \
     } while (0)
 
+//如果argname为NULL，则返回retval
 # define virCheckNonNullArgReturn(argname, retval)  \
     do {                                            \
         if (argname == NULL) {                      \
