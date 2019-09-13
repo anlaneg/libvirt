@@ -55,9 +55,9 @@ typedef virConfParserCtxt *virConfParserCtxtPtr;
 
 struct _virConfParserCtxt {
     const char* filename;
-    const char* base;
+    const char* base;//起始位置
     const char* cur;
-    const char *end;
+    const char *end;//终止位置
     int line;
 
     virConfPtr conf;
@@ -101,6 +101,7 @@ struct _virConfEntry {
 struct _virConf {
     char *filename;
     unsigned int flags;
+    //串成一串的key,value
     virConfEntryPtr entries;
 };
 
@@ -229,7 +230,7 @@ virConfCreate(const char *filename, unsigned int flags)
  * Returns a pointer to the entry or NULL in case of failure
  */
 static virConfEntryPtr
-virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm)
+virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm/*注释*/)
 {
     virConfEntryPtr ret, prev;
 
@@ -698,6 +699,8 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
             return -1;
         }
     }
+
+    //添加key,value及注释
     if (virConfAddEntry(ctxt->conf, name, value, comm) == NULL) {
         VIR_FREE(name);
         virConfFreeValue(value);
@@ -721,7 +724,7 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
  *         read or parse the file, use virConfFree() to free the data.
  */
 static virConfPtr
-virConfParse(const char *filename, const char *content, int len,
+virConfParse(const char *filename/*文件名*/, const char *content, int len,
              unsigned int flags)
 {
     virConfParserCtxt ctxt;
@@ -793,6 +796,7 @@ virConfReadFile(const char *filename, unsigned int flags)
         content[len] = '\0';
     }
 
+    //解析配置内容
     conf = virConfParse(filename, content, len, flags);
 
  cleanup:
@@ -1561,6 +1565,7 @@ virConfWriteMem(char *memory, int *len, virConfPtr conf)
     return use;
 }
 
+//确定libvrit配置文件路径
 static char *
 virConfLoadConfigPath(const char *name)
 {
@@ -1585,6 +1590,7 @@ virConfLoadConfigPath(const char *name)
     return path;
 }
 
+//加载libvrit配置文件
 int
 virConfLoadConfig(virConfPtr *conf, const char *name)
 {
@@ -1596,11 +1602,13 @@ virConfLoadConfig(virConfPtr *conf, const char *name)
     if (!(path = virConfLoadConfigPath(name)))
         goto cleanup;
 
+    //配置目录须存在
     if (!virFileExists(path)) {
         ret = 0;
         goto cleanup;
     }
 
+    //加载配置文件
     VIR_DEBUG("Loading config file '%s'", path);
     if (!(*conf = virConfReadFile(path, 0)))
         goto cleanup;

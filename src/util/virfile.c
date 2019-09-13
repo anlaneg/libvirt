@@ -1380,6 +1380,7 @@ virFileReadLimFD(int fd, int maxlen, char **buf)
     return len;
 }
 
+//读文件的内容到buf
 int
 virFileReadAll(const char *path, int maxlen, char **buf)
 {

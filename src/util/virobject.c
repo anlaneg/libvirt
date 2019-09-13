@@ -165,6 +165,7 @@ virClassPtr virClassNew(virClassPtr parent,
 bool virClassIsDerivedFrom(virClassPtr klass,
                            virClassPtr parent)
 {
+	//检查klass是否为parent的子类
     while (klass) {
         if (klass->magic == parent->magic)
             return true;
@@ -209,6 +210,7 @@ void *virObjectLockableNew(virClassPtr klass)
 {
     virObjectLockablePtr obj;
 
+    //klass必须为virClassForObjectLockable的子类
     if (!virClassIsDerivedFrom(klass, virClassForObjectLockable())) {
         virReportInvalidArg(klass,
                             _("Class %s must derive from virObjectLockable"),

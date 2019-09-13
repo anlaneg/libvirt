@@ -529,10 +529,10 @@ virDeleteElementsN(void *ptrptr, size_t size, size_t at,
  * Returns -1 on failure, 0 on success
  */
 int virAllocVar(void *ptrptr,
-                size_t struct_size,
-                size_t element_size,
-                size_t count,
-                bool report,
+                size_t struct_size/*结构体大小*/,
+                size_t element_size/*元素大小*/,
+                size_t count/*元素数*/,
+                bool report/*申请失败，需要report*/,
                 int domcode,
                 const char *filename,
                 const char *funcname,
@@ -559,6 +559,7 @@ int virAllocVar(void *ptrptr,
     alloc_size = struct_size + (element_size * count);
     *(void **)ptrptr = calloc(1, alloc_size);
     if (*(void **)ptrptr == NULL) {
+    	/*申请内存失败*/
         if (report)
             virReportOOMErrorFull(domcode, filename, funcname, linenr);
         return -1;
