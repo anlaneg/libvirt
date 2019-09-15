@@ -212,3 +212,7 @@ tags
 !/po/*.po
 !/po/POTFILES.in
 !/po/libvirt.pot
+.cproject
+.project
+.settings/
+
