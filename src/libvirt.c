@@ -679,6 +679,7 @@ virSetSharedNWFilterDriver(virNWFilterDriverPtr driver)
  *
  * Returns the driver priority or -1 in case of error.
  */
+//注册链接driver
 int
 virRegisterConnectDriver(virConnectDriverPtr driver,
                          bool setSharedDrivers)
@@ -714,6 +715,7 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
             driver->storageDriver = virSharedStorageDriver;
     }
 
+    //存放连接用driver
     virConnectDriverTab[virConnectDriverTabCount] = driver;
     return virConnectDriverTabCount++;
 }
@@ -1088,6 +1090,7 @@ virConnectOpenInternal(const char *name,
         VIR_DEBUG("trying driver %zu (%s) ...",
                   i, virConnectDriverTab[i]->hypervisorDriver->name);
 
+        //指定连接对应的dirver
         ret->driver = virConnectDriverTab[i]->hypervisorDriver;
         ret->interfaceDriver = virConnectDriverTab[i]->interfaceDriver;
         ret->networkDriver = virConnectDriverTab[i]->networkDriver;

@@ -1111,7 +1111,7 @@ qemuStateCleanup(void)
     return 0;
 }
 
-
+//qemu对应的连接函数
 static virDrvOpenStatus qemuConnectOpen(virConnectPtr conn,
                                         virConnectAuthPtr auth ATTRIBUTE_UNUSED,
                                         virConfPtr conf ATTRIBUTE_UNUSED,
@@ -20192,6 +20192,7 @@ qemuDomainSetGuestVcpus(virDomainPtr dom,
 
 static virHypervisorDriver qemuHypervisorDriver = {
     .name = QEMU_DRIVER_NAME,
+	//qemu连接
     .connectOpen = qemuConnectOpen, /* 0.2.0 */
     .connectClose = qemuConnectClose, /* 0.2.0 */
     .connectSupportsFeature = qemuConnectSupportsFeature, /* 0.5.0 */
@@ -20202,6 +20203,7 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .connectGetMaxVcpus = qemuConnectGetMaxVcpus, /* 0.2.1 */
     .nodeGetInfo = qemuNodeGetInfo, /* 0.2.0 */
     .connectGetCapabilities = qemuConnectGetCapabilities, /* 0.2.1 */
+	//列出所有domain
     .connectListDomains = qemuConnectListDomains, /* 0.2.0 */
     .connectNumOfDomains = qemuConnectNumOfDomains, /* 0.2.0 */
     .connectListAllDomains = qemuConnectListAllDomains, /* 0.9.13 */
@@ -20405,7 +20407,7 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .domainSetGuestVcpus = qemuDomainSetGuestVcpus, /* 2.0.0 */
 };
 
-
+//qemu对应的connectDriver
 static virConnectDriver qemuConnectDriver = {
     .hypervisorDriver = &qemuHypervisorDriver,
 };

@@ -1385,7 +1385,7 @@ hypervDebugHandler(const char *message, debug_level_e level,
     }
 }
 
-
+//hyperv对应的driver
 static virConnectDriver hypervConnectDriver = {
     .hypervisorDriver = &hypervHypervisorDriver,
 };
@@ -1396,6 +1396,7 @@ hypervRegister(void)
     /* Forward openwsman errors and warnings to libvirt's logging */
     debug_add_handler(hypervDebugHandler, DEBUG_LEVEL_WARNING, NULL);
 
+    //注册hyperv对应的connect driver
     return virRegisterConnectDriver(&hypervConnectDriver,
                                     false);
 }

@@ -230,7 +230,7 @@ int virThreadCreateFull(virThreadPtr thread,
         goto cleanup;
     }
 
-    args->func = func;
+    args->func = func;//用户定制的回调
     args->funcName = funcName;
     args->worker = worker;
     args->opaque = opaque;
@@ -238,6 +238,7 @@ int virThreadCreateFull(virThreadPtr thread,
     if (!joinable)
         pthread_attr_setdetachstate(&attr, 1);
 
+    //创建线程并执行virThreadHelper回调
     err = pthread_create(&thread->thread, &attr, virThreadHelper, args);
     if (err != 0) {
         VIR_FREE(args);

@@ -395,6 +395,7 @@ virshInit(vshControl *ctl)
     vshInitReload(ctl);
 
     if (priv->conn)
+    		//已连接，退出
         return false;
 
     /* set up the library error handler */
@@ -918,6 +919,7 @@ main(int argc, char **argv)
     ctl->eventPipe[1] = -1;
     ctl->eventTimerId = -1;
     virshCtl.escapeChar = "^]";     /* Same default as telnet */
+    //指定ctl的私有数据为virshCtl
     ctl->privData = &virshCtl;
 
     if (!(progname = strrchr(argv[0], '/')))
@@ -954,8 +956,9 @@ main(int argc, char **argv)
     if (!vshInit(ctl, cmdGroups/*注册的命令行*/, NULL))
         exit(EXIT_FAILURE);
 
+    //执行命令行解析
     if (!virshParseArgv(ctl, argc, argv) ||
-        !virshInit(ctl)) {
+        !virshInit(ctl)/*执行virsh初始化*/) {
         virshDeinit(ctl);
         exit(EXIT_FAILURE);
     }

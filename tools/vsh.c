@@ -1312,6 +1312,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
 
         if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT) ||
             (hooks && hooks->connHandler && hooks->connHandler(ctl))) {
+        		//执行对应的命令处理
             ret = cmd->def->handler(ctl, cmd);
         } else {
             /* connection is not usable, return error */
