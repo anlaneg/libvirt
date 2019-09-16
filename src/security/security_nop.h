@@ -17,11 +17,8 @@
  *
  */
 
-#ifndef __VIR_SECURITY_NOP_H__
-# define __VIR_SECURITY_NOP_H__
+#pragma once
 
-# include "security_driver.h"
+#include "security_driver.h"
 
 extern virSecurityDriver virSecurityDriverNop;
-
-#endif /* __VIR_SECURITY_NOP_H__ */

@@ -16,27 +16,32 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Daniel Veillard <veillard@redhat.com>
- *  Karel Zak <kzak@redhat.com>
- *  Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
-#ifndef VIRSH_NETWORK_H
-# define VIRSH_NETWORK_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
 
 virNetworkPtr
 virshCommandOptNetworkBy(vshControl *ctl, const vshCmd *cmd,
                          const char **name, unsigned int flags);
 
+virNetworkPortPtr
+virshCommandOptNetworkPort(vshControl *ctl, const vshCmd *cmd,
+                           virNetworkPtr net,
+                           const char **name);
+
 /* default is lookup by Name and UUID */
-# define virshCommandOptNetwork(_ctl, _cmd, _name)                    \
-    virshCommandOptNetworkBy(_ctl, _cmd, _name,                       \
+#define virshCommandOptNetwork(_ctl, _cmd, _name) \
+    virshCommandOptNetworkBy(_ctl, _cmd, _name, \
                              VIRSH_BYUUID | VIRSH_BYNAME)
 
-extern const vshCmdDef networkCmds[];
+struct virshNetworkEventCallback {
+    const char *name;
+    virConnectNetworkEventGenericCallback cb;
+};
+typedef struct virshNetworkEventCallback virshNetworkEventCallback;
 
-#endif /* VIRSH_NETWORK_H */
+extern virshNetworkEventCallback virshNetworkEventCallbacks[];
+
+extern const vshCmdDef networkCmds[];

@@ -19,19 +19,18 @@
  *
  */
 
-#ifndef __VIR_DBUS_H__
-# define __VIR_DBUS_H__
+#pragma once
 
-# ifdef WITH_DBUS
-#  undef interface /* Work around namespace pollution in mingw's rpc.h */
-#  include <dbus/dbus.h>
-# else
-#  define DBusConnection void
-#  define DBusMessage void
-# endif
-# include "internal.h"
+#ifdef WITH_DBUS
+# undef interface /* Work around namespace pollution in mingw's rpc.h */
+# include <dbus/dbus.h>
+#else
+# define DBusConnection void
+# define DBusMessage void
+#endif
+#include "internal.h"
 
-# include <stdarg.h>
+#include <stdarg.h>
 
 void virDBusSetSharedBus(bool shared);
 
@@ -67,12 +66,11 @@ int virDBusCallMethod(DBusConnection *conn,
                       const char *iface,
                       const char *member,
                       const char *types, ...);
-int virDBusMessageRead(DBusMessage *msg,
-                       const char *types, ...);
+int virDBusMessageDecode(DBusMessage *msg,
+                         const char *types, ...);
 void virDBusMessageUnref(DBusMessage *msg);
 
 int virDBusIsServiceEnabled(const char *name);
 int virDBusIsServiceRegistered(const char *name);
 
 bool virDBusErrorIsUnknownMethod(virErrorPtr err);
-#endif /* __VIR_DBUS_H__ */

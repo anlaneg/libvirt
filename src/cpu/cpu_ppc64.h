@@ -16,17 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Anton Blanchard <anton@au.ibm.com>
- *      Prerna Saxena <prerna@linux.vnet.ibm.com>
  */
 
-#ifndef __VIR_CPU_PPC64_H__
-# define __VIR_CPU_PPC64_H__
+#pragma once
 
-# include "cpu.h"
+#include "cpu.h"
 
 extern struct cpuArchDriver cpuDriverPPC64;
-
-#endif /* __VIR_CPU_PPC64_H__ */

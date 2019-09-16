@@ -19,11 +19,8 @@
  *
  */
 
-#ifndef __ESX_STORAGE_BACKEND_ISCSI_H__
-# define __ESX_STORAGE_BACKEND_ISCSI_H__
+#pragma once
 
-# include "driver.h"
+#include "driver.h"
 
 extern virStorageDriver esxStorageBackendISCSI;
-
-#endif /* __ESX_STORAGE_BACKEND_ISCSI_H__ */

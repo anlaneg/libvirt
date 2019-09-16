@@ -16,43 +16,36 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
-#ifndef __VIR_NET_DAEMON_H__
-# define __VIR_NET_DAEMON_H__
+#pragma once
 
-# include <signal.h>
+#include <signal.h>
 
-# ifdef WITH_GNUTLS
-#  include "virnettlscontext.h"
-# endif
-# include "virobject.h"
-# include "virjson.h"
-# include "virnetserverprogram.h"
-# include "virnetserverclient.h"
-# include "virnetserverservice.h"
-# include "virnetserver.h"
+#include "virnettlscontext.h"
+#include "virobject.h"
+#include "virjson.h"
+#include "virnetserverprogram.h"
+#include "virnetserverclient.h"
+#include "virnetserverservice.h"
+#include "virnetserver.h"
 
 virNetDaemonPtr virNetDaemonNew(void);
 
 int virNetDaemonAddServer(virNetDaemonPtr dmn,
                           virNetServerPtr srv);
 
-virNetServerPtr virNetDaemonAddServerPostExec(virNetDaemonPtr dmn,
-                                              const char *serverName,
-                                              virNetServerClientPrivNew clientPrivNew,
-                                              virNetServerClientPrivNewPostExecRestart clientPrivNewPostExecRestart,
-                                              virNetServerClientPrivPreExecRestart clientPrivPreExecRestart,
-                                              virFreeCallback clientPrivFree,
-                                              void *clientPrivOpaque);
-
-virNetDaemonPtr virNetDaemonNewPostExecRestart(virJSONValuePtr object);
+typedef virNetServerPtr (*virNetDaemonNewServerPostExecRestart)(virNetDaemonPtr dmn,
+                                                                const char *name,
+                                                                virJSONValuePtr object,
+                                                                void *opaque);
+virNetDaemonPtr virNetDaemonNewPostExecRestart(virJSONValuePtr object,
+                                               size_t nDefServerNames,
+                                               const char **defServerNames,
+                                               virNetDaemonNewServerPostExecRestart cb,
+                                               void *opaque);
 
 virJSONValuePtr virNetDaemonPreExecRestart(virNetDaemonPtr dmn);
-
-typedef int (*virNetDaemonAutoShutdownFunc)(virNetDaemonPtr dmn, void *opaque);
 
 bool virNetDaemonIsPrivileged(virNetDaemonPtr dmn);
 
@@ -83,5 +76,5 @@ bool virNetDaemonHasClients(virNetDaemonPtr dmn);
 virNetServerPtr virNetDaemonGetServer(virNetDaemonPtr dmn,
                                       const char *serverName);
 ssize_t virNetDaemonGetServers(virNetDaemonPtr dmn, virNetServerPtr **servers);
-
-#endif /* __VIR_NET_DAEMON_H__ */
+bool virNetDaemonHasServer(virNetDaemonPtr dmn,
+                           const char *serverName);

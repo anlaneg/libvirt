@@ -17,18 +17,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __QEMU_ALIAS_H__
-# define __QEMU_ALIAS_H__
+#pragma once
 
-# include "domain_conf.h"
+#include "domain_conf.h"
 
-# include "qemu_capabilities.h"
-# include "qemu_domain.h"
-# include "qemu_domain_address.h"
+#include "qemu_capabilities.h"
+#include "qemu_domain.h"
+#include "qemu_domain_address.h"
 
 int qemuAssignDeviceChrAlias(virDomainDefPtr def,
                              virDomainChrDefPtr chr,
@@ -38,8 +35,8 @@ int qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
                                     virQEMUCapsPtr qemuCaps,
                                     virDomainControllerDefPtr controller);
 
-int qemuAssignDeviceDiskAlias(virDomainDefPtr vmdef,
-                              virDomainDiskDefPtr def,
+int qemuAssignDeviceDiskAlias(virDomainDefPtr def,
+                              virDomainDiskDefPtr disk,
                               virQEMUCapsPtr qemuCaps);
 
 int qemuAssignDeviceHostdevAlias(virDomainDefPtr def,
@@ -65,12 +62,20 @@ int qemuAssignDeviceShmemAlias(virDomainDefPtr def,
                                virDomainShmemDefPtr shmem,
                                int idx);
 
+int qemuAssignDeviceWatchdogAlias(virDomainWatchdogDefPtr watchdog);
+
+int qemuAssignDeviceInputAlias(virDomainDefPtr def,
+                               virDomainInputDefPtr input,
+                               int idx);
+
+int qemuAssignDeviceVsockAlias(virDomainVsockDefPtr vsock);
+
 int qemuAssignDeviceAliases(virDomainDefPtr def, virQEMUCapsPtr qemuCaps);
 
 int qemuDomainDeviceAliasIndex(const virDomainDeviceInfo *info,
                                const char *prefix);
 
-char *qemuAliasFromDisk(const virDomainDiskDef *disk);
+char *qemuAliasDiskDriveFromDisk(const virDomainDiskDef *disk);
 
 const char *qemuAliasDiskDriveSkipPrefix(const char *dev_name);
 
@@ -81,10 +86,15 @@ char *qemuDomainGetMasterKeyAlias(void);
 char *qemuDomainGetSecretAESAlias(const char *srcalias,
                                   bool isLuks);
 
-char *qemuAliasTLSObjFromChardevAlias(const char *chardev_alias)
+char *qemuAliasTLSObjFromSrcAlias(const char *srcAlias)
     ATTRIBUTE_NONNULL(1);
 
 char *qemuAliasChardevFromDevAlias(const char *devAlias)
     ATTRIBUTE_NONNULL(1);
 
-#endif /* __QEMU_ALIAS_H__*/
+const char *qemuDomainGetManagedPRAlias(void);
+
+char *qemuDomainGetUnmanagedPRAlias(const char *parentalias);
+
+char *qemuAliasDBusVMStateFromId(const char *id)
+    ATTRIBUTE_NONNULL(1);

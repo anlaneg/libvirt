@@ -19,11 +19,7 @@
  *
  */
 
-
-#ifndef OPENVZ_UTIL_H
-# define OPENVZ_UTIL_H
+#pragma once
 
 long openvzKBPerPages(void);
 char *openvzVEGetStringParam(virDomainPtr dom, const char *param);
-
-#endif

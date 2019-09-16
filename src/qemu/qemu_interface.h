@@ -17,17 +17,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Matthew J. Rosato <mjrosato@linux.vnet.ibm.com>
  */
 
-#ifndef __QEMU_INTERFACE_H__
-# define __QEMU_INTERFACE_H__
+#pragma once
 
-# include "domain_conf.h"
-# include "qemu_conf.h"
-# include "qemu_domain.h"
+#include "domain_conf.h"
+#include "qemu_conf.h"
+#include "qemu_domain.h"
+#include "qemu_slirp.h"
 
 int qemuInterfaceStartDevice(virDomainNetDefPtr net);
 int qemuInterfaceStartDevices(virDomainDefPtr def);
@@ -56,7 +53,8 @@ int qemuInterfaceBridgeConnect(virDomainDefPtr def,
 
 int qemuInterfaceOpenVhostNet(virDomainDefPtr def,
                               virDomainNetDefPtr net,
-                              virQEMUCapsPtr qemuCaps,
                               int *vhostfd,
                               size_t *vhostfdSize);
-#endif /* __QEMU_INTERFACE_H__ */
+
+qemuSlirpPtr qemuInterfacePrepareSlirp(virQEMUDriverPtr driver,
+                                       virDomainNetDefPtr net);

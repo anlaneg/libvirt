@@ -14,21 +14,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_RANDOM_H__
-# define __VIR_RANDOM_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-uint64_t virRandomBits(int nbits);
+uint64_t virRandomBits(int nbits) ATTRIBUTE_NOINLINE;
 double virRandom(void);
 uint32_t virRandomInt(uint32_t max);
 int virRandomBytes(unsigned char *buf, size_t buflen)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-int virRandomGenerateWWN(char **wwn, const char *virt_type);
-
-#endif /* __VIR_RANDOM_H__ */
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NOINLINE;
+int virRandomGenerateWWN(char **wwn, const char *virt_type) ATTRIBUTE_NOINLINE;

@@ -16,30 +16,40 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NET_CLIENT_STREAM_H__
-# define __VIR_NET_CLIENT_STREAM_H__
+#pragma once
 
-# include "virnetclientprogram.h"
-# include "virobject.h"
+#include "virnetclientprogram.h"
+#include "virobject.h"
 
 typedef struct _virNetClientStream virNetClientStream;
 typedef virNetClientStream *virNetClientStreamPtr;
+
+typedef enum {
+    VIR_NET_CLIENT_STREAM_CLOSED_NOT = 0,
+    VIR_NET_CLIENT_STREAM_CLOSED_FINISHED,
+    VIR_NET_CLIENT_STREAM_CLOSED_ABORTED,
+} virNetClientStreamClosed;
 
 typedef void (*virNetClientStreamEventCallback)(virNetClientStreamPtr stream,
                                                 int events, void *opaque);
 
 virNetClientStreamPtr virNetClientStreamNew(virNetClientProgramPtr prog,
                                             int proc,
-                                            unsigned serial);
+                                            unsigned serial,
+                                            bool allowSkip);
 
-bool virNetClientStreamRaiseError(virNetClientStreamPtr st);
+int virNetClientStreamCheckState(virNetClientStreamPtr st);
+
+int virNetClientStreamCheckSendStatus(virNetClientStreamPtr st,
+                                      virNetMessagePtr msg);
 
 int virNetClientStreamSetError(virNetClientStreamPtr st,
                                virNetMessagePtr msg);
+
+void virNetClientStreamSetClosed(virNetClientStreamPtr st,
+                                 virNetClientStreamClosed closed);
 
 bool virNetClientStreamMatches(virNetClientStreamPtr st,
                                virNetMessagePtr msg);
@@ -57,7 +67,17 @@ int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
                                  virNetClientPtr client,
                                  char *data,
                                  size_t nbytes,
-                                 bool nonblock);
+                                 bool nonblock,
+                                 unsigned int flags);
+
+int virNetClientStreamSendHole(virNetClientStreamPtr st,
+                               virNetClientPtr client,
+                               long long length,
+                               unsigned int flags);
+
+int virNetClientStreamRecvHole(virNetClientPtr client,
+                               virNetClientStreamPtr st,
+                               long long *length);
 
 int virNetClientStreamEventAddCallback(virNetClientStreamPtr st,
                                        int events,
@@ -71,5 +91,3 @@ int virNetClientStreamEventRemoveCallback(virNetClientStreamPtr st);
 
 bool virNetClientStreamEOF(virNetClientStreamPtr st)
     ATTRIBUTE_NONNULL(1);
-
-#endif /* __VIR_NET_CLIENT_STREAM_H__ */

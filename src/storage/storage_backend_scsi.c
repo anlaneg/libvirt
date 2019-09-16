@@ -17,14 +17,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange redhat com>
  */
 
 #include <config.h>
 
 #include <unistd.h>
-#include <stdio.h>
 #include <fcntl.h>
 
 #include "virerror.h"
@@ -35,6 +32,9 @@
 #include "vircommand.h"
 #include "virstring.h"
 #include "storage_util.h"
+#include "node_device_conf.h"
+#include "node_device_util.h"
+#include "driver.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -55,17 +55,14 @@ struct _virStoragePoolFCRefreshInfo {
 static int
 virStorageBackendSCSITriggerRescan(uint32_t host)
 {
-    int fd = -1;
-    int retval = 0;
-    char *path;
+    VIR_AUTOCLOSE fd = -1;
+    VIR_AUTOFREE(char *) path = NULL;
 
     VIR_DEBUG("Triggering rescan of host %d", host);
 
     if (virAsprintf(&path, "%s/host%u/scan",
-                    LINUX_SYSFS_SCSI_HOST_PREFIX, host) < 0) {
-        retval = -1;
-        goto out;
-    }
+                    LINUX_SYSFS_SCSI_HOST_PREFIX, host) < 0)
+        return -1;
 
     VIR_DEBUG("Scan trigger path is '%s'", path);
 
@@ -75,26 +72,20 @@ virStorageBackendSCSITriggerRescan(uint32_t host)
         virReportSystemError(errno,
                              _("Could not open '%s' to trigger host scan"),
                              path);
-        retval = -1;
-        goto free_path;
+        return -1;
     }
 
     if (safewrite(fd,
                   LINUX_SYSFS_SCSI_HOST_SCAN_STRING,
                   sizeof(LINUX_SYSFS_SCSI_HOST_SCAN_STRING)) < 0) {
-        VIR_FORCE_CLOSE(fd);
         virReportSystemError(errno,
                              _("Write to '%s' to trigger host scan failed"),
                              path);
-        retval = -1;
+        return -1;
     }
 
-    VIR_FORCE_CLOSE(fd);
- free_path:
-    VIR_FREE(path);
- out:
     VIR_DEBUG("Rescan of host %d complete", host);
-    return retval;
+    return 0;
 }
 
 /**
@@ -138,6 +129,7 @@ virStoragePoolFCRefreshThread(void *opaque)
     const char *fchost_name = cbdata->fchost_name;
     const unsigned char *pool_uuid = cbdata->pool_uuid;
     virStoragePoolObjPtr pool = NULL;
+    virStoragePoolDefPtr def;
     unsigned int host;
     int found = 0;
     int tries = 2;
@@ -148,22 +140,23 @@ virStoragePoolFCRefreshThread(void *opaque)
         /* Let's see if the pool still exists -  */
         if (!(pool = virStoragePoolObjFindPoolByUUID(pool_uuid)))
             break;
+        def = virStoragePoolObjGetDef(pool);
 
         /* Return with pool lock, if active, we can get the host number,
          * successfully, rescan, and find LUN's, then we are happy
          */
         VIR_DEBUG("Attempt FC Refresh for pool='%s' name='%s' tries='%d'",
-                  pool->def->name, fchost_name, tries);
+                  def->name, fchost_name, tries);
 
-        pool->def->allocation = pool->def->capacity = pool->def->available = 0;
+        def->allocation = def->capacity = def->available = 0;
 
         if (virStoragePoolObjIsActive(pool) &&
-            virGetSCSIHostNumber(fchost_name, &host) == 0 &&
+            virSCSIHostGetNumber(fchost_name, &host) == 0 &&
             virStorageBackendSCSITriggerRescan(host) == 0) {
             virStoragePoolObjClearVols(pool);
             found = virStorageBackendSCSIFindLUs(pool, host);
         }
-        virStoragePoolObjUnlock(pool);
+        virStoragePoolObjEndAPI(&pool);
     } while (!found && --tries);
 
     if (pool && !found)
@@ -173,60 +166,105 @@ virStoragePoolFCRefreshThread(void *opaque)
 }
 
 static char *
-getAdapterName(virStoragePoolSourceAdapter adapter)
+getAdapterName(virStorageAdapterPtr adapter)
 {
     char *name = NULL;
-    char *parentaddr = NULL;
 
-    if (adapter.type == VIR_STORAGE_POOL_SOURCE_ADAPTER_TYPE_SCSI_HOST) {
-        if (adapter.data.scsi_host.has_parent) {
-            virPCIDeviceAddress addr = adapter.data.scsi_host.parentaddr;
-            unsigned int unique_id = adapter.data.scsi_host.unique_id;
+    if (adapter->type == VIR_STORAGE_ADAPTER_TYPE_SCSI_HOST) {
+        virStorageAdapterSCSIHostPtr scsi_host = &adapter->data.scsi_host;
 
-            if (!(name = virGetSCSIHostNameByParentaddr(addr.domain,
-                                                        addr.bus,
-                                                        addr.slot,
-                                                        addr.function,
+        if (scsi_host->has_parent) {
+            virPCIDeviceAddressPtr addr = &scsi_host->parentaddr;
+            unsigned int unique_id = scsi_host->unique_id;
+
+            if (!(name = virSCSIHostGetNameByParentaddr(addr->domain,
+                                                        addr->bus,
+                                                        addr->slot,
+                                                        addr->function,
                                                         unique_id)))
-                goto cleanup;
+                return NULL;
         } else {
-            ignore_value(VIR_STRDUP(name, adapter.data.scsi_host.name));
+            ignore_value(VIR_STRDUP(name, scsi_host->name));
         }
-    } else if (adapter.type == VIR_STORAGE_POOL_SOURCE_ADAPTER_TYPE_FC_HOST) {
-        if (!(name = virGetFCHostNameByWWN(NULL,
-                                           adapter.data.fchost.wwnn,
-                                           adapter.data.fchost.wwpn))) {
+    } else if (adapter->type == VIR_STORAGE_ADAPTER_TYPE_FC_HOST) {
+        virStorageAdapterFCHostPtr fchost = &adapter->data.fchost;
+
+        if (!(name = virVHBAGetHostByWWN(NULL, fchost->wwnn, fchost->wwpn))) {
             virReportError(VIR_ERR_XML_ERROR,
                            _("Failed to find SCSI host with wwnn='%s', "
-                             "wwpn='%s'"), adapter.data.fchost.wwnn,
-                           adapter.data.fchost.wwpn);
+                             "wwpn='%s'"), fchost->wwnn, fchost->wwpn);
         }
     }
 
- cleanup:
-    VIR_FREE(parentaddr);
     return name;
 }
+
+
+/**
+ * @name: Name from a wwnn/wwpn lookup
+ *
+ * Validate that the @name fetched from the wwnn/wwpn is a vHBA
+ * and not an HBA as that should be a configuration error. It's only
+ * possible to use an existing wwnn/wwpn of a vHBA because that's
+ * what someone would have created using the node device create via XML
+ * functionality. Using the HBA "just because" it has a wwnn/wwpn and
+ * the characteristics of a vHBA is just not valid
+ *
+ * Returns true if the @name is OK, false on error
+ */
+static bool
+checkName(const char *name)
+{
+    unsigned int host_num;
+
+    if (virSCSIHostGetNumber(name, &host_num) &&
+        virVHBAIsVportCapable(NULL, host_num))
+        return true;
+
+    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                   _("the wwnn/wwpn for '%s' are assigned to an HBA"), name);
+    return false;
+}
+
 
 /*
  * Using the host# name found via wwnn/wwpn lookup in the fc_host
  * sysfs tree to get the parent 'scsi_host#' to ensure it matches.
  */
 static bool
-checkVhbaSCSIHostParent(virConnectPtr conn,
-                        const char *name,
-                        const char *parent_name)
+checkParent(const char *name,
+            const char *parent_name)
 {
-    char *vhba_parent = NULL;
+    unsigned int host_num;
     bool retval = false;
+    virConnectPtr conn = NULL;
+    VIR_AUTOFREE(char *) scsi_host_name = NULL;
+    VIR_AUTOFREE(char *) vhba_parent = NULL;
 
-    VIR_DEBUG("conn=%p, name=%s, parent_name=%s", conn, name, parent_name);
+    VIR_DEBUG("name=%s, parent_name=%s", name, parent_name);
 
-    /* autostarted pool - assume we're OK */
+    conn = virGetConnectNodeDev();
     if (!conn)
-        return true;
+        goto cleanup;
 
-    if (!(vhba_parent = virStoragePoolGetVhbaSCSIHostParent(conn, name)))
+    if (virSCSIHostGetNumber(parent_name, &host_num) < 0) {
+        virReportError(VIR_ERR_XML_ERROR,
+                       _("parent '%s' is not properly formatted"),
+                       parent_name);
+        goto cleanup;
+    }
+
+    if (!virVHBAPathExists(NULL, host_num)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("parent '%s' is not an fc_host for the wwnn/wwpn"),
+                       parent_name);
+        goto cleanup;
+    }
+
+    if (virAsprintf(&scsi_host_name, "scsi_%s", name) < 0)
+        goto cleanup;
+
+    if (!(vhba_parent = virNodeDeviceGetParentName(conn, scsi_host_name)))
         goto cleanup;
 
     if (STRNEQ(parent_name, vhba_parent)) {
@@ -240,93 +278,38 @@ checkVhbaSCSIHostParent(virConnectPtr conn,
     retval = true;
 
  cleanup:
-    VIR_FREE(vhba_parent);
+    virObjectUnref(conn);
     return retval;
 }
 
+
 static int
-createVport(virConnectPtr conn,
-            virStoragePoolObjPtr pool)
+createVport(virStoragePoolDefPtr def,
+            const char *configFile,
+            virStorageAdapterFCHostPtr fchost)
 {
-    const char *configFile = pool->configFile;
-    virStoragePoolSourceAdapterPtr adapter = &pool->def->source.adapter;
-    unsigned int parent_host;
-    char *name = NULL;
-    char *parent_hoststr = NULL;
-    bool skip_capable_check = false;
     virStoragePoolFCRefreshInfoPtr cbdata = NULL;
     virThread thread;
-    int ret = -1;
+    VIR_AUTOFREE(char *) name = NULL;
 
-    if (adapter->type != VIR_STORAGE_POOL_SOURCE_ADAPTER_TYPE_FC_HOST)
-        return 0;
-
-    VIR_DEBUG("conn=%p, configFile='%s' parent='%s', wwnn='%s' wwpn='%s'",
-              conn, NULLSTR(configFile), NULLSTR(adapter->data.fchost.parent),
-              adapter->data.fchost.wwnn, adapter->data.fchost.wwpn);
+    VIR_DEBUG("configFile='%s' parent='%s', wwnn='%s' wwpn='%s'",
+              NULLSTR(configFile), NULLSTR(fchost->parent),
+              fchost->wwnn, fchost->wwpn);
 
     /* If we find an existing HBA/vHBA within the fc_host sysfs
      * using the wwnn/wwpn, then a nodedev is already created for
      * this pool and we don't have to create the vHBA
      */
-    if ((name = virGetFCHostNameByWWN(NULL, adapter->data.fchost.wwnn,
-                                      adapter->data.fchost.wwpn))) {
+    if ((name = virVHBAGetHostByWWN(NULL, fchost->wwnn, fchost->wwpn))) {
+        if (!(checkName(name)))
+            return -1;
+
         /* If a parent was provided, let's make sure the 'name' we've
-         * retrieved has the same parent
-         */
-        if (adapter->data.fchost.parent &&
-            checkVhbaSCSIHostParent(conn, name, adapter->data.fchost.parent))
-            ret = 0;
+         * retrieved has the same parent. If not this will cause failure. */
+        if (!fchost->parent || checkParent(name, fchost->parent))
+            return 0;
 
-        goto cleanup;
-    }
-
-    if (adapter->data.fchost.parent) {
-        if (VIR_STRDUP(parent_hoststr, adapter->data.fchost.parent) < 0)
-            goto cleanup;
-    } else if (adapter->data.fchost.parent_wwnn &&
-               adapter->data.fchost.parent_wwpn) {
-        if (!(parent_hoststr =
-              virGetFCHostNameByWWN(NULL, adapter->data.fchost.parent_wwnn,
-                                    adapter->data.fchost.parent_wwpn))) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("cannot find parent using provided wwnn/wwpn"));
-            goto cleanup;
-        }
-    } else if (adapter->data.fchost.parent_fabric_wwn) {
-        if (!(parent_hoststr =
-              virGetFCHostNameByFabricWWN(NULL,
-                                          adapter->data.fchost.parent_fabric_wwn))) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("cannot find parent using provided fabric_wwn"));
-            goto cleanup;
-        }
-    } else {
-        if (!(parent_hoststr = virFindFCHostCapableVport(NULL))) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("'parent' for vHBA not specified, and "
-                             "cannot find one on this host"));
-            goto cleanup;
-        }
-        skip_capable_check = true;
-    }
-
-    if (virGetSCSIHostNumber(parent_hoststr, &parent_host) < 0)
-        goto cleanup;
-
-    /* NOTE:
-     * We do not save the parent_hoststr in adapter->data.fchost.parent
-     * since we could be writing out the 'def' to the saved XML config.
-     * If we wrote out the name in the XML, then future starts would
-     * always use the same parent rather than finding the "best available"
-     * parent. Besides we have a way to determine the parent based on
-     * the 'name' field.
-     */
-    if (!skip_capable_check && !virIsCapableFCHost(NULL, parent_host)) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("parent '%s' specified for vHBA is not vport capable"),
-                       parent_hoststr);
-        goto cleanup;
+        return -1;
     }
 
     /* Since we're creating the vHBA, then we need to manage removing it
@@ -334,103 +317,35 @@ createVport(virConnectPtr conn,
      * restart, we need to save the persistent configuration. So if not
      * already defined as YES, then force the issue.
      */
-    if (adapter->data.fchost.managed != VIR_TRISTATE_BOOL_YES) {
-        adapter->data.fchost.managed = VIR_TRISTATE_BOOL_YES;
+    if (fchost->managed != VIR_TRISTATE_BOOL_YES) {
+        fchost->managed = VIR_TRISTATE_BOOL_YES;
         if (configFile) {
-            if (virStoragePoolSaveConfig(configFile, pool->def) < 0)
-                goto cleanup;
+            if (virStoragePoolSaveConfig(configFile, def) < 0)
+                return -1;
         }
     }
 
-    if (virManageVport(parent_host, adapter->data.fchost.wwpn,
-                       adapter->data.fchost.wwnn, VPORT_CREATE) < 0)
-        goto cleanup;
-
-    virFileWaitForDevices();
+    if (!(name = virNodeDeviceCreateVport(fchost)))
+        return -1;
 
     /* Creating our own VPORT didn't leave enough time to find any LUN's,
      * so, let's create a thread whose job it is to call the FindLU's with
      * retry logic set to true. If the thread isn't created, then no big
      * deal since it's still possible to refresh the pool later.
      */
-    if ((name = virGetFCHostNameByWWN(NULL, adapter->data.fchost.wwnn,
-                                      adapter->data.fchost.wwpn))) {
-        if (VIR_ALLOC(cbdata) == 0) {
-            memcpy(cbdata->pool_uuid, pool->def->uuid, VIR_UUID_BUFLEN);
-            VIR_STEAL_PTR(cbdata->fchost_name, name);
+    if (VIR_ALLOC(cbdata) == 0) {
+        memcpy(cbdata->pool_uuid, def->uuid, VIR_UUID_BUFLEN);
+        VIR_STEAL_PTR(cbdata->fchost_name, name);
 
-            if (virThreadCreate(&thread, false, virStoragePoolFCRefreshThread,
-                                cbdata) < 0) {
-                /* Oh well - at least someone can still refresh afterwards */
-                VIR_DEBUG("Failed to create FC Pool Refresh Thread");
-                virStoragePoolFCRefreshDataFree(cbdata);
-            }
+        if (virThreadCreate(&thread, false, virStoragePoolFCRefreshThread,
+                            cbdata) < 0) {
+            /* Oh well - at least someone can still refresh afterwards */
+            VIR_DEBUG("Failed to create FC Pool Refresh Thread");
+            virStoragePoolFCRefreshDataFree(cbdata);
         }
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(name);
-    VIR_FREE(parent_hoststr);
-    return ret;
-}
-
-static int
-deleteVport(virConnectPtr conn,
-            virStoragePoolSourceAdapter adapter)
-{
-    unsigned int parent_host;
-    char *name = NULL;
-    char *vhba_parent = NULL;
-    int ret = -1;
-
-    if (adapter.type != VIR_STORAGE_POOL_SOURCE_ADAPTER_TYPE_FC_HOST)
-        return 0;
-
-    VIR_DEBUG("conn=%p parent='%s', managed='%d' wwnn='%s' wwpn='%s'",
-              conn, NULLSTR(adapter.data.fchost.parent),
-              adapter.data.fchost.managed,
-              adapter.data.fchost.wwnn,
-              adapter.data.fchost.wwpn);
-
-    /* If we're not managing the deletion of the vHBA, then just return */
-    if (adapter.data.fchost.managed != VIR_TRISTATE_BOOL_YES)
-        return 0;
-
-    /* Find our vHBA by searching the fc_host sysfs tree for our wwnn/wwpn */
-    if (!(name = virGetFCHostNameByWWN(NULL, adapter.data.fchost.wwnn,
-                                       adapter.data.fchost.wwpn))) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to find fc_host for wwnn='%s' and wwpn='%s'"),
-                       adapter.data.fchost.wwnn, adapter.data.fchost.wwpn);
-        goto cleanup;
-    }
-
-    /* If at startup time we provided a parent, then use that to
-     * get the parent_host value; otherwise, we have to determine
-     * the parent scsi_host which we did not save at startup time
-     */
-    if (adapter.data.fchost.parent) {
-        if (virGetSCSIHostNumber(adapter.data.fchost.parent, &parent_host) < 0)
-            goto cleanup;
-    } else {
-        if (!(vhba_parent = virStoragePoolGetVhbaSCSIHostParent(conn, name)))
-            goto cleanup;
-
-        if (virGetSCSIHostNumber(vhba_parent, &parent_host) < 0)
-            goto cleanup;
-    }
-
-    if (virManageVport(parent_host, adapter.data.fchost.wwpn,
-                       adapter.data.fchost.wwnn, VPORT_DELETE) < 0)
-        goto cleanup;
-
-    ret = 0;
- cleanup:
-    VIR_FREE(name);
-    VIR_FREE(vhba_parent);
-    return ret;
+    return 0;
 }
 
 
@@ -438,20 +353,19 @@ static int
 virStorageBackendSCSICheckPool(virStoragePoolObjPtr pool,
                                bool *isActive)
 {
-    char *path = NULL;
-    char *name = NULL;
+    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
     unsigned int host;
-    int ret = -1;
+    VIR_AUTOFREE(char *) path = NULL;
+    VIR_AUTOFREE(char *) name = NULL;
 
     *isActive = false;
 
-    if (!(name = getAdapterName(pool->def->source.adapter))) {
+    if (!(name = getAdapterName(&def->source.adapter))) {
         /* It's normal for the pool with "fc_host" type source
          * adapter fails to get the adapter name, since the vHBA
          * the adapter based on might be not created yet.
          */
-        if (pool->def->source.adapter.type ==
-            VIR_STORAGE_POOL_SOURCE_ADAPTER_TYPE_FC_HOST) {
+        if (def->source.adapter.type == VIR_STORAGE_ADAPTER_TYPE_FC_HOST) {
             virResetLastError();
             return 0;
         } else {
@@ -459,65 +373,78 @@ virStorageBackendSCSICheckPool(virStoragePoolObjPtr pool,
         }
     }
 
-    if (virGetSCSIHostNumber(name, &host) < 0)
-        goto cleanup;
+    if (virSCSIHostGetNumber(name, &host) < 0)
+        return -1;
 
     if (virAsprintf(&path, "%s/host%d",
                     LINUX_SYSFS_SCSI_HOST_PREFIX, host) < 0)
-        goto cleanup;
+        return -1;
 
     *isActive = virFileExists(path);
 
-    ret = 0;
- cleanup:
-    VIR_FREE(path);
-    VIR_FREE(name);
-    return ret;
+    return 0;
 }
 
 static int
-virStorageBackendSCSIRefreshPool(virConnectPtr conn ATTRIBUTE_UNUSED,
-                                 virStoragePoolObjPtr pool)
+virStorageBackendSCSIRefreshPool(virStoragePoolObjPtr pool)
 {
-    char *name = NULL;
+    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
     unsigned int host;
-    int ret = -1;
+    VIR_AUTOFREE(char *) name = NULL;
 
-    pool->def->allocation = pool->def->capacity = pool->def->available = 0;
+    def->allocation = def->capacity = def->available = 0;
 
-    if (!(name = getAdapterName(pool->def->source.adapter)))
+    if (!(name = getAdapterName(&def->source.adapter)))
         return -1;
 
-    if (virGetSCSIHostNumber(name, &host) < 0)
-        goto out;
+    if (virSCSIHostGetNumber(name, &host) < 0)
+        return -1;
 
     VIR_DEBUG("Scanning host%u", host);
 
     if (virStorageBackendSCSITriggerRescan(host) < 0)
-        goto out;
+        return -1;
 
     if (virStorageBackendSCSIFindLUs(pool, host) < 0)
-        goto out;
+        return -1;
 
-    ret = 0;
- out:
-    VIR_FREE(name);
-    return ret;
+    return 0;
 }
 
-static int
-virStorageBackendSCSIStartPool(virConnectPtr conn,
-                               virStoragePoolObjPtr pool)
-{
-    return createVport(conn, pool);
-}
 
 static int
-virStorageBackendSCSIStopPool(virConnectPtr conn,
-                              virStoragePoolObjPtr pool)
+virStorageBackendSCSIStartPool(virStoragePoolObjPtr pool)
 {
-    virStoragePoolSourceAdapter adapter = pool->def->source.adapter;
-    return deleteVport(conn, adapter);
+    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    const char *configFile = virStoragePoolObjGetConfigFile(pool);
+
+    if (def->source.adapter.type == VIR_STORAGE_ADAPTER_TYPE_FC_HOST)
+        return createVport(def, configFile,
+                           &def->source.adapter.data.fchost);
+
+    return 0;
+}
+
+
+static int
+virStorageBackendSCSIStopPool(virStoragePoolObjPtr pool)
+{
+    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+
+    if (def->source.adapter.type == VIR_STORAGE_ADAPTER_TYPE_FC_HOST) {
+        virConnectPtr conn;
+        int ret;
+        conn = virGetConnectNodeDev();
+        if (!conn)
+            return -1;
+
+        ret = virNodeDeviceDeleteVport(conn,
+                                       &def->source.adapter.data.fchost);
+        virObjectUnref(conn);
+        return ret;
+    }
+
+    return 0;
 }
 
 virStorageBackend virStorageBackendSCSI = {
@@ -531,3 +458,10 @@ virStorageBackend virStorageBackendSCSI = {
     .downloadVol = virStorageBackendVolDownloadLocal,
     .wipeVol = virStorageBackendVolWipeLocal,
 };
+
+
+int
+virStorageBackendSCSIRegister(void)
+{
+    return virStorageBackendRegister(&virStorageBackendSCSI);
+}

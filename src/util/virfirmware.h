@@ -16,14 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jim Fehlig <jfehlig@suse.com>
  */
 
-#ifndef __VIR_FIRMWARE_H__
-# define __VIR_FIRMWARE_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef struct _virFirmware virFirmware;
 typedef virFirmware *virFirmwarePtr;
@@ -33,6 +30,11 @@ struct _virFirmware {
     char *nvram;
 };
 
+
+void
+virFirmwareFree(virFirmwarePtr firmware);
+
+VIR_DEFINE_AUTOPTR_FUNC(virFirmware, virFirmwareFree);
 
 void
 virFirmwareFreeList(virFirmwarePtr *firmwares, size_t nfirmwares);
@@ -46,6 +48,3 @@ virFirmwareParseList(const char *list,
                      virFirmwarePtr **firmwares,
                      size_t *nfirmwares)
     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
-
-
-#endif /* __VIR_FIRMWARE_H__ */

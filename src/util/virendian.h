@@ -19,10 +19,9 @@
  *
  */
 
-#ifndef __VIR_ENDIAN_H__
-# define __VIR_ENDIAN_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 /* The interfaces in this file are provided as macros for speed.  */
 
@@ -34,14 +33,14 @@
  * Read 8 bytes at BUF as a big-endian 64-bit number.  Caller is
  * responsible to avoid reading beyond array bounds.
  */
-# define virReadBufInt64BE(buf)                          \
-    (((uint64_t)(uint8_t)((buf)[0]) << 56) |             \
-     ((uint64_t)(uint8_t)((buf)[1]) << 48) |             \
-     ((uint64_t)(uint8_t)((buf)[2]) << 40) |             \
-     ((uint64_t)(uint8_t)((buf)[3]) << 32) |             \
-     ((uint64_t)(uint8_t)((buf)[4]) << 24) |             \
-     ((uint64_t)(uint8_t)((buf)[5]) << 16) |             \
-     ((uint64_t)(uint8_t)((buf)[6]) << 8) |              \
+#define virReadBufInt64BE(buf) \
+    (((uint64_t)(uint8_t)((buf)[0]) << 56) | \
+     ((uint64_t)(uint8_t)((buf)[1]) << 48) | \
+     ((uint64_t)(uint8_t)((buf)[2]) << 40) | \
+     ((uint64_t)(uint8_t)((buf)[3]) << 32) | \
+     ((uint64_t)(uint8_t)((buf)[4]) << 24) | \
+     ((uint64_t)(uint8_t)((buf)[5]) << 16) | \
+     ((uint64_t)(uint8_t)((buf)[6]) << 8) | \
      (uint64_t)(uint8_t)((buf)[7]))
 
 /**
@@ -52,14 +51,14 @@
  * Read 8 bytes at BUF as a little-endian 64-bit number.  Caller is
  * responsible to avoid reading beyond array bounds.
  */
-# define virReadBufInt64LE(buf)                          \
-    ((uint64_t)(uint8_t)((buf)[0]) |                     \
-     ((uint64_t)(uint8_t)((buf)[1]) << 8) |              \
-     ((uint64_t)(uint8_t)((buf)[2]) << 16) |             \
-     ((uint64_t)(uint8_t)((buf)[3]) << 24) |             \
-     ((uint64_t)(uint8_t)((buf)[4]) << 32) |             \
-     ((uint64_t)(uint8_t)((buf)[5]) << 40) |             \
-     ((uint64_t)(uint8_t)((buf)[6]) << 48) |             \
+#define virReadBufInt64LE(buf) \
+    ((uint64_t)(uint8_t)((buf)[0]) | \
+     ((uint64_t)(uint8_t)((buf)[1]) << 8) | \
+     ((uint64_t)(uint8_t)((buf)[2]) << 16) | \
+     ((uint64_t)(uint8_t)((buf)[3]) << 24) | \
+     ((uint64_t)(uint8_t)((buf)[4]) << 32) | \
+     ((uint64_t)(uint8_t)((buf)[5]) << 40) | \
+     ((uint64_t)(uint8_t)((buf)[6]) << 48) | \
      ((uint64_t)(uint8_t)((buf)[7]) << 56))
 
 /**
@@ -70,10 +69,10 @@
  * Read 4 bytes at BUF as a big-endian 32-bit number.  Caller is
  * responsible to avoid reading beyond array bounds.
  */
-# define virReadBufInt32BE(buf)                          \
-    (((uint32_t)(uint8_t)((buf)[0]) << 24) |             \
-     ((uint32_t)(uint8_t)((buf)[1]) << 16) |             \
-     ((uint32_t)(uint8_t)((buf)[2]) << 8) |              \
+#define virReadBufInt32BE(buf) \
+    (((uint32_t)(uint8_t)((buf)[0]) << 24) | \
+     ((uint32_t)(uint8_t)((buf)[1]) << 16) | \
+     ((uint32_t)(uint8_t)((buf)[2]) << 8) | \
      (uint32_t)(uint8_t)((buf)[3]))
 
 /**
@@ -84,10 +83,10 @@
  * Read 4 bytes at BUF as a little-endian 32-bit number.  Caller is
  * responsible to avoid reading beyond array bounds.
  */
-# define virReadBufInt32LE(buf)                          \
-    ((uint32_t)(uint8_t)((buf)[0]) |                     \
-     ((uint32_t)(uint8_t)((buf)[1]) << 8) |              \
-     ((uint32_t)(uint8_t)((buf)[2]) << 16) |             \
+#define virReadBufInt32LE(buf) \
+    ((uint32_t)(uint8_t)((buf)[0]) | \
+     ((uint32_t)(uint8_t)((buf)[1]) << 8) | \
+     ((uint32_t)(uint8_t)((buf)[2]) << 16) | \
      ((uint32_t)(uint8_t)((buf)[3]) << 24))
 
 /**
@@ -98,8 +97,8 @@
  * Read 2 bytes at BUF as a big-endian 16-bit number.  Caller is
  * responsible to avoid reading beyond array bounds.
  */
-# define virReadBufInt16BE(buf)                          \
-    (((uint16_t)(uint8_t)((buf)[0]) << 8) |              \
+#define virReadBufInt16BE(buf) \
+    (((uint16_t)(uint8_t)((buf)[0]) << 8) | \
      (uint16_t)(uint8_t)((buf)[1]))
 
 /**
@@ -110,8 +109,6 @@
  * Read 2 bytes at BUF as a little-endian 16-bit number.  Caller is
  * responsible to avoid reading beyond array bounds.
  */
-# define virReadBufInt16LE(buf)                          \
-    ((uint16_t)(uint8_t)((buf)[0]) |                     \
+#define virReadBufInt16LE(buf) \
+    ((uint16_t)(uint8_t)((buf)[0]) | \
      ((uint16_t)(uint8_t)((buf)[1]) << 8))
-
-#endif /* __VIR_ENDIAN_H__ */

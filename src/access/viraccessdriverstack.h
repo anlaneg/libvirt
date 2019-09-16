@@ -18,15 +18,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_ACCESS_DRIVER_STACK_H__
-# define __VIR_ACCESS_DRIVER_STACK_H__
+#pragma once
 
-# include "access/viraccessdriver.h"
+#include "access/viraccessdriver.h"
 
 
 int virAccessDriverStackAppend(virAccessManagerPtr manager,
                                virAccessManagerPtr child);
 
 extern virAccessDriver accessDriverStack;
-
-#endif /* __VIR_ACCESS_DRIVER_STACK_H__ */

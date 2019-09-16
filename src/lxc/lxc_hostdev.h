@@ -17,15 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __LXC_HOSTDEV_H__
-# define __LXC_HOSTDEV_H__
+#pragma once
 
-# include "lxc_conf.h"
-# include "domain_conf.h"
+#include "lxc_conf.h"
+#include "domain_conf.h"
 
 int virLXCUpdateActiveUSBHostdevs(virLXCDriverPtr driver,
                                   virDomainDefPtr def);
@@ -39,5 +36,3 @@ int virLXCPrepareHostDevices(virLXCDriverPtr driver,
                              virDomainDefPtr def);
 void virLXCDomainReAttachHostDevices(virLXCDriverPtr driver,
                                      virDomainDefPtr def);
-
-#endif /* __LXC_HOSTDEV_H__ */

@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
 #include <config.h>
@@ -38,8 +36,6 @@
 
 #define VIR_FROM_THIS VIR_FROM_ADMIN
 
-#define LIBVIRTD_ADMIN_SOCK_NAME "/libvirt-admin-sock"
-#define LIBVIRTD_ADMIN_UNIX_SOCKET LOCALSTATEDIR "/run/libvirt" LIBVIRTD_ADMIN_SOCK_NAME
 
 VIR_LOG_INIT("libvirt-admin");
 
@@ -62,13 +58,12 @@ virAdmGlobalInit(void)
 
     virLogSetFromEnv();
 
+#ifdef HAVE_LIBINTL_H
     if (!bindtextdomain(PACKAGE, LOCALEDIR))
         goto error;
+#endif /* HAVE_LIBINTL_H */
 
-    if (!(remoteAdminPrivClass = virClassNew(virClassForObjectLockable(),
-                                             "remoteAdminPriv",
-                                             sizeof(remoteAdminPriv),
-                                             remoteAdminPrivDispose)))
+    if (!VIR_CLASS_NEW(remoteAdminPriv, virClassForObjectLockable()))
         goto error;
 
     return;
@@ -128,23 +123,43 @@ getSocketPath(virURIPtr uri)
     }
 
     if (!sock_path) {
-        if (STRNEQ_NULLABLE(uri->scheme, "libvirtd")) {
+        VIR_AUTOFREE(char *) sockbase = NULL;
+        bool legacy = false;
+
+        if (!uri->scheme) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Unsupported URI scheme '%s'"),
-                           NULLSTR(uri->scheme));
+                           "%s", _("No URI scheme specified"));
             goto error;
         }
+        if (STREQ(uri->scheme, "libvirtd")) {
+            legacy = true;
+        } else if (!STRPREFIX(uri->scheme, "virt")) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("Unsupported URI scheme '%s'"),
+                           uri->scheme);
+            goto error;
+        }
+
+        if (legacy) {
+            if (VIR_STRDUP(sockbase, "libvirt-admin-sock") < 0)
+                goto error;
+        } else {
+            if (virAsprintf(&sockbase, "%s-admin-sock", uri->scheme) < 0)
+                goto error;
+        }
+
         if (STREQ_NULLABLE(uri->path, "/system")) {
-            if (VIR_STRDUP(sock_path, LIBVIRTD_ADMIN_UNIX_SOCKET) < 0)
+            if (virAsprintf(&sock_path, RUNSTATEDIR "/libvirt/%s",
+                            sockbase) < 0)
                 goto error;
         } else if (STREQ_NULLABLE(uri->path, "/session")) {
-            if (!rundir || virAsprintf(&sock_path, "%s%s", rundir,
-                                       LIBVIRTD_ADMIN_SOCK_NAME) < 0)
+            if (!rundir || virAsprintf(&sock_path, "%s/%s", rundir,
+                                       sockbase) < 0)
                 goto error;
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Invalid URI path '%s', try '/system'"),
-                           uri->path ? uri->path : "");
+                           NULLSTR_EMPTY(uri->path));
             goto error;
         }
     }
@@ -161,7 +176,7 @@ getSocketPath(virURIPtr uri)
 static int
 virAdmGetDefaultURI(virConfPtr conf, char **uristr)
 {
-    const char *defname = virGetEnvAllowSUID("LIBVIRT_ADMIN_DEFAULT_URI");
+    const char *defname = getenv("LIBVIRT_ADMIN_DEFAULT_URI");
     if (defname && *defname) {
         if (VIR_STRDUP(*uristr, defname) < 0)
             return -1;
@@ -208,13 +223,13 @@ virAdmConnectOpen(const char *name, unsigned int flags)
     char *sock_path = NULL;
     char *alias = NULL;
     virAdmConnectPtr conn = NULL;
-    virConfPtr conf = NULL;
+    VIR_AUTOPTR(virConf) conf = NULL;
     char *uristr = NULL;
 
     if (virAdmInitialize() < 0)
         goto error;
 
-    VIR_DEBUG("flags=%x", flags);
+    VIR_DEBUG("name=%s flags=0x%x", NULLSTR(name), flags);
     virResetLastError();
 
     if (!(conn = virAdmConnectNew()))
@@ -257,7 +272,6 @@ virAdmConnectOpen(const char *name, unsigned int flags)
  cleanup:
     VIR_FREE(sock_path);
     VIR_FREE(uristr);
-    virConfFree(conf);
     return conn;
 
  error:
@@ -329,7 +343,7 @@ int
 virAdmConnectRef(virAdmConnectPtr conn)
 {
     VIR_DEBUG("conn=%p refs=%d", conn,
-              conn ? conn->object.parent.u.s.refs : 0);
+              conn ? conn->parent.parent.u.s.refs : 0);
 
     virResetLastError();
     virCheckAdmConnectReturn(conn, -1);
@@ -711,7 +725,7 @@ virAdmConnectListServers(virAdmConnectPtr conn,
 {
     int ret = -1;
 
-    VIR_DEBUG("conn=%p, servers=%p, flags=%x", conn, servers, flags);
+    VIR_DEBUG("conn=%p, servers=%p, flags=0x%x", conn, servers, flags);
 
     virResetLastError();
 
@@ -749,7 +763,7 @@ virAdmConnectLookupServer(virAdmConnectPtr conn,
 {
     virAdmServerPtr ret = NULL;
 
-    VIR_DEBUG("conn=%p, name=%s, flags=%x", conn, NULLSTR(name), flags);
+    VIR_DEBUG("conn=%p, name=%s, flags=0x%x", conn, NULLSTR(name), flags);
     virResetLastError();
 
     virCheckAdmConnectGoto(conn, cleanup);
@@ -791,7 +805,7 @@ virAdmServerGetThreadPoolParameters(virAdmServerPtr srv,
 {
     int ret = -1;
 
-    VIR_DEBUG("srv=%p, params=%p, nparams=%p, flags=%x",
+    VIR_DEBUG("srv=%p, params=%p, nparams=%p, flags=0x%x",
               srv, params, nparams, flags);
 
     virResetLastError();
@@ -828,7 +842,7 @@ virAdmServerSetThreadPoolParameters(virAdmServerPtr srv,
                                     int nparams,
                                     unsigned int flags)
 {
-    VIR_DEBUG("srv=%p, params=%p, nparams=%x, flags=%x",
+    VIR_DEBUG("srv=%p, params=%p, nparams=%d, flags=0x%x",
               srv, params, nparams, flags);
 
     virResetLastError();
@@ -870,7 +884,7 @@ virAdmServerListClients(virAdmServerPtr srv,
 {
     int ret = -1;
 
-    VIR_DEBUG("srv=%p, clients=%p, flags=%x", srv, clients, flags);
+    VIR_DEBUG("srv=%p, clients=%p, flags=0x%x", srv, clients, flags);
 
     virResetLastError();
 
@@ -908,7 +922,7 @@ virAdmServerLookupClient(virAdmServerPtr srv,
 {
     virAdmClientPtr ret = NULL;
 
-    VIR_DEBUG("srv=%p, id=%llu, flags=%x", srv, id, flags);
+    VIR_DEBUG("srv=%p, id=%llu, flags=0x%x", srv, id, flags);
     virResetLastError();
 
     virCheckAdmServerGoto(srv, error);
@@ -955,7 +969,7 @@ virAdmClientGetInfo(virAdmClientPtr client,
 {
     int ret = -1;
 
-    VIR_DEBUG("client=%p, params=%p, nparams=%p, flags=%x",
+    VIR_DEBUG("client=%p, params=%p, nparams=%p, flags=0x%x",
               client, params, nparams, flags);
 
     virResetLastError();
@@ -986,7 +1000,7 @@ int virAdmClientClose(virAdmClientPtr client,
 {
     int ret = -1;
 
-    VIR_DEBUG("client=%p, flags=%x", client, flags);
+    VIR_DEBUG("client=%p, flags=0x%x", client, flags);
     virResetLastError();
 
     virCheckAdmClientGoto(client, error);
@@ -1026,7 +1040,8 @@ virAdmServerGetClientLimits(virAdmServerPtr srv,
 {
     int ret = -1;
 
-    VIR_DEBUG("srv=%p, flags=%x", srv, flags);
+    VIR_DEBUG("srv=%p, params=%p, nparams=%p, flags=0x%x",
+              srv, params, nparams, flags);
     virResetLastError();
 
     virCheckAdmServerGoto(srv, error);
@@ -1065,7 +1080,7 @@ virAdmServerSetClientLimits(virAdmServerPtr srv,
 {
     int ret = -1;
 
-    VIR_DEBUG("srv=%p, params=%p, nparams=%d, flags=%x", srv, params, nparams,
+    VIR_DEBUG("srv=%p, params=%p, nparams=%d, flags=0x%x", srv, params, nparams,
               flags);
     VIR_TYPED_PARAMS_DEBUG(params, nparams);
 
@@ -1110,7 +1125,7 @@ virAdmConnectGetLoggingOutputs(virAdmConnectPtr conn,
 {
     int ret = -1;
 
-    VIR_DEBUG("conn=%p, flags=%x", conn, flags);
+    VIR_DEBUG("conn=%p, flags=0x%x", conn, flags);
 
     virResetLastError();
     virCheckAdmConnectReturn(conn, -1);
@@ -1151,7 +1166,8 @@ virAdmConnectGetLoggingFilters(virAdmConnectPtr conn,
 {
     int ret = -1;
 
-    VIR_DEBUG("conn=%p, flags=%x", conn, flags);
+    VIR_DEBUG("conn=%p, filters=%p, flags=0x%x",
+              conn, filters, flags);
 
     virResetLastError();
     virCheckAdmConnectReturn(conn, -1);
@@ -1190,7 +1206,7 @@ virAdmConnectSetLoggingOutputs(virAdmConnectPtr conn,
 {
     int ret = -1;
 
-    VIR_DEBUG("conn=%p, outputs=%s, flags=%x", conn, outputs, flags);
+    VIR_DEBUG("conn=%p, outputs=%s, flags=0x%x", conn, outputs, flags);
 
     virResetLastError();
     virCheckAdmConnectReturn(conn, -1);
@@ -1228,7 +1244,7 @@ virAdmConnectSetLoggingFilters(virAdmConnectPtr conn,
 {
     int ret = -1;
 
-    VIR_DEBUG("conn=%p, flags=%x", conn, flags);
+    VIR_DEBUG("conn=%p, filters=%s, flags=0x%x", conn, filters, flags);
 
     virResetLastError();
     virCheckAdmConnectReturn(conn, -1);

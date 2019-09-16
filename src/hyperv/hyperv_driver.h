@@ -20,9 +20,6 @@
  *
  */
 
-#ifndef __HYPERV_DRIVER_H__
-# define __HYPERV_DRIVER_H__
+#pragma once
 
 int hypervRegister(void);
-
-#endif /* __HYPERV_DRIVER_H__ */

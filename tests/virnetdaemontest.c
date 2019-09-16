@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -27,6 +25,60 @@
 #define VIR_FROM_THIS VIR_FROM_RPC
 
 #if defined(HAVE_SOCKETPAIR) && defined(WITH_YAJL)
+struct testClientPriv {
+    int magic;
+};
+
+
+static void *
+testClientNew(virNetServerClientPtr client ATTRIBUTE_UNUSED,
+              void *opaque ATTRIBUTE_UNUSED)
+{
+    struct testClientPriv *priv;
+
+    if (VIR_ALLOC(priv) < 0)
+        return NULL;
+
+    priv->magic = 1729;
+
+    return priv;
+}
+
+
+static virJSONValuePtr
+testClientPreExec(virNetServerClientPtr client ATTRIBUTE_UNUSED,
+                  void *data)
+{
+    struct testClientPriv *priv = data;
+
+    return virJSONValueNewNumberInt(priv->magic);
+}
+
+
+static void *
+testClientNewPostExec(virNetServerClientPtr client,
+                      virJSONValuePtr object,
+                      void *opaque)
+{
+    int magic;
+
+    if (virJSONValueGetNumberInt(object, &magic) < 0)
+        return NULL;
+
+    if (magic != 1729)
+        return NULL;
+
+    return testClientNew(client, opaque);
+}
+
+
+static void
+testClientFree(void *opaque)
+{
+    VIR_FREE(opaque);
+}
+
+
 static virNetServerPtr
 testCreateServer(const char *server_name, const char *host, int family)
 {
@@ -35,13 +87,6 @@ testCreateServer(const char *server_name, const char *host, int family)
     virNetServerClientPtr cln1 = NULL, cln2 = NULL;
     virNetSocketPtr sk1 = NULL, sk2 = NULL;
     int fdclient[2];
-    const char *mdns_entry = NULL;
-    const char *mdns_group = NULL;
-
-# ifdef WITH_AVAHI
-    mdns_entry = "libvirt-ro";
-    mdns_group = "libvirtTest";
-# endif
 
     if (socketpair(PF_UNIX, SOCK_STREAM, 0, fdclient) < 0) {
         virReportSystemError(errno, "%s",
@@ -52,10 +97,9 @@ testCreateServer(const char *server_name, const char *host, int family)
     if (!(srv = virNetServerNew(server_name, 1,
                                 10, 50, 5, 100, 10,
                                 120, 5,
-                                mdns_group,
-                                NULL,
-                                NULL,
-                                NULL,
+                                testClientNew,
+                                testClientPreExec,
+                                testClientFree,
                                 NULL)))
         goto error;
 
@@ -63,9 +107,7 @@ testCreateServer(const char *server_name, const char *host, int family)
                                            NULL,
                                            family,
                                            VIR_NET_SERVER_SERVICE_AUTH_NONE,
-# ifdef WITH_GNUTLS
                                            NULL,
-# endif
                                            true,
                                            5,
                                            2)))
@@ -75,17 +117,15 @@ testCreateServer(const char *server_name, const char *host, int family)
                                            NULL,
                                            family,
                                            VIR_NET_SERVER_SERVICE_AUTH_POLKIT,
-# ifdef WITH_GNUTLS
                                            NULL,
-# endif
                                            false,
                                            25,
                                            5)))
         goto error;
 
-    if (virNetServerAddService(srv, svc1, mdns_entry) < 0)
+    if (virNetServerAddService(srv, svc1) < 0)
         goto error;
-    if (virNetServerAddService(srv, svc2, mdns_entry) < 0)
+    if (virNetServerAddService(srv, svc2) < 0)
         goto error;
 
     if (virNetSocketNewConnectSockFD(fdclient[0], &sk1) < 0)
@@ -98,10 +138,11 @@ testCreateServer(const char *server_name, const char *host, int family)
                                        VIR_NET_SERVER_SERVICE_AUTH_SASL,
                                        true,
                                        15,
-# ifdef WITH_GNUTLS
                                        NULL,
-# endif
-                                       NULL, NULL, NULL, NULL)))
+                                       testClientNew,
+                                       testClientPreExec,
+                                       testClientFree,
+                                       NULL)))
         goto error;
 
     if (!(cln2 = virNetServerClientNew(virNetServerNextClientID(srv),
@@ -109,10 +150,11 @@ testCreateServer(const char *server_name, const char *host, int family)
                                        VIR_NET_SERVER_SERVICE_AUTH_POLKIT,
                                        true,
                                        66,
-# ifdef WITH_GNUTLS
                                        NULL,
-# endif
-                                       NULL, NULL, NULL, NULL)))
+                                       testClientNew,
+                                       testClientPreExec,
+                                       testClientFree,
+                                       NULL)))
         goto error;
 
     if (virNetServerAddClient(srv, cln1) < 0)
@@ -194,12 +236,35 @@ struct testExecRestartData {
     bool pass;
 };
 
+static virNetServerPtr
+testNewServerPostExecRestart(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
+                             const char *name,
+                             virJSONValuePtr object,
+                             void *opaque)
+{
+    struct testExecRestartData *data = opaque;
+    size_t i;
+    for (i = 0; i < data->nservers; i++) {
+        if (STREQ(data->serverNames[i], name)) {
+            return virNetServerNewPostExecRestart(object,
+                                                  name,
+                                                  testClientNew,
+                                                  testClientNewPostExec,
+                                                  testClientPreExec,
+                                                  testClientFree,
+                                                  NULL);
+        }
+    }
+
+    virReportError(VIR_ERR_INTERNAL_ERROR, "Unexpected server name '%s'", name);
+    return NULL;
+}
+
 static int testExecRestart(const void *opaque)
 {
     size_t i;
     int ret = -1;
     virNetDaemonPtr dmn = NULL;
-    virNetServerPtr srv = NULL;
     const struct testExecRestartData *data = opaque;
     char *infile = NULL, *outfile = NULL;
     char *injsonstr = NULL, *outjsonstr = NULL;
@@ -222,10 +287,13 @@ static int testExecRestart(const void *opaque)
      * fds 100->103 for something else, which is probably
      * fairly reasonable in general
      */
-    dup2(fdserver[0], 100);
-    dup2(fdserver[1], 101);
-    dup2(fdclient[0], 102);
-    dup2(fdclient[1], 103);
+    if (dup2(fdserver[0], 100) < 0 ||
+        dup2(fdserver[1], 101) < 0 ||
+        dup2(fdclient[0], 102) < 0 ||
+        dup2(fdclient[1], 103) < 0) {
+        virReportSystemError(errno, "%s", "dup2() failed");
+        goto cleanup;
+    }
 
     if (virAsprintf(&infile, "%s/virnetdaemondata/input-data-%s.json",
                     abs_srcdir, data->jsonfile) < 0)
@@ -241,15 +309,20 @@ static int testExecRestart(const void *opaque)
     if (!(injson = virJSONValueFromString(injsonstr)))
         goto cleanup;
 
-    if (!(dmn = virNetDaemonNewPostExecRestart(injson)))
+    if (!(dmn = virNetDaemonNewPostExecRestart(injson,
+                                               data->nservers,
+                                               data->serverNames,
+                                               testNewServerPostExecRestart,
+                                               (void *)data)))
         goto cleanup;
 
     for (i = 0; i < data->nservers; i++) {
-        if (!(srv = virNetDaemonAddServerPostExec(dmn, data->serverNames[i],
-                                                  NULL, NULL, NULL,
-                                                  NULL, NULL)))
+        if (!virNetDaemonHasServer(dmn, data->serverNames[i])) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           "Server %s was not created",
+                           data->serverNames[i]);
             goto cleanup;
-        srv = NULL;
+        }
     }
 
     if (!(outjson = virNetDaemonPreExecRestart(dmn)))
@@ -265,13 +338,13 @@ static int testExecRestart(const void *opaque)
  cleanup:
     if (ret < 0) {
         if (!data->pass) {
-            VIR_TEST_DEBUG("Got expected error: %s\n",
+            VIR_TEST_DEBUG("Got expected error: %s",
                            virGetLastErrorMessage());
             virResetLastError();
             ret = 0;
         }
     } else if (!data->pass) {
-            VIR_TEST_DEBUG("Test should have failed\n");
+            VIR_TEST_DEBUG("Test should have failed");
             ret = -1;
     }
     VIR_FREE(infile);
@@ -316,40 +389,39 @@ mymain(void)
         return ret;
     }
 
-# define EXEC_RESTART_TEST_FULL(file, nservers, pass)         \
-    do {                                                      \
-        struct testExecRestartData data = {                   \
-            file, server_names, nservers, pass                \
-        };                                                    \
-        if (virTestRun("ExecRestart " file,                   \
-                       testExecRestart, &data) < 0)           \
-            ret = -1;                                         \
+# define EXEC_RESTART_TEST_FULL(file, nservers, pass) \
+    do { \
+        struct testExecRestartData data = { \
+            file, server_names, nservers, pass \
+        }; \
+        if (virTestRun("ExecRestart " file, \
+                       testExecRestart, &data) < 0) \
+            ret = -1; \
     } while (0)
 
 # define EXEC_RESTART_TEST(file, N) EXEC_RESTART_TEST_FULL(file, N, true)
 # define EXEC_RESTART_TEST_FAIL(file, N) EXEC_RESTART_TEST_FULL(file, N, false)
 
 
-# ifdef WITH_AVAHI
     EXEC_RESTART_TEST("initial", 1);
-# endif
-    EXEC_RESTART_TEST("initial-nomdns", 1);
     EXEC_RESTART_TEST("anon-clients", 1);
-    EXEC_RESTART_TEST("admin-nomdns", 2);
+    EXEC_RESTART_TEST("admin", 2);
     EXEC_RESTART_TEST("admin-server-names", 2);
     EXEC_RESTART_TEST("no-keepalive-required", 2);
     EXEC_RESTART_TEST("client-ids", 1);
     EXEC_RESTART_TEST("client-timestamp", 1);
     EXEC_RESTART_TEST_FAIL("anon-clients", 2);
+    EXEC_RESTART_TEST("client-auth-pending", 1);
+    EXEC_RESTART_TEST_FAIL("client-auth-pending-failure", 1);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virnetdaemonmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virnetdaemon"))
 #else
 static int
 mymain(void)
 {
     return EXIT_AM_SKIP;
 }
-VIRT_TEST_MAIN(mymain);
+VIR_TEST_MAIN(mymain);
 #endif

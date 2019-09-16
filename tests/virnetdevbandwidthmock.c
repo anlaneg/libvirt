@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Erik Skultety <eskultet@redhat.com>
  */
 
 #include <config.h>
@@ -23,6 +21,11 @@
 #include <sys/types.h>
 
 uid_t geteuid(void)
+{
+    return 0;
+}
+
+uid_t getuid(void)
 {
     return 0;
 }

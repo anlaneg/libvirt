@@ -19,7 +19,7 @@
 LCOV = lcov
 GENHTML = genhtml
 
-SUBDIRS = . gnulib/lib include/libvirt src daemon tools docs gnulib/tests \
+SUBDIRS = . gnulib/lib include/libvirt src tools docs gnulib/tests \
   tests po examples
 
 XZ_OPT ?= -v -T0
@@ -29,19 +29,31 @@ ACLOCAL_AMFLAGS = -I m4
 
 EXTRA_DIST = \
   config-post.h \
-  ChangeLog-old \
   libvirt.spec libvirt.spec.in \
   mingw-libvirt.spec.in \
   libvirt.pc.in \
   libvirt-qemu.pc.in \
   libvirt-lxc.pc.in \
   libvirt-admin.pc.in \
-  autobuild.sh \
   Makefile.nonreentrant \
   autogen.sh \
   cfg.mk \
   run.in \
-  AUTHORS.in
+  README.md \
+  AUTHORS.in \
+  build-aux/augeas-gentest.pl \
+  build-aux/check-spacing.pl \
+  build-aux/gitlog-to-changelog \
+  build-aux/header-ifdef.pl \
+  build-aux/minimize-po.pl \
+  build-aux/mock-noinline.pl \
+  build-aux/prohibit-duplicate-header.pl \
+  build-aux/useless-if-before-free \
+  build-aux/vc-list-files \
+  ci/Makefile \
+  ci/build.sh \
+  ci/prepare.sh \
+  $(NULL)
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libvirt.pc libvirt-qemu.pc libvirt-lxc.pc libvirt-admin.pc
@@ -57,7 +69,7 @@ NEWS: \
 	    $(srcdir)/docs/news.xml \
 	  >$@-tmp \
 	    || { rm -f $@-tmp; exit 1; }; \
-	  $(srcdir)/docs/reformat-news.py $@-tmp >$@ \
+	  $(PYTHON) $(srcdir)/docs/reformat-news.py $@-tmp >$@ \
 	    || { rm -f $@-tmp; exit 1; }; \
 	  rm -f $@-tmp; \
 	fi
@@ -66,29 +78,21 @@ EXTRA_DIST += \
 	$(srcdir)/docs/news-ascii.xsl \
 	$(srcdir)/docs/reformat-news.py
 
-$(top_srcdir)/HACKING: $(top_srcdir)/docs/hacking1.xsl \
-			$(top_srcdir)/docs/hacking2.xsl \
-			$(top_srcdir)/docs/wrapstring.xsl \
-			$(top_srcdir)/docs/hacking.html.in
-	$(AM_V_GEN)if [ -x $(XSLTPROC) ] ; then \
-	   $(XSLTPROC) --nonet $(top_srcdir)/docs/hacking1.xsl \
-		$(top_srcdir)/docs/hacking.html.in | \
-	   $(XSLTPROC) --nonet $(top_srcdir)/docs/hacking2.xsl - \
-	   | perl -0777 -pe 's/\n\n+$$/\n/' \
-	   > $@-t && mv $@-t $@ ; fi;
-
 rpm: clean
 	@(unset CDPATH ; $(MAKE) dist && rpmbuild -ta $(distdir).tar.xz)
 
+srpm: clean
+	@(unset CDPATH ; $(MAKE) dist && rpmbuild -ts $(distdir).tar.xz)
+
 check-local: all tests
 
-check-access:
+check-access: all
 	@($(MAKE) $(AM_MAKEFLAGS) -C tests check-access)
 
 cov: clean-cov
 	$(MKDIR_P) $(top_builddir)/coverage
 	$(LCOV) -c -o $(top_builddir)/coverage/libvirt.info.tmp \
-	  -d $(top_builddir)/src  -d $(top_builddir)/daemon \
+	  -d $(top_builddir)/src \
 	  -d $(top_builddir)/tests
 	$(LCOV) -r $(top_builddir)/coverage/libvirt.info.tmp \
 	  -o $(top_builddir)/coverage/libvirt.info
@@ -101,25 +105,24 @@ clean-cov:
 
 MAINTAINERCLEANFILES = .git-module-status
 
-dist-hook: gen-ChangeLog gen-AUTHORS
-
-# Generate the ChangeLog file (with all entries since the switch to git)
-# and insert it into the directory we're about to use to create a tarball.
-gen_start_date = 2009-07-04
-.PHONY: gen-ChangeLog
-gen-ChangeLog:
-	$(AM_V_GEN)if test -d .git; then			\
-	  $(top_srcdir)/build-aux/gitlog-to-changelog		\
-	    --since=$(gen_start_date) > $(distdir)/cl-t;	\
-	  rm -f $(distdir)/ChangeLog;				\
-	  mv $(distdir)/cl-t $(distdir)/ChangeLog;		\
-	fi
+dist-hook: gen-AUTHORS
 
 .PHONY: gen-AUTHORS
 gen-AUTHORS:
-	$(AM_V_GEN)if test -d $(srcdir)/.git; then \
-	    out="`cd $(srcdir) && git log --pretty=format:'%aN <%aE>' | sort -u`" && \
-	    perl -p -e "s/#authorslist#// and print '$$out'" \
-	      < $(srcdir)/AUTHORS.in > $(distdir)/AUTHORS-tmp && \
-	    mv -f $(distdir)/AUTHORS-tmp $(distdir)/AUTHORS ; \
+	$(AM_V_GEN)\
+	if test -d $(srcdir)/.git; then \
+	  ( \
+	    cd $(srcdir) && \
+	    git log --pretty=format:'%aN <%aE>' | sort -u \
+	  ) > all.list && \
+	  sort -u $(srcdir)/AUTHORS.in > maint.list && \
+	  comm -23 all.list maint.list > contrib.list && \
+	  contrib="`cat contrib.list`" && \
+	  perl -p -e "s/#contributorslist#// and print '$$contrib'" \
+	    < $(srcdir)/AUTHORS.in > $(distdir)/AUTHORS-tmp && \
+	  mv -f $(distdir)/AUTHORS-tmp $(distdir)/AUTHORS && \
+	  rm -f all.list maint.list contrib.list; \
 	fi
+
+ci-%:
+	$(MAKE) -C ci/ $@

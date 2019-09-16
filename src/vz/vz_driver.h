@@ -20,9 +20,6 @@
  *
  */
 
-#ifndef PARALLELS_DRIVER_H
-# define PARALLELS_DRIVER_H
+#pragma once
 
 int vzRegister(void);
-
-#endif

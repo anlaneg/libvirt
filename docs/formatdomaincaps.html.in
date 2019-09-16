@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body>
     <h1>Domain capabilities XML format</h1>
 
     <ul id="toc"></ul>
 
-    <h2><a name="Overview">Overview</a></h2>
+    <h2><a id="Overview">Overview</a></h2>
 
     <p>Sometimes, when a new domain is to be created it may come handy to know
     the capabilities of the hypervisor so the correct combination of devices and
@@ -37,7 +37,18 @@
     management application to choose an appropriate mode for a pass-through
     host device as well as which adapter to utilize.</p>
 
-    <h2><a name="elements">Element and attribute overview</a></h2>
+    <p>Some XML elements may be entirely omitted from the domaincapabilities
+    XML, depending on what the libvirt driver has filled in. Applications
+    should only act on what is explicitly reported in the domaincapabilities
+    XML. For example, if &lt;disk supported='yes'/&gt; is present, you can safely
+    assume the driver supports &lt;disk&gt; devices. If &lt;disk supported='no'/&gt; is
+    present, you can safely assume the driver does NOT support &lt;disk&gt;
+    devices. If the &lt;disk&gt; block is omitted entirely, the driver is not
+    indicating one way or the other whether it supports &lt;disk&gt; devices, and
+    applications should not interpret the missing block to mean any thing in
+    particular.</p>
+
+    <h2><a id="elements">Element and attribute overview</a></h2>
 
     <p> A new query interface was added to the virConnect API's to retrieve the
     XML listing of the set of domain capabilities (<span class="since">Since
@@ -70,7 +81,8 @@
 
       <dt><code>machine</code></dt>
       <dd>The domain's <a href="formatdomain.html#elementsOSBIOS">machine
-          type</a>.</dd>
+          type</a>. Since not every hypervisor has a sense of machine types
+          this element might be omitted in such drivers.</dd>
 
       <dt><code>arch</code></dt>
       <dd>The domain's <a href="formatdomain.html#elementsOSBIOS">
@@ -78,9 +90,9 @@
 
     </dl>
 
-    <h3><a name="elementsCPUAllocation">CPU Allocation</a></h3>
+    <h3><a id="elementsCPUAllocation">CPU Allocation</a></h3>
 
-    <p>Before any devices capability occurs, there might be a info on domain
+    <p>Before any devices capability occurs, there might be info on domain
     wide capabilities, e.g. virtual CPUs:</p>
 
 <pre>
@@ -96,7 +108,7 @@
       <dd>The maximum number of supported virtual CPUs</dd>
     </dl>
 
-    <h3><a name="elementsOSBIOS">BIOS bootloader</a></h3>
+    <h3><a id="elementsOSBIOS">BIOS bootloader</a></h3>
 
     <p>Sometimes users might want to tweak some BIOS knobs or use
     UEFI. For cases like that, <a
@@ -107,6 +119,10 @@
 &lt;domainCapabilities&gt;
   ...
   &lt;os supported='yes'&gt;
+    &lt;enum name='firmware'&gt;
+      &lt;value&gt;bios&lt;/value&gt;
+      &lt;value&gt;efi&lt;/value&gt;
+    &lt;/enum&gt;
     &lt;loader supported='yes'&gt;
       &lt;value&gt;/usr/share/OVMF/OVMF_CODE.fd&lt;/value&gt;
       &lt;enum name='type'&gt;
@@ -117,32 +133,64 @@
         &lt;value&gt;yes&lt;/value&gt;
         &lt;value&gt;no&lt;/value&gt;
       &lt;/enum&gt;
+      &lt;enum name='secure'&gt;
+        &lt;value&gt;yes&lt;/value&gt;
+        &lt;value&gt;no&lt;/value&gt;
+      &lt;/enum&gt;
     &lt;/loader&gt;
   &lt;/os&gt;
   ...
 &lt;domainCapabilities&gt;
 </pre>
 
+    <p>The <code>firmware</code> enum corresponds to the
+      <code>firmware</code> attribute of the <code>os</code> element in
+      the domain XML. The presence of this enum means libvirt is capable
+      of the so-called firmware auto-selection feature. And the listed
+      firmware values represent the accepted input in the domain
+      XML. Note that the <code>firmware</code> enum reports only those
+      values for which a firmware "descriptor file" exists on the host.
+      Firmware descriptor file is a small JSON document that describes
+      details about a given BIOS or UEFI binary on the host, e.g. the
+      fimware binary path, its architecture, supported machine types,
+      NVRAM template, etc. This ensures that the reported values won't
+      cause a failure on guest boot.
+    </p>
+
     <p>For the <code>loader</code> element, the following can occur:</p>
 
     <dl>
       <dt><code>value</code></dt>
-      <dd>List of known loader paths. Currently this is only used
-      to advertise known locations of OVMF binaries for qemu. Binaries
-      will only be listed if they actually exist on disk.</dd>
+      <dd>List of known firmware binary paths. Currently this is used
+      only to advertise the known location of OVMF binaries for
+      QEMU. OVMF binaries will only be listed if they actually exist on
+      host.</dd>
 
       <dt><code>type</code></dt>
-      <dd>Whether loader is a typical BIOS (<code>rom</code>) or
-      an UEFI binary (<code>pflash</code>). This refers to
-      <code>type</code> attribute of the &lt;loader/&gt;
-      element.</dd>
+      <dd>Whether the boot loader is a typical BIOS (<code>rom</code>)
+      or a UEFI firmware (<code>pflash</code>). Each <code>value</code>
+      sub-element under the <code>type</code> enum represents a possible
+      value for the <code>type</code> attribute for the &lt;loader/&gt;
+      element in the domain XML. E.g. the presence
+      of <code>pfalsh</code> under the <code>type</code> enum means that
+      a domain XML can use UEFI firmware via: &lt;loader/&gt;
+      type="pflash" ...&gt;/path/to/the/firmware/binary/&lt;/loader&gt;.
+      </dd>
 
       <dt><code>readonly</code></dt>
       <dd>Options for the <code>readonly</code> attribute of the
-      &lt;loader/&gt; element.</dd>
+      &lt;loader/&gt; element in the domain XML.</dd>
+
+      <dt><code>secure</code></dt>
+      <dd>Options for the <code>secure</code> attribute of the
+      &lt;loader/&gt; element in the domain XML. Note that the
+      value <code>yes</code> is listed only if libvirt detects a
+      firmware descriptor file that has path to an OVMF binary that
+      supports Secure boot, and lists its architecture and supported
+      machine type.</dd>
     </dl>
 
-    <h3><a name="elementsCPU">CPU configuration</a></h3>
+    <h3><a id="elementsCPU">CPU configuration</a></h3>
 
     <p>
       The <code>cpu</code> element exposes options usable for configuring
@@ -207,7 +255,23 @@
       </dd>
     </dl>
 
-    <h3><a name="elementsDevices">Devices</a></h3>
+    <h3><a id="elementsIothreads">I/O Threads</a></h3>
+
+    <p>
+      The <code>iothread</code> elements indicates whether or not
+      <a href="formatdomain.html#elementsIOThreadsAllocation">I/O threads</a>
+      are supported.
+    </p>
+
+<pre>
+&lt;domainCapabilities&gt;
+  ...
+  &lt;iothread supported='yes'/&gt;
+  ...
+&lt;domainCapabilities&gt;
+</pre>
+
+    <h3><a id="elementsDevices">Devices</a></h3>
 
     <p>
       Another set of XML elements describe the supported devices and their
@@ -239,7 +303,7 @@
     support the values <code>disk</code>, <code>cdrom</code>,
     <code>floppy</code>, or <code>lun</code>.</p>
 
-    <h4><a name="elementsDisks">Hard drives, floppy disks, CDROMs</a></h4>
+    <h4><a id="elementsDisks">Hard drives, floppy disks, CDROMs</a></h4>
     <p>Disk capabilities are exposed under the <code>disk</code> element. For
     instance:</p>
 
@@ -261,7 +325,6 @@
         &lt;value&gt;virtio&lt;/value&gt;
         &lt;value&gt;xen&lt;/value&gt;
         &lt;value&gt;usb&lt;/value&gt;
-        &lt;value&gt;uml&lt;/value&gt;
         &lt;value&gt;sata&lt;/value&gt;
         &lt;value&gt;sd&lt;/value&gt;
       &lt;/enum&gt;
@@ -282,7 +345,7 @@
     </dl>
 
 
-    <h4><a name="elementsGraphics">Graphical framebuffers</a></h4>
+    <h4><a id="elementsGraphics">Graphical framebuffers</a></h4>
     <p>Graphics device capabilities are exposed under the
     <code>graphics</code> element. For instance:</p>
 
@@ -309,7 +372,7 @@
     </dl>
 
 
-    <h4><a name="elementsVideo">Video device</a></h4>
+    <h4><a id="elementsVideo">Video device</a></h4>
     <p>Video device capabilities are exposed under the
     <code>video</code> element. For instance:</p>
 
@@ -338,7 +401,7 @@
     </dl>
 
 
-    <h4><a name="elementsHostDev">Host device assignment</a></h4>
+    <h4><a id="elementsHostDev">Host device assignment</a></h4>
     <p>Some host devices can be passed through to a guest (e.g. USB, PCI and
     SCSI). Well, only if the following is enabled:</p>
 
@@ -400,7 +463,42 @@
       element.</dd>
     </dl>
 
-    <h3><a name="elementsFeatures">Features</a></h3>
+
+    <h4><a id="elementsRNG">RNG device</a></h4>
+    <p>RNG device capabilities are exposed under the
+    <code>rng</code> element. For instance:</p>
+
+<pre>
+&lt;domainCapabilities&gt;
+  ...
+  &lt;devices&gt;
+    &lt;rng supported='yes'&gt;
+      &lt;enum name='model'&gt;
+        &lt;value&gt;virtio&lt;/value&gt;
+        &lt;value&gt;virtio-transitional&lt;/value&gt;
+        &lt;value&gt;virtio-non-transitional&lt;/value&gt;
+      &lt;/enum&gt;
+      &lt;enum name='backendModel'&gt;
+        &lt;value&gt;random&lt;/value&gt;
+        &lt;value&gt;egd&lt;/value&gt;
+      &lt;/enum&gt;
+    &lt;/rng&gt;
+    ...
+  &lt;/devices&gt;
+&lt;/domainCapabilities&gt;
+</pre>
+
+    <dl>
+      <dt><code>model</code></dt>
+      <dd>Options for the <code>model</code> attribute of the
+      &lt;rng&gt; element.</dd>
+      <dt><code>backendModel</code></dt>
+      <dd>Options for the <code>model</code> attribute of the
+      &lt;rng&gt;&lt;backend&gt; element.</dd>
+    </dl>
+
+
+    <h3><a id="elementsFeatures">Features</a></h3>
 
     <p>One more set of XML elements describe the supported features and
     their capabilities. All features occur as children of the main
@@ -416,6 +514,12 @@
         &lt;value&gt;3&lt;/value&gt;
       &lt;/enum&gt;
     &lt;/gic&gt;
+    &lt;vmcoreinfo supported='yes'/&gt;
+    &lt;genid supported='yes'/&gt;
+    &lt;sev&gt;
+      &lt;cbitpos&gt;47&lt;/cbitpos&gt;
+      &lt;reduced-phys-bits&gt;1&lt;/reduced-phys-bits&gt;
+    &lt;/sev&gt;
   &lt;/features&gt;
 &lt;/domainCapabilities&gt;
 </pre>
@@ -430,7 +534,7 @@
     the domain XML documentation.
     </p>
 
-    <h4><a name="elementsGIC">GIC capabilities</a></h4>
+    <h4><a id="elementsGIC">GIC capabilities</a></h4>
 
     <p>GIC capabilities are exposed under the <code>gic</code> element.</p>
 
@@ -438,6 +542,39 @@
       <dt><code>version</code></dt>
       <dd>Options for the <code>version</code> attribute of the
       <code>gic</code> element.</dd>
+    </dl>
+
+    <h4><a id="elementsvmcoreinfo">vmcoreinfo</a></h4>
+
+    <p>Reports whether the vmcoreinfo feature can be enabled.</p>
+
+    <h4><a id="elementsgenid">genid</a></h4>
+
+    <p>Reports whether the genid feature can be used by the domain.</p>
+
+    <h4><a id="elementsSEV">SEV capabilities</a></h4>
+
+    <p>AMD Secure Encrypted Virtualization (SEV) capabilities are exposed under
+    the <code>sev</code> element.
+    SEV is an extension to the AMD-V architecture which supports running
+    virtual machines (VMs) under the control of a hypervisor. When supported,
+    guest owner can create a VM whose memory contents will be transparently
+    encrypted with a key unique to that VM.</p>
+
+    <p>
+      For more details on the SEV feature, please follow resources in the
+      AMD developer's document store. In order to use SEV with libvirt have
+      a look at <a href="formatdomain.html#launchSecurity">SEV in domain XML</a>
+    </p>
+
+    <dl>
+      <dt><code>cbitpos</code></dt>
+      <dd>When memory encryption is enabled, one of the physical address bits
+      (aka the C-bit) is utilized to mark if a memory page is protected. The
+      C-bit position is Hypervisor dependent.</dd>
+      <dt><code>reducedPhysBits</code></dt>
+      <dd>When memory encryption is enabled, we lose certain bits in physical
+      address space. The number of bits we lose is hypervisor dependent.</dd>
     </dl>
 
   </body>

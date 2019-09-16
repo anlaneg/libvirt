@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -47,7 +45,7 @@ virLogManagerDaemonPath(bool privileged)
 {
     char *path;
     if (privileged) {
-        if (VIR_STRDUP(path, LOCALSTATEDIR "/run/libvirt/virtlogd-sock") < 0)
+        if (VIR_STRDUP(path, RUNSTATEDIR "/libvirt/virtlogd-sock") < 0)
             return NULL;
     } else {
         char *rundir = NULL;
@@ -82,7 +80,7 @@ virLogManagerConnect(bool privileged,
     if (!privileged &&
         !(daemonPath = virFileFindResourceFull("virtlogd",
                                                NULL, NULL,
-                                               abs_topbuilddir "/src",
+                                               abs_top_builddir "/src",
                                                SBINDIR,
                                                "VIRTLOGD_PATH")))
         goto error;

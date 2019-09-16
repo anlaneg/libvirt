@@ -20,11 +20,8 @@
  *
  */
 
-#ifndef __ESX_STORAGE_BACKEND_VMFS_H__
-# define __ESX_STORAGE_BACKEND_VMFS_H__
+#pragma once
 
-# include "driver.h"
+#include "driver.h"
 
 extern virStorageDriver esxStorageBackendVMFS;
-
-#endif /* __ESX_STORAGE_BACKEND_VMFS_H__ */

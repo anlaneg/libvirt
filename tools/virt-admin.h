@@ -16,17 +16,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Erik Skultety <eskultet@redhat.com>
  */
 
-#ifndef VIRT_ADMIN_H
-# define VIRT_ADMIN_H
+#pragma once
 
-# include "internal.h"
-# include "vsh.h"
+#include "internal.h"
+#include "vsh.h"
 
-# define VIR_FROM_THIS VIR_FROM_NONE
+#define VIR_FROM_THIS VIR_FROM_NONE
 
 /*
  * Command group types
@@ -42,5 +39,3 @@ struct _vshAdmControl {
     virAdmConnectPtr conn;      /* connection to a daemon's admin server */
     bool wantReconnect;
 };
-
-#endif /* VIRT_ADMIN_H */

@@ -26,16 +26,17 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "virerror.h"
-#include <libxml/xpathInternals.h>
 #include "virstring.h"
 #include "virutil.h"
 #include "virfile.h"
 #include "virtime.h"
+#include "virsystemd.h"
+#include "virinitctl.h"
 
 #define VIR_FROM_THIS VIR_FROM_LXC
-#define LXC_NAMESPACE_HREF "http://libvirt.org/schemas/domain/lxc/1.0"
 
-VIR_ENUM_IMPL(virLXCDomainJob, LXC_JOB_LAST,
+VIR_ENUM_IMPL(virLXCDomainJob,
+              LXC_JOB_LAST,
               "none",
               "query",
               "destroy",
@@ -150,7 +151,7 @@ virLXCDomainObjEndJob(virLXCDriverPtr driver ATTRIBUTE_UNUSED,
 
 
 static void *
-virLXCDomainObjPrivateAlloc(void)
+virLXCDomainObjPrivateAlloc(void *opaque ATTRIBUTE_UNUSED)
 {
     virLXCDomainObjPrivatePtr priv;
 
@@ -182,14 +183,16 @@ VIR_ENUM_IMPL(virLXCDomainNamespace,
               VIR_LXC_DOMAIN_NAMESPACE_LAST,
               "sharenet",
               "shareipc",
-              "shareuts")
+              "shareuts",
+);
 
 VIR_ENUM_IMPL(virLXCDomainNamespaceSource,
               VIR_LXC_DOMAIN_NAMESPACE_SOURCE_LAST,
               "none",
               "name",
               "pid",
-              "netns")
+              "netns",
+);
 
 static void
 lxcDomainDefNamespaceFree(void *nsdata)
@@ -202,9 +205,7 @@ lxcDomainDefNamespaceFree(void *nsdata)
 }
 
 static int
-lxcDomainDefNamespaceParse(xmlDocPtr xml ATTRIBUTE_UNUSED,
-                           xmlNodePtr root ATTRIBUTE_UNUSED,
-                           xmlXPathContextPtr ctxt,
+lxcDomainDefNamespaceParse(xmlXPathContextPtr ctxt,
                            void **data)
 {
     lxcDomainDefPtr lxcDef = NULL;
@@ -216,13 +217,6 @@ lxcDomainDefNamespaceParse(xmlDocPtr xml ATTRIBUTE_UNUSED,
     char *tmp = NULL;
     size_t i;
 
-    if (xmlXPathRegisterNs(ctxt, BAD_CAST "lxc", BAD_CAST LXC_NAMESPACE_HREF) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to register xml namespace '%s'"),
-                       LXC_NAMESPACE_HREF);
-        return -1;
-    }
-
     if (VIR_ALLOC(lxcDef) < 0)
         return -1;
 
@@ -233,7 +227,7 @@ lxcDomainDefNamespaceParse(xmlDocPtr xml ATTRIBUTE_UNUSED,
 
     for (i = 0; i < n; i++) {
         if ((feature = virLXCDomainNamespaceTypeFromString(
-                 (const char *) nodes[i]->name)) < 0) {
+                 (const char *)nodes[i]->name)) < 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                             _("unsupported Namespace feature: %s"),
                             nodes[i]->name);
@@ -307,18 +301,13 @@ lxcDomainDefNamespaceFormatXML(virBufferPtr buf,
     return 0;
 }
 
-static const char *
-lxcDomainDefNamespaceHref(void)
-{
-    return "xmlns:lxc='" LXC_NAMESPACE_HREF "'";
-}
 
-
-virDomainXMLNamespace virLXCDriverDomainXMLNamespace = {
+virXMLNamespace virLXCDriverDomainXMLNamespace = {
     .parse = lxcDomainDefNamespaceParse,
     .free = lxcDomainDefNamespaceFree,
     .format = lxcDomainDefNamespaceFormatXML,
-    .href = lxcDomainDefNamespaceHref,
+    .prefix = "lxc",
+    .uri = "http://libvirt.org/schemas/domain/lxc/1.0",
 };
 
 
@@ -329,7 +318,7 @@ virLXCDomainObjPrivateXMLFormat(virBufferPtr buf,
     virLXCDomainObjPrivatePtr priv = vm->privateData;
 
     virBufferAsprintf(buf, "<init pid='%lld'/>\n",
-                      (long long) priv->initpid);
+                      (long long)priv->initpid);
 
     return 0;
 }
@@ -397,3 +386,110 @@ virDomainDefParserConfig virLXCDriverDomainDefParserConfig = {
     .domainPostParseCallback = virLXCDomainDefPostParse,
     .devicesPostParseCallback = virLXCDomainDeviceDefPostParse,
 };
+
+
+char *
+virLXCDomainGetMachineName(virDomainDefPtr def, pid_t pid)
+{
+    char *ret = NULL;
+
+    if (pid) {
+        ret = virSystemdGetMachineNameByPID(pid);
+        if (!ret)
+            virResetLastError();
+    }
+
+    if (!ret)
+        ret = virDomainGenerateMachineName("lxc", def->id, def->name, true);
+
+    return ret;
+}
+
+
+typedef struct _lxcDomainInitctlCallbackData lxcDomainInitctlCallbackData;
+struct _lxcDomainInitctlCallbackData {
+    int runlevel;
+    bool *st_valid;
+    struct stat *st;
+};
+
+
+static int
+lxcDomainInitctlCallback(pid_t pid ATTRIBUTE_UNUSED,
+                         void *opaque)
+{
+    lxcDomainInitctlCallbackData *data = opaque;
+    size_t i;
+
+    for (i = 0; virInitctlFifos[i]; i++) {
+        const char *fifo = virInitctlFifos[i];
+        struct stat cont_sb;
+
+        if (stat(fifo, &cont_sb) < 0) {
+            if (errno == ENOENT)
+                continue;
+
+            virReportSystemError(errno, _("Unable to stat %s"), fifo);
+            return -1;
+        }
+
+        /* Check if the init fifo is not the very one that's on
+         * the host. We don't want to change the host's runlevel.
+         */
+        if (data->st_valid[i] &&
+            data->st[i].st_dev == cont_sb.st_dev &&
+            data->st[i].st_ino == cont_sb.st_ino)
+            continue;
+
+        return virInitctlSetRunLevel(fifo, data->runlevel);
+    }
+
+    /* If no usable fifo was found then declare success. Caller
+     * will try killing the domain with signal. */
+    return 0;
+}
+
+
+int
+virLXCDomainSetRunlevel(virDomainObjPtr vm,
+                        int runlevel)
+{
+    virLXCDomainObjPrivatePtr priv = vm->privateData;
+    lxcDomainInitctlCallbackData data;
+    size_t nfifos = 0;
+    size_t i;
+    int ret = -1;
+
+    memset(&data, 0, sizeof(data));
+
+    data.runlevel = runlevel;
+
+    for (nfifos = 0; virInitctlFifos[nfifos]; nfifos++)
+        ;
+
+    if (VIR_ALLOC_N(data.st, nfifos) < 0 ||
+        VIR_ALLOC_N(data.st_valid, nfifos) < 0)
+        goto cleanup;
+
+    for (i = 0; virInitctlFifos[i]; i++) {
+        const char *fifo = virInitctlFifos[i];
+
+        if (stat(fifo, &(data.st[i])) < 0) {
+            if (errno == ENOENT)
+                continue;
+
+            virReportSystemError(errno, _("Unable to stat %s"), fifo);
+            goto cleanup;
+        }
+
+        data.st_valid[i] = true;
+    }
+
+    ret = virProcessRunInMountNamespace(priv->initpid,
+                                        lxcDomainInitctlCallback,
+                                        &data);
+ cleanup:
+    VIR_FREE(data.st);
+    VIR_FREE(data.st_valid);
+    return ret;
+}

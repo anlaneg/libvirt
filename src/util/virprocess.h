@@ -19,14 +19,14 @@
  *
  */
 
-#ifndef __VIR_PROCESS_H__
-# define __VIR_PROCESS_H__
+#pragma once
 
-# include <sys/types.h>
+#include <sys/types.h>
 
-# include "internal.h"
-# include "virbitmap.h"
-# include "virutil.h"
+#include "internal.h"
+#include "virbitmap.h"
+#include "virutil.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_PROC_POLICY_NONE = 0,
@@ -55,6 +55,9 @@ virProcessWait(pid_t pid, int *exitstatus, bool raw)
 int virProcessKill(pid_t pid, int sig);
 
 int virProcessKillPainfully(pid_t pid, bool force);
+int virProcessKillPainfullyDelay(pid_t pid,
+                                 bool force,
+                                 unsigned int extradelay);
 
 int virProcessSetAffinity(pid_t pid, virBitmapPtr map);
 
@@ -72,7 +75,7 @@ int virProcessGetNamespaces(pid_t pid,
 int virProcessSetNamespaces(size_t nfdlist,
                             int *fdlist);
 
-int virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes);
+int virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes) ATTRIBUTE_NOINLINE;
 int virProcessSetMaxProcesses(pid_t pid, unsigned int procs);
 int virProcessSetMaxFiles(pid_t pid, unsigned int files);
 int virProcessSetMaxCoreSize(pid_t pid, unsigned long long bytes);
@@ -90,6 +93,23 @@ int virProcessRunInMountNamespace(pid_t pid,
                                   virProcessNamespaceCallback cb,
                                   void *opaque);
 
+/**
+ * virProcessForkCallback:
+ * @ppid: parent's pid
+ * @opaque: opaque data
+ *
+ * Callback to run in fork()-ed process.
+ *
+ * Returns: 0 on success,
+ *         -1 on error (treated as EXIT_CANCELED)
+ */
+typedef int (*virProcessForkCallback)(pid_t ppid,
+                                      void *opaque);
+
+int virProcessRunInFork(virProcessForkCallback cb,
+                        void *opaque)
+    ATTRIBUTE_NOINLINE;
+
 int virProcessSetupPrivateMountNS(void);
 
 int virProcessSetScheduler(pid_t pid,
@@ -105,5 +125,3 @@ typedef enum {
 } virProcessNamespaceFlags;
 
 int virProcessNamespaceAvailable(unsigned int ns);
-
-#endif /* __VIR_PROCESS_H__ */

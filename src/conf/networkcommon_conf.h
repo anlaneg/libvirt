@@ -18,20 +18,17 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __NETWORKCOMMON_CONF_H__
-# define __NETWORKCOMMON_CONF_H__
+#pragma once
 
-# include <libxml/tree.h>
-# include <libxml/xpath.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
 
-# include "internal.h"
-# include "virbuffer.h"
-# include "virsocketaddr.h"
-# include "virnetdevip.h"
+#include "internal.h"
+#include "virbuffer.h"
+#include "virsocketaddr.h"
+#include "virnetdevip.h"
 
 virNetDevIPRoutePtr
 virNetDevIPRouteCreate(const char *networkName,
@@ -51,5 +48,3 @@ virNetDevIPRouteParseXML(const char *networkName,
 int
 virNetDevIPRouteFormat(virBufferPtr buf,
                        const virNetDevIPRoute *def);
-
-#endif /* __NETWORKCOMMON_CONF_H__ */

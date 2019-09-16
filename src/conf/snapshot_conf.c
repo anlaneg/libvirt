@@ -1,7 +1,7 @@
 /*
  * snapshot_conf.c: domain snapshot XML processing
  *
- * Copyright (C) 2006-2014 Red Hat, Inc.
+ * Copyright (C) 2006-2019 Red Hat, Inc.
  * Copyright (C) 2006-2008 Daniel P. Berrange
  *
  * This library is free software; you can redistribute it and/or
@@ -17,17 +17,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Eric Blake <eblake@redhat.com>
  */
 
 #include <config.h>
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <unistd.h>
 
+#include "configmake.h"
 #include "internal.h"
 #include "virbitmap.h"
 #include "virbuffer.h"
@@ -47,19 +45,40 @@
 #include "virerror.h"
 #include "virxml.h"
 #include "virstring.h"
+#include "virdomainsnapshotobjlist.h"
+
+#define LIBVIRT_SNAPSHOT_CONF_PRIV_H_ALLOW
+#include "snapshot_conf_priv.h"
 
 #define VIR_FROM_THIS VIR_FROM_DOMAIN_SNAPSHOT
 
 VIR_LOG_INIT("conf.snapshot_conf");
 
-VIR_ENUM_IMPL(virDomainSnapshotLocation, VIR_DOMAIN_SNAPSHOT_LOCATION_LAST,
+static virClassPtr virDomainSnapshotDefClass;
+static void virDomainSnapshotDefDispose(void *obj);
+
+static int
+virDomainSnapshotOnceInit(void)
+{
+    if (!VIR_CLASS_NEW(virDomainSnapshotDef, virClassForDomainMomentDef()))
+        return -1;
+
+    return 0;
+}
+
+VIR_ONCE_GLOBAL_INIT(virDomainSnapshot);
+
+VIR_ENUM_IMPL(virDomainSnapshotLocation,
+              VIR_DOMAIN_SNAPSHOT_LOCATION_LAST,
               "default",
               "no",
               "internal",
-              "external")
+              "external",
+);
 
 /* virDomainSnapshotState is really virDomainState plus one extra state */
-VIR_ENUM_IMPL(virDomainSnapshotState, VIR_DOMAIN_SNAPSHOT_STATE_LAST,
+VIR_ENUM_IMPL(virDomainSnapshotState,
+              VIR_DOMAIN_SNAPSHOT_LAST,
               "nostate",
               "running",
               "blocked",
@@ -68,47 +87,61 @@ VIR_ENUM_IMPL(virDomainSnapshotState, VIR_DOMAIN_SNAPSHOT_STATE_LAST,
               "shutoff",
               "crashed",
               "pmsuspended",
-              "disk-snapshot")
-
-struct _virDomainSnapshotObjList {
-    /* name string -> virDomainSnapshotObj  mapping
-     * for O(1), lockless lookup-by-name */
-    virHashTable *objs;
-
-    virDomainSnapshotObj metaroot; /* Special parent of all root snapshots */
-};
+              "disk-snapshot",
+);
 
 /* Snapshot Def functions */
 static void
 virDomainSnapshotDiskDefClear(virDomainSnapshotDiskDefPtr disk)
 {
     VIR_FREE(disk->name);
-    virStorageSourceFree(disk->src);
+    virObjectUnref(disk->src);
     disk->src = NULL;
 }
 
-void virDomainSnapshotDefFree(virDomainSnapshotDefPtr def)
+void
+virDomainSnapshotDiskDefFree(virDomainSnapshotDiskDefPtr disk)
 {
-    size_t i;
-
-    if (!def)
+    if (!disk)
         return;
 
-    VIR_FREE(def->name);
-    VIR_FREE(def->description);
-    VIR_FREE(def->parent);
+    virDomainSnapshotDiskDefClear(disk);
+    VIR_FREE(disk);
+}
+
+
+/* Allocate a new virDomainSnapshotDef; free with virObjectUnref() */
+virDomainSnapshotDefPtr
+virDomainSnapshotDefNew(void)
+{
+    virDomainSnapshotDefPtr def;
+
+    if (virDomainSnapshotInitialize() < 0)
+        return NULL;
+
+    def = virObjectNew(virDomainSnapshotDefClass);
+    return def;
+}
+
+static void
+virDomainSnapshotDefDispose(void *obj)
+{
+    virDomainSnapshotDefPtr def = obj;
+    size_t i;
+
     VIR_FREE(def->file);
     for (i = 0; i < def->ndisks; i++)
         virDomainSnapshotDiskDefClear(&def->disks[i]);
     VIR_FREE(def->disks);
-    virDomainDefFree(def->dom);
-    VIR_FREE(def);
+    virObjectUnref(def->cookie);
 }
 
-static int
+int
 virDomainSnapshotDiskDefParseXML(xmlNodePtr node,
                                  xmlXPathContextPtr ctxt,
-                                 virDomainSnapshotDiskDefPtr def)
+                                 virDomainSnapshotDiskDefPtr def,
+                                 unsigned int flags,
+                                 virDomainXMLOptionPtr xmlopt)
 {
     int ret = -1;
     char *snapshot = NULL;
@@ -119,7 +152,7 @@ virDomainSnapshotDiskDefParseXML(xmlNodePtr node,
 
     ctxt->node = node;
 
-    if (VIR_ALLOC(def->src) < 0)
+    if (!(def->src = virStorageSourceNew()))
         goto cleanup;
 
     def->name = virXMLPropString(node, "name");
@@ -153,20 +186,14 @@ virDomainSnapshotDiskDefParseXML(xmlNodePtr node,
     }
 
     if ((cur = virXPathNode("./source", ctxt)) &&
-        virDomainDiskSourceParse(cur, ctxt, def->src) < 0)
+        virDomainStorageSourceParse(cur, ctxt, def->src, flags, xmlopt) < 0)
         goto cleanup;
 
-    if ((driver = virXPathString("string(./driver/@type)", ctxt))) {
-        def->src->format = virStorageFileFormatTypeFromString(driver);
-        if (def->src->format < VIR_STORAGE_FILE_BACKING) {
+    if ((driver = virXPathString("string(./driver/@type)", ctxt)) &&
+        (def->src->format = virStorageFileFormatTypeFromString(driver)) <= 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           def->src->format <= 0
-                           ? _("unknown disk snapshot driver '%s'")
-                           : _("disk format '%s' lacks backing file "
-                               "support"),
-                           driver);
+                           _("unknown disk snapshot driver '%s'"), driver);
             goto cleanup;
-        }
     }
 
     /* validate that the passed path is absolute */
@@ -194,54 +221,56 @@ virDomainSnapshotDiskDefParseXML(xmlNodePtr node,
 
 /* flags is bitwise-or of virDomainSnapshotParseFlags.
  * If flags does not include VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE, then
- * caps are ignored.
+ * caps are ignored. If flags does not include
+ * VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL, then current is ignored.
  */
 static virDomainSnapshotDefPtr
 virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
                           virCapsPtr caps,
                           virDomainXMLOptionPtr xmlopt,
+                          void *parseOpaque,
+                          bool *current,
                           unsigned int flags)
 {
     virDomainSnapshotDefPtr def = NULL;
     virDomainSnapshotDefPtr ret = NULL;
     xmlNodePtr *nodes = NULL;
+    xmlNodePtr inactiveDomNode = NULL;
     size_t i;
     int n;
     char *creation = NULL, *state = NULL;
-    struct timeval tv;
     int active;
     char *tmp;
     char *memorySnapshot = NULL;
     char *memoryFile = NULL;
     bool offline = !!(flags & VIR_DOMAIN_SNAPSHOT_PARSE_OFFLINE);
+    virSaveCookieCallbacksPtr saveCookie = virDomainXMLOptionGetSaveCookie(xmlopt);
+    int domainflags = VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                      VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE;
 
-    if (VIR_ALLOC(def) < 0)
-        goto cleanup;
+    if (!(def = virDomainSnapshotDefNew()))
+        return NULL;
 
-    gettimeofday(&tv, NULL);
-
-    def->name = virXPathString("string(./name)", ctxt);
-    if (def->name == NULL) {
+    def->parent.name = virXPathString("string(./name)", ctxt);
+    if (def->parent.name == NULL) {
         if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("a redefined snapshot must have a name"));
             goto cleanup;
         }
-        if (virAsprintf(&def->name, "%lld", (long long)tv.tv_sec) < 0)
-            goto cleanup;
     }
 
-    def->description = virXPathString("string(./description)", ctxt);
+    def->parent.description = virXPathString("string(./description)", ctxt);
 
     if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE) {
         if (virXPathLongLong("string(./creationTime)", ctxt,
-                             &def->creationTime) < 0) {
+                             &def->parent.creationTime) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("missing creationTime from existing snapshot"));
             goto cleanup;
         }
 
-        def->parent = virXPathString("string(./parent/name)", ctxt);
+        def->parent.parent_name = virXPathString("string(./parent/name)", ctxt);
 
         state = virXPathString("string(./state)", ctxt);
         if (state == NULL) {
@@ -253,24 +282,20 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
             goto cleanup;
         }
         def->state = virDomainSnapshotStateTypeFromString(state);
-        if (def->state < 0) {
+        if (def->state <= 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Invalid state '%s' in domain snapshot XML"),
                            state);
             goto cleanup;
         }
-        offline = (def->state == VIR_DOMAIN_SHUTOFF ||
-                   def->state == VIR_DOMAIN_DISK_SNAPSHOT);
+        offline = (def->state == VIR_DOMAIN_SNAPSHOT_SHUTOFF ||
+                   def->state == VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT);
 
         /* Older snapshots were created with just <domain>/<uuid>, and
          * lack domain/@type.  In that case, leave dom NULL, and
          * clients will have to decide between best effort
          * initialization or outright failure.  */
         if ((tmp = virXPathString("string(./domain/@type)", ctxt))) {
-            int domainflags = VIR_DOMAIN_DEF_PARSE_INACTIVE |
-                              VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE;
-            if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL)
-                domainflags |= VIR_DOMAIN_DEF_PARSE_SKIP_OSTYPE_CHECKS;
             xmlNodePtr domainNode = virXPathNode("./domain", ctxt);
 
             VIR_FREE(tmp);
@@ -279,15 +304,26 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
                                _("missing domain in snapshot"));
                 goto cleanup;
             }
-            def->dom = virDomainDefParseNode(ctxt->node->doc, domainNode,
-                                             caps, xmlopt, NULL, domainflags);
-            if (!def->dom)
+            def->parent.dom = virDomainDefParseNode(ctxt->node->doc, domainNode,
+                                                    caps, xmlopt, parseOpaque,
+                                                    domainflags);
+            if (!def->parent.dom)
                 goto cleanup;
         } else {
             VIR_WARN("parsing older snapshot that lacks domain");
         }
-    } else {
-        def->creationTime = tv.tv_sec;
+
+        /* /inactiveDomain entry saves the config XML present in a running
+         * VM. In case of absent, leave parent.inactiveDom NULL and use
+         * parent.dom for config and live XML. */
+        if ((inactiveDomNode = virXPathNode("./inactiveDomain", ctxt))) {
+            def->parent.inactiveDom = virDomainDefParseNode(ctxt->node->doc, inactiveDomNode,
+                                                            caps, xmlopt, NULL, domainflags);
+            if (!def->parent.inactiveDom)
+                goto cleanup;
+        }
+    } else if (virDomainXMLOptionRunMomentPostParse(xmlopt, &def->parent) < 0) {
+        goto cleanup;
     }
 
     memorySnapshot = virXPathString("string(./memory/@snapshot)", ctxt);
@@ -327,8 +363,7 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
                          "disk-only snapshot"));
         goto cleanup;
     }
-    def->file = memoryFile;
-    memoryFile = NULL;
+    VIR_STEAL_PTR(def->file, memoryFile);
 
     /* verify that memory path is absolute */
     if (def->file && def->file[0] != '/') {
@@ -345,8 +380,8 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
             goto cleanup;
         def->ndisks = n;
         for (i = 0; i < def->ndisks; i++) {
-            if (virDomainSnapshotDiskDefParseXML(nodes[i], ctxt,
-                                                 &def->disks[i]) < 0)
+            if (virDomainSnapshotDiskDefParseXML(nodes[i], ctxt, &def->disks[i],
+                                                 flags, xmlopt) < 0)
                 goto cleanup;
         }
         VIR_FREE(nodes);
@@ -357,15 +392,23 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
     }
 
     if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL) {
+        if (!current) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("internal parse requested with NULL current"));
+            goto cleanup;
+        }
         if (virXPathInt("string(./active)", ctxt, &active) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Could not find 'active' element"));
             goto cleanup;
         }
-        def->current = active != 0;
+        *current = active != 0;
     }
 
-    ret = def;
+    if (!offline && virSaveCookieParse(ctxt, &def->cookie, saveCookie) < 0)
+        goto cleanup;
+
+    VIR_STEAL_PTR(ret, def);
 
  cleanup:
     VIR_FREE(creation);
@@ -373,8 +416,7 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
     VIR_FREE(nodes);
     VIR_FREE(memorySnapshot);
     VIR_FREE(memoryFile);
-    if (ret == NULL)
-        virDomainSnapshotDefFree(def);
+    virObjectUnref(def);
 
     return ret;
 }
@@ -384,14 +426,28 @@ virDomainSnapshotDefParseNode(xmlDocPtr xml,
                               xmlNodePtr root,
                               virCapsPtr caps,
                               virDomainXMLOptionPtr xmlopt,
+                              void *parseOpaque,
+                              bool *current,
                               unsigned int flags)
 {
     xmlXPathContextPtr ctxt = NULL;
     virDomainSnapshotDefPtr def = NULL;
 
-    if (!xmlStrEqual(root->name, BAD_CAST "domainsnapshot")) {
+    if (!virXMLNodeNameEqual(root, "domainsnapshot")) {
         virReportError(VIR_ERR_XML_ERROR, "%s", _("domainsnapshot"));
         goto cleanup;
+    }
+
+    if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_VALIDATE) {
+        VIR_AUTOFREE(char *) schema = NULL;
+
+        schema = virFileFindResource("domainsnapshot.rng",
+                                     abs_top_srcdir "/docs/schemas",
+                                     PKGDATADIR "/schemas");
+        if (!schema)
+            goto cleanup;
+        if (virXMLValidateAgainstSchema(schema, xml) < 0)
+            goto cleanup;
     }
 
     ctxt = xmlXPathNewContext(xml);
@@ -401,7 +457,7 @@ virDomainSnapshotDefParseNode(xmlDocPtr xml,
     }
 
     ctxt->node = root;
-    def = virDomainSnapshotDefParse(ctxt, caps, xmlopt, flags);
+    def = virDomainSnapshotDefParse(ctxt, caps, xmlopt, parseOpaque, current, flags);
  cleanup:
     xmlXPathFreeContext(ctxt);
     return def;
@@ -411,6 +467,8 @@ virDomainSnapshotDefPtr
 virDomainSnapshotDefParseString(const char *xmlStr,
                                 virCapsPtr caps,
                                 virDomainXMLOptionPtr xmlopt,
+                                void *parseOpaque,
+                                bool *current,
                                 unsigned int flags)
 {
     virDomainSnapshotDefPtr ret = NULL;
@@ -420,12 +478,96 @@ virDomainSnapshotDefParseString(const char *xmlStr,
     if ((xml = virXMLParse(NULL, xmlStr, _("(domain_snapshot)")))) {
         xmlKeepBlanksDefault(keepBlanksDefault);
         ret = virDomainSnapshotDefParseNode(xml, xmlDocGetRootElement(xml),
-                                            caps, xmlopt, flags);
+                                            caps, xmlopt, parseOpaque,
+                                            current, flags);
         xmlFreeDoc(xml);
     }
     xmlKeepBlanksDefault(keepBlanksDefault);
 
     return ret;
+}
+
+
+/* Perform sanity checking on a redefined snapshot definition. If
+ * @other is non-NULL, this may include swapping def->parent.dom from other
+ * into def. */
+int
+virDomainSnapshotRedefineValidate(virDomainSnapshotDefPtr def,
+                                  const unsigned char *domain_uuid,
+                                  virDomainMomentObjPtr other,
+                                  virDomainXMLOptionPtr xmlopt,
+                                  unsigned int flags)
+{
+    int align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL;
+    bool align_match = true;
+    bool external = def->state == VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT ||
+        virDomainSnapshotDefIsExternal(def);
+
+    if ((flags & VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY) && !external) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("disk-only flag for snapshot %s requires "
+                         "disk-snapshot state"),
+                       def->parent.name);
+        return -1;
+    }
+    if (def->parent.dom && memcmp(def->parent.dom->uuid, domain_uuid,
+                                  VIR_UUID_BUFLEN)) {
+        char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+        virUUIDFormat(domain_uuid, uuidstr);
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("definition for snapshot %s must use uuid %s"),
+                       def->parent.name, uuidstr);
+        return -1;
+    }
+
+    if (other) {
+        virDomainSnapshotDefPtr otherdef = virDomainSnapshotObjGetDef(other);
+
+        if ((otherdef->state == VIR_DOMAIN_SNAPSHOT_RUNNING ||
+             otherdef->state == VIR_DOMAIN_SNAPSHOT_PAUSED) !=
+            (def->state == VIR_DOMAIN_SNAPSHOT_RUNNING ||
+             def->state == VIR_DOMAIN_SNAPSHOT_PAUSED)) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("cannot change between online and offline "
+                             "snapshot state in snapshot %s"),
+                           def->parent.name);
+            return -1;
+        }
+
+        if ((otherdef->state == VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT) !=
+            (def->state == VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT)) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("cannot change between disk only and "
+                             "full system in snapshot %s"),
+                           def->parent.name);
+            return -1;
+        }
+
+        if (otherdef->parent.dom) {
+            if (def->parent.dom) {
+                if (!virDomainDefCheckABIStability(otherdef->parent.dom,
+                                                   def->parent.dom, xmlopt))
+                    return -1;
+            } else {
+                /* Transfer the domain def */
+                VIR_STEAL_PTR(def->parent.dom, otherdef->parent.dom);
+            }
+        }
+    }
+
+    if (def->parent.dom) {
+        if (external) {
+            align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
+            align_match = false;
+        }
+        if (virDomainSnapshotAlignDisks(def, align_location,
+                                        align_match) < 0)
+            return -1;
+    }
+
+
+    return 0;
 }
 
 
@@ -461,7 +603,7 @@ virDomainSnapshotDefAssignExternalNames(virDomainSnapshotDefPtr def)
             return -1;
         }
 
-        if (!(origpath = virDomainDiskGetSource(def->dom->disks[i]))) {
+        if (!(origpath = virDomainDiskGetSource(def->parent.dom->disks[i]))) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("cannot generate external snapshot name "
                              "for disk '%s' without source"),
@@ -485,7 +627,7 @@ virDomainSnapshotDefAssignExternalNames(virDomainSnapshotDefPtr def)
         if ((tmp = strrchr(tmppath, '.')) && !strchr(tmp, '/'))
             *tmp = '\0';
 
-        if (virAsprintf(&disk->src->path, "%s.%s", tmppath, def->name) < 0) {
+        if (virAsprintf(&disk->src->path, "%s.%s", tmppath, def->parent.name) < 0) {
             VIR_FREE(tmppath);
             return -1;
         }
@@ -518,7 +660,7 @@ virDomainSnapshotCompareDiskIndex(const void *a, const void *b)
     return diska->idx - diskb->idx;
 }
 
-/* Align def->disks to def->domain.  Sort the list of def->disks,
+/* Align def->disks to def->parent.dom.  Sort the list of def->disks,
  * filling in any missing disks or snapshot state defaults given by
  * the domain, with a fallback to a passed in default.  Convert paths
  * to disk targets for uniformity.  Issue an error and return -1 if
@@ -535,31 +677,31 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
     size_t i;
     int ndisks;
 
-    if (!def->dom) {
+    if (!def->parent.dom) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing domain in snapshot"));
         goto cleanup;
     }
 
-    if (def->ndisks > def->dom->ndisks) {
+    if (def->ndisks > def->parent.dom->ndisks) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("too many disk snapshot requests for domain"));
         goto cleanup;
     }
 
     /* Unlikely to have a guest without disks but technically possible.  */
-    if (!def->dom->ndisks) {
+    if (!def->parent.dom->ndisks) {
         ret = 0;
         goto cleanup;
     }
 
-    if (!(map = virBitmapNew(def->dom->ndisks)))
+    if (!(map = virBitmapNew(def->parent.dom->ndisks)))
         goto cleanup;
 
     /* Double check requested disks.  */
     for (i = 0; i < def->ndisks; i++) {
         virDomainSnapshotDiskDefPtr disk = &def->disks[i];
-        int idx = virDomainDiskIndexByName(def->dom, disk->name, false);
+        int idx = virDomainDiskIndexByName(def->parent.dom, disk->name, false);
         int disk_snapshot;
 
         if (idx < 0) {
@@ -577,7 +719,7 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
         ignore_value(virBitmapSetBit(map, idx));
         disk->idx = idx;
 
-        disk_snapshot = def->dom->disks[idx]->snapshot;
+        disk_snapshot = def->parent.dom->disks[idx]->snapshot;
         if (!disk->snapshot) {
             if (disk_snapshot &&
                 (!require_match ||
@@ -605,9 +747,9 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
                            disk->src->path, disk->name);
             goto cleanup;
         }
-        if (STRNEQ(disk->name, def->dom->disks[idx]->dst)) {
+        if (STRNEQ(disk->name, def->parent.dom->disks[idx]->dst)) {
             VIR_FREE(disk->name);
-            if (VIR_STRDUP(disk->name, def->dom->disks[idx]->dst) < 0)
+            if (VIR_STRDUP(disk->name, def->parent.dom->disks[idx]->dst) < 0)
                 goto cleanup;
         }
     }
@@ -615,26 +757,26 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
     /* Provide defaults for all remaining disks.  */
     ndisks = def->ndisks;
     if (VIR_EXPAND_N(def->disks, def->ndisks,
-                     def->dom->ndisks - def->ndisks) < 0)
+                     def->parent.dom->ndisks - def->ndisks) < 0)
         goto cleanup;
 
-    for (i = 0; i < def->dom->ndisks; i++) {
+    for (i = 0; i < def->parent.dom->ndisks; i++) {
         virDomainSnapshotDiskDefPtr disk;
 
         if (virBitmapIsBitSet(map, i))
             continue;
         disk = &def->disks[ndisks++];
-        if (VIR_ALLOC(disk->src) < 0)
+        if (!(disk->src = virStorageSourceNew()))
             goto cleanup;
-        if (VIR_STRDUP(disk->name, def->dom->disks[i]->dst) < 0)
+        if (VIR_STRDUP(disk->name, def->parent.dom->disks[i]->dst) < 0)
             goto cleanup;
         disk->idx = i;
 
         /* Don't snapshot empty drives */
-        if (virStorageSourceIsEmpty(def->dom->disks[i]->src))
+        if (virStorageSourceIsEmpty(def->parent.dom->disks[i]->src))
             disk->snapshot = VIR_DOMAIN_SNAPSHOT_LOCATION_NONE;
         else
-            disk->snapshot = def->dom->disks[i]->snapshot;
+            disk->snapshot = def->parent.dom->disks[i]->snapshot;
 
         disk->src->type = VIR_STORAGE_TYPE_FILE;
         if (!disk->snapshot)
@@ -655,14 +797,31 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
     return ret;
 }
 
-static void
+
+/* Converts public VIR_DOMAIN_SNAPSHOT_XML_* into
+ * VIR_DOMAIN_SNAPSHOT_FORMAT_* flags, and silently ignores any other
+ * flags. */
+unsigned int
+virDomainSnapshotFormatConvertXMLFlags(unsigned int flags)
+{
+    unsigned int formatFlags = 0;
+
+    if (flags & VIR_DOMAIN_SNAPSHOT_XML_SECURE)
+        formatFlags |= VIR_DOMAIN_SNAPSHOT_FORMAT_SECURE;
+
+    return formatFlags;
+}
+
+
+static int
 virDomainSnapshotDiskDefFormat(virBufferPtr buf,
-                               virDomainSnapshotDiskDefPtr disk)
+                               virDomainSnapshotDiskDefPtr disk,
+                               virDomainXMLOptionPtr xmlopt)
 {
     int type = disk->src->type;
 
     if (!disk->name)
-        return;
+        return 0;
 
     virBufferEscapeString(buf, "<disk name='%s'", disk->name);
     if (disk->snapshot > 0)
@@ -671,7 +830,7 @@ virDomainSnapshotDiskDefFormat(virBufferPtr buf,
 
     if (!disk->src->path && disk->src->format == 0) {
         virBufferAddLit(buf, "/>\n");
-        return;
+        return 0;
     }
 
     virBufferAsprintf(buf, " type='%s'>\n", virStorageTypeToString(type));
@@ -680,494 +839,132 @@ virDomainSnapshotDiskDefFormat(virBufferPtr buf,
     if (disk->src->format > 0)
         virBufferEscapeString(buf, "<driver type='%s'/>\n",
                               virStorageFileFormatTypeToString(disk->src->format));
-    virDomainDiskSourceFormat(buf, disk->src, 0, 0);
+    if (virDomainDiskSourceFormat(buf, disk->src, "source", 0, false, 0,
+                                  xmlopt) < 0)
+        return -1;
 
     virBufferAdjustIndent(buf, -2);
     virBufferAddLit(buf, "</disk>\n");
+    return 0;
 }
 
-char *virDomainSnapshotDefFormat(const char *domain_uuid,
-                                 virDomainSnapshotDefPtr def,
-                                 virCapsPtr caps,
-                                 unsigned int flags,
-                                 int internal)
+
+/* Append XML describing def into buf. Return 0 on success, or -1 on
+ * failure with buf cleared. */
+static int
+virDomainSnapshotDefFormatInternal(virBufferPtr buf,
+                                   const char *uuidstr,
+                                   virDomainSnapshotDefPtr def,
+                                   virCapsPtr caps,
+                                   virDomainXMLOptionPtr xmlopt,
+                                   unsigned int flags)
+{
+    size_t i;
+    int domainflags = VIR_DOMAIN_DEF_FORMAT_INACTIVE;
+
+    if (flags & VIR_DOMAIN_SNAPSHOT_FORMAT_SECURE)
+        domainflags |= VIR_DOMAIN_DEF_FORMAT_SECURE;
+
+    virBufferAddLit(buf, "<domainsnapshot>\n");
+    virBufferAdjustIndent(buf, 2);
+
+    virBufferEscapeString(buf, "<name>%s</name>\n", def->parent.name);
+    if (def->parent.description)
+        virBufferEscapeString(buf, "<description>%s</description>\n",
+                              def->parent.description);
+    if (def->state)
+        virBufferAsprintf(buf, "<state>%s</state>\n",
+                          virDomainSnapshotStateTypeToString(def->state));
+
+    if (def->parent.parent_name) {
+        virBufferAddLit(buf, "<parent>\n");
+        virBufferAdjustIndent(buf, 2);
+        virBufferEscapeString(buf, "<name>%s</name>\n",
+                              def->parent.parent_name);
+        virBufferAdjustIndent(buf, -2);
+        virBufferAddLit(buf, "</parent>\n");
+    }
+
+    if (def->parent.creationTime)
+        virBufferAsprintf(buf, "<creationTime>%lld</creationTime>\n",
+                          def->parent.creationTime);
+
+    if (def->memory) {
+        virBufferAsprintf(buf, "<memory snapshot='%s'",
+                          virDomainSnapshotLocationTypeToString(def->memory));
+        virBufferEscapeString(buf, " file='%s'", def->file);
+        virBufferAddLit(buf, "/>\n");
+    }
+
+    if (def->ndisks) {
+        virBufferAddLit(buf, "<disks>\n");
+        virBufferAdjustIndent(buf, 2);
+        for (i = 0; i < def->ndisks; i++) {
+            if (virDomainSnapshotDiskDefFormat(buf, &def->disks[i], xmlopt) < 0)
+                goto error;
+        }
+        virBufferAdjustIndent(buf, -2);
+        virBufferAddLit(buf, "</disks>\n");
+    }
+
+    if (def->parent.dom) {
+        if (virDomainDefFormatInternal(def->parent.dom, caps, domainflags, buf,
+                                       xmlopt) < 0)
+            goto error;
+    } else if (uuidstr) {
+        virBufferAddLit(buf, "<domain>\n");
+        virBufferAdjustIndent(buf, 2);
+        virBufferAsprintf(buf, "<uuid>%s</uuid>\n", uuidstr);
+        virBufferAdjustIndent(buf, -2);
+        virBufferAddLit(buf, "</domain>\n");
+    }
+
+    if (def->parent.inactiveDom) {
+        if (virDomainDefFormatInternalSetRootName(def->parent.inactiveDom, caps,
+                                                  domainflags, buf, xmlopt,
+                                                  "inactiveDomain") < 0)
+            goto error;
+    }
+
+    if (virSaveCookieFormatBuf(buf, def->cookie,
+                               virDomainXMLOptionGetSaveCookie(xmlopt)) < 0)
+        goto error;
+
+    if (flags & VIR_DOMAIN_SNAPSHOT_FORMAT_INTERNAL)
+        virBufferAsprintf(buf, "<active>%d</active>\n",
+                          !!(flags & VIR_DOMAIN_SNAPSHOT_FORMAT_CURRENT));
+
+    virBufferAdjustIndent(buf, -2);
+    virBufferAddLit(buf, "</domainsnapshot>\n");
+
+    if (virBufferCheckError(buf) < 0)
+        goto error;
+
+    return 0;
+
+ error:
+    virBufferFreeAndReset(buf);
+    return -1;
+}
+
+
+char *
+virDomainSnapshotDefFormat(const char *uuidstr,
+                           virDomainSnapshotDefPtr def,
+                           virCapsPtr caps,
+                           virDomainXMLOptionPtr xmlopt,
+                           unsigned int flags)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
-    size_t i;
 
-    virCheckFlags(VIR_DOMAIN_DEF_FORMAT_SECURE |
-                  VIR_DOMAIN_DEF_FORMAT_UPDATE_CPU, NULL);
-
-    flags |= VIR_DOMAIN_DEF_FORMAT_INACTIVE;
-
-    virBufferAddLit(&buf, "<domainsnapshot>\n");
-    virBufferAdjustIndent(&buf, 2);
-    virBufferEscapeString(&buf, "<name>%s</name>\n", def->name);
-    if (def->description)
-        virBufferEscapeString(&buf, "<description>%s</description>\n",
-                              def->description);
-    virBufferAsprintf(&buf, "<state>%s</state>\n",
-                      virDomainSnapshotStateTypeToString(def->state));
-    if (def->parent) {
-        virBufferAddLit(&buf, "<parent>\n");
-        virBufferAdjustIndent(&buf, 2);
-        virBufferEscapeString(&buf, "<name>%s</name>\n", def->parent);
-        virBufferAdjustIndent(&buf, -2);
-        virBufferAddLit(&buf, "</parent>\n");
-    }
-    virBufferAsprintf(&buf, "<creationTime>%lld</creationTime>\n",
-                      def->creationTime);
-    if (def->memory) {
-        virBufferAsprintf(&buf, "<memory snapshot='%s'",
-                          virDomainSnapshotLocationTypeToString(def->memory));
-        virBufferEscapeString(&buf, " file='%s'", def->file);
-        virBufferAddLit(&buf, "/>\n");
-    }
-    if (def->ndisks) {
-        virBufferAddLit(&buf, "<disks>\n");
-        virBufferAdjustIndent(&buf, 2);
-        for (i = 0; i < def->ndisks; i++)
-            virDomainSnapshotDiskDefFormat(&buf, &def->disks[i]);
-        virBufferAdjustIndent(&buf, -2);
-        virBufferAddLit(&buf, "</disks>\n");
-    }
-    if (def->dom) {
-        if (virDomainDefFormatInternal(def->dom, caps, flags, &buf) < 0) {
-            virBufferFreeAndReset(&buf);
-            return NULL;
-        }
-    } else if (domain_uuid) {
-        virBufferAddLit(&buf, "<domain>\n");
-        virBufferAdjustIndent(&buf, 2);
-        virBufferAsprintf(&buf, "<uuid>%s</uuid>\n", domain_uuid);
-        virBufferAdjustIndent(&buf, -2);
-        virBufferAddLit(&buf, "</domain>\n");
-    }
-    if (internal)
-        virBufferAsprintf(&buf, "<active>%d</active>\n", def->current);
-    virBufferAdjustIndent(&buf, -2);
-    virBufferAddLit(&buf, "</domainsnapshot>\n");
-
-    if (virBufferCheckError(&buf) < 0)
+    virCheckFlags(VIR_DOMAIN_SNAPSHOT_FORMAT_SECURE |
+                  VIR_DOMAIN_SNAPSHOT_FORMAT_INTERNAL |
+                  VIR_DOMAIN_SNAPSHOT_FORMAT_CURRENT, NULL);
+    if (virDomainSnapshotDefFormatInternal(&buf, uuidstr, def, caps,
+                                           xmlopt, flags) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
-}
-
-/* Snapshot Obj functions */
-static virDomainSnapshotObjPtr virDomainSnapshotObjNew(void)
-{
-    virDomainSnapshotObjPtr snapshot;
-
-    if (VIR_ALLOC(snapshot) < 0)
-        return NULL;
-
-    VIR_DEBUG("obj=%p", snapshot);
-
-    return snapshot;
-}
-
-static void virDomainSnapshotObjFree(virDomainSnapshotObjPtr snapshot)
-{
-    if (!snapshot)
-        return;
-
-    VIR_DEBUG("obj=%p", snapshot);
-
-    virDomainSnapshotDefFree(snapshot->def);
-    VIR_FREE(snapshot);
-}
-
-virDomainSnapshotObjPtr virDomainSnapshotAssignDef(virDomainSnapshotObjListPtr snapshots,
-                                                   virDomainSnapshotDefPtr def)
-{
-    virDomainSnapshotObjPtr snap;
-
-    if (virHashLookup(snapshots->objs, def->name) != NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected domain snapshot %s already exists"),
-                       def->name);
-        return NULL;
-    }
-
-    if (!(snap = virDomainSnapshotObjNew()))
-        return NULL;
-    snap->def = def;
-
-    if (virHashAddEntry(snapshots->objs, snap->def->name, snap) < 0) {
-        VIR_FREE(snap);
-        return NULL;
-    }
-
-    return snap;
-}
-
-/* Snapshot Obj List functions */
-static void
-virDomainSnapshotObjListDataFree(void *payload,
-                                 const void *name ATTRIBUTE_UNUSED)
-{
-    virDomainSnapshotObjPtr obj = payload;
-
-    virDomainSnapshotObjFree(obj);
-}
-
-virDomainSnapshotObjListPtr
-virDomainSnapshotObjListNew(void)
-{
-    virDomainSnapshotObjListPtr snapshots;
-    if (VIR_ALLOC(snapshots) < 0)
-        return NULL;
-    snapshots->objs = virHashCreate(50, virDomainSnapshotObjListDataFree);
-    if (!snapshots->objs) {
-        VIR_FREE(snapshots);
-        return NULL;
-    }
-    return snapshots;
-}
-
-void
-virDomainSnapshotObjListFree(virDomainSnapshotObjListPtr snapshots)
-{
-    if (!snapshots)
-        return;
-    virHashFree(snapshots->objs);
-    VIR_FREE(snapshots);
-}
-
-struct virDomainSnapshotNameData {
-    char **const names;
-    int maxnames;
-    unsigned int flags;
-    int count;
-    bool error;
-};
-
-static int virDomainSnapshotObjListCopyNames(void *payload,
-                                             const void *name ATTRIBUTE_UNUSED,
-                                             void *opaque)
-{
-    virDomainSnapshotObjPtr obj = payload;
-    struct virDomainSnapshotNameData *data = opaque;
-
-    if (data->error)
-        return 0;
-    /* Caller already sanitized flags.  Filtering on DESCENDANTS was
-     * done by choice of iteration in the caller.  */
-    if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_LEAVES) && obj->nchildren)
-        return 0;
-    if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_NO_LEAVES) && !obj->nchildren)
-        return 0;
-
-    if (data->flags & VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS) {
-        if (!(data->flags & VIR_DOMAIN_SNAPSHOT_LIST_INACTIVE) &&
-            obj->def->state == VIR_DOMAIN_SHUTOFF)
-            return 0;
-        if (!(data->flags & VIR_DOMAIN_SNAPSHOT_LIST_DISK_ONLY) &&
-            obj->def->state == VIR_DOMAIN_DISK_SNAPSHOT)
-            return 0;
-        if (!(data->flags & VIR_DOMAIN_SNAPSHOT_LIST_ACTIVE) &&
-            obj->def->state != VIR_DOMAIN_SHUTOFF &&
-            obj->def->state != VIR_DOMAIN_DISK_SNAPSHOT)
-            return 0;
-    }
-
-    if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_INTERNAL) &&
-        virDomainSnapshotIsExternal(obj))
-        return 0;
-    if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_EXTERNAL) &&
-        !virDomainSnapshotIsExternal(obj))
-        return 0;
-
-    if (data->names && data->count < data->maxnames &&
-        VIR_STRDUP(data->names[data->count], obj->def->name) < 0) {
-        data->error = true;
-        return 0;
-    }
-    data->count++;
-    return 0;
-}
-
-int
-virDomainSnapshotObjListGetNames(virDomainSnapshotObjListPtr snapshots,
-                                 virDomainSnapshotObjPtr from,
-                                 char **const names, int maxnames,
-                                 unsigned int flags)
-{
-    struct virDomainSnapshotNameData data = { names, maxnames, flags, 0,
-                                              false };
-    size_t i;
-
-    if (!from) {
-        /* LIST_ROOTS and LIST_DESCENDANTS have the same bit value,
-         * but opposite semantics.  Toggle here to get the correct
-         * traversal on the metaroot.  */
-        flags ^= VIR_DOMAIN_SNAPSHOT_LIST_ROOTS;
-        from = &snapshots->metaroot;
-    }
-
-    /* We handle LIST_ROOT/LIST_DESCENDANTS directly, mask that bit
-     * out to determine when we must use the filter callback.  */
-    data.flags &= ~VIR_DOMAIN_SNAPSHOT_LIST_DESCENDANTS;
-
-    /* If this common code is being used, we assume that all snapshots
-     * have metadata, and thus can handle METADATA up front as an
-     * all-or-none filter.  XXX This might not always be true, if we
-     * add the ability to track qcow2 internal snapshots without the
-     * use of metadata.  */
-    if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_METADATA) ==
-        VIR_DOMAIN_SNAPSHOT_LIST_NO_METADATA)
-        return 0;
-    data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_METADATA;
-
-    /* For ease of coding the visitor, it is easier to zero each group
-     * where all of the bits are set.  */
-    if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES) ==
-        VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES)
-        data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES;
-    if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS) ==
-        VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS)
-        data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS;
-    if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION) ==
-        VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION)
-        data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION;
-
-    if (flags & VIR_DOMAIN_SNAPSHOT_LIST_DESCENDANTS) {
-        if (from->def)
-            virDomainSnapshotForEachDescendant(from,
-                                               virDomainSnapshotObjListCopyNames,
-                                               &data);
-        else if (names || data.flags)
-            virHashForEach(snapshots->objs, virDomainSnapshotObjListCopyNames,
-                           &data);
-        else
-            data.count = virHashSize(snapshots->objs);
-    } else if (names || data.flags) {
-        virDomainSnapshotForEachChild(from,
-                                      virDomainSnapshotObjListCopyNames, &data);
-    } else {
-        data.count = from->nchildren;
-    }
-
-    if (data.error) {
-        for (i = 0; i < data.count; i++)
-            VIR_FREE(names[i]);
-        return -1;
-    }
-
-    return data.count;
-}
-
-int
-virDomainSnapshotObjListNum(virDomainSnapshotObjListPtr snapshots,
-                            virDomainSnapshotObjPtr from,
-                            unsigned int flags)
-{
-    return virDomainSnapshotObjListGetNames(snapshots, from, NULL, 0, flags);
-}
-
-virDomainSnapshotObjPtr
-virDomainSnapshotFindByName(virDomainSnapshotObjListPtr snapshots,
-                            const char *name)
-{
-    return name ? virHashLookup(snapshots->objs, name) : &snapshots->metaroot;
-}
-
-void virDomainSnapshotObjListRemove(virDomainSnapshotObjListPtr snapshots,
-                                    virDomainSnapshotObjPtr snapshot)
-{
-    virHashRemoveEntry(snapshots->objs, snapshot->def->name);
-}
-
-int
-virDomainSnapshotForEach(virDomainSnapshotObjListPtr snapshots,
-                         virHashIterator iter,
-                         void *data)
-{
-    return virHashForEach(snapshots->objs, iter, data);
-}
-
-/* Run iter(data) on all direct children of snapshot, while ignoring all
- * other entries in snapshots.  Return the number of children
- * visited.  No particular ordering is guaranteed.  */
-int
-virDomainSnapshotForEachChild(virDomainSnapshotObjPtr snapshot,
-                              virHashIterator iter,
-                              void *data)
-{
-    virDomainSnapshotObjPtr child = snapshot->first_child;
-
-    while (child) {
-        virDomainSnapshotObjPtr next = child->sibling;
-        (iter)(child, child->def->name, data);
-        child = next;
-    }
-
-    return snapshot->nchildren;
-}
-
-struct snapshot_act_on_descendant {
-    int number;
-    virHashIterator iter;
-    void *data;
-};
-
-static int
-virDomainSnapshotActOnDescendant(void *payload,
-                                 const void *name,
-                                 void *data)
-{
-    virDomainSnapshotObjPtr obj = payload;
-    struct snapshot_act_on_descendant *curr = data;
-
-    curr->number += 1 + virDomainSnapshotForEachDescendant(obj,
-                                                           curr->iter,
-                                                           curr->data);
-    (curr->iter)(payload, name, curr->data);
-    return 0;
-}
-
-/* Run iter(data) on all descendants of snapshot, while ignoring all
- * other entries in snapshots.  Return the number of descendants
- * visited.  No particular ordering is guaranteed.  */
-int
-virDomainSnapshotForEachDescendant(virDomainSnapshotObjPtr snapshot,
-                                   virHashIterator iter,
-                                   void *data)
-{
-    struct snapshot_act_on_descendant act;
-
-    act.number = 0;
-    act.iter = iter;
-    act.data = data;
-    virDomainSnapshotForEachChild(snapshot,
-                                  virDomainSnapshotActOnDescendant, &act);
-
-    return act.number;
-}
-
-/* Struct and callback function used as a hash table callback; each call
- * inspects the pre-existing snapshot->def->parent field, and adjusts
- * the snapshot->parent field as well as the parent's child fields to
- * wire up the hierarchical relations for the given snapshot.  The error
- * indicator gets set if a parent is missing or a requested parent would
- * cause a circular parent chain.  */
-struct snapshot_set_relation {
-    virDomainSnapshotObjListPtr snapshots;
-    int err;
-};
-static int
-virDomainSnapshotSetRelations(void *payload,
-                              const void *name ATTRIBUTE_UNUSED,
-                              void *data)
-{
-    virDomainSnapshotObjPtr obj = payload;
-    struct snapshot_set_relation *curr = data;
-    virDomainSnapshotObjPtr tmp;
-
-    obj->parent = virDomainSnapshotFindByName(curr->snapshots,
-                                              obj->def->parent);
-    if (!obj->parent) {
-        curr->err = -1;
-        obj->parent = &curr->snapshots->metaroot;
-        VIR_WARN("snapshot %s lacks parent", obj->def->name);
-    } else {
-        tmp = obj->parent;
-        while (tmp && tmp->def) {
-            if (tmp == obj) {
-                curr->err = -1;
-                obj->parent = &curr->snapshots->metaroot;
-                VIR_WARN("snapshot %s in circular chain", obj->def->name);
-                break;
-            }
-            tmp = tmp->parent;
-        }
-    }
-    obj->parent->nchildren++;
-    obj->sibling = obj->parent->first_child;
-    obj->parent->first_child = obj;
-    return 0;
-}
-
-/* Populate parent link and child count of all snapshots, with all
- * relations starting as 0/NULL.  Return 0 on success, -1 if a parent
- * is missing or if a circular relationship was requested.  */
-int
-virDomainSnapshotUpdateRelations(virDomainSnapshotObjListPtr snapshots)
-{
-    struct snapshot_set_relation act = { snapshots, 0 };
-
-    virHashForEach(snapshots->objs, virDomainSnapshotSetRelations, &act);
-    return act.err;
-}
-
-/* Prepare to reparent or delete snapshot, by removing it from its
- * current listed parent.  Note that when bulk removing all children
- * of a parent, it is faster to just 0 the count rather than calling
- * this function on each child.  */
-void
-virDomainSnapshotDropParent(virDomainSnapshotObjPtr snapshot)
-{
-    virDomainSnapshotObjPtr prev = NULL;
-    virDomainSnapshotObjPtr curr = NULL;
-
-    snapshot->parent->nchildren--;
-    curr = snapshot->parent->first_child;
-    while (curr != snapshot) {
-        if (!curr) {
-            VIR_WARN("inconsistent snapshot relations");
-            return;
-        }
-        prev = curr;
-        curr = curr->sibling;
-    }
-    if (prev)
-        prev->sibling = snapshot->sibling;
-    else
-        snapshot->parent->first_child = snapshot->sibling;
-    snapshot->parent = NULL;
-    snapshot->sibling = NULL;
-}
-
-int
-virDomainListSnapshots(virDomainSnapshotObjListPtr snapshots,
-                       virDomainSnapshotObjPtr from,
-                       virDomainPtr dom,
-                       virDomainSnapshotPtr **snaps,
-                       unsigned int flags)
-{
-    int count = virDomainSnapshotObjListNum(snapshots, from, flags);
-    virDomainSnapshotPtr *list = NULL;
-    char **names;
-    int ret = -1;
-    size_t i;
-
-    if (!snaps || count < 0)
-        return count;
-    if (VIR_ALLOC_N(names, count) < 0 ||
-        VIR_ALLOC_N(list, count + 1) < 0)
-        goto cleanup;
-
-    if (virDomainSnapshotObjListGetNames(snapshots, from, names, count,
-                                         flags) < 0)
-        goto cleanup;
-    for (i = 0; i < count; i++)
-        if ((list[i] = virGetDomainSnapshot(dom, names[i])) == NULL)
-            goto cleanup;
-
-    ret = count;
-    *snaps = list;
-
- cleanup:
-    for (i = 0; i < count; i++)
-        VIR_FREE(names[i]);
-    VIR_FREE(names);
-    if (ret < 0 && list) {
-        for (i = 0; i < count; i++)
-            virObjectUnref(list[i]);
-        VIR_FREE(list);
-    }
-    return ret;
 }
 
 
@@ -1188,157 +985,55 @@ virDomainSnapshotDefIsExternal(virDomainSnapshotDefPtr def)
 }
 
 bool
-virDomainSnapshotIsExternal(virDomainSnapshotObjPtr snap)
+virDomainSnapshotIsExternal(virDomainMomentObjPtr snap)
 {
-    return virDomainSnapshotDefIsExternal(snap->def);
+    virDomainSnapshotDefPtr def = virDomainSnapshotObjGetDef(snap);
+
+    return virDomainSnapshotDefIsExternal(def);
 }
 
 int
 virDomainSnapshotRedefinePrep(virDomainPtr domain,
                               virDomainObjPtr vm,
                               virDomainSnapshotDefPtr *defptr,
-                              virDomainSnapshotObjPtr *snap,
+                              virDomainMomentObjPtr *snap,
+                              virDomainXMLOptionPtr xmlopt,
                               bool *update_current,
                               unsigned int flags)
 {
     virDomainSnapshotDefPtr def = *defptr;
-    int ret = -1;
-    int align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL;
-    bool align_match = true;
-    char uuidstr[VIR_UUID_STRING_BUFLEN];
-    virDomainSnapshotObjPtr other;
+    virDomainMomentObjPtr other;
+    virDomainSnapshotDefPtr otherdef = NULL;
+    bool check_if_stolen;
 
-    virUUIDFormat(domain->uuid, uuidstr);
+    if (virDomainSnapshotCheckCycles(vm->snapshots, def, vm->def->name) < 0)
+        return -1;
 
-    /* Prevent circular chains */
-    if (def->parent) {
-        if (STREQ(def->name, def->parent)) {
-            virReportError(VIR_ERR_INVALID_ARG,
-                           _("cannot set snapshot %s as its own parent"),
-                           def->name);
-            goto cleanup;
-        }
-        other = virDomainSnapshotFindByName(vm->snapshots, def->parent);
-        if (!other) {
-            virReportError(VIR_ERR_INVALID_ARG,
-                           _("parent %s for snapshot %s not found"),
-                           def->parent, def->name);
-            goto cleanup;
-        }
-        while (other->def->parent) {
-            if (STREQ(other->def->parent, def->name)) {
-                virReportError(VIR_ERR_INVALID_ARG,
-                               _("parent %s would create cycle to %s"),
-                               other->def->name, def->name);
-                goto cleanup;
-            }
-            other = virDomainSnapshotFindByName(vm->snapshots,
-                                                other->def->parent);
-            if (!other) {
-                VIR_WARN("snapshots are inconsistent for %s",
-                         vm->def->name);
-                break;
-            }
-        }
+    other = virDomainSnapshotFindByName(vm->snapshots, def->parent.name);
+    if (other)
+        otherdef = virDomainSnapshotObjGetDef(other);
+    check_if_stolen = other && otherdef->parent.dom;
+    if (virDomainSnapshotRedefineValidate(def, domain->uuid, other, xmlopt,
+                                          flags) < 0) {
+        /* revert any stealing of the snapshot domain definition */
+        if (check_if_stolen && def->parent.dom && !otherdef->parent.dom)
+            VIR_STEAL_PTR(otherdef->parent.dom, def->parent.dom);
+        return -1;
     }
-
-    /* Check that any replacement is compatible */
-    if ((flags & VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY) &&
-        def->state != VIR_DOMAIN_DISK_SNAPSHOT) {
-        virReportError(VIR_ERR_INVALID_ARG,
-                       _("disk-only flag for snapshot %s requires "
-                         "disk-snapshot state"),
-                       def->name);
-        goto cleanup;
-
-    }
-
-    if (def->dom &&
-        memcmp(def->dom->uuid, domain->uuid, VIR_UUID_BUFLEN)) {
-        virReportError(VIR_ERR_INVALID_ARG,
-                       _("definition for snapshot %s must use uuid %s"),
-                       def->name, uuidstr);
-        goto cleanup;
-    }
-
-    other = virDomainSnapshotFindByName(vm->snapshots, def->name);
     if (other) {
-        if ((other->def->state == VIR_DOMAIN_RUNNING ||
-             other->def->state == VIR_DOMAIN_PAUSED) !=
-            (def->state == VIR_DOMAIN_RUNNING ||
-             def->state == VIR_DOMAIN_PAUSED)) {
-            virReportError(VIR_ERR_INVALID_ARG,
-                           _("cannot change between online and offline "
-                             "snapshot state in snapshot %s"),
-                           def->name);
-            goto cleanup;
-        }
-
-        if ((other->def->state == VIR_DOMAIN_DISK_SNAPSHOT) !=
-            (def->state == VIR_DOMAIN_DISK_SNAPSHOT)) {
-            virReportError(VIR_ERR_INVALID_ARG,
-                           _("cannot change between disk snapshot and "
-                             "system checkpoint in snapshot %s"),
-                           def->name);
-            goto cleanup;
-        }
-
-        if (other->def->dom) {
-            if (def->dom) {
-                if (!virDomainDefCheckABIStability(other->def->dom,
-                                                   def->dom))
-                    goto cleanup;
-            } else {
-                /* Transfer the domain def */
-                def->dom = other->def->dom;
-                other->def->dom = NULL;
-            }
-        }
-
-        if (def->dom) {
-            if (def->state == VIR_DOMAIN_DISK_SNAPSHOT ||
-                virDomainSnapshotDefIsExternal(def)) {
-                align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
-                align_match = false;
-            }
-
-            if (virDomainSnapshotAlignDisks(def, align_location,
-                                            align_match) < 0) {
-                /* revert stealing of the snapshot domain definition */
-                if (def->dom && !other->def->dom) {
-                    other->def->dom = def->dom;
-                    def->dom = NULL;
-                }
-                goto cleanup;
-            }
-        }
-
-        if (other == vm->current_snapshot) {
+        if (other == virDomainSnapshotGetCurrent(vm->snapshots)) {
             *update_current = true;
-            vm->current_snapshot = NULL;
+            virDomainSnapshotSetCurrent(vm->snapshots, NULL);
         }
 
         /* Drop and rebuild the parent relationship, but keep all
-         * child relations by reusing snap.  */
-        virDomainSnapshotDropParent(other);
-        virDomainSnapshotDefFree(other->def);
-        other->def = def;
+         * child relations by reusing snap. */
+        virDomainMomentDropParent(other);
+        virObjectUnref(otherdef);
+        other->def = &(*defptr)->parent;
         *defptr = NULL;
         *snap = other;
-    } else {
-        if (def->dom) {
-            if (def->state == VIR_DOMAIN_DISK_SNAPSHOT ||
-                def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
-                align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
-                align_match = false;
-            }
-            if (virDomainSnapshotAlignDisks(def, align_location,
-                                            align_match) < 0)
-                goto cleanup;
-        }
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }

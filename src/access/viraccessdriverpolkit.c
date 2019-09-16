@@ -33,8 +33,8 @@
 
 VIR_LOG_INIT("access.accessdriverpolkit");
 
-#define virAccessError(code, ...)                                       \
-    virReportErrorHelper(VIR_FROM_THIS, code, __FILE__,                 \
+#define virAccessError(code, ...) \
+    virReportErrorHelper(VIR_FROM_THIS, code, __FILE__, \
                          __FUNCTION__, __LINE__, __VA_ARGS__)
 
 #define VIR_ACCESS_DRIVER_POLKIT_ACTION_PREFIX "org.libvirt.api"
@@ -80,6 +80,7 @@ virAccessDriverPolkitGetCaller(const char *actionid,
 {
     virIdentityPtr identity = virIdentityGetCurrent();
     int ret = -1;
+    int rc;
 
     if (!identity) {
         virAccessError(VIR_ERR_ACCESS_DENIED,
@@ -88,17 +89,28 @@ virAccessDriverPolkitGetCaller(const char *actionid,
         return -1;
     }
 
-    if (virIdentityGetUNIXProcessID(identity, pid) < 0) {
+    if ((rc = virIdentityGetProcessID(identity, pid)) < 0)
+        goto cleanup;
+
+    if (rc == 0) {
         virAccessError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("No UNIX process ID available"));
+                       _("No process ID available"));
         goto cleanup;
     }
-    if (virIdentityGetUNIXProcessTime(identity, startTime) < 0) {
+
+    if ((rc = virIdentityGetProcessTime(identity, startTime)) < 0)
+        goto cleanup;
+
+    if (rc == 0) {
         virAccessError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("No UNIX process start time available"));
+                       _("No process start time available"));
         goto cleanup;
     }
-    if (virIdentityGetUNIXUserID(identity, uid) < 0) {
+
+    if ((rc = virIdentityGetUNIXUserID(identity, uid)) < 0)
+        goto cleanup;
+
+    if (rc == 0) {
         virAccessError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("No UNIX caller UID available"));
         goto cleanup;
@@ -135,7 +147,7 @@ virAccessDriverPolkitCheck(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
         goto cleanup;
 
     VIR_DEBUG("Check action '%s' for process '%lld' time %lld uid %d",
-              actionid, (long long) pid, startTime, uid);
+              actionid, (long long)pid, startTime, uid);
 
     rv = virPolkitCheckAuth(actionid,
                             pid,
@@ -238,6 +250,31 @@ virAccessDriverPolkitCheckNetwork(virAccessManagerPtr manager,
 }
 
 static int
+virAccessDriverPolkitCheckNetworkPort(virAccessManagerPtr manager,
+                                      const char *driverName,
+                                      virNetworkDefPtr network,
+                                      virNetworkPortDefPtr port,
+                                      virAccessPermNetworkPort perm)
+{
+    char uuidstr1[VIR_UUID_STRING_BUFLEN];
+    char uuidstr2[VIR_UUID_STRING_BUFLEN];
+    const char *attrs[] = {
+        "connect_driver", driverName,
+        "network_name", network->name,
+        "network_uuid", uuidstr1,
+        "port_uuid", uuidstr2,
+        NULL,
+    };
+    virUUIDFormat(network->uuid, uuidstr1);
+    virUUIDFormat(port->uuid, uuidstr2);
+
+    return virAccessDriverPolkitCheck(manager,
+                                      "network-port",
+                                      virAccessPermNetworkPortTypeToString(perm),
+                                      attrs);
+}
+
+static int
 virAccessDriverPolkitCheckNodeDevice(virAccessManagerPtr manager,
                                      const char *driverName,
                                      virNodeDeviceDefPtr nodedev,
@@ -273,6 +310,26 @@ virAccessDriverPolkitCheckNWFilter(virAccessManagerPtr manager,
     return virAccessDriverPolkitCheck(manager,
                                       "nwfilter",
                                       virAccessPermNWFilterTypeToString(perm),
+                                      attrs);
+}
+
+static int
+virAccessDriverPolkitCheckNWFilterBinding(virAccessManagerPtr manager,
+                                          const char *driverName,
+                                          virNWFilterBindingDefPtr binding,
+                                          virAccessPermNWFilterBinding perm)
+{
+    const char *attrs[] = {
+        "connect_driver", driverName,
+        "nwfilter_binding_portdev", binding->portdevname,
+        "nwfilter_binding_linkdev", binding->linkdevname,
+        "nwfilter_binding_filter", binding->filter,
+        NULL,
+    };
+
+    return virAccessDriverPolkitCheck(manager,
+                                      "nwfilter_binding",
+                                      virAccessPermNWFilterBindingTypeToString(perm),
                                       attrs);
 }
 
@@ -407,8 +464,10 @@ virAccessDriver accessDriverPolkit = {
     .checkDomain = virAccessDriverPolkitCheckDomain,
     .checkInterface = virAccessDriverPolkitCheckInterface,
     .checkNetwork = virAccessDriverPolkitCheckNetwork,
+    .checkNetworkPort = virAccessDriverPolkitCheckNetworkPort,
     .checkNodeDevice = virAccessDriverPolkitCheckNodeDevice,
     .checkNWFilter = virAccessDriverPolkitCheckNWFilter,
+    .checkNWFilterBinding = virAccessDriverPolkitCheckNWFilterBinding,
     .checkSecret = virAccessDriverPolkitCheckSecret,
     .checkStoragePool = virAccessDriverPolkitCheckStoragePool,
     .checkStorageVol = virAccessDriverPolkitCheckStorageVol,

@@ -16,14 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Andrea Bolognani <abologna@redhat.com>
  */
 
-#ifndef __VIR_GIC_H__
-# define __VIR_GIC_H__
+#pragma once
 
-# include "virutil.h"
+#include "virutil.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_GIC_VERSION_NONE = 0,
@@ -34,9 +32,6 @@ typedef enum {
 } virGICVersion;
 
 VIR_ENUM_DECL(virGICVersion);
-
-/* Consider GIC v2 the default */
-# define VIR_GIC_VERSION_DEFAULT VIR_GIC_VERSION_2
 
 typedef enum {
     VIR_GIC_IMPLEMENTATION_NONE = 0,
@@ -50,5 +45,3 @@ struct _virGICCapability {
     virGICVersion version;
     virGICImplementation implementation;
 };
-
-#endif /* __VIR_GIC_H__ */

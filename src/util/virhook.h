@@ -17,18 +17,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel Veillard <veillard@redhat.com>
  */
 
-#ifndef __VIR_HOOKS_H__
-# define __VIR_HOOKS_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef enum {
     VIR_HOOK_DRIVER_DAEMON = 0,        /* Daemon related events */
-    VIR_HOOK_DRIVER_QEMU,              /* QEmu domains related events */
+    VIR_HOOK_DRIVER_QEMU,              /* QEMU domains related events */
     VIR_HOOK_DRIVER_LXC,               /* LXC domains related events */
     VIR_HOOK_DRIVER_NETWORK,           /* network related events */
     VIR_HOOK_DRIVER_LIBXL,             /* Xen libxl domains related events */
@@ -81,8 +78,8 @@ typedef enum {
     VIR_HOOK_NETWORK_OP_START,          /* network is about to start */
     VIR_HOOK_NETWORK_OP_STARTED,        /* network has start */
     VIR_HOOK_NETWORK_OP_STOPPED,        /* network has stopped */
-    VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,  /* an interface has been plugged into the network */
-    VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,    /* an interface was unplugged from the network */
+    VIR_HOOK_NETWORK_OP_PORT_CREATED,   /* port has been created in the network */
+    VIR_HOOK_NETWORK_OP_PORT_DELETED,   /* port has been deleted in the network */
     VIR_HOOK_NETWORK_OP_UPDATED,        /* network has been updated */
 
     VIR_HOOK_NETWORK_OP_LAST,
@@ -106,5 +103,3 @@ int virHookPresent(int driver);
 
 int virHookCall(int driver, const char *id, int op, int sub_op,
                 const char *extra, const char *input, char **output);
-
-#endif /* __VIR_HOOKS_H__ */

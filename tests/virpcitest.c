@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -24,8 +22,6 @@
 
 #ifdef __linux__
 
-# include <stdlib.h>
-# include <stdio.h>
 # include <sys/types.h>
 # include <sys/stat.h>
 # include <fcntl.h>
@@ -82,12 +78,12 @@ testVirPCIDeviceNew(const void *opaque ATTRIBUTE_UNUSED)
     return ret;
 }
 
-# define CHECK_LIST_COUNT(list, cnt)                                    \
-    if ((count = virPCIDeviceListCount(list)) != cnt) {                 \
-        virReportError(VIR_ERR_INTERNAL_ERROR,                          \
-                       "Unexpected count of items in " #list ": %d, "   \
-                       "expecting %zu", count, (size_t) cnt);           \
-        goto cleanup;                                                   \
+# define CHECK_LIST_COUNT(list, cnt) \
+    if ((count = virPCIDeviceListCount(list)) != cnt) { \
+        virReportError(VIR_ERR_INTERNAL_ERROR, \
+                       "Unexpected count of items in " #list ": %d, " \
+                       "expecting %zu", count, (size_t) cnt); \
+        goto cleanup; \
     }
 
 static int
@@ -110,12 +106,12 @@ testVirPCIDeviceDetach(const void *opaque ATTRIBUTE_UNUSED)
         if (!(dev[i] = virPCIDeviceNew(0, 0, i + 1, 0)))
             goto cleanup;
 
-        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_KVM);
+        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_VFIO);
 
         if (virPCIDeviceDetach(dev[i], activeDevs, inactiveDevs) < 0)
             goto cleanup;
 
-        if (testVirPCIDeviceCheckDriver(dev[i], "pci-stub") < 0)
+        if (testVirPCIDeviceCheckDriver(dev[i], "vfio-pci") < 0)
             goto cleanup;
 
         CHECK_LIST_COUNT(activeDevs, 0);
@@ -151,7 +147,7 @@ testVirPCIDeviceReset(const void *opaque ATTRIBUTE_UNUSED)
         if (!(dev[i] = virPCIDeviceNew(0, 0, i + 1, 0)))
             goto cleanup;
 
-        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_KVM);
+        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_VFIO);
 
         if (virPCIDeviceReset(dev[i], activeDevs, inactiveDevs) < 0)
             goto cleanup;
@@ -191,7 +187,7 @@ testVirPCIDeviceReattach(const void *opaque ATTRIBUTE_UNUSED)
         CHECK_LIST_COUNT(activeDevs, 0);
         CHECK_LIST_COUNT(inactiveDevs, i + 1);
 
-        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_KVM);
+        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_VFIO);
     }
 
     CHECK_LIST_COUNT(activeDevs, 0);
@@ -249,42 +245,12 @@ testVirPCIDeviceDetachSingle(const void *opaque)
     if (!dev)
         goto cleanup;
 
-    virPCIDeviceSetStubDriver(dev, VIR_PCI_STUB_DRIVER_KVM);
+    virPCIDeviceSetStubDriver(dev, VIR_PCI_STUB_DRIVER_VFIO);
 
     if (virPCIDeviceDetach(dev, NULL, NULL) < 0)
         goto cleanup;
 
     ret = 0;
- cleanup:
-    virPCIDeviceFree(dev);
-    return ret;
-}
-
-static int
-testVirPCIDeviceDetachFail(const void *opaque)
-{
-    const struct testPCIDevData *data = opaque;
-    int ret = -1;
-    virPCIDevicePtr dev;
-
-    dev = virPCIDeviceNew(data->domain, data->bus, data->slot, data->function);
-    if (!dev)
-        goto cleanup;
-
-    virPCIDeviceSetStubDriver(dev, VIR_PCI_STUB_DRIVER_VFIO);
-
-    if (virPCIDeviceDetach(dev, NULL, NULL) < 0) {
-        if (virTestGetVerbose() || virTestGetDebug())
-            virDispatchError(NULL);
-        virResetLastError();
-        ret = 0;
-    } else {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "Attaching device %s to %s should have failed",
-                       virPCIDeviceGetName(dev),
-                       virPCIStubDriverTypeToString(VIR_PCI_STUB_DRIVER_VFIO));
-    }
-
  cleanup:
     virPCIDeviceFree(dev);
     return ret;
@@ -363,7 +329,7 @@ mymain(void)
     char *fakerootdir;
 
     if (VIR_STRDUP_QUIET(fakerootdir, FAKEROOTDIRTEMPLATE) < 0) {
-        VIR_TEST_DEBUG("Out of memory\n");
+        VIR_TEST_DEBUG("Out of memory");
         abort();
     }
 
@@ -374,44 +340,44 @@ mymain(void)
 
     setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, 1);
 
-# define DO_TEST(fnc)                                   \
-    do {                                                \
-        if (virTestRun(#fnc, fnc, NULL) < 0)            \
-            ret = -1;                                   \
+# define DO_TEST(fnc) \
+    do { \
+        if (virTestRun(#fnc, fnc, NULL) < 0) \
+            ret = -1; \
     } while (0)
 
-# define DO_TEST_PCI(fnc, domain, bus, slot, function)                  \
-    do {                                                                \
-        struct testPCIDevData data = {                                  \
-            domain, bus, slot, function, NULL                           \
-        };                                                              \
-        char *label = NULL;                                             \
-        if (virAsprintf(&label, "%s(%04x:%02x:%02x.%x)",                \
-                        #fnc, domain, bus, slot, function) < 0) {       \
-            ret = -1;                                                   \
-            break;                                                      \
-        }                                                               \
-        if (virTestRun(label, fnc, &data) < 0)                          \
-            ret = -1;                                                   \
-        VIR_FREE(label);                                                \
+# define DO_TEST_PCI(fnc, domain, bus, slot, function) \
+    do { \
+        struct testPCIDevData data = { \
+            domain, bus, slot, function, NULL \
+        }; \
+        char *label = NULL; \
+        if (virAsprintf(&label, "%s(%04x:%02x:%02x.%x)", \
+                        #fnc, domain, bus, slot, function) < 0) { \
+            ret = -1; \
+            break; \
+        } \
+        if (virTestRun(label, fnc, &data) < 0) \
+            ret = -1; \
+        VIR_FREE(label); \
     } while (0)
 
-# define DO_TEST_PCI_DRIVER(domain, bus, slot, function, driver)        \
-    do {                                                                \
-        struct testPCIDevData data = {                                  \
-            domain, bus, slot, function, driver                         \
-        };                                                              \
-        char *label = NULL;                                             \
-        if (virAsprintf(&label, "PCI driver %04x:%02x:%02x.%x is %s",   \
-                        domain, bus, slot, function,                    \
-                        NULLSTR(driver)) < 0) {                         \
-            ret = -1;                                                   \
-            break;                                                      \
-        }                                                               \
-        if (virTestRun(label, testVirPCIDeviceCheckDriverTest,          \
-                       &data) < 0)                                      \
-            ret = -1;                                                   \
-        VIR_FREE(label);                                                \
+# define DO_TEST_PCI_DRIVER(domain, bus, slot, function, driver) \
+    do { \
+        struct testPCIDevData data = { \
+            domain, bus, slot, function, driver \
+        }; \
+        char *label = NULL; \
+        if (virAsprintf(&label, "PCI driver %04x:%02x:%02x.%x is %s", \
+                        domain, bus, slot, function, \
+                        NULLSTR(driver)) < 0) { \
+            ret = -1; \
+            break; \
+        } \
+        if (virTestRun(label, testVirPCIDeviceCheckDriverTest, \
+                       &data) < 0) \
+            ret = -1; \
+        VIR_FREE(label); \
     } while (0)
 
     /* Changes made to individual devices are persistent and the
@@ -424,8 +390,6 @@ mymain(void)
     DO_TEST(testVirPCIDeviceReattach);
     DO_TEST_PCI(testVirPCIDeviceIsAssignable, 5, 0x90, 1, 0);
     DO_TEST_PCI(testVirPCIDeviceIsAssignable, 1, 1, 0, 0);
-
-    DO_TEST_PCI(testVirPCIDeviceDetachFail, 0, 0x0a, 1, 0);
 
     /* Reattach a device already bound to non-stub a driver */
     DO_TEST_PCI_DRIVER(0, 0x0a, 1, 0, "i915");
@@ -441,7 +405,7 @@ mymain(void)
     /* Detach an unbound device */
     DO_TEST_PCI_DRIVER(0, 0x0a, 2, 0, NULL);
     DO_TEST_PCI(testVirPCIDeviceDetachSingle, 0, 0x0a, 2, 0);
-    DO_TEST_PCI_DRIVER(0, 0x0a, 2, 0, "pci-stub");
+    DO_TEST_PCI_DRIVER(0, 0x0a, 2, 0, "vfio-pci");
 
     /* Reattach an unknown unbound device */
     DO_TEST_PCI_DRIVER(0, 0x0a, 3, 0, NULL);
@@ -456,7 +420,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virpcimock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virpci"))
 #else
 int
 main(void)

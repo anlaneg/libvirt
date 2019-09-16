@@ -18,24 +18,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: David L Stevens <dlstevens@us.ibm.com>
  */
 
-#ifndef __NWFILTER_DHCPSNOOP_H
-# define __NWFILTER_DHCPSNOOP_H
+#pragma once
 
-# include "nwfilter_tech_driver.h"
+#include "nwfilter_tech_driver.h"
 
 int virNWFilterDHCPSnoopInit(void);
 void virNWFilterDHCPSnoopShutdown(void);
 int virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
-                            const char *ifname,
-                            const char *linkdev,
-                            const unsigned char *vmuuid,
-                            const virMacAddr *macaddr,
-                            const char *filtername,
-                            virNWFilterHashTablePtr filterparams,
+                            virNWFilterBindingDefPtr binding,
                             virNWFilterDriverStatePtr driver);
 void virNWFilterDHCPSnoopEnd(const char *ifname);
-#endif /* __NWFILTER_DHCPSNOOP_H */

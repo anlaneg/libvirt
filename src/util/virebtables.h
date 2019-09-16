@@ -17,16 +17,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * based on iptables.h
- * Authors:
- *     Gerhard Stenzel <gerhard.stenzel@de.ibm.com>
  */
 
-#ifndef __QEMUD_EBTABLES_H__
-# define __QEMUD_EBTABLES_H__
+#pragma once
 
-# include "virmacaddr.h"
+#include "virmacaddr.h"
 
 typedef struct _ebtablesContext ebtablesContext;
 
@@ -41,5 +36,3 @@ int              ebtablesRemoveForwardAllowIn    (ebtablesContext *ctx,
                                                   const virMacAddr *mac);
 
 int              ebtablesAddForwardPolicyReject(ebtablesContext *ctx);
-
-#endif /* __QEMUD_ebtabLES_H__ */

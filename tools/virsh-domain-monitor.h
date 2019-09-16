@@ -16,22 +16,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Daniel Veillard <veillard@redhat.com>
- *  Karel Zak <kzak@redhat.com>
- *  Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
-#ifndef VIRSH_DOMAIN_MONITOR_H
-# define VIRSH_DOMAIN_MONITOR_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
 
 char *virshGetDomainDescription(vshControl *ctl, virDomainPtr dom,
                                 bool title, unsigned int flags)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 
 extern const vshCmdDef domMonitoringCmds[];
-
-#endif /* VIRSH_DOMAIN_MONITOR_H */

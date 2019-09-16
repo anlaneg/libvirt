@@ -1,5 +1,7 @@
 <?xml version="1.0"?>
-<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+<xsl:stylesheet version="1.0"
+                xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
   <xsl:output method="xml" indent="yes" encoding="UTF-8"/>
 
   <!-- This XSLT stylesheet can be applied to the XML version of the release
@@ -8,7 +10,7 @@
 
   <!-- Document -->
   <xsl:template match="/libvirt">
-    <xsl:text disable-output-escaping="yes">&lt;!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"&gt;
+    <xsl:text disable-output-escaping="yes">&lt;!DOCTYPE html&gt;
 </xsl:text>
     <html xmlns="http://www.w3.org/1999/xhtml">
       <head>
@@ -25,7 +27,7 @@
         <p>This is the list of official releases for libvirt, along with an
         overview of the changes introduced by each of them.</p>
         <p>For a more fine-grained view, use the
-        <a href="http://libvirt.org/git/?p=libvirt.git;a=log">git log</a>.
+        <a href="https://libvirt.org/git/?p=libvirt.git;a=log">git log</a>.
         </p>
         <xsl:apply-templates select="release"/>
         <p>Older libvirt releases didn't have proper release notes,
@@ -39,12 +41,17 @@
   <!-- Release -->
   <xsl:template match="release">
     <h3>
-      <strong>
-        <xsl:value-of select="@version"/>
-        <xsl:text> (</xsl:text>
-        <xsl:value-of select="@date"/>
-        <xsl:text>)</xsl:text>
-      </strong>
+      <a>
+        <xsl:attribute name="id">
+          <xsl:value-of select="@version"/>
+        </xsl:attribute>
+        <strong>
+          <xsl:value-of select="@version"/>
+          <xsl:text> (</xsl:text>
+          <xsl:value-of select="@date"/>
+          <xsl:text>)</xsl:text>
+        </strong>
+      </a>
     </h3>
     <ul>
       <xsl:apply-templates select="section"/>
@@ -57,17 +64,25 @@
       <strong>
         <xsl:value-of select="@title"/>
       </strong>
-      <ul>
-        <xsl:apply-templates select="change"/>
-      </ul>
+      <xsl:if test="*">
+        <ul class="news-section-content">
+          <xsl:apply-templates select="change"/>
+        </ul>
+      </xsl:if>
     </li>
   </xsl:template>
 
   <!-- Change -->
   <xsl:template match="change">
     <li>
-      <xsl:apply-templates select="summary"/>
-      <xsl:apply-templates select="description"/>
+      <dl>
+        <dt>
+          <xsl:apply-templates select="summary"/>
+        </dt>
+        <dd>
+          <xsl:apply-templates select="description"/>
+        </dd>
+      </dl>
     </li>
   </xsl:template>
 
@@ -78,19 +93,14 @@
 
   <!-- Change description -->
   <xsl:template match="description">
-    <br/>
     <xsl:apply-templates/>
   </xsl:template>
 
-  <!-- Misc HTML tags, add more as they are needed -->
-  <xsl:template match="code|i|tt">
-    <xsl:text disable-output-escaping="yes">&lt;</xsl:text>
-    <xsl:value-of select="name()"/>
-    <xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+  <!-- <code> HTML tag -->
+  <xsl:template match="code">
+    <xsl:text disable-output-escaping="yes">&lt;code&gt;</xsl:text>
     <xsl:apply-templates/>
-    <xsl:text disable-output-escaping="yes">&lt;/</xsl:text>
-    <xsl:value-of select="name()"/>
-    <xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+    <xsl:text disable-output-escaping="yes">&lt;/code&gt;</xsl:text>
   </xsl:template>
 
 </xsl:stylesheet>

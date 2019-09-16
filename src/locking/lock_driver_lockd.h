@@ -19,12 +19,9 @@
  *
  */
 
-#ifndef __VIR_LOCK_DRIVER_LOCKD_H__
-# define __VIR_LOCK_DRIVER_LOCKD_H__
+#pragma once
 
 enum virLockSpaceProtocolAcquireResourceFlags {
         VIR_LOCK_SPACE_PROTOCOL_ACQUIRE_RESOURCE_SHARED = (1 << 0),
         VIR_LOCK_SPACE_PROTOCOL_ACQUIRE_RESOURCE_AUTOCREATE = (1 << 1),
 };
-
-#endif /* __VIR_LOCK_DRIVER_LOCKD_H__ */

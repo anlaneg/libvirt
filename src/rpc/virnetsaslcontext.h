@@ -18,13 +18,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_NET_CLIENT_SASL_CONTEXT_H__
-# define __VIR_NET_CLIENT_SASL_CONTEXT_H__
+#pragma once
 
-# include "internal.h"
-# include <sasl/sasl.h>
+#include "internal.h"
+#include <sasl/sasl.h>
 
-# include "virobject.h"
+#include "virobject.h"
 
 typedef struct _virNetSASLContext virNetSASLContext;
 typedef virNetSASLContext *virNetSASLContextPtr;
@@ -109,5 +108,3 @@ ssize_t virNetSASLSessionDecode(virNetSASLSessionPtr sasl,
                                 size_t inputLen,
                                 const char **output,
                                 size_t *outputlen);
-
-#endif /* __VIR_NET_CLIENT_SASL_CONTEXT_H__ */

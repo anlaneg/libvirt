@@ -16,16 +16,16 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 
-#ifndef __VIR_MACMAP_H__
-# define __VIR_MACMAP_H__
+#pragma once
 
 typedef struct virMacMap virMacMap;
 typedef virMacMap *virMacMapPtr;
+
+char *
+virMacMapFileName(const char *dnsmasqStateDir,
+                  const char *bridge);
 
 virMacMapPtr virMacMapNew(const char *file);
 
@@ -45,4 +45,3 @@ int virMacMapWriteFile(virMacMapPtr mgr,
 
 int virMacMapDumpStr(virMacMapPtr mgr,
                      char **str);
-#endif /* __VIR_MACMAPPING_H__ */

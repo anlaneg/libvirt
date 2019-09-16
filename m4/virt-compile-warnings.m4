@@ -47,8 +47,6 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     dontwarn="$dontwarn -Wlong-long"
     # We allow manual list of all enum cases without default:
     dontwarn="$dontwarn -Wswitch-default"
-    # We allow optional default: instead of listing all enum values
-    dontwarn="$dontwarn -Wswitch-enum"
     # Not a problem since we don't use -fstrict-overflow
     dontwarn="$dontwarn -Wstrict-overflow"
     # Not a problem since we don't use -funsafe-loop-optimizations
@@ -61,62 +59,17 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     dontwarn="$dontwarn -Wenum-compare"
     # gcc 5.1 -Wformat-signedness mishandles enums, not ready for prime time
     dontwarn="$dontwarn -Wformat-signedness"
+    # Several conditionals expand the same on both branches
+    # depending on the particular platform/architecture
+    dontwarn="$dontwarn -Wduplicated-branches"
+    # > This warning does not generally indicate that there is anything wrong
+    # > with your code; it merely indicates that GCC's optimizers are unable
+    # > to handle the code effectively.
+    # Source: https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
+    dontwarn="$dontwarn -Wdisabled-optimization"
 
-    # gcc 4.2 treats attribute(format) as an implicit attribute(nonnull),
-    # which triggers spurious warnings for our usage
-    AC_CACHE_CHECK([whether the C compiler's -Wformat allows NULL strings],
-      [lv_cv_gcc_wformat_null_works], [
-      save_CFLAGS=$CFLAGS
-      CFLAGS='-Wunknown-pragmas -Werror -Wformat'
-      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-        #include <stddef.h>
-        static __attribute__ ((__format__ (__printf__, 1, 2))) int
-        foo (const char *fmt, ...) { return !fmt; }
-      ]], [[
-        return foo(NULL);
-      ]])],
-      [lv_cv_gcc_wformat_null_works=yes],
-      [lv_cv_gcc_wformat_null_works=no])
-      CFLAGS=$save_CFLAGS])
-
-    # Gnulib uses '#pragma GCC diagnostic push' to silence some
-    # warnings, but older gcc doesn't support this.
-    AC_CACHE_CHECK([whether pragma GCC diagnostic push works],
-      [lv_cv_gcc_pragma_push_works], [
-      save_CFLAGS=$CFLAGS
-      CFLAGS='-Wunknown-pragmas -Werror'
-      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-        #pragma GCC diagnostic push
-        #pragma GCC diagnostic pop
-      ]])],
-      [lv_cv_gcc_pragma_push_works=yes],
-      [lv_cv_gcc_pragma_push_works=no])
-      CFLAGS=$save_CFLAGS])
-    if test $lv_cv_gcc_pragma_push_works = no; then
-      dontwarn="$dontwarn -Wmissing-prototypes"
-      dontwarn="$dontwarn -Wmissing-declarations"
-      dontwarn="$dontwarn -Wcast-align"
-    else
-      AC_DEFINE_UNQUOTED([WORKING_PRAGMA_PUSH], 1,
-       [Define to 1 if gcc supports pragma push/pop])
-    fi
-
-    dnl Check whether strchr(s, char variable) causes a bogus compile
-    dnl warning, which is the case with GCC < 4.6 on some glibc
-    AC_CACHE_CHECK([whether the C compiler's -Wlogical-op gives bogus warnings],
-      [lv_cv_gcc_wlogical_op_broken], [
-      save_CFLAGS="$CFLAGS"
-      CFLAGS="-O2 -Wlogical-op -Werror"
-      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-        #include <string.h>
-        ]], [[
-        const char *haystack;
-        char needle;
-        return strchr(haystack, needle) == haystack;]])],
-        [lv_cv_gcc_wlogical_op_broken=no],
-        [lv_cv_gcc_wlogical_op_broken=yes])
-      CFLAGS="$save_CFLAGS"])
-
+    # Broken in 6.0 and later
+    #     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=69602
     AC_CACHE_CHECK([whether gcc gives bogus warnings for -Wlogical-op],
       [lv_cv_gcc_wlogical_op_equal_expr_broken], [
         save_CFLAGS="$CFLAGS"
@@ -130,6 +83,24 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
         [lv_cv_gcc_wlogical_op_equal_expr_broken=no],
         [lv_cv_gcc_wlogical_op_equal_expr_broken=yes])
         CFLAGS="$save_CFLAGS"])
+
+    AC_CACHE_CHECK([whether clang gives bogus warnings for -Wdouble-promotion],
+      [lv_cv_clang_double_promotion_broken], [
+        save_CFLAGS="$CFLAGS"
+        CFLAGS="-O2 -Wdouble-promotion -Werror"
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+          #include <math.h>
+        ]], [[
+          float f = 0.0;
+	  return isnan(f);]])],
+        [lv_cv_clang_double_promotion_broken=no],
+        [lv_cv_clang_double_promotion_broken=yes])
+        CFLAGS="$save_CFLAGS"])
+
+    if test "$lv_cv_clang_double_promotion_broken" = "yes";
+    then
+      dontwarn="$dontwarn -Wdouble-promotion"
+    fi
 
     # We might fundamentally need some of these disabled forever, but
     # ideally we'd turn many of them on
@@ -151,26 +122,31 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     # with gl_MANYWARN_COMPLEMENT
     # So we have -W enabled, and then have to explicitly turn off...
     wantwarn="$wantwarn -Wno-sign-compare"
+    # We do "bad" function casts all the time for event callbacks
+    wantwarn="$wantwarn -Wno-cast-function-type"
 
     # GNULIB expects this to be part of -Wc++-compat, but we turn
     # that one off, so we need to manually enable this again
     wantwarn="$wantwarn -Wjump-misses-init"
 
+    # GNULIB explicitly filters it out, preferring -Wswitch
+    # but that doesn't report missing enums if a default:
+    # is present.
+    wantwarn="$wantwarn -Wswitch-enum"
+
     # GNULIB turns on -Wformat=2 which implies -Wformat-nonliteral,
-    # so we need to manually re-exclude it.  Also, older gcc 4.2
-    # added an implied ATTRIBUTE_NONNULL on any parameter marked
-    # ATTRIBUTE_FMT_PRINT, which causes -Wformat failure on our
-    # intentional use of virReportError(code, NULL).
+    # so we need to manually re-exclude it.
     wantwarn="$wantwarn -Wno-format-nonliteral"
-    if test $lv_cv_gcc_wformat_null_works = no; then
-      wantwarn="$wantwarn -Wno-format"
-    fi
+
+    # -Wformat enables this by default, and we should keep it,
+    # but need to rewrite various areas of code first
+    wantwarn="$wantwarn -Wno-format-truncation"
 
     # This should be < 256 really. Currently we're down to 4096,
     # but using 1024 bytes sized buffers (mostly for virStrerror)
     # stops us from going down further
-    wantwarn="$wantwarn -Wframe-larger-than=4096"
-    dnl wantwarn="$wantwarn -Wframe-larger-than=256"
+    gl_WARN_ADD([-Wframe-larger-than=4096], [STRICT_FRAME_LIMIT_CFLAGS])
+    gl_WARN_ADD([-Wframe-larger-than=32768], [RELAXED_FRAME_LIMIT_CFLAGS])
 
     # Extra special flags
     dnl -fstack-protector stuff passes gl_WARN_ADD with gcc
@@ -225,7 +201,7 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
         *-fstack-protector-strong*)
         ;;
         *)
-            gl_WARN_ADD(["-fstack-protector-all"])
+            gl_WARN_ADD([-fstack-protector-all])
         ;;
         esac
         ;;
@@ -247,12 +223,6 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
      # define _FORTIFY_SOURCE 2
      #endif
     ])
-
-    if test "$gl_cv_warn_c__Wlogical_op" = yes &&
-       test "$lv_cv_gcc_wlogical_op_broken" = yes; then
-      AC_DEFINE_UNQUOTED([BROKEN_GCC_WLOGICALOP_STRCHR], 1,
-       [Define to 1 if gcc -Wlogical-op reports false positives on strchr])
-    fi
 
     if test "$gl_cv_warn_c__Wlogical_op" = yes &&
        test "$lv_cv_gcc_wlogical_op_equal_expr_broken" = yes; then

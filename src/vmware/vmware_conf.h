@@ -1,4 +1,3 @@
-/*---------------------------------------------------------------------------*/
 /*
  * Copyright (C) 2014 Red Hat, Inc.
  * Copyright 2010, diateam (www.diateam.net)
@@ -18,19 +17,18 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  */
-/*---------------------------------------------------------------------------*/
 
-#ifndef VMWARE_CONF_H
-# define VMWARE_CONF_H
+#pragma once
 
-# define NOGUI "nogui"
+#define NOGUI "nogui"
 
-# include "internal.h"
-# include "virdomainobjlist.h"
-# include "virthread.h"
+#include "internal.h"
+#include "virdomainobjlist.h"
+#include "virthread.h"
+#include "virenum.h"
 
-# define VIR_FROM_THIS VIR_FROM_VMWARE
-# define PROGRAM_SENTINEL ((char *)0x1)
+#define VIR_FROM_THIS VIR_FROM_VMWARE
+#define PROGRAM_SENTINEL ((char *)0x1)
 
 enum vmwareDriverType {
     VMWARE_DRIVER_PLAYER      = 0, /* VMware Player */
@@ -40,7 +38,7 @@ enum vmwareDriverType {
     VMWARE_DRIVER_LAST,            /* required last item */
 };
 
-VIR_ENUM_DECL(vmwareDriver)
+VIR_ENUM_DECL(vmwareDriver);
 
 struct vmware_driver {
     virMutex lock;
@@ -86,5 +84,3 @@ int vmwareMakePath(char *srcDir, char *srcName, char *srcExt,
 int vmwareExtractPid(const char * vmxPath);
 
 char *vmwareCopyVMXFileName(const char *datastorePath, void *opaque);
-
-#endif

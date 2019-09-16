@@ -39,12 +39,12 @@ testCompareXMLToXMLHelper(const void *data)
 
     ret = testCompareDomXML2XMLFiles(driver.caps, driver.xmlopt, xml_in,
                                      is_different ? xml_out : xml_in,
-                                     false, NULL, NULL, 0,
+                                     false, 0,
                                      TEST_COMPARE_DOM_XML2XML_RESULT_SUCCESS);
 
     if ((ret != 0) && (info->flags & FLAG_EXPECT_FAILURE)) {
         ret = 0;
-        VIR_TEST_DEBUG("Got expected error: %s\n",
+        VIR_TEST_DEBUG("Got expected error: %s",
                        virGetLastErrorMessage());
         virResetLastError();
     }
@@ -66,12 +66,12 @@ mymain(void)
     if ((driver.xmlopt = virBhyveDriverCreateXMLConf(&driver)) == NULL)
         return EXIT_FAILURE;
 
-# define DO_TEST_FULL(name, flags)                               \
-    do {                                                         \
-        const struct testInfo info = {name, (flags)};            \
-        if (virTestRun("BHYVE XML-2-XML " name,                  \
-                       testCompareXMLToXMLHelper, &info) < 0)    \
-            ret = -1;                                            \
+# define DO_TEST_FULL(name, flags) \
+    do { \
+        const struct testInfo info = {name, (flags)}; \
+        if (virTestRun("BHYVE XML-2-XML " name, \
+                       testCompareXMLToXMLHelper, &info) < 0) \
+            ret = -1; \
     } while (0)
 
 # define DO_TEST_DIFFERENT(name) \
@@ -84,6 +84,7 @@ mymain(void)
 
     DO_TEST_DIFFERENT("acpiapic");
     DO_TEST_DIFFERENT("base");
+    DO_TEST_DIFFERENT("wired");
     DO_TEST_DIFFERENT("bhyveload-bootorder");
     DO_TEST_DIFFERENT("bhyveload-bootorder1");
     DO_TEST_DIFFERENT("bhyveload-bootorder2");
@@ -104,11 +105,20 @@ mymain(void)
     DO_TEST_DIFFERENT("serial");
     DO_TEST_DIFFERENT("serial-grub");
     DO_TEST_DIFFERENT("serial-grub-nocons");
+    DO_TEST_DIFFERENT("vnc");
+    DO_TEST_DIFFERENT("vnc-vgaconf-on");
+    DO_TEST_DIFFERENT("vnc-vgaconf-off");
+    DO_TEST_DIFFERENT("vnc-vgaconf-io");
+    DO_TEST_DIFFERENT("vnc-autoport");
+    DO_TEST_DIFFERENT("commandline");
+    DO_TEST_DIFFERENT("msrs");
 
     /* Address allocation tests */
     DO_TEST_DIFFERENT("addr-single-sata-disk");
     DO_TEST_DIFFERENT("addr-multiple-sata-disks");
     DO_TEST_DIFFERENT("addr-more-than-32-sata-disks");
+    DO_TEST_DIFFERENT("addr-single-virtio-disk");
+    DO_TEST_DIFFERENT("addr-multiple-virtio-disks");
 
     /* The same without 32 devs per controller support */
     driver.bhyvecaps ^= BHYVE_CAP_AHCI32SLOT;
@@ -116,13 +126,16 @@ mymain(void)
     DO_TEST_DIFFERENT("addr-no32devs-multiple-sata-disks");
     DO_TEST_FAILURE("addr-no32devs-more-than-32-sata-disks");
 
+    /* USB xhci tablet */
+    DO_TEST_DIFFERENT("input-xhci-tablet");
+
     virObjectUnref(driver.caps);
     virObjectUnref(driver.xmlopt);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("bhyvexml2argv"))
 
 #else
 

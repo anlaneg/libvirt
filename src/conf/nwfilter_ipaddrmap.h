@@ -4,9 +4,6 @@
  *
  * Copyright (C) 2010, 2012 IBM Corp.
  *
- * Author:
- *     Stefan Berger <stefanb@linux.vnet.ibm.com>
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -23,8 +20,7 @@
  *
  */
 
-#ifndef __VIR_NWFILTER_IPADDRMAP_H
-# define __VIR_NWFILTER_IPADDRMAP_H
+#pragma once
 
 int virNWFilterIPAddrMapInit(void);
 void virNWFilterIPAddrMapShutdown(void);
@@ -33,5 +29,3 @@ int virNWFilterIPAddrMapAddIPAddr(const char *ifname, char *addr);
 int virNWFilterIPAddrMapDelIPAddr(const char *ifname,
                                   const char *ipaddr);
 virNWFilterVarValuePtr virNWFilterIPAddrMapGetIPAddr(const char *ifname);
-
-#endif /* __VIR_NWFILTER_IPADDRMAP_H */

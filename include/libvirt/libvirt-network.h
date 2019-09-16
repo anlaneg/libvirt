@@ -2,7 +2,6 @@
  * libvirt-network.h
  * Summary: APIs for management of networks
  * Description: Provides APIs for the management of networks
- * Author: Daniel Veillard <veillard@redhat.com>
  *
  * Copyright (C) 2006-2014 Red Hat, Inc.
  *
@@ -21,8 +20,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_LIBVIRT_NETWORK_H__
-# define __VIR_LIBVIRT_NETWORK_H__
+#ifndef LIBVIRT_NETWORK_H
+# define LIBVIRT_NETWORK_H
 
 # ifndef __VIR_LIBVIRT_H_INCLUDES__
 #  error "Don't include this file directly, only use libvirt/libvirt.h"
@@ -46,6 +45,22 @@ typedef struct _virNetwork virNetwork;
  * type used to reference a virtual network in the API.
  */
 typedef virNetwork *virNetworkPtr;
+
+/**
+ * virNetworkPort:
+ *
+ * a virNetworkPort is a private structure representing a virtual network
+ * port
+ */
+typedef struct _virNetworkPort virNetworkPort;
+
+/**
+ * virNetworkPortPtr:
+ *
+ * a virNetworkPortPtr is pointer to a virNetworkPort private structure,
+ * this is the type used to reference a virtual network port in the API.
+ */
+typedef virNetworkPort *virNetworkPortPtr;
 
 /*
  * Get connection from network.
@@ -334,4 +349,113 @@ int virConnectNetworkEventRegisterAny(virConnectPtr conn,
 int virConnectNetworkEventDeregisterAny(virConnectPtr conn,
                                         int callbackID);
 
-#endif /* __VIR_LIBVIRT_NETWORK_H__ */
+
+virNetworkPortPtr
+virNetworkPortLookupByUUID(virNetworkPtr net,
+                           const unsigned char *uuid);
+
+virNetworkPortPtr
+virNetworkPortLookupByUUIDString(virNetworkPtr net,
+                                 const char *uuidstr);
+
+typedef enum {
+    VIR_NETWORK_PORT_CREATE_RECLAIM = (1 << 0), /* reclaim existing used resources */
+} virNetworkPortCreateFlags;
+
+virNetworkPortPtr
+virNetworkPortCreateXML(virNetworkPtr net,
+                        const char *xmldesc,
+                        unsigned int flags);
+
+virNetworkPtr
+virNetworkPortGetNetwork(virNetworkPortPtr port);
+
+char *
+virNetworkPortGetXMLDesc(virNetworkPortPtr port,
+                         unsigned int flags);
+
+int
+virNetworkPortGetUUID(virNetworkPortPtr port,
+                      unsigned char *uuid);
+int
+virNetworkPortGetUUIDString(virNetworkPortPtr port,
+                            char *buf);
+
+/* Management of interface parameters */
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_IN_AVERAGE:
+ *
+ * Macro represents the inbound average of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_IN_AVERAGE "inbound.average"
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_IN_PEAK:
+ *
+ * Macro represents the inbound peak of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_IN_PEAK "inbound.peak"
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_IN_BURST:
+ *
+ * Macro represents the inbound burst of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_IN_BURST "inbound.burst"
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_IN_FLOOR:
+ *
+ * Macro represents the inbound floor of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_IN_FLOOR "inbound.floor"
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_OUT_AVERAGE:
+ *
+ * Macro represents the outbound average of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_OUT_AVERAGE "outbound.average"
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_OUT_PEAK:
+ *
+ * Macro represents the outbound peak of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_OUT_PEAK "outbound.peak"
+
+/**
+ * VIR_NETWORK_PORT_BANDWIDTH_OUT_BURST:
+ *
+ * Macro represents the outbound burst of NIC bandwidth, as a uint.
+ */
+# define VIR_NETWORK_PORT_BANDWIDTH_OUT_BURST "outbound.burst"
+
+int
+virNetworkPortSetParameters(virNetworkPortPtr port,
+                            virTypedParameterPtr params,
+                            int nparams,
+                            unsigned int flags);
+int
+virNetworkPortGetParameters(virNetworkPortPtr port,
+                            virTypedParameterPtr *params,
+                            int *nparams,
+                            unsigned int flags);
+
+int
+virNetworkPortDelete(virNetworkPortPtr port,
+                     unsigned int flags);
+
+int
+virNetworkListAllPorts(virNetworkPtr network,
+                       virNetworkPortPtr **ports,
+                       unsigned int flags);
+
+int
+virNetworkPortFree(virNetworkPortPtr port);
+
+int
+virNetworkPortRef(virNetworkPortPtr port);
+
+#endif /* LIBVIRT_NETWORK_H */

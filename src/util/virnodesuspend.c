@@ -29,6 +29,7 @@
 #include "datatypes.h"
 
 #include "viralloc.h"
+#include "virfile.h"
 #include "virlog.h"
 #include "virerror.h"
 
@@ -76,7 +77,9 @@ static int virNodeSuspendSetNodeWakeup(unsigned long long alarmTime)
     int ret = -1;
 
     if (alarmTime < MIN_TIME_REQ_FOR_SUSPEND) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s", _("Suspend duration is too short"));
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("Suspend duration is too short, must be at least %u seconds"),
+                       MIN_TIME_REQ_FOR_SUSPEND);
         return -1;
     }
 
@@ -94,23 +97,23 @@ static int virNodeSuspendSetNodeWakeup(unsigned long long alarmTime)
 }
 
 /**
- * virNodeSuspend:
+ * virNodeSuspendHelper:
  * @cmdString: pointer to the command string this thread has to execute.
  *
  * Actually perform the suspend operation by invoking the command.
  * Give a short delay before executing the command so as to give a chance
- * to virNodeSuspendForDuration() to return the status to the caller.
+ * to virNodeSuspend() to return the status to the caller.
  * If we don't give this delay, that function will not be able to return
  * the status, since the suspend operation would have begun and hence no
  * data can be sent through the connection to the caller. However, with
  * this delay added, the status return is best-effort only.
  */
-static void virNodeSuspend(void *cmdString)
+static void virNodeSuspendHelper(void *cmdString)
 {
     virCommandPtr suspendCmd = virCommandNew((const char *)cmdString);
 
     /*
-     * Delay for sometime so that the function nodeSuspendForDuration()
+     * Delay for sometime so that the function virNodeSuspend()
      * can return the status to the caller.
      */
     sleep(SUSPEND_DELAY);
@@ -129,7 +132,7 @@ static void virNodeSuspend(void *cmdString)
 }
 
 /**
- * nodeSuspendForDuration:
+ * virNodeSuspend:
  * @conn: pointer to the hypervisor connection
  * @target: the state to which the host must be suspended to -
  *         VIR_NODE_SUSPEND_TARGET_MEM       (Suspend-to-RAM),
@@ -155,9 +158,9 @@ static void virNodeSuspend(void *cmdString)
  * -1 if suspending the node is not supported, or if a previous suspend
  * operation is still in progress.
  */
-int nodeSuspendForDuration(unsigned int target,
-                           unsigned long long duration,
-                           unsigned int flags)
+int virNodeSuspend(unsigned int target,
+                   unsigned long long duration,
+                   unsigned int flags)
 {
     static virThread thread;
     const char *cmdString = NULL;
@@ -217,7 +220,9 @@ int nodeSuspendForDuration(unsigned int target,
     if (virNodeSuspendSetNodeWakeup(duration) < 0)
         goto cleanup;
 
-    if (virThreadCreate(&thread, false, virNodeSuspend, (void *)cmdString) < 0) {
+    if (virThreadCreate(&thread, false,
+                        virNodeSuspendHelper,
+                        (void *)cmdString) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Failed to create thread to suspend the host"));
         goto cleanup;
@@ -234,39 +239,40 @@ int nodeSuspendForDuration(unsigned int target,
 static int
 virNodeSuspendSupportsTargetPMUtils(unsigned int target, bool *supported)
 {
-    virCommandPtr cmd;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) binary = NULL;
     int status;
-    int ret = -1;
 
     *supported = false;
 
+    binary = virFindFileInPath("pm-is-supported");
+    if (!binary)
+        return -2;
+
     switch (target) {
     case VIR_NODE_SUSPEND_TARGET_MEM:
-        cmd = virCommandNewArgList("pm-is-supported", "--suspend", NULL);
+        cmd = virCommandNewArgList(binary, "--suspend", NULL);
         break;
     case VIR_NODE_SUSPEND_TARGET_DISK:
-        cmd = virCommandNewArgList("pm-is-supported", "--hibernate", NULL);
+        cmd = virCommandNewArgList(binary, "--hibernate", NULL);
         break;
     case VIR_NODE_SUSPEND_TARGET_HYBRID:
-        cmd = virCommandNewArgList("pm-is-supported", "--suspend-hybrid", NULL);
+        cmd = virCommandNewArgList(binary, "--suspend-hybrid", NULL);
         break;
     default:
-        return ret;
+        return -1;
     }
 
     if (virCommandRun(cmd, &status) < 0)
-        goto cleanup;
+        return -1;
 
    /*
     * Check return code of command == 0 for success
     * (i.e., the PM capability is supported)
     */
     *supported = (status == 0);
-    ret = 0;
 
- cleanup:
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 #else /* ! WITH_PM_UTILS */
 static int
@@ -326,11 +332,10 @@ virNodeSuspendSupportsTarget(unsigned int target, bool *supported)
     if (ret == -2)
         ret = virNodeSuspendSupportsTargetPMUtils(target, supported);
 
-    /* If still unavailable, then report error */
+    /* If still unavailable, then report unsupported */
     if (ret == -2) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Cannot probe for supported suspend types"));
-        ret = -1;
+        *supported = false;
+        ret = 0;
     }
 
     return ret;

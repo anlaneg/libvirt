@@ -16,15 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_LOCK_DAEMON_H__
-# define __VIR_LOCK_DAEMON_H__
+#pragma once
 
-# include "virlockspace.h"
-# include "virthread.h"
+#include "virlockspace.h"
+#include "virthread.h"
 
 typedef struct _virLockDaemon virLockDaemon;
 typedef virLockDaemon *virLockDaemonPtr;
@@ -52,5 +49,3 @@ int virLockDaemonAddLockSpace(virLockDaemonPtr lockd,
 
 virLockSpacePtr virLockDaemonFindLockSpace(virLockDaemonPtr lockd,
                                            const char *path);
-
-#endif /* __VIR_LOCK_DAEMON_H__ */

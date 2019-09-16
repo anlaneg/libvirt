@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Red Hat Author: Miloslav Trmač <mitr@redhat.com>
  */
 
 #include <config.h>
@@ -30,6 +28,7 @@
 #include "secret_conf.h"
 #include "virsecretobj.h"
 #include "virerror.h"
+#include "virsecret.h"
 #include "virstring.h"
 #include "virxml.h"
 #include "viruuid.h"
@@ -37,9 +36,6 @@
 #define VIR_FROM_THIS VIR_FROM_SECRET
 
 VIR_LOG_INIT("conf.secret_conf");
-
-VIR_ENUM_IMPL(virSecretUsage, VIR_SECRET_USAGE_TYPE_LAST,
-              "none", "volume", "ceph", "iscsi", "tls")
 
 void
 virSecretDefFree(virSecretDefPtr def)
@@ -114,6 +110,15 @@ virSecretDefParseUsage(xmlXPathContextPtr ctxt,
         }
         break;
 
+    case VIR_SECRET_USAGE_TYPE_VTPM:
+        def->usage_id = virXPathString("string(./usage/name)", ctxt);
+        if (!def->usage_id) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("vTPM usage specified, but name is missing"));
+            return -1;
+        }
+        break;
+
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("unexpected secret usage type %d"),
@@ -131,7 +136,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
     char *prop = NULL;
     char *uuidstr = NULL;
 
-    if (!xmlStrEqual(root->name, BAD_CAST "secret")) {
+    if (!virXMLNodeNameEqual(root, "secret")) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("unexpected root element <%s>, "
                          "expecting <secret>"),
@@ -151,11 +156,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 
     prop = virXPathString("string(./@ephemeral)", ctxt);
     if (prop != NULL) {
-        if (STREQ(prop, "yes")) {
-            def->isephemeral = true;
-        } else if (STREQ(prop, "no")) {
-            def->isephemeral = false;
-        } else {
+        if (virStringParseYesNo(prop, &def->isephemeral) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("invalid value of 'ephemeral'"));
             goto cleanup;
@@ -165,11 +166,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 
     prop = virXPathString("string(./@private)", ctxt);
     if (prop != NULL) {
-        if (STREQ(prop, "yes")) {
-            def->isprivate = true;
-        } else if (STREQ(prop, "no")) {
-            def->isprivate = false;
-        } else {
+        if (virStringParseYesNo(prop, &def->isprivate) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("invalid value of 'private'"));
             goto cleanup;
@@ -179,7 +176,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 
     uuidstr = virXPathString("string(./uuid)", ctxt);
     if (!uuidstr) {
-        if (virUUIDGenerate(def->uuid)) {
+        if (virUUIDGenerate(def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("Failed to generate UUID"));
             goto cleanup;
@@ -197,8 +194,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
     if (virXPathNode("./usage", ctxt) != NULL
         && virSecretDefParseUsage(ctxt, def) < 0)
         goto cleanup;
-    ret = def;
-    def = NULL;
+    VIR_STEAL_PTR(ret, def);
 
  cleanup:
     VIR_FREE(prop);
@@ -267,6 +263,10 @@ virSecretDefFormatUsage(virBufferPtr buf,
         break;
 
     case VIR_SECRET_USAGE_TYPE_TLS:
+        virBufferEscapeString(buf, "<name>%s</name>\n", def->usage_id);
+        break;
+
+    case VIR_SECRET_USAGE_TYPE_VTPM:
         virBufferEscapeString(buf, "<name>%s</name>\n", def->usage_id);
         break;
 

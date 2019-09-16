@@ -16,9 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -74,10 +71,7 @@ virMacMapDispose(void *obj)
 
 static int virMacMapOnceInit(void)
 {
-    if (!(virMacMapClass = virClassNew(virClassForObjectLockable(),
-                                       "virMacMapClass",
-                                       sizeof(virMacMap),
-                                       virMacMapDispose)))
+    if (!VIR_CLASS_NEW(virMacMap, virClassForObjectLockable()))
         return -1;
 
     return 0;
@@ -93,7 +87,6 @@ virMacMapAddLocked(virMacMapPtr mgr,
 {
     int ret = -1;
     char **macsList = NULL;
-    char **newMacsList = NULL;
 
     if ((macsList = virHashLookup(mgr->macs, domain)) &&
         virStringListHasString((const char**) macsList, mac)) {
@@ -101,15 +94,12 @@ virMacMapAddLocked(virMacMapPtr mgr,
         goto cleanup;
     }
 
-    if (!(newMacsList = virStringListAdd((const char **) macsList, mac)) ||
-        virHashUpdateEntry(mgr->macs, domain, newMacsList) < 0)
+    if (virStringListAdd(&macsList, mac) < 0 ||
+        virHashUpdateEntry(mgr->macs, domain, macsList) < 0)
         goto cleanup;
-    newMacsList = NULL;
-    virStringListFree(macsList);
 
     ret = 0;
  cleanup:
-    virStringListFree(newMacsList);
     return ret;
 }
 
@@ -291,6 +281,18 @@ virMacMapWriteFileLocked(virMacMapPtr mgr,
  cleanup:
     VIR_FREE(str);
     return ret;
+}
+
+
+char *
+virMacMapFileName(const char *dnsmasqStateDir,
+                  const char *bridge)
+{
+    char *filename;
+
+    ignore_value(virAsprintf(&filename, "%s/%s.macs", dnsmasqStateDir, bridge));
+
+    return filename;
 }
 
 

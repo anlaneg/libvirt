@@ -19,13 +19,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
+#pragma once
 
-#ifndef __LXC_DOMAIN_H__
-# define __LXC_DOMAIN_H__
-
-# include "vircgroup.h"
-# include "lxc_conf.h"
-# include "lxc_monitor.h"
+#include "vircgroup.h"
+#include "lxc_conf.h"
+#include "lxc_monitor.h"
+#include "virenum.h"
 
 
 typedef enum {
@@ -44,8 +43,8 @@ typedef enum {
     VIR_LXC_DOMAIN_NAMESPACE_SOURCE_LAST,
 } virLXCDomainNamespaceSource;
 
-VIR_ENUM_DECL(virLXCDomainNamespace)
-VIR_ENUM_DECL(virLXCDomainNamespaceSource)
+VIR_ENUM_DECL(virLXCDomainNamespace);
+VIR_ENUM_DECL(virLXCDomainNamespaceSource);
 
 typedef struct _lxcDomainDef lxcDomainDef;
 typedef lxcDomainDef *lxcDomainDefPtr;
@@ -66,7 +65,7 @@ enum virLXCDomainJob {
     LXC_JOB_MODIFY,        /* May change state */
     LXC_JOB_LAST
 };
-VIR_ENUM_DECL(virLXCDomainJob)
+VIR_ENUM_DECL(virLXCDomainJob);
 
 
 struct virLXCDomainJobObj {
@@ -92,7 +91,7 @@ struct _virLXCDomainObjPrivate {
     struct virLXCDomainJobObj job;
 };
 
-extern virDomainXMLNamespace virLXCDriverDomainXMLNamespace;
+extern virXMLNamespace virLXCDriverDomainXMLNamespace;
 extern virDomainXMLPrivateDataCallbacks virLXCDriverPrivateDataCallbacks;
 extern virDomainDefParserConfig virLXCDriverDomainDefParserConfig;
 
@@ -107,4 +106,9 @@ virLXCDomainObjEndJob(virLXCDriverPtr driver,
                      virDomainObjPtr obj);
 
 
-#endif /* __LXC_DOMAIN_H__ */
+char *
+virLXCDomainGetMachineName(virDomainDefPtr def, pid_t pid);
+
+int
+virLXCDomainSetRunlevel(virDomainObjPtr vm,
+                        int runlevel);

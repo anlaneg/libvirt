@@ -16,15 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Roman Bogorodskiy <bogorodskiy@gmail.com>
  */
 
-#ifndef __BHYVE_DRIVER_H__
-# define __BHYVE_DRIVER_H__
+#pragma once
 
-# include "capabilities.h"
-# include "bhyve_utils.h"
+#include "capabilities.h"
+#include "bhyve_utils.h"
 
 int bhyveRegister(void);
 
@@ -33,5 +30,3 @@ unsigned bhyveDriverGetCaps(virConnectPtr conn);
 unsigned bhyveDriverGetGrubCaps(virConnectPtr conn);
 
 virCapsPtr bhyveDriverGetCapabilities(bhyveConnPtr driver);
-
-#endif /* __BHYVE_DRIVER_H__ */

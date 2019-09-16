@@ -17,13 +17,13 @@
  *
  */
 
-#ifndef __VIR_QEMU_MONITOR_TEST_UTILS_H__
-# define __VIR_QEMU_MONITOR_TEST_UTILS_H__
+#pragma once
 
-# include "domain_conf.h"
-# include "qemu/qemu_conf.h"
-# include "qemu/qemu_monitor.h"
-# include "qemu/qemu_agent.h"
+#include "domain_conf.h"
+#include "qemu/qemu_conf.h"
+#include "qemu/qemu_monitor.h"
+#include "qemu/qemu_agent.h"
+#include "virautoclean.h"
 
 typedef struct _qemuMonitorTest qemuMonitorTest;
 typedef qemuMonitorTest *qemuMonitorTestPtr;
@@ -73,21 +73,24 @@ int qemuMonitorTestAddItemExpect(qemuMonitorTestPtr test,
                                  bool apostrophe,
                                  const char *response);
 
-# define qemuMonitorTestNewSimple(json, xmlopt) \
-    qemuMonitorTestNew(json, xmlopt, NULL, NULL, NULL)
+#define qemuMonitorTestNewSimple(xmlopt) \
+    qemuMonitorTestNew(xmlopt, NULL, NULL, NULL, NULL)
+#define qemuMonitorTestNewSchema(xmlopt, schema) \
+    qemuMonitorTestNew(xmlopt, NULL, NULL, NULL, schema)
 
-qemuMonitorTestPtr qemuMonitorTestNew(bool json,
-                                      virDomainXMLOptionPtr xmlopt,
+qemuMonitorTestPtr qemuMonitorTestNew(virDomainXMLOptionPtr xmlopt,
                                       virDomainObjPtr vm,
                                       virQEMUDriverPtr driver,
-                                      const char *greeting);
+                                      const char *greeting,
+                                      virHashTablePtr schema);
 
 qemuMonitorTestPtr qemuMonitorTestNewFromFile(const char *fileName,
                                               virDomainXMLOptionPtr xmlopt,
                                               bool simple);
 qemuMonitorTestPtr qemuMonitorTestNewFromFileFull(const char *fileName,
                                                   virQEMUDriverPtr driver,
-                                                  virDomainObjPtr vm);
+                                                  virDomainObjPtr vm,
+                                                  virHashTablePtr qmpschema);
 
 qemuMonitorTestPtr qemuMonitorTestNewAgent(virDomainXMLOptionPtr xmlopt);
 
@@ -96,5 +99,6 @@ void qemuMonitorTestFree(qemuMonitorTestPtr test);
 
 qemuMonitorPtr qemuMonitorTestGetMonitor(qemuMonitorTestPtr test);
 qemuAgentPtr qemuMonitorTestGetAgent(qemuMonitorTestPtr test);
+virDomainObjPtr qemuMonitorTestGetDomainObj(qemuMonitorTestPtr test);
 
-#endif /* __VIR_QEMU_MONITOR_TEST_UTILS_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(qemuMonitorTest, qemuMonitorTestFree);

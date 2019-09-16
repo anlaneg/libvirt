@@ -17,23 +17,18 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author:
- *     Hu Tao <hutao@cn.fujitsu.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_THREADPOOL_H__
-# define __VIR_THREADPOOL_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef struct _virThreadPool virThreadPool;
 typedef virThreadPool *virThreadPoolPtr;
 
 typedef void (*virThreadPoolJobFunc)(void *jobdata, void *opaque);
 
-# define virThreadPoolNew(min, max, prio, func, opaque) \
+#define virThreadPoolNew(min, max, prio, func, opaque) \
     virThreadPoolNewFull(min, max, prio, func, #func, opaque)
 
 virThreadPoolPtr virThreadPoolNewFull(size_t minWorkers,
@@ -61,5 +56,3 @@ int virThreadPoolSetParameters(virThreadPoolPtr pool,
                                long long int minWorkers,
                                long long int maxWorkers,
                                long long int prioWorkers);
-
-#endif

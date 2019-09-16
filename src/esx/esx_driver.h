@@ -20,9 +20,6 @@
  *
  */
 
-#ifndef __ESX_DRIVER_H__
-# define __ESX_DRIVER_H__
+#pragma once
 
 int esxRegister(void);
-
-#endif /* __ESX_DRIVER_H__ */

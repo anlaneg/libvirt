@@ -16,18 +16,18 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Daniel Veillard <veillard@redhat.com>
- *  Karel Zak <kzak@redhat.com>
- *  Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
-#ifndef VIRSH_NODEDEV_H
-# define VIRSH_NODEDEV_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
+
+struct virshNodeDeviceEventCallback {
+    const char *name;
+    virConnectNodeDeviceEventGenericCallback cb;
+};
+typedef struct virshNodeDeviceEventCallback virshNodeDeviceEventCallback;
+
+extern virshNodeDeviceEventCallback virshNodeDeviceEventCallbacks[];
 
 extern const vshCmdDef nodedevCmds[];
-
-#endif /* VIRSH_NODEDEV_H */

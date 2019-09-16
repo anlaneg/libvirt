@@ -18,12 +18,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_DRIVER_INTERFACE_H__
-# define __VIR_DRIVER_INTERFACE_H__
+#pragma once
 
-# ifndef __VIR_DRIVER_H_INCLUDES___
-#  error "Don't include this file directly, only use driver.h"
-# endif
+#ifndef __VIR_DRIVER_H_INCLUDES___
+# error "Don't include this file directly, only use driver.h"
+#endif
 
 typedef int
 (*virDrvConnectNumOfInterfaces)(virConnectPtr conn);
@@ -117,6 +116,3 @@ struct _virInterfaceDriver {
     virDrvInterfaceChangeCommit interfaceChangeCommit;
     virDrvInterfaceChangeRollback interfaceChangeRollback;
 };
-
-
-#endif /* __VIR_DRIVER_INTERFACE_H__ */

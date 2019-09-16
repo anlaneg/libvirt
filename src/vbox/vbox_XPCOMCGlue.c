@@ -26,13 +26,9 @@
  * additional information or have any questions.
  */
 
-/*******************************************************************************
-*   Header Files                                                               *
-*******************************************************************************/
 
 #include <config.h>
 
-#include <stdlib.h>
 #include <dlfcn.h>
 
 #include "vbox_XPCOMCGlue.h"
@@ -48,9 +44,6 @@
 
 VIR_LOG_INIT("vbox.vbox_XPCOMCGlue");
 
-/*******************************************************************************
-*   Defined Constants And Macros                                               *
-*******************************************************************************/
 #if defined(__linux__) || defined(__linux_gnu__) || defined(__sun__) || \
     defined(__FreeBSD__) || defined(__OpenBSD__) || \
     defined(__FreeBSD_kernel__)
@@ -64,9 +57,6 @@ VIR_LOG_INIT("vbox.vbox_XPCOMCGlue");
 #endif
 
 
-/*******************************************************************************
-*   Global Variables                                                           *
-*******************************************************************************/
 /** The dlopen handle for VBoxXPCOMC. */
 static void *hVBoxXPCOMC;
 /** Pointer to the VBoxXPCOMC function table. */
@@ -200,7 +190,7 @@ VBoxCGlueInit(unsigned int *version)
         "/usr/local/lib/VirtualBox",
         "/Applications/VirtualBox.app/Contents/MacOS"
     };
-    const char *home = virGetEnvBlockSUID("VBOX_APP_HOME");
+    const char *home = getenv("VBOX_APP_HOME");
 
     /* If the user specifies the location, try only that. */
     if (home != NULL) {

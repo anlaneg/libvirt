@@ -14,10 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -103,39 +99,58 @@ virNetDevBandwidthParseRate(xmlNodePtr node, virNetDevBandwidthRatePtr rate)
 /**
  * virNetDevBandwidthParse:
  * @bandwidth: parsed bandwidth
+ * @class_id: parsed class ID
  * @node: XML node
- * @net_type: one of virDomainNetType
+ * @allowFloor: whether "floor" setting is supported
  *
  * Parse bandwidth XML and return pointer to structure.
- * @net_type tell to which type will/is interface connected to.
- * Pass -1 if this is not called on interface.
+ * The @allowFloor attribute indicates whether the caller
+ * is able to support use of the "floor" setting.
  *
  * Returns !NULL on success, NULL on error.
  */
 int
 virNetDevBandwidthParse(virNetDevBandwidthPtr *bandwidth,
+                        unsigned int *class_id,
                         xmlNodePtr node,
-                        int net_type)
+                        bool allowFloor)
 {
     int ret = -1;
     virNetDevBandwidthPtr def = NULL;
     xmlNodePtr cur;
     xmlNodePtr in = NULL, out = NULL;
+    char *class_id_prop = NULL;
 
     if (VIR_ALLOC(def) < 0)
         return ret;
 
-    if (!node || !xmlStrEqual(node->name, BAD_CAST "bandwidth")) {
+    if (!node || !virXMLNodeNameEqual(node, "bandwidth")) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
                        _("invalid argument supplied"));
         goto cleanup;
+    }
+
+    class_id_prop = virXMLPropString(node, "classID");
+    if (class_id_prop) {
+        if (!class_id) {
+            virReportError(VIR_ERR_XML_DETAIL, "%s",
+                           _("classID attribute not supported on <bandwidth> "
+                             "in this usage context"));
+            goto cleanup;
+        }
+        if (virStrToLong_ui(class_id_prop, NULL, 10, class_id) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Unable to parse class id '%s'"),
+                           class_id_prop);
+            goto cleanup;
+        }
     }
 
     cur = node->children;
 
     while (cur) {
         if (cur->type == XML_ELEMENT_NODE) {
-            if (xmlStrEqual(cur->name, BAD_CAST "inbound")) {
+            if (virXMLNodeNameEqual(cur, "inbound")) {
                 if (in) {
                     virReportError(VIR_ERR_XML_DETAIL, "%s",
                                    _("Only one child <inbound> "
@@ -143,7 +158,7 @@ virNetDevBandwidthParse(virNetDevBandwidthPtr *bandwidth,
                     goto cleanup;
                 }
                 in = cur;
-            } else if (xmlStrEqual(cur->name, BAD_CAST "outbound")) {
+            } else if (virXMLNodeNameEqual(cur, "outbound")) {
                 if (out) {
                     virReportError(VIR_ERR_XML_DETAIL, "%s",
                                    _("Only one child <outbound> "
@@ -166,17 +181,9 @@ virNetDevBandwidthParse(virNetDevBandwidthPtr *bandwidth,
             goto cleanup;
         }
 
-        if (def->in->floor && net_type != VIR_DOMAIN_NET_TYPE_NETWORK) {
-            if (net_type == -1) {
-                /* 'floor' on network isn't supported */
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("floor attribute isn't supported for "
-                                 "network's bandwidth yet"));
-            } else {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("floor attribute is supported only for "
-                                 "interfaces of type network"));
-            }
+        if (def->in->floor && !allowFloor) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("floor attribute is not supported for this config"));
             goto cleanup;
         }
     }
@@ -206,6 +213,7 @@ virNetDevBandwidthParse(virNetDevBandwidthPtr *bandwidth,
     ret = 0;
 
  cleanup:
+    VIR_FREE(class_id_prop);
     virNetDevBandwidthFree(def);
     return ret;
 }
@@ -241,8 +249,9 @@ virNetDevBandwidthRateFormat(virNetDevBandwidthRatePtr def,
 }
 
 /**
- * virNetDevBandwidthDefFormat:
+ * virNetDevBandwidthFormat:
  * @def: Data source
+ * @class_id: the class ID to format, 0 to skip
  * @buf: Buffer to print to
  *
  * Formats bandwidth and prepend each line with @indent.
@@ -251,7 +260,9 @@ virNetDevBandwidthRateFormat(virNetDevBandwidthRatePtr def,
  * Returns 0 on success, else -1.
  */
 int
-virNetDevBandwidthFormat(virNetDevBandwidthPtr def, virBufferPtr buf)
+virNetDevBandwidthFormat(virNetDevBandwidthPtr def,
+                         unsigned int class_id,
+                         virBufferPtr buf)
 {
     int ret = -1;
 
@@ -263,7 +274,10 @@ virNetDevBandwidthFormat(virNetDevBandwidthPtr def, virBufferPtr buf)
         goto cleanup;
     }
 
-    virBufferAddLit(buf, "<bandwidth>\n");
+    virBufferAddLit(buf, "<bandwidth");
+    if (class_id)
+        virBufferAsprintf(buf, " classID='%u'", class_id);
+    virBufferAddLit(buf, ">\n");
     virBufferAdjustIndent(buf, 2);
     if (virNetDevBandwidthRateFormat(def->in, buf, "inbound") < 0 ||
         virNetDevBandwidthRateFormat(def->out, buf, "outbound") < 0)

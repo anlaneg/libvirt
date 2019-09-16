@@ -19,10 +19,9 @@
  *
  */
 
-#ifndef __VIR_KMOD_H__
-# define __VIR_KMOD_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 char *virKModConfig(void);
 char *virKModLoad(const char *, bool)
@@ -31,4 +30,3 @@ char *virKModUnload(const char *)
     ATTRIBUTE_NONNULL(1);
 bool virKModIsBlacklisted(const char *)
     ATTRIBUTE_NONNULL(1);
-#endif /* __VIR_KMOD_H__ */

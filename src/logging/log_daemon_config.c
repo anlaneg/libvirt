@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -73,6 +71,7 @@ virLogDaemonConfigNew(bool privileged ATTRIBUTE_UNUSED)
         return NULL;
 
     data->max_clients = 1024;
+    data->admin_max_clients = 5000;
     data->max_size = 1024 * 1024 * 2;
     data->max_backups = 3;
 
@@ -103,6 +102,8 @@ virLogDaemonConfigLoadOptions(virLogDaemonConfigPtr data,
         return -1;
     if (virConfGetValueUInt(conf, "max_clients", &data->max_clients) < 0)
         return -1;
+    if (virConfGetValueUInt(conf, "admin_max_clients", &data->admin_max_clients) < 0)
+        return -1;
     if (virConfGetValueSizeT(conf, "max_size", &data->max_size) < 0)
         return -1;
     if (virConfGetValueSizeT(conf, "max_backups", &data->max_backups) < 0)
@@ -119,8 +120,7 @@ virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
                            const char *filename,
                            bool allow_missing)
 {
-    virConfPtr conf;
-    int ret;
+    VIR_AUTOPTR(virConf) conf = NULL;
 
     if (allow_missing &&
         access(filename, R_OK) == -1 &&
@@ -131,7 +131,5 @@ virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
     if (!conf)
         return -1;
 
-    ret = virLogDaemonConfigLoadOptions(data, conf);
-    virConfFree(conf);
-    return ret;
+    return virLogDaemonConfigLoadOptions(data, conf);
 }

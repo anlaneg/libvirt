@@ -16,16 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Roman Bogorodskiy
  */
 
-#ifndef __BHYVE_DEVICE_H__
-# define __BHYVE_DEVICE_H__
+#pragma once
 
-# include "domain_conf.h"
-# include "virpci.h"
-# include "bhyve_domain.h"
+#include "domain_conf.h"
+#include "virpci.h"
+#include "bhyve_domain.h"
 
 int bhyveDomainAssignPCIAddresses(virDomainDefPtr def, virDomainObjPtr obj);
 
@@ -34,5 +31,3 @@ virDomainPCIAddressSetPtr bhyveDomainPCIAddressSetCreate(virDomainDefPtr def,
 
 int bhyveDomainAssignAddresses(virDomainDefPtr def, virDomainObjPtr obj)
     ATTRIBUTE_NONNULL(1);
-
-#endif /* __BHYVE_DEVICE_H__ */

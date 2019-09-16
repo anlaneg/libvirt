@@ -14,23 +14,19 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Stefan Berger <stefanb@us.ibm.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NETDEV_VPORT_PROFILE_H__
-# define __VIR_NETDEV_VPORT_PROFILE_H__
+#pragma once
 
-# include "internal.h"
-# include "viruuid.h"
-# include "virutil.h"
-# include "virmacaddr.h"
+#include "internal.h"
+#include "viruuid.h"
+#include "virutil.h"
+#include "virmacaddr.h"
+#include "virenum.h"
 
-# define LIBVIRT_IFLA_VF_PORT_PROFILE_MAX 40
+#define LIBVIRT_IFLA_VF_PORT_PROFILE_MAX 40
 
-enum virNetDevVPortProfile {
+typedef enum virNetDevVPortProfile {
     VIR_NETDEV_VPORT_PROFILE_NONE,
     VIR_NETDEV_VPORT_PROFILE_8021QBG,
     VIR_NETDEV_VPORT_PROFILE_8021QBH,
@@ -38,8 +34,8 @@ enum virNetDevVPortProfile {
     VIR_NETDEV_VPORT_PROFILE_MIDONET,
 
     VIR_NETDEV_VPORT_PROFILE_LAST,
-};
-VIR_ENUM_DECL(virNetDevVPort)
+} virNetDevVPortProfileType;
+VIR_ENUM_DECL(virNetDevVPort);
 
 typedef enum {
     VIR_NETDEV_VPORT_PROFILE_OP_CREATE,
@@ -53,7 +49,7 @@ typedef enum {
 
     VIR_NETDEV_VPORT_PROFILE_OP_LAST
 } virNetDevVPortProfileOp;
-VIR_ENUM_DECL(virNetDevVPortProfileOp)
+VIR_ENUM_DECL(virNetDevVPortProfileOp);
 
 /* profile data for macvtap (VEPA) and openvswitch */
 typedef struct _virNetDevVPortProfile virNetDevVPortProfile;
@@ -83,6 +79,8 @@ struct _virNetDevVPortProfile {
 
 bool virNetDevVPortProfileEqual(virNetDevVPortProfilePtr a,
                                 virNetDevVPortProfilePtr b);
+int virNetDevVPortProfileCopy(virNetDevVPortProfilePtr *dst,
+                              const virNetDevVPortProfile *src);
 
 int virNetDevVPortProfileCheckComplete(virNetDevVPortProfilePtr virtport,
                                        bool generateMissing);
@@ -95,23 +93,18 @@ int virNetDevVPortProfileMerge3(virNetDevVPortProfilePtr *result,
 
 int virNetDevVPortProfileAssociate(const char *ifname,
                                    const virNetDevVPortProfile *virtPort,
-                                   const virMacAddr *macaddr,
+                                   const virMacAddr *macvtap_macaddr,
                                    const char *linkdev,
                                    int vf,
                                    const unsigned char *vmuuid,
                                    virNetDevVPortProfileOp vmOp,
                                    bool setlink_only)
-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4) ATTRIBUTE_NONNULL(6)
-    ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
 
 int virNetDevVPortProfileDisassociate(const char *ifname,
                                       const virNetDevVPortProfile *virtPort,
-                                      const virMacAddr *macaddr,
+                                      const virMacAddr *macvtap_macaddr,
                                       const char *linkdev,
                                       int vf,
                                       virNetDevVPortProfileOp vmOp)
-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
-    ATTRIBUTE_RETURN_CHECK;
-
-
-#endif /* __VIR_NETDEV_VPORT_PROFILE_H__ */
+    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;

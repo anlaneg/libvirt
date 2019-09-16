@@ -19,12 +19,8 @@
  *
  */
 
-#ifndef __VIR_LOCK_DRIVER_NOP_H__
-# define __VIR_LOCK_DRIVER_NOP_H__
+#pragma once
 
-# include "lock_driver.h"
+#include "lock_driver.h"
 
 extern virLockDriver virLockDriverNop;
-
-
-#endif /* __VIR_LOCK_DRIVER_NOP_H__ */

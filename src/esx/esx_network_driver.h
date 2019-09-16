@@ -20,11 +20,8 @@
  *
  */
 
-#ifndef __ESX_NETWORK_DRIVER_H__
-# define __ESX_NETWORK_DRIVER_H__
+#pragma once
 
-# include "driver.h"
+#include "driver.h"
 
 extern virNetworkDriver esxNetworkDriver;
-
-#endif /* __ESX_NETWORK_DRIVER_H__ */

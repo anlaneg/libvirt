@@ -16,15 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Cédric Bosdonnat <cbosdonnat@suse.com>
  */
 
-#ifndef __LIBXL_LOGGER_H
-# define __LIBXL_LOGGER_H
+#pragma once
 
-# include "util/virlog.h"
+#include "util/virlog.h"
 
 typedef struct xentoollog_logger_libvirt libxlLogger;
 typedef libxlLogger *libxlLoggerPtr;
@@ -36,5 +32,3 @@ void libxlLoggerFree(libxlLoggerPtr logger);
 void libxlLoggerOpenFile(libxlLoggerPtr logger, int id, const char *name,
                          const char *domain_config);
 void libxlLoggerCloseFile(libxlLoggerPtr logger, int id);
-
-#endif /* __LIBXL_LOGGER_H */

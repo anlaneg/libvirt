@@ -16,15 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_LOG_DAEMON_H__
-# define __VIR_LOG_DAEMON_H__
+#pragma once
 
-# include "virthread.h"
-# include "log_handler.h"
+#include "virthread.h"
+#include "log_handler.h"
 
 typedef struct _virLogDaemon virLogDaemon;
 typedef virLogDaemon *virLogDaemonPtr;
@@ -41,5 +38,3 @@ struct _virLogDaemonClient {
 extern virLogDaemonPtr logDaemon;
 
 virLogHandlerPtr virLogDaemonGetHandler(virLogDaemonPtr dmn);
-
-#endif /* __VIR_LOG_DAEMON_H__ */

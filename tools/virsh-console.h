@@ -16,23 +16,17 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_CONSOLE_H__
-# define __VIR_CONSOLE_H__
+#pragma once
 
-# ifndef WIN32
+#ifndef WIN32
 
-#  include <virsh.h>
+# include <virsh.h>
 
 int virshRunConsole(vshControl *ctl,
                     virDomainPtr dom,
                     const char *dev_name,
                     unsigned int flags);
 
-# endif /* !WIN32 */
-
-#endif /* __VIR_CONSOLE_H__ */
+#endif /* !WIN32 */

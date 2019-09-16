@@ -58,6 +58,16 @@ virAccessDriverNopCheckNetwork(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
 }
 
 static int
+virAccessDriverNopCheckNetworkPort(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
+                                   const char *driverName ATTRIBUTE_UNUSED,
+                                   virNetworkDefPtr network ATTRIBUTE_UNUSED,
+                                   virNetworkPortDefPtr port ATTRIBUTE_UNUSED,
+                                   virAccessPermNetworkPort perm ATTRIBUTE_UNUSED)
+{
+    return 1; /* Allow */
+}
+
+static int
 virAccessDriverNopCheckNodeDevice(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
                                   const char *driverName ATTRIBUTE_UNUSED,
                                   virNodeDeviceDefPtr nodedev ATTRIBUTE_UNUSED,
@@ -71,6 +81,15 @@ virAccessDriverNopCheckNWFilter(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
                                 const char *driverName ATTRIBUTE_UNUSED,
                                 virNWFilterDefPtr nwfilter ATTRIBUTE_UNUSED,
                                 virAccessPermNWFilter perm ATTRIBUTE_UNUSED)
+{
+    return 1; /* Allow */
+}
+
+static int
+virAccessDriverNopCheckNWFilterBinding(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
+                                       const char *driverName ATTRIBUTE_UNUSED,
+                                       virNWFilterBindingDefPtr binding ATTRIBUTE_UNUSED,
+                                       virAccessPermNWFilterBinding perm ATTRIBUTE_UNUSED)
 {
     return 1; /* Allow */
 }
@@ -110,8 +129,10 @@ virAccessDriver accessDriverNop = {
     .checkDomain = virAccessDriverNopCheckDomain,
     .checkInterface = virAccessDriverNopCheckInterface,
     .checkNetwork = virAccessDriverNopCheckNetwork,
+    .checkNetworkPort = virAccessDriverNopCheckNetworkPort,
     .checkNodeDevice = virAccessDriverNopCheckNodeDevice,
     .checkNWFilter = virAccessDriverNopCheckNWFilter,
+    .checkNWFilterBinding = virAccessDriverNopCheckNWFilterBinding,
     .checkSecret = virAccessDriverNopCheckSecret,
     .checkStoragePool = virAccessDriverNopCheckStoragePool,
     .checkStorageVol = virAccessDriverNopCheckStorageVol,

@@ -20,57 +20,56 @@
  *
  */
 
-#ifndef __ESX_VI_H__
-# define __ESX_VI_H__
+#pragma once
 
-# include <libxml/tree.h>
-# include <libxml/xpath.h>
-# include <curl/curl.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
+#include <curl/curl.h>
 
-# include "internal.h"
-# include "virerror.h"
-# include "datatypes.h"
-# include "esx_vi_types.h"
-# include "esx_util.h"
+#include "internal.h"
+#include "virerror.h"
+#include "datatypes.h"
+#include "esx_vi_types.h"
+#include "esx_util.h"
 
 /* curl_multi_wait was added in libcurl 7.28.0, emulate it on older versions */
-# define ESX_EMULATE_CURL_MULTI_WAIT (LIBCURL_VERSION_NUM < 0x071C00)
+#define ESX_EMULATE_CURL_MULTI_WAIT (LIBCURL_VERSION_NUM < 0x071C00)
 
 
 
-# define ESX_VI__SOAP__REQUEST_HEADER                                         \
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"                            \
-    "<soapenv:Envelope\n"                                                     \
-    " xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\"\n"          \
-    " xmlns:soapenc=\"http://schemas.xmlsoap.org/soap/encoding/\"\n"          \
-    " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n"              \
-    " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">\n"                      \
+#define ESX_VI__SOAP__REQUEST_HEADER \
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
+    "<soapenv:Envelope\n" \
+    " xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" \
+    " xmlns:soapenc=\"http://schemas.xmlsoap.org/soap/encoding/\"\n" \
+    " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" \
+    " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">\n" \
     "<soapenv:Body>\n"
 
 
 
-# define ESX_VI__SOAP__REQUEST_FOOTER                                         \
-    "</soapenv:Body>\n"                                                       \
+#define ESX_VI__SOAP__REQUEST_FOOTER \
+    "</soapenv:Body>\n" \
     "</soapenv:Envelope>"
 
 
 
-# define ESV_VI__XML_TAG__OPEN(_buffer, _element, _type)                      \
-    do {                                                                      \
-        virBufferAddLit(_buffer, "<");                                        \
-        virBufferAdd(_buffer, _element, -1);                                  \
-        virBufferAddLit(_buffer, " xmlns=\"urn:vim25\" xsi:type=\"");         \
-        virBufferAdd(_buffer, _type, -1);                                     \
-        virBufferAddLit(_buffer, "\">");                                      \
+#define ESV_VI__XML_TAG__OPEN(_buffer, _element, _type) \
+    do { \
+        virBufferAddLit(_buffer, "<"); \
+        virBufferAdd(_buffer, _element, -1); \
+        virBufferAddLit(_buffer, " xmlns=\"urn:vim25\" xsi:type=\""); \
+        virBufferAdd(_buffer, _type, -1); \
+        virBufferAddLit(_buffer, "\">"); \
     } while (0)
 
 
 
-# define ESV_VI__XML_TAG__CLOSE(_buffer, _element)                            \
-    do {                                                                      \
-        virBufferAddLit(_buffer, "</");                                       \
-        virBufferAdd(_buffer, _element, -1);                                  \
-        virBufferAddLit(_buffer, ">");                                        \
+#define ESV_VI__XML_TAG__CLOSE(_buffer, _element) \
+    do { \
+        virBufferAddLit(_buffer, "</"); \
+        virBufferAdd(_buffer, _element, -1); \
+        virBufferAddLit(_buffer, ">"); \
     } while (0)
 
 
@@ -160,11 +159,11 @@ int esxVI_SharedCURL_Remove(esxVI_SharedCURL *shared, esxVI_CURL *curl);
 struct _esxVI_MultiCURL {
     CURLM *handle;
     size_t count; /* number of added easy handle */
-# if ESX_EMULATE_CURL_MULTI_WAIT
+#if ESX_EMULATE_CURL_MULTI_WAIT
     struct pollfd *pollfds;
     size_t npollfds;
     bool timeoutPending;
-# endif
+#endif
 };
 
 int esxVI_MultiCURL_Alloc(esxVI_MultiCURL **multi);
@@ -333,6 +332,10 @@ int esxVI_GetVirtualMachinePowerState
 int esxVI_GetVirtualMachineQuestionInfo
       (esxVI_ObjectContent *virtualMachine,
        esxVI_VirtualMachineQuestionInfo **questionInfo);
+
+int esxVI_GetVirtualMachineMORef
+      (esxVI_ObjectContent *virtualMachine,
+       char **moref);
 
 int esxVI_GetBoolean(esxVI_ObjectContent *objectContent,
                      const char *propertyName,
@@ -526,6 +529,4 @@ int esxVI_LookupHostScsiTopologyLunListByTargetName
 int esxVI_LookupStoragePoolNameByScsiLunKey(esxVI_Context *ctx, const char *key,
                                             char **poolName);
 
-# include "esx_vi.generated.h"
-
-#endif /* __ESX_VI_H__ */
+#include "esx_vi.generated.h"

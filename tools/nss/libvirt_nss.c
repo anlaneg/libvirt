@@ -21,197 +21,60 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 #include <config.h>
 
 #include "libvirt_nss.h"
 
-#include <netinet/in.h>
 #include <resolv.h>
 #include <sys/types.h>
 #include <dirent.h>
 #include <arpa/inet.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <errno.h>
+#include <string.h>
+#include <time.h>
+
 
 #if defined(HAVE_BSD_NSS)
 # include <nsswitch.h>
 #endif
 
-#include "virlease.h"
-#include "viralloc.h"
-#include "virfile.h"
-#include "virtime.h"
-#include "virerror.h"
-#include "virstring.h"
-#include "virsocketaddr.h"
-#include "configmake.h"
-#include "virmacmap.h"
-#include "virobject.h"
+/*
+ * This gnulib files is used for its macros only,
+ * so doesn't introduce a link time dep, which we
+ * must avoid
+ */
+#include "gnulib/lib/configmake.h"
 
-#if 0
-# define ERROR(...)                                             \
-do {                                                            \
-    char ebuf[1024];                                            \
-    fprintf(stderr, "ERROR %s:%d : ", __FUNCTION__, __LINE__);  \
-    fprintf(stderr, __VA_ARGS__);                               \
-    fprintf(stderr, " : %s\n", virStrerror(errno, ebuf, sizeof(ebuf))); \
-    fprintf(stderr, "\n");                                      \
-} while (0)
+#include "libvirt_nss_leases.h"
 
-# define DEBUG(...)                                             \
-do {                                                            \
-    fprintf(stderr, "DEBUG %s:%d : ", __FUNCTION__, __LINE__);  \
-    fprintf(stderr, __VA_ARGS__);                               \
-    fprintf(stderr, "\n");                                      \
-} while (0)
-#else
-# define ERROR(...) do { } while (0)
-# define DEBUG(...) do { } while (0)
-#endif
+#if defined(LIBVIRT_NSS_GUEST)
+# include "libvirt_nss_macs.h"
+#endif /* !LIBVIRT_NSS_GUEST */
 
 #define LEASEDIR LOCALSTATEDIR "/lib/libvirt/dnsmasq/"
 
 #define LIBVIRT_ALIGN(x) (((x) + __SIZEOF_POINTER__ - 1) & ~(__SIZEOF_POINTER__ - 1))
 #define FAMILY_ADDRESS_SIZE(family) ((family) == AF_INET6 ? 16 : 4)
 
-typedef struct {
-    unsigned char addr[16];
-    int af;
-} leaseAddress;
-
-
 static int
-appendAddr(leaseAddress **tmpAddress,
-           size_t *ntmpAddress,
-           virJSONValuePtr lease,
-           int af)
+leaseAddressSorter(const void *a,
+                   const void *b)
 {
-    int ret = -1;
-    const char *ipAddr;
-    virSocketAddr sa;
-    int family;
-    size_t i;
+    const leaseAddress *la = a;
+    const leaseAddress *lb = b;
 
-    if (!(ipAddr = virJSONValueObjectGetString(lease, "ip-address"))) {
-        ERROR("ip-address field missing for %s", name);
-        goto cleanup;
-    }
-
-    DEBUG("IP address: %s", ipAddr);
-
-    if (virSocketAddrParse(&sa, ipAddr, AF_UNSPEC) < 0) {
-        ERROR("Unable to parse %s", ipAddr);
-        goto cleanup;
-    }
-
-    family = VIR_SOCKET_ADDR_FAMILY(&sa);
-    if (af != AF_UNSPEC && af != family) {
-        DEBUG("Skipping address which family is %d, %d requested", family, af);
-        ret = 0;
-        goto cleanup;
-    }
-
-    for (i = 0; i < *ntmpAddress; i++) {
-        if (memcmp((*tmpAddress)[i].addr,
-                   (family == AF_INET ?
-                    (void *) &sa.data.inet4.sin_addr.s_addr :
-                    (void *) &sa.data.inet6.sin6_addr.s6_addr),
-                   FAMILY_ADDRESS_SIZE(family)) == 0) {
-            DEBUG("IP address already in the list");
-            ret = 0;
-            goto cleanup;
-        }
-    }
-
-    if (VIR_REALLOC_N_QUIET(*tmpAddress, *ntmpAddress + 1) < 0) {
-        ERROR("Out of memory");
-        goto cleanup;
-    }
-
-    (*tmpAddress)[*ntmpAddress].af = family;
-    memcpy((*tmpAddress)[*ntmpAddress].addr,
-           (family == AF_INET ?
-            (void *) &sa.data.inet4.sin_addr.s_addr :
-            (void *) &sa.data.inet6.sin6_addr.s6_addr),
-           FAMILY_ADDRESS_SIZE(family));
-    (*ntmpAddress)++;
-    ret = 0;
- cleanup:
-    return ret;
+    return lb->expirytime - la->expirytime;
 }
 
 
-static int
-findLeaseInJSON(leaseAddress **tmpAddress,
-                size_t *ntmpAddress,
-                virJSONValuePtr leases_array,
-                size_t nleases,
-                const char *name,
-                const char **macs,
-                int af,
-                bool *found)
+static void
+sortAddr(leaseAddress *tmpAddress,
+         size_t ntmpAddress)
 {
-    size_t i;
-    long long expirytime;
-    time_t currtime;
-    int ret = -1;
-
-    if ((currtime = time(NULL)) == (time_t) - 1) {
-        ERROR("Failed to get current system time");
-        goto cleanup;
-    }
-
-    for (i = 0; i < nleases; i++) {
-        virJSONValuePtr lease = virJSONValueArrayGet(leases_array, i);
-
-        if (!lease) {
-            /* This should never happen (TM) */
-            ERROR("Unable to get element %zu of %zu", i, nleases);
-            goto cleanup;
-        }
-
-        if (macs) {
-            const char *macAddr;
-
-            macAddr = virJSONValueObjectGetString(lease, "mac-address");
-            if (!macAddr)
-                continue;
-
-            if (!virStringListHasString(macs, macAddr))
-                continue;
-        } else {
-            const char *lease_name;
-
-            lease_name = virJSONValueObjectGetString(lease, "hostname");
-
-            if (STRNEQ_NULLABLE(name, lease_name))
-                continue;
-        }
-
-        if (virJSONValueObjectGetNumberLong(lease, "expiry-time", &expirytime) < 0) {
-            /* A lease cannot be present without expiry-time */
-            ERROR("expiry-time field missing for %s", name);
-            goto cleanup;
-        }
-
-        /* Do not report expired lease */
-        if (expirytime < (long long) currtime) {
-            DEBUG("Skipping expired lease for %s", name);
-            continue;
-        }
-
-        DEBUG("Found record for %s", name);
-        *found = true;
-
-        if (appendAddr(tmpAddress, ntmpAddress, lease, af) < 0)
-            goto cleanup;
-    }
-
-    ret = 0;
- cleanup:
-    return ret;
+    qsort(tmpAddress, ntmpAddress, sizeof(*tmpAddress), leaseAddressSorter);
 }
 
 
@@ -247,12 +110,12 @@ findLease(const char *name,
     int ret = -1;
     const char *leaseDir = LEASEDIR;
     struct dirent *entry;
-    virJSONValuePtr leases_array = NULL;
-    ssize_t nleases;
-    leaseAddress *tmpAddress = NULL;
-    size_t ntmpAddress = 0;
-    virMacMapPtr *macmaps = NULL;
-    size_t nMacmaps = 0;
+    char **leaseFiles = NULL;
+    size_t nleaseFiles = 0;
+    char **macs = NULL;
+    size_t nmacs = 0;
+    size_t i;
+    time_t now;
 
     *address = NULL;
     *naddress = 0;
@@ -263,94 +126,88 @@ findLease(const char *name,
         goto cleanup;
     }
 
-    if (virDirOpenQuiet(&dir, leaseDir) < 0) {
+    dir = opendir(leaseDir);
+    if (!dir) {
         ERROR("Failed to open dir '%s'", leaseDir);
         goto cleanup;
     }
 
-    if (!(leases_array = virJSONValueNewArray())) {
-        ERROR("Failed to create json array");
-        goto cleanup;
-    }
-
     DEBUG("Dir: %s", leaseDir);
-    while ((ret = virDirRead(dir, &entry, leaseDir)) > 0) {
+    while ((entry = readdir(dir)) != NULL) {
         char *path;
+        size_t dlen = strlen(entry->d_name);
 
-        if (virFileHasSuffix(entry->d_name, ".status")) {
-            if (!(path = virFileBuildPath(leaseDir, entry->d_name, NULL)))
-                goto cleanup;
-
-            DEBUG("Processing %s", path);
-            if (virLeaseReadCustomLeaseFile(leases_array, path, NULL, NULL) < 0) {
-                ERROR("Unable to parse %s", path);
-                VIR_FREE(path);
-                goto cleanup;
-            }
-            VIR_FREE(path);
-        } else if (virFileHasSuffix(entry->d_name, ".macs")) {
-            if (!(path = virFileBuildPath(leaseDir, entry->d_name, NULL)))
+        if (dlen >= 7 && !strcmp(entry->d_name + dlen - 7, ".status")) {
+            char **tmpLease;
+            if (asprintf(&path, "%s/%s", leaseDir, entry->d_name) < 0)
                 goto cleanup;
 
-            if (VIR_REALLOC_N_QUIET(macmaps, nMacmaps + 1) < 0) {
-                VIR_FREE(path);
+            tmpLease = realloc(leaseFiles, sizeof(char *) * (nleaseFiles + 1));
+            if (!tmpLease)
                 goto cleanup;
-            }
+            leaseFiles = tmpLease;
+            leaseFiles[nleaseFiles++] = path;
+#if defined(LIBVIRT_NSS_GUEST)
+        } else if (dlen >= 5 && !strcmp(entry->d_name + dlen - 5, ".macs")) {
+            if (asprintf(&path, "%s/%s", leaseDir, entry->d_name) < 0)
+                goto cleanup;
 
             DEBUG("Processing %s", path);
-            if (!(macmaps[nMacmaps] = virMacMapNew(path))) {
-                ERROR("Unable to parse %s", path);
-                VIR_FREE(path);
+            if (findMACs(path, name, &macs, &nmacs) < 0) {
+                free(path);
                 goto cleanup;
             }
-            nMacmaps++;
-            VIR_FREE(path);
+            free(path);
+#endif /* LIBVIRT_NSS_GUEST */
         }
+
+        errno = 0;
     }
-    VIR_DIR_CLOSE(dir);
+    closedir(dir);
+    dir = NULL;
 
-    if ((nleases = virJSONValueArraySize(leases_array)) < 0)
+#if defined(LIBVIRT_NSS_GUEST)
+    DEBUG("Finding with %zu macs", nmacs);
+    if (!nmacs)
         goto cleanup;
-    DEBUG("Read %zd leases", nleases);
+    for (i = 0; i < nmacs; i++)
+        DEBUG("  %s", macs[i]);
+#endif
 
-#if !defined(LIBVIRT_NSS_GUEST)
-    if (findLeaseInJSON(&tmpAddress, &ntmpAddress,
-                        leases_array, nleases,
-                        name, NULL, af, found) < 0)
+    if ((now = time(NULL)) == (time_t)-1) {
+        DEBUG("Failed to get time");
         goto cleanup;
+    }
 
-#else /* defined(LIBVIRT_NSS_GUEST) */
-
-    size_t i;
-    for (i = 0; i < nMacmaps; i++) {
-        const char **macs = (const char **) virMacMapLookup(macmaps[i], name);
-
-        if (!macs)
-            continue;
-
-        if (findLeaseInJSON(&tmpAddress, &ntmpAddress,
-                            leases_array, nleases,
-                            name, macs, af, found) < 0)
+    for (i = 0; i < nleaseFiles; i++) {
+        if (findLeases(leaseFiles[i],
+                       name, macs, nmacs,
+                       af, now,
+                       address, naddress,
+                       found) < 0)
             goto cleanup;
     }
 
-#endif /* defined(LIBVIRT_NSS_GUEST) */
-
-    *address = tmpAddress;
-    *naddress = ntmpAddress;
-    tmpAddress = NULL;
-    ntmpAddress = 0;
+    DEBUG("Found %zu addresses", *naddress);
+    sortAddr(*address, *naddress);
 
     ret = 0;
 
  cleanup:
     *errnop = errno;
-    VIR_FREE(tmpAddress);
-    virJSONValueFree(leases_array);
-    VIR_DIR_CLOSE(dir);
-    while (nMacmaps)
-        virObjectUnref(macmaps[--nMacmaps]);
-    VIR_FREE(macmaps);
+    for (i = 0; i < nleaseFiles; i++)
+        free(leaseFiles[i]);
+    free(leaseFiles);
+    for (i = 0; i < nmacs; i++)
+        free(macs[i]);
+    free(macs);
+    if (ret < 0) {
+        free(*address);
+        *address = NULL;
+        *naddress = 0;
+    }
+    if (dir)
+        closedir(dir);
     return ret;
 }
 
@@ -410,6 +267,7 @@ NSS_NAME(gethostbyname3)(const char *name, int af, struct hostent *result,
         af = AF_INET;
 
     if ((r = findLease(name, af, &addr, &naddr, &found, errnop)) < 0) {
+        free(addr);
         /* Error occurred. Return immediately. */
         if (*errnop == EAGAIN) {
             *herrnop = TRY_AGAIN;
@@ -424,11 +282,13 @@ NSS_NAME(gethostbyname3)(const char *name, int af, struct hostent *result,
         /* NOT found */
         *errnop = ESRCH;
         *herrnop = HOST_NOT_FOUND;
+        free(addr);
         return NSS_STATUS_NOTFOUND;
     } else if (!naddr) {
         /* Found, but no data */
         *errnop = ENXIO;
         *herrnop = NO_DATA;
+        free(addr);
         return NSS_STATUS_UNAVAIL;
     }
 
@@ -500,7 +360,7 @@ NSS_NAME(gethostbyname3)(const char *name, int af, struct hostent *result,
 
     ret = NSS_STATUS_SUCCESS;
  cleanup:
-    VIR_FREE(addr);
+    free(addr);
     return ret;
 }
 
@@ -625,24 +485,45 @@ aiforaf(const char *name, int af, struct addrinfo *pai, struct addrinfo **aip)
 
     addrList = resolved.h_addr_list;
     while (*addrList) {
-        virSocketAddr sa;
-        char *ipAddr = NULL;
+        union {
+            struct sockaddr sa;
+            struct sockaddr_in sin;
+            struct sockaddr_in6 sin6;
+        } sa;
+        socklen_t salen;
         void *address = *addrList;
+        char host[NI_MAXHOST];
+        char port[NI_MAXSERV];
 
         memset(&sa, 0, sizeof(sa));
         if (resolved.h_addrtype == AF_INET) {
-            virSocketAddrSetIPv4AddrNetOrder(&sa, *((uint32_t *) address));
+            sa.sin.sin_family = AF_INET;
+            memcpy(&sa.sin.sin_addr.s_addr,
+                   address,
+                   FAMILY_ADDRESS_SIZE(AF_INET));
+            salen = sizeof(sa.sin);
         } else {
-            virSocketAddrSetIPv6AddrNetOrder(&sa, address);
+            sa.sin6.sin6_family = AF_INET6;
+            memcpy(&sa.sin6.sin6_addr.s6_addr,
+                   address,
+                   FAMILY_ADDRESS_SIZE(AF_INET6));
+            salen = sizeof(sa.sin6);
         }
 
-        ipAddr = virSocketAddrFormat(&sa);
+        if ((err = getnameinfo(&sa.sa, salen,
+                               host, sizeof(host),
+                               port, sizeof(port),
+                               NI_NUMERICHOST | NI_NUMERICSERV)) != 0) {
+            ERROR("Cannot convert socket address to string: %s",
+                  gai_strerror(err));
+            continue;
+        }
 
         hints = *pai;
         hints.ai_flags = AI_NUMERICHOST;
         hints.ai_family = af;
 
-        if (getaddrinfo(ipAddr, NULL, &hints, &res0)) {
+        if (getaddrinfo(host, NULL, &hints, &res0)) {
             addrList++;
             continue;
         }
@@ -652,14 +533,16 @@ aiforaf(const char *name, int af, struct addrinfo *pai, struct addrinfo **aip)
 
         (*aip)->ai_next = res0;
         while ((*aip)->ai_next)
-           *aip = (*aip)->ai_next;
+            *aip = (*aip)->ai_next;
 
         addrList++;
     }
 }
 
 int
-_nss_compat_getaddrinfo(void *retval, void *mdata ATTRIBUTE_UNUSED, va_list ap)
+_nss_compat_getaddrinfo(void *retval,
+                        void *mdata __attribute__((unused)),
+                        va_list ap)
 {
     struct addrinfo sentinel, *cur, *ai;
     const char *name;
@@ -685,7 +568,9 @@ _nss_compat_getaddrinfo(void *retval, void *mdata ATTRIBUTE_UNUSED, va_list ap)
 }
 
 int
-_nss_compat_gethostbyname2_r(void *retval, void *mdata ATTRIBUTE_UNUSED, va_list ap)
+_nss_compat_gethostbyname2_r(void *retval,
+                             void *mdata __attribute__((unused)),
+                             va_list ap)
 {
     int ret;
 
@@ -712,7 +597,8 @@ _nss_compat_gethostbyname2_r(void *retval, void *mdata ATTRIBUTE_UNUSED, va_list
 }
 
 ns_mtab*
-nss_module_register(const char *name ATTRIBUTE_UNUSED, unsigned int *size,
+nss_module_register(const char *name __attribute__((unused)),
+                    unsigned int *size,
                     nss_module_unregister_fn *unregister)
 {
     *size = sizeof(methods) / sizeof(methods[0]);

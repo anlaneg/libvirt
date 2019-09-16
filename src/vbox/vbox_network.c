@@ -375,7 +375,7 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
     PRUnichar *networkNameUtf16 = NULL;
     char *networkNameUtf8 = NULL;
     IHostNetworkInterface *networkInterface = NULL;
-    virNetworkDefPtr def = virNetworkDefParseString(xml);
+    virNetworkDefPtr def = virNetworkDefParseString(xml, NULL);
     virNetworkIPDefPtr ipdef = NULL;
     unsigned char uuid[VIR_UUID_BUFLEN];
     vboxIID vboxnetiid;
@@ -413,7 +413,7 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
      * assign a name to it and it defaults to vboxnet*, for e.g:
      * vboxnet0, vboxnet1, etc. Also the UUID is assigned to it
      * automatically depending on the mac address and thus both
-     * these paramters are ignored here for now.
+     * these parameters are ignored here for now.
      *
      * If the vbox is in 2.x and the def->name not equal to vboxnet0,
      * the function call will fail and the networkInterface set to
@@ -911,7 +911,7 @@ static char *vboxNetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
     }
 
     DEBUGIID("Network UUID", &vboxnet0IID);
-    ret = virNetworkDefFormat(def, 0);
+    ret = virNetworkDefFormat(def, NULL, 0);
 
  cleanup:
     vboxIIDUnalloc(&vboxnet0IID);

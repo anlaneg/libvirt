@@ -36,7 +36,7 @@ testLogMatch(const void *opaque)
 
     bool got = virLogProbablyLogMessage(data->str);
     if (got != data->pass) {
-        VIR_TEST_DEBUG("Expected '%d' but got '%d' for '%s'\n",
+        VIR_TEST_DEBUG("Expected '%d' but got '%d' for '%s'",
                        data->pass, got, data->str);
         return -1;
     }
@@ -54,7 +54,7 @@ testLogParseOutputs(const void *opaque)
     noutputs = virLogParseOutputs(data->str, &outputs);
     if (noutputs < 0) {
         if (!data->pass) {
-            VIR_TEST_DEBUG("Got expected error: %s\n",
+            VIR_TEST_DEBUG("Got expected error: %s",
                            virGetLastErrorMessage());
             virResetLastError();
             ret = 0;
@@ -62,10 +62,10 @@ testLogParseOutputs(const void *opaque)
         }
     } else if (noutputs != data->count) {
             VIR_TEST_DEBUG("Expected number of parsed outputs is %d, "
-                           "but got %d\n", data->count, noutputs);
+                           "but got %d", data->count, noutputs);
             goto cleanup;
     } else if (!data->pass) {
-        VIR_TEST_DEBUG("Test should have failed\n");
+        VIR_TEST_DEBUG("Test should have failed");
         goto cleanup;
     }
 
@@ -86,7 +86,7 @@ testLogParseFilters(const void *opaque)
     nfilters = virLogParseFilters(data->str, &filters);
     if (nfilters < 0) {
         if (!data->pass) {
-            VIR_TEST_DEBUG("Got expected error: %s\n",
+            VIR_TEST_DEBUG("Got expected error: %s",
                            virGetLastErrorMessage());
             virResetLastError();
             ret = 0;
@@ -94,10 +94,10 @@ testLogParseFilters(const void *opaque)
         }
     } else if (nfilters != data->count) {
         VIR_TEST_DEBUG("Expected number of parsed outputs is %d, "
-                       "but got %d\n", data->count, nfilters);
+                       "but got %d", data->count, nfilters);
         goto cleanup;
     } else if (!data->pass) {
-        VIR_TEST_DEBUG("Test should have failed\n");
+        VIR_TEST_DEBUG("Test should have failed");
         goto cleanup;
     }
 
@@ -112,27 +112,27 @@ mymain(void)
 {
     int ret = 0;
 
-#define DO_TEST_FULL(name, test, str, count, pass)                          \
-    do {                                                                    \
-        struct testLogData data = {                                         \
-            str, count, pass                                                \
-        };                                                                  \
-        if (virTestRun(name, test, &data) < 0)                              \
-            ret = -1;                                                       \
+#define DO_TEST_FULL(name, test, str, count, pass) \
+    do { \
+        struct testLogData data = { \
+            str, count, pass \
+        }; \
+        if (virTestRun(name, test, &data) < 0) \
+            ret = -1; \
     } while (0)
 
-#define TEST_LOG_MATCH_FAIL(str)                                            \
+#define TEST_LOG_MATCH_FAIL(str) \
     DO_TEST_FULL("testLogMatch " # str, testLogMatch, str, 0, false)
-#define TEST_LOG_MATCH(str)                                                 \
+#define TEST_LOG_MATCH(str) \
     DO_TEST_FULL("testLogMatch " # str, testLogMatch, str, 0, true)
 
-#define TEST_PARSE_OUTPUTS_FAIL(str, count)                                 \
+#define TEST_PARSE_OUTPUTS_FAIL(str, count) \
     DO_TEST_FULL("testLogParseOutputs " # str, testLogParseOutputs, str, count, false)
-#define TEST_PARSE_OUTPUTS(str, count)                                      \
+#define TEST_PARSE_OUTPUTS(str, count) \
     DO_TEST_FULL("testLogParseOutputs " # str, testLogParseOutputs, str, count, true)
-#define TEST_PARSE_FILTERS_FAIL(str, count)                                 \
+#define TEST_PARSE_FILTERS_FAIL(str, count) \
     DO_TEST_FULL("testLogParseFilters " # str, testLogParseFilters, str, count, false)
-#define TEST_PARSE_FILTERS(str, count)                                      \
+#define TEST_PARSE_FILTERS(str, count) \
     DO_TEST_FULL("testLogParseFilters " # str, testLogParseFilters, str, count, true)
 
 
@@ -154,4 +154,4 @@ mymain(void)
     return ret;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

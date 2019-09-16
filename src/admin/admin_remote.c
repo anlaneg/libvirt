@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Erik Skultety <eskultet@redhat.com>
  */
 
 #include <config.h>
@@ -296,6 +294,7 @@ remoteAdminServerSetThreadPoolParameters(virAdmServerPtr srv,
     virObjectLock(priv);
 
     if (virTypedParamsSerialize(params, nparams,
+                                ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX,
                                 (virTypedParameterRemotePtr *) &args.params.params_val,
                                 &args.params.params_len,
                                 0) < 0)
@@ -407,6 +406,7 @@ remoteAdminServerSetClientLimits(virAdmServerPtr srv,
     virObjectLock(priv);
 
     if (virTypedParamsSerialize(params, nparams,
+                                ADMIN_SERVER_CLIENT_LIMITS_MAX,
                                 (virTypedParameterRemotePtr *) &args.params.params_val,
                                 &args.params.params_len,
                                 0) < 0)

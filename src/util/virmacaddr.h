@@ -16,20 +16,17 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_MACADDR_H__
-# define __VIR_MACADDR_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
+#include "virautoclean.h"
 
-# define VIR_MAC_BUFLEN 6
-# define VIR_MAC_HEXLEN (VIR_MAC_BUFLEN * 2)
-# define VIR_MAC_PREFIX_BUFLEN 3
-# define VIR_MAC_STRING_BUFLEN (VIR_MAC_BUFLEN * 3)
+#define VIR_MAC_BUFLEN 6
+#define VIR_MAC_HEXLEN (VIR_MAC_BUFLEN * 2)
+#define VIR_MAC_PREFIX_BUFLEN 3
+#define VIR_MAC_STRING_BUFLEN (VIR_MAC_BUFLEN * 3)
 
 typedef struct _virMacAddr virMacAddr;
 typedef virMacAddr *virMacAddrPtr;
@@ -37,6 +34,13 @@ typedef virMacAddr *virMacAddrPtr;
 struct _virMacAddr {
     unsigned char addr[VIR_MAC_BUFLEN];
 };
+/* This struct is used as a part of a larger struct that is
+ * overlaid on an ethernet packet captured with libpcap, so it
+ * must not have any extra members added - it must remain exactly
+ * 6 bytes in length.
+ */
+verify(sizeof(struct _virMacAddr) == 6);
+
 
 int virMacAddrCompare(const char *mac1, const char *mac2);
 int virMacAddrCmp(const virMacAddr *mac1, const virMacAddr *mac2);
@@ -48,7 +52,7 @@ void virMacAddrGetRaw(const virMacAddr *src, unsigned char dst[VIR_MAC_BUFLEN]);
 const char *virMacAddrFormat(const virMacAddr *addr,
                              char *str);
 void virMacAddrGenerate(const unsigned char prefix[VIR_MAC_PREFIX_BUFLEN],
-                        virMacAddrPtr addr);
+                        virMacAddrPtr addr) ATTRIBUTE_NOINLINE;
 int virMacAddrParse(const char* str,
                     virMacAddrPtr addr) ATTRIBUTE_RETURN_CHECK;
 int virMacAddrParseHex(const char* str,
@@ -57,5 +61,6 @@ int virMacAddrParseHex(const char* str,
 bool virMacAddrIsUnicast(const virMacAddr *addr);
 bool virMacAddrIsMulticast(const virMacAddr *addr);
 bool virMacAddrIsBroadcastRaw(const unsigned char s[VIR_MAC_BUFLEN]);
+void virMacAddrFree(virMacAddrPtr addr);
 
-#endif /* __VIR_MACADDR_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virMacAddr, virMacAddrFree);

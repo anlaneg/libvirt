@@ -3,9 +3,6 @@
  *
  * lxc_fuse.c: fuse filesystem support for libvirt lxc
  *
- * Authors:
- *  Gao feng <gaofeng at cn.fujitsu.com>
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -21,17 +18,15 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LXC_FUSE_H
-# define LXC_FUSE_H
+#pragma once
 
-# define FUSE_USE_VERSION 26
+#define FUSE_USE_VERSION 26
 
-# if WITH_FUSE
-#  include <fuse.h>
-# endif
+#if WITH_FUSE
+# include <fuse.h>
+#endif
 
-# include "lxc_conf.h"
-# include "viralloc.h"
+#include "lxc_conf.h"
 
 struct virLXCMeminfo {
     unsigned long long memtotal;
@@ -60,5 +55,3 @@ typedef struct virLXCFuse *virLXCFusePtr;
 int lxcSetupFuse(virLXCFusePtr *f, virDomainDefPtr def);
 int lxcStartFuse(virLXCFusePtr f);
 void lxcFreeFuse(virLXCFusePtr *f);
-
-#endif /* LXC_FUSE_H */

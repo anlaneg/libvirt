@@ -16,15 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_LOG_HANDLER_H__
-# define __VIR_LOG_HANDLER_H__
+#pragma once
 
-# include "internal.h"
-# include "virjson.h"
+#include "internal.h"
+#include "virjson.h"
 
 typedef struct _virLogHandler virLogHandler;
 typedef virLogHandler *virLogHandlerPtr;
@@ -78,5 +75,3 @@ int virLogHandlerDomainAppendLogFile(virLogHandlerPtr handler,
                                      unsigned int flags);
 
 virJSONValuePtr virLogHandlerPreExecRestart(virLogHandlerPtr handler);
-
-#endif /** __VIR_LOG_HANDLER_H__ */

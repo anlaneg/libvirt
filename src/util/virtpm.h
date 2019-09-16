@@ -16,12 +16,31 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Stefan Berger <stefanb@linux.vnet.ibm.com>
  */
-#ifndef __VIR_TPM_H__
-# define __VIR_TPM_H__
 
-char *virTPMCreateCancelPath(const char *devpath);
+#pragma once
 
-#endif /* __VIR_TPM_H__ */
+char *virTPMCreateCancelPath(const char *devpath) ATTRIBUTE_NOINLINE;
+
+char *virTPMGetSwtpm(void);
+char *virTPMGetSwtpmSetup(void);
+char *virTPMGetSwtpmIoctl(void);
+int virTPMEmulatorInit(void);
+
+bool virTPMSwtpmCapsGet(unsigned int cap);
+bool virTPMSwtpmSetupCapsGet(unsigned int cap);
+
+typedef enum {
+    VIR_TPM_SWTPM_FEATURE_CMDARG_PWD_FD,
+
+    VIR_TPM_SWTPM_FEATURE_LAST
+} virTPMSwtpmFeature;
+
+typedef enum {
+    VIR_TPM_SWTPM_SETUP_FEATURE_CMDARG_PWDFILE_FD,
+
+    VIR_TPM_SWTPM_SETUP_FEATURE_LAST
+} virTPMSwtpmSetupFeature;
+
+VIR_ENUM_DECL(virTPMSwtpmFeature);
+VIR_ENUM_DECL(virTPMSwtpmSetupFeature);

@@ -16,21 +16,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *    Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_FIREWALL_PRIV_H_ALLOW__
+#ifndef LIBVIRT_VIRFIREWALLPRIV_H_ALLOW
 # error "virfirewallpriv.h may only be included by virfirewall.c or test suites"
-#endif
+#endif /* LIBVIRT_VIRFIREWALLPRIV_H_ALLOW */
 
-#ifndef __VIR_FIREWALL_PRIV_H__
-# define __VIR_FIREWALL_PRIV_H__
+#pragma once
 
-# include "virfirewall.h"
-
-# define VIR_FIREWALL_FIREWALLD_SERVICE "org.fedoraproject.FirewallD1"
+#include "virfirewall.h"
 
 typedef enum {
     VIR_FIREWALL_BACKEND_AUTOMATIC,
@@ -41,5 +35,3 @@ typedef enum {
 } virFirewallBackend;
 
 int virFirewallSetBackend(virFirewallBackend backend);
-
-#endif /* __VIR_FIREWALL_PRIV_H__ */

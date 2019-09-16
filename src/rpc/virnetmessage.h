@@ -18,10 +18,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_NET_MESSAGE_H__
-# define __VIR_NET_MESSAGE_H__
+#pragma once
 
-# include "virnetprotocol.h"
+#include "virnetprotocol.h"
 
 typedef struct virNetMessageHeader *virNetMessageHeaderPtr;
 typedef struct virNetMessageError *virNetMessageErrorPtr;
@@ -100,5 +99,3 @@ int virNetMessageDupFD(virNetMessagePtr msg,
 
 int virNetMessageAddFD(virNetMessagePtr msg,
                        int fd);
-
-#endif /* __VIR_NET_MESSAGE_H__ */

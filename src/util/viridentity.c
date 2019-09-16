@@ -36,6 +36,7 @@
 #include "virutil.h"
 #include "virstring.h"
 #include "virprocess.h"
+#include "virtypedparam.h"
 
 #define VIR_FROM_THIS VIR_FROM_IDENTITY
 
@@ -44,7 +45,9 @@ VIR_LOG_INIT("util.identity");
 struct _virIdentity {
     virObject parent;
 
-    char *attrs[VIR_IDENTITY_ATTR_LAST];
+    int nparams;
+    int maxparams;
+    virTypedParameterPtr params;
 };
 
 static virClassPtr virIdentityClass;
@@ -54,10 +57,7 @@ static void virIdentityDispose(void *obj);
 
 static int virIdentityOnceInit(void)
 {
-    if (!(virIdentityClass = virClassNew(virClassForObject(),
-                                         "virIdentity",
-                                         sizeof(virIdentity),
-                                         virIdentityDispose)))
+    if (!VIR_CLASS_NEW(virIdentity, virClassForObject()))
         return -1;
 
     if (virThreadLocalInit(&virIdentityCurrent,
@@ -70,7 +70,7 @@ static int virIdentityOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virIdentity)
+VIR_ONCE_GLOBAL_INIT(virIdentity);
 
 /**
  * virIdentityGetCurrent:
@@ -136,8 +136,8 @@ int virIdentitySetCurrent(virIdentityPtr ident)
  */
 virIdentityPtr virIdentityGetSystem(void)
 {
-    char *username = NULL;
-    char *groupname = NULL;
+    VIR_AUTOFREE(char *) username = NULL;
+    VIR_AUTOFREE(char *) groupname = NULL;
     unsigned long long startTime;
     virIdentityPtr ret = NULL;
 #if WITH_SELINUX
@@ -147,25 +147,25 @@ virIdentityPtr virIdentityGetSystem(void)
     if (!(ret = virIdentityNew()))
         goto error;
 
-    if (virIdentitySetUNIXProcessID(ret, getpid()) < 0)
+    if (virIdentitySetProcessID(ret, getpid()) < 0)
         goto error;
 
     if (virProcessGetStartTime(getpid(), &startTime) < 0)
         goto error;
     if (startTime != 0 &&
-        virIdentitySetUNIXProcessTime(ret, startTime) < 0)
+        virIdentitySetProcessTime(ret, startTime) < 0)
         goto error;
 
     if (!(username = virGetUserName(geteuid())))
-        goto cleanup;
-    if (virIdentitySetUNIXUserName(ret, username) < 0)
+        return ret;
+    if (virIdentitySetUserName(ret, username) < 0)
         goto error;
     if (virIdentitySetUNIXUserID(ret, getuid()) < 0)
         goto error;
 
     if (!(groupname = virGetGroupName(getegid())))
-        goto cleanup;
-    if (virIdentitySetUNIXGroupName(ret, groupname) < 0)
+        return ret;
+    if (virIdentitySetGroupName(ret, groupname) < 0)
         goto error;
     if (virIdentitySetUNIXGroupID(ret, getgid()) < 0)
         goto error;
@@ -175,7 +175,7 @@ virIdentityPtr virIdentityGetSystem(void)
         if (getcon(&con) < 0) {
             virReportSystemError(errno, "%s",
                                  _("Unable to lookup SELinux process context"));
-            goto cleanup;
+            return ret;
         }
         if (virIdentitySetSELinuxContext(ret, con) < 0) {
             freecon(con);
@@ -185,15 +185,11 @@ virIdentityPtr virIdentityGetSystem(void)
     }
 #endif
 
- cleanup:
-    VIR_FREE(username);
-    VIR_FREE(groupname);
     return ret;
 
  error:
     virObjectUnref(ret);
-    ret = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 
@@ -222,311 +218,275 @@ virIdentityPtr virIdentityNew(void)
 static void virIdentityDispose(void *object)
 {
     virIdentityPtr ident = object;
-    size_t i;
 
-    for (i = 0; i < VIR_IDENTITY_ATTR_LAST; i++)
-        VIR_FREE(ident->attrs[i]);
+    virTypedParamsFree(ident->params, ident->nparams);
 }
 
 
-/**
- * virIdentitySetAttr:
- * @ident: the identity to modify
- * @attr: the attribute type to set
- * @value: the identifying value to associate with @attr
- *
- * Sets an identifying attribute @attr on @ident. Each
- * @attr type can only be set once.
- *
- * Returns: 0 on success, or -1 on error
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
  */
-int virIdentitySetAttr(virIdentityPtr ident,
-                       unsigned int attr,
-                       const char *value)
+int virIdentityGetUserName(virIdentityPtr ident,
+                           const char **username)
 {
-    int ret = -1;
-    VIR_DEBUG("ident=%p attribute=%u value=%s", ident, attr, value);
-
-    if (ident->attrs[attr]) {
-        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
-                        _("Identity attribute is already set"));
-        goto cleanup;
-    }
-
-    if (VIR_STRDUP(ident->attrs[attr], value) < 0)
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    return ret;
+    *username = NULL;
+    return virTypedParamsGetString(ident->params,
+                                   ident->nparams,
+                                   VIR_CONNECT_IDENTITY_USER_NAME,
+                                   username);
 }
 
 
-/**
- * virIdentityGetAttr:
- * @ident: the identity to query
- * @attr: the attribute to read
- * @value: filled with the attribute value
- *
- * Fills @value with a pointer to the value associated
- * with the identifying attribute @attr in @ident. If
- * @attr is not set, then it will simply be initialized
- * to NULL and considered as a successful read
- *
- * Returns 0 on success, -1 on error
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
  */
-int virIdentityGetAttr(virIdentityPtr ident,
-                       unsigned int attr,
-                       const char **value)
-{
-    VIR_DEBUG("ident=%p attribute=%d value=%p", ident, attr, value);
-
-    *value = ident->attrs[attr];
-
-    return 0;
-}
-
-
-/**
- * virIdentityIsEqual:
- * @identA: the first identity
- * @identB: the second identity
- *
- * Compares every attribute in @identA and @identB
- * to determine if they refer to the same identity
- *
- * Returns true if they are equal, false if not equal
- */
-bool virIdentityIsEqual(virIdentityPtr identA,
-                        virIdentityPtr identB)
-{
-    bool ret = false;
-    size_t i;
-    VIR_DEBUG("identA=%p identB=%p", identA, identB);
-
-    for (i = 0; i < VIR_IDENTITY_ATTR_LAST; i++) {
-        if (STRNEQ_NULLABLE(identA->attrs[i],
-                            identB->attrs[i]))
-            goto cleanup;
-    }
-
-    ret = true;
- cleanup:
-    return ret;
-}
-
-
-int virIdentityGetUNIXUserName(virIdentityPtr ident,
-                               const char **username)
-{
-    return virIdentityGetAttr(ident,
-                              VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                              username);
-}
-
-
 int virIdentityGetUNIXUserID(virIdentityPtr ident,
                              uid_t *uid)
 {
-    int val;
-    const char *userid;
+    unsigned long long val;
+    int rc;
 
     *uid = -1;
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_USER_ID,
-                           &userid) < 0)
-        return -1;
-
-    if (!userid)
-        return -1;
-
-    if (virStrToLong_i(userid, NULL, 10, &val) < 0)
-        return -1;
+    rc = virTypedParamsGetULLong(ident->params,
+                                 ident->nparams,
+                                 VIR_CONNECT_IDENTITY_UNIX_USER_ID,
+                                 &val);
+    if (rc <= 0)
+        return rc;
 
     *uid = (uid_t)val;
 
-    return 0;
+    return 1;
 }
 
-int virIdentityGetUNIXGroupName(virIdentityPtr ident,
-                                const char **groupname)
+
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
+int virIdentityGetGroupName(virIdentityPtr ident,
+                            const char **groupname)
 {
-    return virIdentityGetAttr(ident,
-                              VIR_IDENTITY_ATTR_UNIX_GROUP_NAME,
-                              groupname);
+    *groupname = NULL;
+    return virTypedParamsGetString(ident->params,
+                                   ident->nparams,
+                                   VIR_CONNECT_IDENTITY_GROUP_NAME,
+                                   groupname);
 }
 
 
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
 int virIdentityGetUNIXGroupID(virIdentityPtr ident,
                               gid_t *gid)
 {
-    int val;
-    const char *groupid;
+    unsigned long long val;
+    int rc;
 
     *gid = -1;
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_GROUP_ID,
-                           &groupid) < 0)
-        return -1;
-
-    if (!groupid)
-        return -1;
-
-    if (virStrToLong_i(groupid, NULL, 10, &val) < 0)
-        return -1;
+    rc = virTypedParamsGetULLong(ident->params,
+                                 ident->nparams,
+                                 VIR_CONNECT_IDENTITY_UNIX_GROUP_ID,
+                                 &val);
+    if (rc <= 0)
+        return rc;
 
     *gid = (gid_t)val;
 
-    return 0;
+    return 1;
 }
 
 
-int virIdentityGetUNIXProcessID(virIdentityPtr ident,
-                                pid_t *pid)
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
+int virIdentityGetProcessID(virIdentityPtr ident,
+                            pid_t *pid)
 {
-    unsigned long long val;
-    const char *processid;
+    long long val;
+    int rc;
 
     *pid = 0;
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_PROCESS_ID,
-                           &processid) < 0)
-        return -1;
-
-    if (!processid)
-        return -1;
-
-    if (virStrToLong_ull(processid, NULL, 10, &val) < 0)
-        return -1;
+    rc = virTypedParamsGetLLong(ident->params,
+                                ident->nparams,
+                                VIR_CONNECT_IDENTITY_PROCESS_ID,
+                                &val);
+    if (rc <= 0)
+        return rc;
 
     *pid = (pid_t)val;
 
-    return 0;
+    return 1;
 }
 
 
-int virIdentityGetUNIXProcessTime(virIdentityPtr ident,
-                                  unsigned long long *timestamp)
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
+int virIdentityGetProcessTime(virIdentityPtr ident,
+                              unsigned long long *timestamp)
 {
-    const char *processtime;
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_PROCESS_TIME,
-                           &processtime) < 0)
-        return -1;
-
-    if (!processtime)
-        return -1;
-
-    if (virStrToLong_ull(processtime, NULL, 10, timestamp) < 0)
-        return -1;
-
-    return 0;
+    *timestamp = 0;
+    return virTypedParamsGetULLong(ident->params,
+                                   ident->nparams,
+                                   VIR_CONNECT_IDENTITY_PROCESS_TIME,
+                                   timestamp);
 }
 
 
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
 int virIdentityGetSASLUserName(virIdentityPtr ident,
                                const char **username)
 {
-    return virIdentityGetAttr(ident,
-                              VIR_IDENTITY_ATTR_SASL_USER_NAME,
-                              username);
+    *username = NULL;
+    return virTypedParamsGetString(ident->params,
+                                   ident->nparams,
+                                   VIR_CONNECT_IDENTITY_SASL_USER_NAME,
+                                   username);
 }
 
 
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
 int virIdentityGetX509DName(virIdentityPtr ident,
                             const char **dname)
 {
-    return virIdentityGetAttr(ident,
-                              VIR_IDENTITY_ATTR_X509_DISTINGUISHED_NAME,
-                              dname);
+    *dname = NULL;
+    return virTypedParamsGetString(ident->params,
+                                   ident->nparams,
+                                   VIR_CONNECT_IDENTITY_X509_DISTINGUISHED_NAME,
+                                   dname);
 }
 
 
+/*
+ * Returns: 0 if not present, 1 if present, -1 on error
+ */
 int virIdentityGetSELinuxContext(virIdentityPtr ident,
                                  const char **context)
 {
-    return virIdentityGetAttr(ident,
-                              VIR_IDENTITY_ATTR_SELINUX_CONTEXT,
-                              context);
+    *context = NULL;
+    return virTypedParamsGetString(ident->params,
+                                   ident->nparams,
+                                   VIR_CONNECT_IDENTITY_SELINUX_CONTEXT,
+                                   context);
 }
 
 
-int virIdentitySetUNIXUserName(virIdentityPtr ident,
-                               const char *username)
+int virIdentitySetUserName(virIdentityPtr ident,
+                           const char *username)
 {
-    return virIdentitySetAttr(ident,
-                              VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                              username);
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_USER_NAME)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
+        return -1;
+    }
+
+    return virTypedParamsAddString(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_USER_NAME,
+                                   username);
 }
 
 
 int virIdentitySetUNIXUserID(virIdentityPtr ident,
                              uid_t uid)
 {
-    char *val;
-    int ret;
-    if (virAsprintf(&val, "%d", (int)uid) < 0)
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_UNIX_USER_ID)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
         return -1;
-    ret = virIdentitySetAttr(ident,
-                             VIR_IDENTITY_ATTR_UNIX_USER_ID,
-                             val);
-    VIR_FREE(val);
-    return ret;
+    }
+
+    return virTypedParamsAddULLong(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_UNIX_USER_ID,
+                                   uid);
 }
 
 
-int virIdentitySetUNIXGroupName(virIdentityPtr ident,
-                                const char *groupname)
+int virIdentitySetGroupName(virIdentityPtr ident,
+                            const char *groupname)
 {
-    return virIdentitySetAttr(ident,
-                              VIR_IDENTITY_ATTR_UNIX_GROUP_NAME,
-                              groupname);
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_GROUP_NAME)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
+        return -1;
+    }
+
+    return virTypedParamsAddString(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_GROUP_NAME,
+                                   groupname);
 }
 
 
 int virIdentitySetUNIXGroupID(virIdentityPtr ident,
                               gid_t gid)
 {
-    char *val;
-    int ret;
-    if (virAsprintf(&val, "%d", (int)gid) < 0)
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_UNIX_GROUP_ID)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
         return -1;
-    ret = virIdentitySetAttr(ident,
-                             VIR_IDENTITY_ATTR_UNIX_GROUP_ID,
-                             val);
-    VIR_FREE(val);
-    return ret;
+    }
+
+    return virTypedParamsAddULLong(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_UNIX_GROUP_ID,
+                                   gid);
 }
 
 
-int virIdentitySetUNIXProcessID(virIdentityPtr ident,
-                                pid_t pid)
+int virIdentitySetProcessID(virIdentityPtr ident,
+                            pid_t pid)
 {
-    char *val;
-    int ret;
-    if (virAsprintf(&val, "%lld", (long long) pid) < 0)
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_PROCESS_ID)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
         return -1;
-    ret = virIdentitySetAttr(ident,
-                             VIR_IDENTITY_ATTR_UNIX_PROCESS_ID,
-                             val);
-    VIR_FREE(val);
-    return ret;
+    }
+
+    return virTypedParamsAddLLong(&ident->params,
+                                  &ident->nparams,
+                                  &ident->maxparams,
+                                  VIR_CONNECT_IDENTITY_PROCESS_ID,
+                                  pid);
 }
 
 
-int virIdentitySetUNIXProcessTime(virIdentityPtr ident,
-                                  unsigned long long timestamp)
+int virIdentitySetProcessTime(virIdentityPtr ident,
+                              unsigned long long timestamp)
 {
-    char *val;
-    int ret;
-    if (virAsprintf(&val, "%llu", timestamp) < 0)
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_PROCESS_TIME)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
         return -1;
-    ret = virIdentitySetAttr(ident,
-                             VIR_IDENTITY_ATTR_UNIX_PROCESS_TIME,
-                             val);
-    VIR_FREE(val);
-    return ret;
+    }
+
+    return virTypedParamsAddULLong(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_PROCESS_TIME,
+                                   timestamp);
 }
 
 
@@ -534,25 +494,110 @@ int virIdentitySetUNIXProcessTime(virIdentityPtr ident,
 int virIdentitySetSASLUserName(virIdentityPtr ident,
                                const char *username)
 {
-    return virIdentitySetAttr(ident,
-                              VIR_IDENTITY_ATTR_SASL_USER_NAME,
-                              username);
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_SASL_USER_NAME)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
+        return -1;
+    }
+
+    return virTypedParamsAddString(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_SASL_USER_NAME,
+                                   username);
 }
 
 
 int virIdentitySetX509DName(virIdentityPtr ident,
                             const char *dname)
 {
-    return virIdentitySetAttr(ident,
-                              VIR_IDENTITY_ATTR_X509_DISTINGUISHED_NAME,
-                              dname);
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_X509_DISTINGUISHED_NAME)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
+        return -1;
+    }
+
+    return virTypedParamsAddString(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_X509_DISTINGUISHED_NAME,
+                                   dname);
 }
 
 
 int virIdentitySetSELinuxContext(virIdentityPtr ident,
                                  const char *context)
 {
-    return virIdentitySetAttr(ident,
-                              VIR_IDENTITY_ATTR_SELINUX_CONTEXT,
-                              context);
+    if (virTypedParamsGet(ident->params,
+                          ident->nparams,
+                          VIR_CONNECT_IDENTITY_SELINUX_CONTEXT)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("Identity attribute is already set"));
+        return -1;
+    }
+
+    return virTypedParamsAddString(&ident->params,
+                                   &ident->nparams,
+                                   &ident->maxparams,
+                                   VIR_CONNECT_IDENTITY_SELINUX_CONTEXT,
+                                   context);
+}
+
+
+int virIdentitySetParameters(virIdentityPtr ident,
+                             virTypedParameterPtr params,
+                             int nparams)
+{
+    if (virTypedParamsValidate(params, nparams,
+                               VIR_CONNECT_IDENTITY_USER_NAME,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_CONNECT_IDENTITY_UNIX_USER_ID,
+                               VIR_TYPED_PARAM_ULLONG,
+                               VIR_CONNECT_IDENTITY_GROUP_NAME,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_CONNECT_IDENTITY_UNIX_GROUP_ID,
+                               VIR_TYPED_PARAM_ULLONG,
+                               VIR_CONNECT_IDENTITY_PROCESS_ID,
+                               VIR_TYPED_PARAM_LLONG,
+                               VIR_CONNECT_IDENTITY_PROCESS_TIME,
+                               VIR_TYPED_PARAM_ULLONG,
+                               VIR_CONNECT_IDENTITY_SASL_USER_NAME,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_CONNECT_IDENTITY_X509_DISTINGUISHED_NAME,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_CONNECT_IDENTITY_SELINUX_CONTEXT,
+                               VIR_TYPED_PARAM_STRING,
+                               NULL) < 0)
+        return -1;
+
+    virTypedParamsFree(ident->params, ident->nparams);
+    ident->params = NULL;
+    ident->nparams = 0;
+    ident->maxparams = 0;
+    if (virTypedParamsCopy(&ident->params, params, nparams) < 0)
+        return -1;
+    ident->nparams = nparams;
+    ident->maxparams = nparams;
+
+    return 0;
+}
+
+
+int virIdentityGetParameters(virIdentityPtr ident,
+                             virTypedParameterPtr *params,
+                             int *nparams)
+{
+    *params = NULL;
+    *nparams = 0;
+
+    if (virTypedParamsCopy(params, ident->params, ident->nparams) < 0)
+        return -1;
+
+    *nparams = ident->nparams;
+
+    return 0;
 }

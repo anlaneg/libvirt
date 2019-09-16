@@ -17,25 +17,20 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "internal.h"
 #include "datatypes.h"
-#include "xen/xen_driver.h"
-#include "xen/xm_internal.h"
-#include "xenconfig/xen_xm.h"
+#include "libxl/xen_xm.h"
 #include "testutils.h"
 #include "testutilsxen.h"
 #include "viralloc.h"
 #include "virstring.h"
+#include "libxl/libxl_conf.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -46,11 +41,10 @@ static int
 testCompareParseXML(const char *xmcfg, const char *xml)
 {
     char *gotxmcfgData = NULL;
-    virConfPtr conf = NULL;
+    VIR_AUTOPTR(virConf) conf = NULL;
     int ret = -1;
     virConnectPtr conn = NULL;
     int wrote = 4096;
-    struct _xenUnifiedPrivate priv;
     virDomainDefPtr def = NULL;
 
     if (VIR_ALLOC_N(gotxmcfgData, wrote) < 0)
@@ -59,15 +53,11 @@ testCompareParseXML(const char *xmcfg, const char *xml)
     conn = virGetConnect();
     if (!conn) goto fail;
 
-    /* Many puppies died to bring you this code. */
-    priv.caps = caps;
-    conn->privateData = &priv;
-
     if (!(def = virDomainDefParseFile(xml, caps, xmlopt, NULL,
                                       VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto fail;
 
-    if (!virDomainDefCheckABIStability(def, def)) {
+    if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
         fprintf(stderr, "ABI stability check failed on %s", xml);
         goto fail;
     }
@@ -86,8 +76,6 @@ testCompareParseXML(const char *xmcfg, const char *xml)
 
  fail:
     VIR_FREE(gotxmcfgData);
-    if (conf)
-        virConfFree(conf);
     virDomainDefFree(def);
     virObjectUnref(conn);
 
@@ -99,23 +87,14 @@ testCompareFormatXML(const char *xmcfg, const char *xml)
 {
     char *xmcfgData = NULL;
     char *gotxml = NULL;
-    virConfPtr conf = NULL;
+    VIR_AUTOPTR(virConf) conf = NULL;
     int ret = -1;
-    virConnectPtr conn;
-    struct _xenUnifiedPrivate priv;
     virDomainDefPtr def = NULL;
-
-    conn = virGetConnect();
-    if (!conn) goto fail;
 
     if (virTestLoadFile(xmcfg, &xmcfgData) < 0)
         goto fail;
 
-    /* Many puppies died to bring you this code. */
-    priv.caps = caps;
-    conn->privateData = &priv;
-
-    if (!(conf = virConfReadMem(xmcfgData, strlen(xmcfgData), 0)))
+    if (!(conf = virConfReadString(xmcfgData, 0)))
         goto fail;
 
     if (!(def = xenParseXM(conf, caps, xmlopt)))
@@ -130,12 +109,9 @@ testCompareFormatXML(const char *xmcfg, const char *xml)
     ret = 0;
 
  fail:
-    if (conf)
-        virConfFree(conf);
     VIR_FREE(xmcfgData);
     VIR_FREE(gotxml);
     virDomainDefFree(def);
-    virObjectUnref(conn);
 
     return ret;
 }
@@ -180,42 +156,45 @@ mymain(void)
 {
     int ret = 0;
 
-    if (!(caps = testXenCapsInit()))
+    if (!(caps = testXLInitCaps()))
         return EXIT_FAILURE;
 
-    if (!(xmlopt = xenDomainXMLConfInit()))
+    if (!(xmlopt = libxlCreateXMLConf()))
         return EXIT_FAILURE;
 
-#define DO_TEST_PARSE(name)                                             \
-    do {                                                                \
-        struct testInfo info0 = { name, 0 };                            \
-        if (virTestRun("Xen XM-2-XML Parse  " name,                     \
-                       testCompareHelper, &info0) < 0)                  \
-            ret = -1;                                                   \
+#define DO_TEST_PARSE(name) \
+    do { \
+        struct testInfo info0 = { name, 0 }; \
+        if (virTestRun("Xen XM-2-XML Parse  " name, \
+                       testCompareHelper, &info0) < 0) \
+            ret = -1; \
     } while (0)
 
 
-#define DO_TEST_FORMAT(name)                                            \
-    do {                                                                \
-        struct testInfo info1 = { name, 1 };                            \
-        if (virTestRun("Xen XM-2-XML Format " name,                     \
-                       testCompareHelper, &info1) < 0)                  \
-            ret = -1;                                                   \
+#define DO_TEST_FORMAT(name) \
+    do { \
+        struct testInfo info1 = { name, 1 }; \
+        if (virTestRun("Xen XM-2-XML Format " name, \
+                       testCompareHelper, &info1) < 0) \
+            ret = -1; \
     } while (0)
 
 
-#define DO_TEST(name)                                                   \
-    do {                                                                \
-        DO_TEST_PARSE(name);                                            \
-        DO_TEST_FORMAT(name);                                           \
+#define DO_TEST(name) \
+    do { \
+        DO_TEST_PARSE(name); \
+        DO_TEST_FORMAT(name); \
     } while (0)
 
     DO_TEST("paravirt-new-pvfb");
     DO_TEST("paravirt-new-pvfb-vncdisplay");
     DO_TEST("paravirt-net-e1000");
+    DO_TEST("paravirt-net-fakemodel");
     DO_TEST("paravirt-net-vifname");
     DO_TEST("paravirt-vcpu");
     DO_TEST("paravirt-maxvcpus");
+    DO_TEST_FORMAT("paravirt-root");
+    DO_TEST_FORMAT("paravirt-extra-root");
     DO_TEST("fullvirt-new-cdrom");
     DO_TEST("fullvirt-utc");
     DO_TEST("fullvirt-localtime");
@@ -256,4 +235,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

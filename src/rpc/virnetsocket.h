@@ -17,24 +17,21 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NET_SOCKET_H__
-# define __VIR_NET_SOCKET_H__
+#pragma once
 
-# include "virsocketaddr.h"
-# include "vircommand.h"
-# ifdef WITH_GNUTLS
-#  include "virnettlscontext.h"
-# endif
-# include "virobject.h"
-# ifdef WITH_SASL
-#  include "virnetsaslcontext.h"
-# endif
-# include "virjson.h"
-# include "viruri.h"
+#include "virsocketaddr.h"
+#include "vircommand.h"
+#ifdef WITH_GNUTLS
+# include "virnettlscontext.h"
+#endif
+#include "virobject.h"
+#ifdef WITH_SASL
+# include "virnetsaslcontext.h"
+#endif
+#include "virjson.h"
+#include "viruri.h"
 
 typedef struct _virNetSocket virNetSocket;
 typedef virNetSocket *virNetSocketPtr;
@@ -61,6 +58,7 @@ int virNetSocketNewListenUNIX(const char *path,
                               virNetSocketPtr *addr);
 
 int virNetSocketNewListenFD(int fd,
+                            bool unlinkUNIX,
                             virNetSocketPtr *addr);
 
 int virNetSocketNewConnectTCP(const char *nodename,
@@ -130,18 +128,23 @@ bool virNetSocketIsLocal(virNetSocketPtr sock);
 
 bool virNetSocketHasPassFD(virNetSocketPtr sock);
 
+char *virNetSocketGetPath(virNetSocketPtr sock);
 int virNetSocketGetPort(virNetSocketPtr sock);
 
 int virNetSocketGetUNIXIdentity(virNetSocketPtr sock,
                                 uid_t *uid,
                                 gid_t *gid,
                                 pid_t *pid,
-                                unsigned long long *timestamp);
+                                unsigned long long *timestamp)
+    ATTRIBUTE_NOINLINE;
 int virNetSocketGetSELinuxContext(virNetSocketPtr sock,
-                                  char **context);
+                                  char **context)
+    ATTRIBUTE_NOINLINE;
 
 int virNetSocketSetBlocking(virNetSocketPtr sock,
                             bool blocking);
+
+void virNetSocketSetQuietEOF(virNetSocketPtr sock);
 
 ssize_t virNetSocketRead(virNetSocketPtr sock, char *buf, size_t len);
 ssize_t virNetSocketWrite(virNetSocketPtr sock, const char *buf, size_t len);
@@ -149,15 +152,15 @@ ssize_t virNetSocketWrite(virNetSocketPtr sock, const char *buf, size_t len);
 int virNetSocketSendFD(virNetSocketPtr sock, int fd);
 int virNetSocketRecvFD(virNetSocketPtr sock, int *fd);
 
-# ifdef WITH_GNUTLS
+#ifdef WITH_GNUTLS
 void virNetSocketSetTLSSession(virNetSocketPtr sock,
                                virNetTLSSessionPtr sess);
-# endif
+#endif
 
-# ifdef WITH_SASL
+#ifdef WITH_SASL
 void virNetSocketSetSASLSession(virNetSocketPtr sock,
                                 virNetSASLSessionPtr sess);
-# endif
+#endif
 bool virNetSocketHasCachedData(virNetSocketPtr sock);
 bool virNetSocketHasPendingData(virNetSocketPtr sock);
 
@@ -181,6 +184,3 @@ void virNetSocketUpdateIOCallback(virNetSocketPtr sock,
 void virNetSocketRemoveIOCallback(virNetSocketPtr sock);
 
 void virNetSocketClose(virNetSocketPtr sock);
-
-
-#endif /* __VIR_NET_SOCKET_H__ */

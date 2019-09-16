@@ -22,15 +22,15 @@
  * include/libvirt/libvirt.h apply. ie this file is *append* only
  */
 
-#ifndef __LIBVIRT_H_
-# define __LIBVIRT_H_
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef void (*virStateInhibitCallback)(bool inhibit,
                                         void *opaque);
 
 int virStateInitialize(bool privileged,
+                       bool mandatory,
                        virStateInhibitCallback inhibit,
                        void *opaque);
 int virStateCleanup(void);
@@ -45,7 +45,7 @@ int virStateStop(void);
  * feature.  Queries for VIR_DRV_FEATURE_PROGRAM* features are answered
  * directly by the RPC layer and not by the real driver.
  */
-enum {
+typedef enum {
     /* Driver supports V1-style virDomainMigrate, ie. domainMigratePrepare/
      * domainMigratePerform/domainMigrateFinish.
      */
@@ -123,7 +123,7 @@ enum {
      * Support for driver close callback rpc
      */
     VIR_DRV_FEATURE_REMOTE_CLOSE_CALLBACK = 15,
-};
+} virDrvFeature;
 
 
 int virConnectSupportsFeature(virConnectPtr conn, int feature);
@@ -294,4 +294,6 @@ virTypedParameterValidateSet(virConnectPtr conn,
                              virTypedParameterPtr params,
                              int nparams);
 
-#endif
+int virStreamInData(virStreamPtr stream,
+                    int *data,
+                    long long *length);

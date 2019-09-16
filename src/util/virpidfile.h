@@ -21,11 +21,10 @@
  *
  */
 
-#ifndef __VIR_PIDFILE_H__
-# define __VIR_PIDFILE_H__
+#pragma once
 
-# include <sys/types.h>
-# include "internal.h"
+#include <sys/types.h>
+#include "internal.h"
 
 char *virPidFileBuildPath(const char *dir,
                           const char *name);
@@ -75,5 +74,3 @@ int virPidFileConstructPath(bool privileged,
                             char **pidfile);
 
 int virPidFileForceCleanupPath(const char *path) ATTRIBUTE_NONNULL(1);
-
-#endif /* __VIR_PIDFILE_H__ */

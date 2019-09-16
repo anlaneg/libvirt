@@ -17,13 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <string.h>
 #include <sys/stat.h>
 
 #include "datatypes.h"
@@ -33,12 +30,18 @@
 #include "virstoragefile.h"
 #include "storage_backend.h"
 #include "virlog.h"
+#include "virmodule.h"
+#include "virfile.h"
+#include "configmake.h"
 
 #if WITH_STORAGE_LVM
 # include "storage_backend_logical.h"
 #endif
 #if WITH_STORAGE_ISCSI
 # include "storage_backend_iscsi.h"
+#endif
+#if WITH_STORAGE_ISCSI_DIRECT
+# include "storage_backend_iscsi_direct.h"
 #endif
 #if WITH_STORAGE_SCSI
 # include "storage_backend_scsi.h"
@@ -72,67 +75,107 @@
 
 VIR_LOG_INIT("storage.storage_backend");
 
-static virStorageBackendPtr backends[] = {
-#if WITH_STORAGE_DIR
-    &virStorageBackendDirectory,
-#endif
-#if WITH_STORAGE_FS
-    &virStorageBackendFileSystem,
-    &virStorageBackendNetFileSystem,
+#define VIR_STORAGE_BACKENDS_MAX 20
+
+static virStorageBackendPtr virStorageBackends[VIR_STORAGE_BACKENDS_MAX];
+static size_t virStorageBackendsCount;
+
+#define STORAGE_BACKEND_MODULE_DIR LIBDIR "/libvirt/storage-backend"
+
+static int
+virStorageDriverLoadBackendModule(const char *name,
+                                  const char *regfunc,
+                                  bool forceload)
+{
+    VIR_AUTOFREE(char *) modfile = NULL;
+
+    if (!(modfile = virFileFindResourceFull(name,
+                                            "libvirt_storage_backend_",
+                                            ".so",
+                                            abs_top_builddir "/src/.libs",
+                                            STORAGE_BACKEND_MODULE_DIR,
+                                            "LIBVIRT_STORAGE_BACKEND_DIR")))
+        return -1;
+
+    return virModuleLoad(modfile, regfunc, forceload);
+}
+
+
+#define VIR_STORAGE_BACKEND_REGISTER(func, module) \
+    if (virStorageDriverLoadBackendModule(module, #func, allbackends) < 0) \
+        return -1
+
+int
+virStorageBackendDriversRegister(bool allbackends ATTRIBUTE_UNUSED)
+{
+#if WITH_STORAGE_DIR || WITH_STORAGE_FS
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendFsRegister, "fs");
 #endif
 #if WITH_STORAGE_LVM
-    &virStorageBackendLogical,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendLogicalRegister, "logical");
 #endif
 #if WITH_STORAGE_ISCSI
-    &virStorageBackendISCSI,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendISCSIRegister, "iscsi");
+#endif
+#if WITH_STORAGE_ISCSI_DIRECT
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendISCSIDirectRegister, "iscsi-direct");
 #endif
 #if WITH_STORAGE_SCSI
-    &virStorageBackendSCSI,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendSCSIRegister, "scsi");
 #endif
 #if WITH_STORAGE_MPATH
-    &virStorageBackendMpath,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendMpathRegister, "mpath");
 #endif
 #if WITH_STORAGE_DISK
-    &virStorageBackendDisk,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendDiskRegister, "disk");
 #endif
 #if WITH_STORAGE_RBD
-    &virStorageBackendRBD,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendRBDRegister, "rbd");
 #endif
 #if WITH_STORAGE_SHEEPDOG
-    &virStorageBackendSheepdog,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendSheepdogRegister, "sheepdog");
 #endif
 #if WITH_STORAGE_GLUSTER
-    &virStorageBackendGluster,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendGlusterRegister, "gluster");
 #endif
 #if WITH_STORAGE_ZFS
-    &virStorageBackendZFS,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendZFSRegister, "zfs");
 #endif
 #if WITH_STORAGE_VSTORAGE
-    &virStorageBackendVstorage,
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendVstorageRegister, "vstorage");
 #endif
-    NULL
-};
+
+    return 0;
+}
+#undef VIR_STORAGE_BACKEND_REGISTER
 
 
-static virStorageFileBackendPtr fileBackends[] = {
-#if WITH_STORAGE_FS
-    &virStorageFileBackendFile,
-    &virStorageFileBackendBlock,
-#endif
-#if WITH_STORAGE_GLUSTER
-    &virStorageFileBackendGluster,
-#endif
-    NULL
-};
+int
+virStorageBackendRegister(virStorageBackendPtr backend)
+{
+    VIR_DEBUG("Registering storage backend '%s'",
+              virStoragePoolTypeToString(backend->type));
+
+    if (virStorageBackendsCount >= VIR_STORAGE_BACKENDS_MAX) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Too many drivers, cannot register storage backend '%s'"),
+                       virStoragePoolTypeToString(backend->type));
+        return -1;
+    }
+
+    virStorageBackends[virStorageBackendsCount] = backend;
+    virStorageBackendsCount++;
+    return 0;
+}
 
 
 virStorageBackendPtr
 virStorageBackendForType(int type)
 {
     size_t i;
-    for (i = 0; backends[i]; i++)
-        if (backends[i]->type == type)
-            return backends[i];
+    for (i = 0; i < virStorageBackendsCount; i++)
+        if (virStorageBackends[i]->type == type)
+            return virStorageBackends[i];
 
     virReportError(VIR_ERR_INTERNAL_ERROR,
                    _("missing backend for pool type %d (%s)"),
@@ -141,44 +184,17 @@ virStorageBackendForType(int type)
 }
 
 
-virStorageFileBackendPtr
-virStorageFileBackendForTypeInternal(int type,
-                                     int protocol,
-                                     bool report)
+virCapsPtr
+virStorageBackendGetCapabilities(void)
 {
+    virCapsPtr caps;
     size_t i;
 
-    for (i = 0; fileBackends[i]; i++) {
-        if (fileBackends[i]->type == type) {
-            if (type == VIR_STORAGE_TYPE_NETWORK &&
-                fileBackends[i]->protocol != protocol)
-                continue;
-
-            return fileBackends[i];
-        }
-    }
-
-    if (!report)
+    if (!(caps = virCapabilitiesNew(VIR_ARCH_NONE, false, false)))
         return NULL;
 
-    if (type == VIR_STORAGE_TYPE_NETWORK) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("missing storage backend for network files "
-                         "using %s protocol"),
-                       virStorageNetProtocolTypeToString(protocol));
-    } else {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("missing storage backend for '%s' storage"),
-                       virStorageTypeToString(type));
-    }
+    for (i = 0; i < virStorageBackendsCount; i++)
+        virCapabilitiesAddStoragePool(caps, virStorageBackends[i]->type);
 
-    return NULL;
-}
-
-
-virStorageFileBackendPtr
-virStorageFileBackendForType(int type,
-                             int protocol)
-{
-    return virStorageFileBackendForTypeInternal(type, protocol, true);
+    return caps;
 }

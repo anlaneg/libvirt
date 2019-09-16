@@ -16,12 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Roman Bogorodskiy
  */
 
 #include <config.h>
 
+#include "bhyve_conf.h"
 #include "bhyve_device.h"
 #include "bhyve_domain.h"
 #include "bhyve_capabilities.h"
@@ -33,7 +32,7 @@
 VIR_LOG_INIT("bhyve.bhyve_domain");
 
 static void *
-bhyveDomainObjPrivateAlloc(void)
+bhyveDomainObjPrivateAlloc(void *opaque ATTRIBUTE_UNUSED)
 {
     bhyveDomainObjPrivatePtr priv;
 
@@ -57,6 +56,21 @@ virDomainXMLPrivateDataCallbacks virBhyveDriverPrivateDataCallbacks = {
     .alloc = bhyveDomainObjPrivateAlloc,
     .free = bhyveDomainObjPrivateFree,
 };
+
+bool
+bhyveDomainDefNeedsISAController(virDomainDefPtr def)
+{
+    if (def->os.bootloader == NULL && def->os.loader)
+        return true;
+
+    if (def->nserials)
+        return true;
+
+    if (def->ngraphics && def->nvideos)
+        return true;
+
+    return false;
+}
 
 static int
 bhyveDomainDefPostParse(virDomainDefPtr def,
@@ -122,6 +136,21 @@ bhyveDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
             bhyveDomainDiskDefAssignAddress(driver, disk, def) < 0)
             return -1;
     }
+
+    if (dev->type == VIR_DOMAIN_DEVICE_CONTROLLER) {
+        virDomainControllerDefPtr cont = dev->data.controller;
+
+        if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI &&
+            (cont->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT ||
+             cont->model == VIR_DOMAIN_CONTROLLER_MODEL_PCIE_ROOT) &&
+            cont->idx != 0) {
+            virReportError(VIR_ERR_XML_ERROR, "%s",
+                           _("pci-root and pcie-root controllers "
+                             "should have index 0"));
+            return -1;
+        }
+    }
+
     return 0;
 }
 
@@ -144,11 +173,94 @@ virBhyveDriverCreateXMLConf(bhyveConnPtr driver)
     virBhyveDriverDomainDefParserConfig.priv = driver;
     return virDomainXMLOptionNew(&virBhyveDriverDomainDefParserConfig,
                                  &virBhyveDriverPrivateDataCallbacks,
-                                 NULL);
+                                 &virBhyveDriverDomainXMLNamespace,
+                                 NULL, NULL);
 }
 
 virDomainDefParserConfig virBhyveDriverDomainDefParserConfig = {
     .devicesPostParseCallback = bhyveDomainDeviceDefPostParse,
     .domainPostParseCallback = bhyveDomainDefPostParse,
     .assignAddressesCallback = bhyveDomainDefAssignAddresses,
+};
+
+static void
+bhyveDomainDefNamespaceFree(void *nsdata)
+{
+    bhyveDomainCmdlineDefPtr cmd = nsdata;
+
+    bhyveDomainCmdlineDefFree(cmd);
+}
+
+static int
+bhyveDomainDefNamespaceParse(xmlXPathContextPtr ctxt,
+                             void **data)
+{
+    bhyveDomainCmdlineDefPtr cmd = NULL;
+    xmlNodePtr *nodes = NULL;
+    int n;
+    size_t i;
+    int ret = -1;
+
+    if (VIR_ALLOC(cmd) < 0)
+        return -1;
+
+    n = virXPathNodeSet("./bhyve:commandline/bhyve:arg", ctxt, &nodes);
+    if (n == 0)
+        ret = 0;
+    if (n <= 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(cmd->args, n) < 0)
+        goto cleanup;
+
+    for (i = 0; i < n; i++) {
+        cmd->args[cmd->num_args] = virXMLPropString(nodes[i], "value");
+        if (cmd->args[cmd->num_args] == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           "%s", _("No bhyve command-line argument specified"));
+            goto cleanup;
+        }
+        cmd->num_args++;
+    }
+
+    VIR_STEAL_PTR(*data, cmd);
+    ret = 0;
+
+ cleanup:
+    VIR_FREE(nodes);
+    bhyveDomainDefNamespaceFree(cmd);
+
+    return ret;
+}
+
+static int
+bhyveDomainDefNamespaceFormatXML(virBufferPtr buf,
+                                 void *nsdata)
+{
+    bhyveDomainCmdlineDefPtr cmd = nsdata;
+    size_t i;
+
+    if (!cmd->num_args)
+        return 0;
+
+    virBufferAddLit(buf, "<bhyve:commandline>\n");
+    virBufferAdjustIndent(buf, 2);
+
+    for (i = 0; i < cmd->num_args; i++)
+        virBufferEscapeString(buf, "<bhyve:arg value='%s'/>\n",
+                              cmd->args[i]);
+
+    virBufferAdjustIndent(buf, -2);
+    virBufferAddLit(buf, "</bhyve:commandline>\n");
+
+    return 0;
+}
+
+virXMLNamespace virBhyveDriverDomainXMLNamespace = {
+    .parse = bhyveDomainDefNamespaceParse,
+    .free = bhyveDomainDefNamespaceFree,
+    .format = bhyveDomainDefNamespaceFormatXML,
+    .prefix = "bhyve",
+    .uri = "http://libvirt.org/schemas/domain/bhyve/1.0",
+
 };

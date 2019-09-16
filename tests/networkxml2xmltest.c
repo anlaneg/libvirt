@@ -1,9 +1,6 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -13,6 +10,7 @@
 #include "network_conf.h"
 #include "testutilsqemu.h"
 #include "virstring.h"
+#include "network/bridge_driver.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -32,15 +30,19 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml,
     int ret;
     testCompareNetXML2XMLResult result = TEST_COMPARE_NET_XML2XML_RESULT_SUCCESS;
     virNetworkDefPtr dev = NULL;
+    virNetworkXMLOptionPtr xmlopt = NULL;
 
-    if (!(dev = virNetworkDefParseFile(inxml))) {
+    if (!(xmlopt = networkDnsmasqCreateXMLConf()))
+        goto cleanup;
+
+    if (!(dev = virNetworkDefParseFile(inxml, xmlopt))) {
         result = TEST_COMPARE_NET_XML2XML_RESULT_FAIL_PARSE;
         goto cleanup;
     }
     if (expectResult == TEST_COMPARE_NET_XML2XML_RESULT_FAIL_PARSE)
         goto cleanup;
 
-    if (!(actual = virNetworkDefFormat(dev, flags))) {
+    if (!(actual = virNetworkDefFormat(dev, xmlopt, flags))) {
         result = TEST_COMPARE_NET_XML2XML_RESULT_FAIL_FORMAT;
         goto cleanup;
     }
@@ -70,6 +72,7 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml,
 
     VIR_FREE(actual);
     virNetworkDefFree(dev);
+    virObjectUnref(xmlopt);
     return ret;
 }
 
@@ -109,12 +112,12 @@ mymain(void)
 {
     int ret = 0;
 
-#define DO_TEST_FULL(name, flags, expectResult)                         \
-    do {                                                                \
-        const struct testInfo info = {name, flags, expectResult};       \
-        if (virTestRun("Network XML-2-XML " name,                       \
-                       testCompareXMLToXMLHelper, &info) < 0)           \
-            ret = -1;                                                   \
+#define DO_TEST_FULL(name, flags, expectResult) \
+    do { \
+        const struct testInfo info = {name, flags, expectResult}; \
+        if (virTestRun("Network XML-2-XML " name, \
+                       testCompareXMLToXMLHelper, &info) < 0) \
+            ret = -1; \
     } while (0)
 #define DO_TEST(name) \
     DO_TEST_FULL(name, 0, TEST_COMPARE_NET_XML2XML_RESULT_SUCCESS)
@@ -141,8 +144,10 @@ mymain(void)
     DO_TEST("nat-network-dns-hosts");
     DO_TEST("nat-network-dns-forward-plain");
     DO_TEST("nat-network-dns-forwarders");
+    DO_TEST("nat-network-dns-forwarder-no-resolv");
     DO_TEST("nat-network-forward-nat-address");
     DO_TEST("nat-network-forward-nat-no-address");
+    DO_TEST("nat-network-mtu");
     DO_TEST("8021Qbh-net");
     DO_TEST("direct-net");
     DO_TEST("host-bridge-net");
@@ -158,8 +163,10 @@ mymain(void)
     DO_TEST_PARSE_ERROR("hostdev-duplicate");
     DO_TEST_PARSE_ERROR("passthrough-duplicate");
     DO_TEST("metadata");
+    DO_TEST("set-mtu");
+    DO_TEST("dnsmasq-options");
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

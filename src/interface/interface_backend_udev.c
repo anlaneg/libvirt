@@ -20,7 +20,6 @@
  */
 #include <config.h>
 
-#include <errno.h>
 #include <dirent.h>
 #include <libudev.h>
 
@@ -33,13 +32,22 @@
 #include "interface_conf.h"
 #include "viralloc.h"
 #include "virstring.h"
+#include "virpidfile.h"
 #include "viraccessapicheck.h"
+#include "virinterfaceobj.h"
 #include "virnetdev.h"
+
+#include "configmake.h"
 
 #define VIR_FROM_THIS VIR_FROM_INTERFACE
 
 struct udev_iface_driver {
     struct udev *udev;
+    /* pid file FD, ensures two copies of the driver can't use the same root */
+    int lockFD;
+
+    char *stateDir;
+    bool privileged;
 };
 
 typedef enum {
@@ -569,7 +577,7 @@ udevBridgeScanDirFilter(const struct dirent *entry)
      * vnet%d. Improvements to this check are welcome.
      */
     if (strlen(entry->d_name) >= 5) {
-        if (STRPREFIX(entry->d_name, VIR_NET_GENERATED_PREFIX) &&
+        if (STRPREFIX(entry->d_name, VIR_NET_GENERATED_TAP_PREFIX) &&
             c_isdigit(entry->d_name[4]))
             return 0;
     }
@@ -1157,13 +1165,41 @@ udevInterfaceIsActive(virInterfacePtr ifinfo)
 
 
 static int
-udevStateInitialize(bool privileged ATTRIBUTE_UNUSED,
+udevStateCleanup(void);
+
+static int
+udevStateInitialize(bool privileged,
                     virStateInhibitCallback callback ATTRIBUTE_UNUSED,
                     void *opaque ATTRIBUTE_UNUSED)
 {
-    int ret = -1;
+    int ret = VIR_DRV_STATE_INIT_ERROR;
 
     if (VIR_ALLOC(driver) < 0)
+        goto cleanup;
+
+    driver->lockFD = -1;
+
+    if (privileged) {
+        if (virAsprintf(&driver->stateDir,
+                        "%s/libvirt/interface", RUNSTATEDIR) < 0)
+            goto cleanup;
+    } else {
+        VIR_AUTOFREE(char *) rundir = NULL;
+
+        if (!(rundir = virGetUserRuntimeDirectory()))
+            goto cleanup;
+        if (virAsprintf(&driver->stateDir, "%s/interface/run", rundir) < 0)
+            goto cleanup;
+    }
+
+    if (virFileMakePathWithMode(driver->stateDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create state directory '%s'"),
+                             driver->stateDir);
+        goto cleanup;
+    }
+
+    if ((driver->lockFD =
+         virPidFileAcquire(driver->stateDir, "driver", false, getpid())) < 0)
         goto cleanup;
 
     driver->udev = udev_new();
@@ -1172,10 +1208,13 @@ udevStateInitialize(bool privileged ATTRIBUTE_UNUSED,
                        _("failed to create udev context"));
         goto cleanup;
     }
+    driver->privileged = privileged;
 
-    ret = 0;
+    ret = VIR_DRV_STATE_INIT_COMPLETE;
 
  cleanup:
+    if (ret < 0)
+        udevStateCleanup();
     return ret;
 }
 
@@ -1185,10 +1224,77 @@ udevStateCleanup(void)
     if (!driver)
         return -1;
 
-    udev_unref(driver->udev);
+    if (driver->udev)
+        udev_unref(driver->udev);
 
+    if (driver->lockFD != -1)
+        virPidFileRelease(driver->stateDir, "driver", driver->lockFD);
+
+    VIR_FREE(driver->stateDir);
     VIR_FREE(driver);
     return 0;
+}
+
+
+static virDrvOpenStatus
+udevConnectOpen(virConnectPtr conn,
+                virConnectAuthPtr auth ATTRIBUTE_UNUSED,
+                virConfPtr conf ATTRIBUTE_UNUSED,
+                unsigned int flags)
+{
+    virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+
+    if (driver == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("interface state driver is not active"));
+        return VIR_DRV_OPEN_ERROR;
+    }
+
+    if (driver->privileged) {
+        if (STRNEQ(conn->uri->path, "/system")) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("unexpected interface URI path '%s', try interface:///system"),
+                           conn->uri->path);
+            return VIR_DRV_OPEN_ERROR;
+        }
+    } else {
+        if (STRNEQ(conn->uri->path, "/session")) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("unexpected interface URI path '%s', try interface:///session"),
+                           conn->uri->path);
+            return VIR_DRV_OPEN_ERROR;
+        }
+    }
+
+    if (virConnectOpenEnsureACL(conn) < 0)
+        return VIR_DRV_OPEN_ERROR;
+
+    return VIR_DRV_OPEN_SUCCESS;
+}
+
+static int udevConnectClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+{
+    return 0;
+}
+
+
+static int udevConnectIsSecure(virConnectPtr conn ATTRIBUTE_UNUSED)
+{
+    /* Trivially secure, since always inside the daemon */
+    return 1;
+}
+
+
+static int udevConnectIsEncrypted(virConnectPtr conn ATTRIBUTE_UNUSED)
+{
+    /* Not encrypted, but remote driver takes care of that */
+    return 0;
+}
+
+
+static int udevConnectIsAlive(virConnectPtr conn ATTRIBUTE_UNUSED)
+{
+    return 1;
 }
 
 
@@ -1205,6 +1311,25 @@ static virInterfaceDriver udevIfaceDriver = {
     .interfaceGetXMLDesc = udevInterfaceGetXMLDesc, /* 1.0.0 */
 };
 
+
+static virHypervisorDriver udevHypervisorDriver = {
+    .name = "interface",
+    .connectOpen = udevConnectOpen, /* 4.1.0 */
+    .connectClose = udevConnectClose, /* 4.1.0 */
+    .connectIsEncrypted = udevConnectIsEncrypted, /* 4.1.0 */
+    .connectIsSecure = udevConnectIsSecure, /* 4.1.0 */
+    .connectIsAlive = udevConnectIsAlive, /* 4.1.0 */
+};
+
+
+static virConnectDriver udevConnectDriver = {
+    .localOnly = true,
+    .uriSchemes = (const char *[]){ "interface", NULL },
+    .hypervisorDriver = &udevHypervisorDriver,
+    .interfaceDriver = &udevIfaceDriver,
+};
+
+
 static virStateDriver interfaceStateDriver = {
     .name = "udev",
     .stateInitialize = udevStateInitialize,
@@ -1214,6 +1339,8 @@ static virStateDriver interfaceStateDriver = {
 int
 udevIfaceRegister(void)
 {
+    if (virRegisterConnectDriver(&udevConnectDriver, false) < 0)
+        return -1;
     if (virSetSharedInterfaceDriver(&udevIfaceDriver) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("failed to register udev interface driver"));

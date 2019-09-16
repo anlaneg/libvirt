@@ -14,17 +14,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_STRING_H__
-# define __VIR_STRING_H__
+#pragma once
 
-# include <stdarg.h>
+#include <stdarg.h>
 
-# include "internal.h"
+#include "internal.h"
 
 char **virStringSplitCount(const char *string,
                            const char *delim,
@@ -41,12 +37,19 @@ char *virStringListJoin(const char **strings,
                         const char *delim)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-char **virStringListAdd(const char **strings,
-                        const char *item);
+int virStringListAdd(char ***strings,
+                     const char *item);
 void virStringListRemove(char ***strings,
                          const char *item);
 
+int virStringListMerge(char ***dst,
+                       char ***src);
+
+int virStringListCopy(char ***dst,
+                      const char **src);
+
 void virStringListFree(char **strings);
+void virStringListAutoFree(char ***strings);
 void virStringListFreeCount(char **strings,
                             size_t count);
 
@@ -55,8 +58,6 @@ bool virStringListHasString(const char **strings,
 char *virStringListGetFirstWithPrefix(char **strings,
                                       const char *prefix)
     ATTRIBUTE_NONNULL(2);
-
-char *virArgvToString(const char *const *argv);
 
 int virStrToLong_i(char const *s,
                    char **end_ptr,
@@ -109,6 +110,9 @@ int virStrToDouble(char const *s,
                    double *result)
     ATTRIBUTE_RETURN_CHECK;
 
+int virDoubleToStr(char **strp, double number)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+
 void virSkipSpaces(const char **str) ATTRIBUTE_NONNULL(1);
 void virSkipSpacesAndBackslash(const char **str) ATTRIBUTE_NONNULL(1);
 void virTrimSpaces(char *str, char **endp) ATTRIBUTE_NONNULL(1);
@@ -117,29 +121,23 @@ void virSkipSpacesBackwards(const char *str, char **endp)
 
 bool virStringIsEmpty(const char *str);
 
-char *virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
+int virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
     ATTRIBUTE_RETURN_CHECK;
-char *virStrcpy(char *dest, const char *src, size_t destbytes)
+int virStrcpy(char *dest, const char *src, size_t destbytes)
     ATTRIBUTE_RETURN_CHECK;
-# define virStrcpyStatic(dest, src) virStrcpy((dest), (src), sizeof(dest))
+#define virStrcpyStatic(dest, src) virStrcpy((dest), (src), sizeof(dest))
 
 /* Don't call these directly - use the macros below */
-int virStrdup(char **dest, const char *src, bool report, int domcode,
-              const char *filename, const char *funcname, size_t linenr)
+int virStrdup(char **dest, const char *src)
     ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
 
-int virStrndup(char **dest, const char *src, ssize_t n, bool report, int domcode,
-               const char *filename, const char *funcname, size_t linenr)
+int virStrndup(char **dest, const char *src, ssize_t n)
     ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
-int virAsprintfInternal(bool report, int domcode, const char *filename,
-                        const char *funcname, size_t linenr, char **strp,
-                        const char *fmt, ...)
-    ATTRIBUTE_NONNULL(6) ATTRIBUTE_NONNULL(7) ATTRIBUTE_FMT_PRINTF(7, 8)
+int virAsprintfInternal(char **strp, const char *fmt, ...)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_FMT_PRINTF(2, 3)
     ATTRIBUTE_RETURN_CHECK;
-int virVasprintfInternal(bool report, int domcode, const char *filename,
-                         const char *funcname, size_t linenr, char **strp,
-                         const char *fmt, va_list list)
-    ATTRIBUTE_NONNULL(6) ATTRIBUTE_NONNULL(7) ATTRIBUTE_FMT_PRINTF(7, 0)
+int virVasprintfInternal(char **strp, const char *fmt, va_list list)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_FMT_PRINTF(2, 0)
     ATTRIBUTE_RETURN_CHECK;
 
 /**
@@ -151,11 +149,9 @@ int virVasprintfInternal(bool report, int domcode, const char *filename,
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns -1 on failure (with OOM error reported), 0 if @src was NULL,
- * 1 if @src was copied
+ * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
  */
-# define VIR_STRDUP(dst, src) virStrdup(&(dst), src, true, VIR_FROM_THIS, \
-                                        __FILE__, __FUNCTION__, __LINE__)
+#define VIR_STRDUP(dst, src) virStrdup(&(dst), src)
 
 /**
  * VIR_STRDUP_QUIET:
@@ -166,9 +162,9 @@ int virVasprintfInternal(bool report, int domcode, const char *filename,
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns -1 on failure, 0 if @src was NULL, 1 if @src was copied
+ * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
  */
-# define VIR_STRDUP_QUIET(dst, src) virStrdup(&(dst), src, false, 0, NULL, NULL, 0)
+#define VIR_STRDUP_QUIET(dst, src) VIR_STRDUP(dst, src)
 
 /**
  * VIR_STRNDUP:
@@ -183,12 +179,9 @@ int virVasprintfInternal(bool report, int domcode, const char *filename,
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns -1 on failure (with OOM error reported), 0 if @src was NULL,
- * 1 if @src was copied
+ * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
  */
-# define VIR_STRNDUP(dst, src, n) virStrndup(&(dst), src, n, true,    \
-                                             VIR_FROM_THIS, __FILE__, \
-                                             __FUNCTION__, __LINE__)
+#define VIR_STRNDUP(dst, src, n) virStrndup(&(dst), src, n)
 
 /**
  * VIR_STRNDUP_QUIET:
@@ -204,65 +197,53 @@ int virVasprintfInternal(bool report, int domcode, const char *filename,
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns -1 on failure, 0 if @src was NULL, 1 if @src was copied
+ * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
  */
-# define VIR_STRNDUP_QUIET(dst, src, n) virStrndup(&(dst), src, n, false, \
-                                                   0, NULL, NULL, 0)
+#define VIR_STRNDUP_QUIET(dst, src, n) virStrndup(&(dst), src, n)
 
 size_t virStringListLength(const char * const *strings);
 
 /**
  * virVasprintf
  *
- * Like glibc's vasprintf but makes sure *strp == NULL on failure, in which
- * case the OOM error is reported too.
+ * Like glibc's vasprintf but aborts on OOM
  *
- * Returns -1 on failure (with OOM error reported), number of bytes printed
- * on success.
+ * Returns number of bytes printed on success, aborts on OOM
  */
-# define virVasprintf(strp, fmt, list) \
-    virVasprintfInternal(true, VIR_FROM_THIS, __FILE__, __FUNCTION__, \
-                         __LINE__, strp, fmt, list)
+#define virVasprintf(strp, fmt, list) virVasprintfInternal(strp, fmt, list)
 
 /**
  * virVasprintfQuiet
  *
- * Like glibc's vasprintf but makes sure *strp == NULL on failure.
+ * Like glibc's vasprintf but aborts on OOM.
  *
- * Returns -1 on failure, number of bytes printed on success.
+ * Returns number of bytes printed on success, aborts on OOM
  */
-# define virVasprintfQuiet(strp, fmt, list) \
-    virVasprintfInternal(false, 0, NULL, NULL, 0, strp, fmt, list)
+#define virVasprintfQuiet(strp, fmt, list) virVasprintf(strp, fmt, list)
 
 /**
  * virAsprintf:
  * @strp: variable to hold result (char **)
  * @fmt: printf format
  *
- * Like glibc's_asprintf but makes sure *strp == NULL on failure, in which case
- * the OOM error is reported too.
+ * Like glibc's asprintf but aborts on OOM.
  *
- * Returns -1 on failure (with OOM error reported), number of bytes printed
- * on success.
+ * Returns number of bytes printed on success, aborts on OOM
  */
 
-# define virAsprintf(strp, ...) \
-    virAsprintfInternal(true, VIR_FROM_THIS, __FILE__, __FUNCTION__, __LINE__, \
-                        strp, __VA_ARGS__)
+#define virAsprintf(strp, ...) virAsprintfInternal(strp, __VA_ARGS__)
 
 /**
  * virAsprintfQuiet:
  * @strp: variable to hold result (char **)
  * @fmt: printf format
  *
- * Like glibc's_asprintf but makes sure *strp == NULL on failure.
+ * Like glibc's asprintf but makes sure *strp == NULL on failure.
  *
- * Returns -1 on failure, number of bytes printed on success.
+ * Returns number of bytes printed on success, aborts on OOM
  */
 
-# define virAsprintfQuiet(strp, ...) \
-    virAsprintfInternal(false, 0, NULL, NULL, 0, \
-                        strp, __VA_ARGS__)
+#define virAsprintfQuiet(strp, ...) virAsprintf(strp, __VA_ARGS__)
 
 int virStringSortCompare(const void *a, const void *b);
 int virStringSortRevCompare(const void *a, const void *b);
@@ -274,18 +255,50 @@ ssize_t virStringSearch(const char *str,
                         char ***matches)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4);
 
+bool virStringMatch(const char *str,
+                    const char *regexp);
+
 char *virStringReplace(const char *haystack,
                        const char *oldneedle,
                        const char *newneedle)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
 
+bool virStringHasSuffix(const char *str,
+                        const char *suffix);
+bool virStringHasCaseSuffix(const char *str,
+                            const char *suffix);
+bool virStringStripSuffix(char *str,
+                          const char *suffix) ATTRIBUTE_RETURN_CHECK;
+bool virStringMatchesNameSuffix(const char *file,
+                                const char *name,
+                                const char *suffix);
+
 void virStringStripIPv6Brackets(char *str);
+bool virStringHasChars(const char *str,
+                       const char *chars);
 bool virStringHasControlChars(const char *str);
 void virStringStripControlChars(char *str);
+void virStringFilterChars(char *str, const char *valid);
 
 bool virStringIsPrintable(const char *str);
 bool virStringBufferIsPrintable(const uint8_t *buf, size_t buflen);
 
 char *virStringEncodeBase64(const uint8_t *buf, size_t buflen);
 
-#endif /* __VIR_STRING_H__ */
+void virStringTrimOptionalNewline(char *str);
+
+int virStringParsePort(const char *str,
+                       unsigned int *port)
+    ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+
+int virStringParseYesNo(const char *str,
+                        bool *result)
+    ATTRIBUTE_RETURN_CHECK;
+/**
+ * VIR_AUTOSTRINGLIST:
+ *
+ * Declares a NULL-terminated list of strings which will be automatically freed
+ * when the pointer goes out of scope.
+ */
+#define VIR_AUTOSTRINGLIST \
+        __attribute__((cleanup(virStringListAutoFree))) char **

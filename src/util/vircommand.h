@@ -19,11 +19,11 @@
  *
  */
 
-#ifndef __VIR_COMMAND_H__
-# define __VIR_COMMAND_H__
+#pragma once
 
-# include "internal.h"
-# include "virbuffer.h"
+#include "internal.h"
+#include "virbuffer.h"
+#include "virautoclean.h"
 
 typedef struct _virCommand virCommand;
 typedef virCommand *virCommandPtr;
@@ -51,22 +51,24 @@ virCommandPtr virCommandNewVAList(const char *binary, va_list list)
  * delayed until the Run/RunAsync methods
  */
 
-enum {
+typedef enum {
     /* Close the FD in the parent */
     VIR_COMMAND_PASS_FD_CLOSE_PARENT = (1 << 0),
-};
+} virCommandPassFDFlags;
 
 void virCommandPassFD(virCommandPtr cmd,
                       int fd,
-                      unsigned int flags);
-
-void virCommandPassListenFDs(virCommandPtr cmd);
+                      unsigned int flags) ATTRIBUTE_NOINLINE;
 
 int virCommandPassFDGetFDIndex(virCommandPtr cmd,
                                int fd);
 
 void virCommandSetPidFile(virCommandPtr cmd,
                           const char *pidfile) ATTRIBUTE_NONNULL(2);
+
+gid_t virCommandGetGID(virCommandPtr cmd) ATTRIBUTE_NONNULL(1);
+
+uid_t virCommandGetUID(virCommandPtr cmd) ATTRIBUTE_NONNULL(1);
 
 void virCommandSetGID(virCommandPtr cmd, gid_t gid);
 
@@ -108,14 +110,12 @@ void virCommandAddEnvString(virCommandPtr cmd,
 void virCommandAddEnvBuffer(virCommandPtr cmd,
                             virBufferPtr buf);
 
-void virCommandAddEnvPassBlockSUID(virCommandPtr cmd,
-                                   const char *name,
-                                   const char *defvalue) ATTRIBUTE_NONNULL(2);
-
-void virCommandAddEnvPassAllowSUID(virCommandPtr cmd,
-                                   const char *name) ATTRIBUTE_NONNULL(2);
+void virCommandAddEnvPass(virCommandPtr cmd,
+                          const char *name) ATTRIBUTE_NONNULL(2);
 
 void virCommandAddEnvPassCommon(virCommandPtr cmd);
+
+void virCommandAddEnvXDG(virCommandPtr cmd, const char *baseDir);
 
 void virCommandAddArg(virCommandPtr cmd,
                       const char *val) ATTRIBUTE_NONNULL(2);
@@ -142,6 +142,11 @@ void virCommandAddArgList(virCommandPtr cmd,
 void virCommandSetWorkingDirectory(virCommandPtr cmd,
                                    const char *pwd) ATTRIBUTE_NONNULL(2);
 
+int virCommandSetSendBuffer(virCommandPtr cmd,
+                            int fd,
+                            unsigned char *buffer, size_t buflen)
+    ATTRIBUTE_NONNULL(3);
+
 void virCommandSetInputBuffer(virCommandPtr cmd,
                               const char *inbuf) ATTRIBUTE_NONNULL(2);
 
@@ -167,9 +172,9 @@ void virCommandSetPreExecHook(virCommandPtr cmd,
 void virCommandWriteArgLog(virCommandPtr cmd,
                            int logfd);
 
-char *virCommandToString(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+char *virCommandToString(virCommandPtr cmd, bool linebreaks) ATTRIBUTE_RETURN_CHECK;
 
-int virCommandExec(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+int virCommandExec(virCommandPtr cmd, gid_t *groups, int ngroups) ATTRIBUTE_RETURN_CHECK;
 
 int virCommandRun(virCommandPtr cmd,
                   int *exitstatus) ATTRIBUTE_RETURN_CHECK;
@@ -214,5 +219,4 @@ int virCommandRunNul(virCommandPtr cmd,
                      virCommandRunNulFunc func,
                      void *data);
 
-
-#endif /* __VIR_COMMAND_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virCommand, virCommandFree);

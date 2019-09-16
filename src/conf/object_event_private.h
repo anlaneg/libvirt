@@ -18,14 +18,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Ben Guthro
  */
 
-#include "datatypes.h"
+#pragma once
 
-#ifndef __OBJECT_EVENT_PRIVATE_H__
-# define __OBJECT_EVENT_PRIVATE_H__
+#include "datatypes.h"
 
 struct _virObjectMeta {
     int id;
@@ -107,5 +104,3 @@ virObjectEventNew(virClassPtr klass,
                   const char *key)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(5)
     ATTRIBUTE_NONNULL(7);
-
-#endif

@@ -2,7 +2,6 @@
  * libvirt-host.h
  * Summary: APIs for management of hosts
  * Description: Provides APIs for the management of hosts
- * Author: Daniel Veillard <veillard@redhat.com>
  *
  * Copyright (C) 2006-2014 Red Hat, Inc.
  *
@@ -21,8 +20,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_LIBVIRT_HOST_H__
-# define __VIR_LIBVIRT_HOST_H__
+#ifndef LIBVIRT_HOST_H
+# define LIBVIRT_HOST_H
 
 # ifndef __VIR_LIBVIRT_H_INCLUDES__
 #  error "Don't include this file directly, only use libvirt/libvirt.h"
@@ -432,6 +431,48 @@ typedef virNodeCPUStats *virNodeCPUStatsPtr;
 
 typedef virNodeMemoryStats *virNodeMemoryStatsPtr;
 
+
+/**
+ *
+ * SEV Parameters
+ */
+
+/**
+ * VIR_NODE_SEV_PDH:
+ *
+ * Macro represents the Platform Diffie-Hellman key, as VIR_TYPED_PARAMS_STRING.
+ */
+# define VIR_NODE_SEV_PDH "pdh"
+
+/**
+ * VIR_NODE_SEV_CERT_CHAIN:
+ *
+ * Macro represents the platform certificate chain that includes the platform
+ * endorsement key (PEK), owner certificate authority (OCD) and chip
+ * endorsement key (CEK), as VIR_TYPED_PARAMS_STRING.
+ */
+# define VIR_NODE_SEV_CERT_CHAIN "cert-chain"
+
+/**
+ * VIR_NODE_SEV_CBITPOS:
+ *
+ * Macro represents the CBit Position used by hypervisor when SEV is enabled.
+ */
+# define VIR_NODE_SEV_CBITPOS "cbitpos"
+
+/**
+ * VIR_NODE_SEV_REDUCED_PHYS_BITS:
+ *
+ * Macro represents the number of bits we lose in physical address space
+ * when SEV is enabled in the guest.
+ */
+# define VIR_NODE_SEV_REDUCED_PHYS_BITS "reduced-phys-bits"
+
+int virNodeGetSEVInfo (virConnectPtr conn,
+                       virTypedParameterPtr *params,
+                       int *nparams,
+                       unsigned int flags);
+
 /**
  * virConnectFlags
  *
@@ -538,6 +579,80 @@ virConnectPtr           virConnectOpenAuth      (const char *name,
                                                  unsigned int flags);
 int                     virConnectRef           (virConnectPtr conn);
 int                     virConnectClose         (virConnectPtr conn);
+
+/**
+ * VIR_CONNECT_IDENTITY_USER_NAME:
+ *
+ * The operating system user name as VIR_TYPED_PARAM_STRING.
+ */
+# define VIR_CONNECT_IDENTITY_USER_NAME "user-name"
+
+/**
+ * VIR_CONNECT_IDENTITY_UNIX_USER_ID:
+ *
+ * The UNIX user ID as VIR_TYPED_PARAM_ULLONG.
+ */
+# define VIR_CONNECT_IDENTITY_UNIX_USER_ID "unix-user-id"
+
+/**
+ * VIR_CONNECT_IDENTITY_GROUP_NAME:
+ *
+ * The operating system group name as VIR_TYPED_PARAM_STRING.
+ */
+# define VIR_CONNECT_IDENTITY_GROUP_NAME "group-name"
+
+/**
+ * VIR_CONNECT_IDENTITY_UNIX_GROUP_ID:
+ *
+ * The UNIX group ID as VIR_TYPED_PARAM_ULLONG.
+ */
+# define VIR_CONNECT_IDENTITY_UNIX_GROUP_ID "unix-group-id"
+
+/**
+ * VIR_CONNECT_IDENTITY_PROCESS_ID:
+ *
+ * The operating system process ID as VIR_TYPED_PARAM_LLONG.
+ */
+# define VIR_CONNECT_IDENTITY_PROCESS_ID "process-id"
+
+/**
+ * VIR_CONNECT_IDENTITY_PROCESS_TIME:
+ *
+ * The operating system process start time as VIR_TYPED_PARAM_ULLONG.
+ *
+ * The units the time is measured in vary according to the
+ * host operating system. On Linux this is usually clock
+ * ticks (as reported in /proc/$PID/stat field 22).
+ */
+# define VIR_CONNECT_IDENTITY_PROCESS_TIME "process-time"
+
+/**
+ * VIR_CONNECT_IDENTITY_SASL_USER_NAME:
+ *
+ * The SASL authenticated username as VIR_TYPED_PARAM_STRING
+ */
+# define VIR_CONNECT_IDENTITY_SASL_USER_NAME "sasl-user-name"
+
+/**
+ * VIR_CONNECT_IDENTITY_X509_DISTINGUISHED_NAME:
+ *
+ * The TLS x509 certificate distinguished named as VIR_TYPED_PARAM_STRING
+ */
+# define VIR_CONNECT_IDENTITY_X509_DISTINGUISHED_NAME "x509-distinguished-name"
+
+/**
+ * VIR_CONNECT_IDENTITY_SELINUX_CONTEXT:
+ *
+ * The application's SELinux context as VIR_TYPED_PARAM_STRING.
+ */
+# define VIR_CONNECT_IDENTITY_SELINUX_CONTEXT "selinux-context"
+
+
+int                     virConnectSetIdentity   (virConnectPtr conn,
+                                                 virTypedParameterPtr params,
+                                                 int nparams,
+                                                 unsigned int flags);
+
 const char *            virConnectGetType       (virConnectPtr conn);
 int                     virConnectGetVersion    (virConnectPtr conn,
                                                  unsigned long *hvVer);
@@ -640,6 +755,13 @@ typedef enum {
 int virConnectCompareCPU(virConnectPtr conn,
                          const char *xmlDesc,
                          unsigned int flags);
+int virConnectCompareHypervisorCPU(virConnectPtr conn,
+                                   const char *emulator,
+                                   const char *arch,
+                                   const char *machine,
+                                   const char *virttype,
+                                   const char *xmlCPU,
+                                   unsigned int flags);
 
 int virConnectGetCPUModelNames(virConnectPtr conn,
                                const char *arch,
@@ -660,6 +782,14 @@ char *virConnectBaselineCPU(virConnectPtr conn,
                             const char **xmlCPUs,
                             unsigned int ncpus,
                             unsigned int flags);
+char *virConnectBaselineHypervisorCPU(virConnectPtr conn,
+                                      const char *emulator,
+                                      const char *arch,
+                                      const char *machine,
+                                      const char *virttype,
+                                      const char **xmlCPUs,
+                                      unsigned int ncpus,
+                                      unsigned int flags);
 
 
 int virNodeGetFreePages(virConnectPtr conn,
@@ -687,4 +817,4 @@ int virNodeAllocPages(virConnectPtr conn,
                       unsigned int flags);
 
 
-#endif /* __VIR_LIBVIRT_HOST_H__ */
+#endif /* LIBVIRT_HOST_H */

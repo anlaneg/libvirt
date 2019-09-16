@@ -16,15 +16,9 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Li Zhang <zhlcindy@linux.vnet.ibm.com>
  */
 
-#ifndef __VIR_CPU_PPC64_DATA_H__
-# define __VIR_CPU_PPC64_DATA_H__
-
-# include <stdint.h>
+#pragma once
 
 typedef struct _virCPUppc64PVR virCPUppc64PVR;
 struct _virCPUppc64PVR {
@@ -32,12 +26,10 @@ struct _virCPUppc64PVR {
     uint32_t mask;
 };
 
-# define VIR_CPU_PPC64_DATA_INIT { 0 }
+#define VIR_CPU_PPC64_DATA_INIT { 0 }
 
 typedef struct _virCPUppc64Data virCPUppc64Data;
 struct _virCPUppc64Data {
     size_t len;
     virCPUppc64PVR *pvr;
 };
-
-#endif /* __VIR_CPU_PPC64_DATA_H__ */

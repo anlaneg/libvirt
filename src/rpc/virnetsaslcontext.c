@@ -52,43 +52,70 @@ struct _virNetSASLSession {
 
 static virClassPtr virNetSASLContextClass;
 static virClassPtr virNetSASLSessionClass;
+static void virNetSASLContextDispose(void *obj);
 static void virNetSASLSessionDispose(void *obj);
 
 static int virNetSASLContextOnceInit(void)
 {
-    if (!(virNetSASLContextClass = virClassNew(virClassForObjectLockable(),
-                                               "virNetSASLContext",
-                                               sizeof(virNetSASLContext),
-                                               NULL)))
+    if (!VIR_CLASS_NEW(virNetSASLContext, virClassForObjectLockable()))
         return -1;
 
-    if (!(virNetSASLSessionClass = virClassNew(virClassForObjectLockable(),
-                                               "virNetSASLSession",
-                                               sizeof(virNetSASLSession),
-                                               virNetSASLSessionDispose)))
+    if (!VIR_CLASS_NEW(virNetSASLSession, virClassForObjectLockable()))
         return -1;
 
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetSASLContext)
+VIR_ONCE_GLOBAL_INIT(virNetSASLContext);
+
+/* Apple have annotated all SASL functions as deprecated for
+ * unknown reasons. Since they still work, lets just ignore
+ * the warnings. If Apple finally delete the SASL functions
+ * our configure check should already catch that
+ */
+#ifdef __APPLE__
+VIR_WARNINGS_NO_DEPRECATED
+#endif
+
+static int virNetSASLContextClientOnceInit(void)
+{
+    int err = sasl_client_init(NULL);
+    if (err != SASL_OK) {
+        virReportError(VIR_ERR_AUTH_FAILED,
+                       _("failed to initialize SASL library: %d (%s)"),
+                       err, sasl_errstring(err, NULL, NULL));
+        return -1;
+    }
+
+    return 0;
+}
+
+VIR_ONCE_GLOBAL_INIT(virNetSASLContextClient);
+
+
+static int virNetSASLContextServerOnceInit(void)
+{
+    int err = sasl_server_init(NULL, "libvirt");
+    if (err != SASL_OK) {
+        virReportError(VIR_ERR_AUTH_FAILED,
+                       _("failed to initialize SASL library: %d (%s)"),
+                       err, sasl_errstring(err, NULL, NULL));
+        return -1;
+    }
+
+    return 0;
+}
+
+VIR_ONCE_GLOBAL_INIT(virNetSASLContextServer);
 
 
 virNetSASLContextPtr virNetSASLContextNewClient(void)
 {
     virNetSASLContextPtr ctxt;
-    int err;
 
-    if (virNetSASLContextInitialize() < 0)
+    if (virNetSASLContextInitialize() < 0 ||
+        virNetSASLContextClientInitialize() < 0)
         return NULL;
-
-    err = sasl_client_init(NULL);
-    if (err != SASL_OK) {
-        virReportError(VIR_ERR_AUTH_FAILED,
-                       _("failed to initialize SASL library: %d (%s)"),
-                       err, sasl_errstring(err, NULL, NULL));
-        return NULL;
-    }
 
     if (!(ctxt = virObjectLockableNew(virNetSASLContextClass)))
         return NULL;
@@ -99,18 +126,10 @@ virNetSASLContextPtr virNetSASLContextNewClient(void)
 virNetSASLContextPtr virNetSASLContextNewServer(const char *const*usernameWhitelist)
 {
     virNetSASLContextPtr ctxt;
-    int err;
 
-    if (virNetSASLContextInitialize() < 0)
+    if (virNetSASLContextInitialize() < 0 ||
+        virNetSASLContextServerInitialize() < 0)
         return NULL;
-
-    err = sasl_server_init(NULL, "libvirt");
-    if (err != SASL_OK) {
-        virReportError(VIR_ERR_AUTH_FAILED,
-                       _("failed to initialize SASL library: %d (%s)"),
-                       err, sasl_errstring(err, NULL, NULL));
-        return NULL;
-    }
 
     if (!(ctxt = virObjectLockableNew(virNetSASLContextClass)))
         return NULL;
@@ -388,6 +407,12 @@ char *virNetSASLSessionListMechanisms(virNetSASLSessionPtr sasl)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("cannot list SASL mechanisms %d (%s)"),
                        err, sasl_errdetail(sasl->conn));
+        goto cleanup;
+    }
+    VIR_DEBUG("SASL mechanism list is '%s'", mechlist);
+    if (STREQ(mechlist, "")) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("no SASL mechanisms are available"));
         goto cleanup;
     }
     ignore_value(VIR_STRDUP(ret, mechlist));
@@ -672,6 +697,11 @@ ssize_t virNetSASLSessionDecode(virNetSASLSessionPtr sasl,
     return ret;
 }
 
+void virNetSASLContextDispose(void *obj ATTRIBUTE_UNUSED)
+{
+    return;
+}
+
 void virNetSASLSessionDispose(void *obj)
 {
     virNetSASLSessionPtr sasl = obj;
@@ -680,3 +710,7 @@ void virNetSASLSessionDispose(void *obj)
         sasl_dispose(&sasl->conn);
     VIR_FREE(sasl->callbacks);
 }
+
+#ifdef __APPLE__
+VIR_WARNINGS_RESET
+#endif

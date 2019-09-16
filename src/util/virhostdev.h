@@ -17,21 +17,18 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- * Author: Chunyan Liu <cyliu@suse.com>
  */
 
-#ifndef __VIR_HOSTDEV_H__
-# define __VIR_HOSTDEV_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "virpci.h"
-# include "virusb.h"
-# include "virscsi.h"
-# include "virscsivhost.h"
-# include "domain_conf.h"
+#include "virpci.h"
+#include "virusb.h"
+#include "virscsi.h"
+#include "virscsivhost.h"
+#include "conf/domain_conf.h"
+#include "virmdev.h"
 
 typedef enum {
     VIR_HOSTDEV_STRICT_ACS_CHECK     = (1 << 0), /* strict acs check */
@@ -55,6 +52,7 @@ struct _virHostdevManager {
     virUSBDeviceListPtr activeUSBHostdevs;
     virSCSIDeviceListPtr activeSCSIHostdevs;
     virSCSIVHostDeviceListPtr activeSCSIVHostHostdevs;
+    virMediatedDeviceListPtr activeMediatedHostdevs;
 };
 
 virHostdevManagerPtr virHostdevManagerGetDefault(void);
@@ -96,6 +94,13 @@ virHostdevPrepareSCSIVHostDevices(virHostdevManagerPtr hostdev_mgr,
                                   virDomainHostdevDefPtr *hostdevs,
                                   int nhostdevs)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+int
+virHostdevPrepareMediatedDevices(virHostdevManagerPtr hostdev_mgr,
+                                 const char *drv_name,
+                                 const char *dom_name,
+                                 virDomainHostdevDefPtr *hostdevs,
+                                 int nhostdevs)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
 void
 virHostdevReAttachPCIDevices(virHostdevManagerPtr hostdev_mgr,
                              const char *drv_name,
@@ -103,14 +108,14 @@ virHostdevReAttachPCIDevices(virHostdevManagerPtr hostdev_mgr,
                              virDomainHostdevDefPtr *hostdevs,
                              int nhostdevs,
                              const char *oldStateDir)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+    ATTRIBUTE_NONNULL(1);
 void
 virHostdevReAttachUSBDevices(virHostdevManagerPtr hostdev_mgr,
                               const char *drv_name,
                               const char *dom_name,
                               virDomainHostdevDefPtr *hostdevs,
                               int nhostdevs)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+    ATTRIBUTE_NONNULL(1);
 void
 virHostdevReAttachSCSIDevices(virHostdevManagerPtr hostdev_mgr,
                               const char *drv_name,
@@ -124,7 +129,14 @@ virHostdevReAttachSCSIVHostDevices(virHostdevManagerPtr hostdev_mgr,
                                    const char *dom_name,
                                    virDomainHostdevDefPtr *hostdevs,
                                    int nhostdevs)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+    ATTRIBUTE_NONNULL(1);
+void
+virHostdevReAttachMediatedDevices(virHostdevManagerPtr hostdev_mgr,
+                                  const char *drv_name,
+                                  const char *dom_name,
+                                  virDomainHostdevDefPtr *hostdevs,
+                                  int nhostdevs)
+    ATTRIBUTE_NONNULL(1);
 int
 virHostdevUpdateActivePCIDevices(virHostdevManagerPtr mgr,
                                  virDomainHostdevDefPtr *hostdevs,
@@ -147,6 +159,13 @@ virHostdevUpdateActiveSCSIDevices(virHostdevManagerPtr mgr,
                                   const char *dom_name)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4) ATTRIBUTE_NONNULL(5);
 int
+virHostdevUpdateActiveMediatedDevices(virHostdevManagerPtr mgr,
+                                      virDomainHostdevDefPtr *hostdevs,
+                                      int nhostdevs,
+                                      const char *drv_name,
+                                      const char *dom_name)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4) ATTRIBUTE_NONNULL(5);
+int
 virHostdevUpdateActiveDomainDevices(virHostdevManagerPtr mgr,
                                     const char *driver,
                                     virDomainDefPtr def,
@@ -157,16 +176,19 @@ virHostdevPrepareDomainDevices(virHostdevManagerPtr mgr,
                                const char *driver,
                                virDomainDefPtr def,
                                unsigned int flags)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
 void
 virHostdevReAttachDomainDevices(virHostdevManagerPtr mgr,
                                 const char *driver,
                                 virDomainDefPtr def,
                                 unsigned int flags,
                                 const char *oldStateDir)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
 bool
 virHostdevIsSCSIDevice(virDomainHostdevDefPtr hostdev)
+    ATTRIBUTE_NONNULL(1);
+bool
+virHostdevIsMdevDevice(virDomainHostdevDefPtr hostdev)
     ATTRIBUTE_NONNULL(1);
 
 /* functions used by NodeDevDetach/Reattach/Reset */
@@ -179,5 +201,3 @@ int virHostdevPCINodeDeviceReAttach(virHostdevManagerPtr mgr,
 int virHostdevPCINodeDeviceReset(virHostdevManagerPtr mgr,
                                  virPCIDevicePtr pci)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-
-#endif /* __VIR_HOSTDEV_H__ */

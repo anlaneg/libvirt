@@ -90,13 +90,19 @@
             </element>
           </element>
         </optional>
+        <optional>
+          <element name='cookie'>
+            <zeroOrMore>
+              <ref name='customElement'/>
+            </zeroOrMore>
+          </element>
+        </optional>
       </interleave>
     </element>
   </define>
 
   <define name='state'>
     <choice>
-      <value>nostate</value>
       <value>running</value>
       <value>blocked</value>
       <value>paused</value>
@@ -151,6 +157,9 @@
                     <optional>
                       <ref name='storageStartupPolicy'/>
                     </optional>
+                    <zeroOrMore>
+                      <ref name='devSeclabel'/>
+                    </zeroOrMore>
                     <empty/>
                   </element>
                 </optional>
@@ -167,6 +176,9 @@
                     <attribute name="dev">
                       <ref name="absFilePath"/>
                     </attribute>
+                    <zeroOrMore>
+                      <ref name='devSeclabel'/>
+                    </zeroOrMore>
                     <empty/>
                   </element>
                 </optional>

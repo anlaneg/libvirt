@@ -14,23 +14,30 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel Veillard <veillard@redhat.com>
- *     Laine Stump <laine@laine.org>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_SOCKETADDR_H__
-# define __VIR_SOCKETADDR_H__
+#pragma once
 
-# include "internal.h"
+#include <netinet/in.h>
+#include <sys/socket.h>
+#ifdef HAVE_SYS_UN_H
+# include <sys/un.h>
+#endif
 
-# include <netinet/in.h>
-# include <sys/socket.h>
-# ifdef HAVE_SYS_UN_H
-#  include <sys/un.h>
-# endif
+#include "internal.h"
+#include "virautoclean.h"
+
+/* On architectures which lack these limits, define them (ie. Cygwin).
+ * Note that the libvirt code should be robust enough to handle the
+ * case where actual value is longer than these limits (eg. by setting
+ * length correctly in second argument to gethostname and by always
+ * using strncpy instead of strcpy).
+ */
+#ifndef INET_ADDRSTRLEN
+# define INET_ADDRSTRLEN 16
+#endif
+
+#define VIR_LOOPBACK_IPV4_ADDR "127.0.0.1"
 
 typedef struct {
     union {
@@ -38,27 +45,27 @@ typedef struct {
         struct sockaddr_storage stor;
         struct sockaddr_in inet4;
         struct sockaddr_in6 inet6;
-# ifdef HAVE_SYS_UN_H
+#ifdef HAVE_SYS_UN_H
         struct sockaddr_un un;
-# endif
+#endif
     } data;
     socklen_t len;
 } virSocketAddr;
 
-# define VIR_SOCKET_ADDR_VALID(s)               \
+#define VIR_SOCKET_ADDR_VALID(s) \
     ((s)->data.sa.sa_family != AF_UNSPEC)
 
-# define VIR_SOCKET_ADDR_IS_FAMILY(s, f)        \
+#define VIR_SOCKET_ADDR_IS_FAMILY(s, f) \
     ((s)->data.sa.sa_family == f)
 
-# define VIR_SOCKET_ADDR_FAMILY(s)              \
+#define VIR_SOCKET_ADDR_FAMILY(s) \
     ((s)->data.sa.sa_family)
 
-# define VIR_SOCKET_ADDR_IPV4_ALL "0.0.0.0"
-# define VIR_SOCKET_ADDR_IPV6_ALL "::"
+#define VIR_SOCKET_ADDR_IPV4_ALL "0.0.0.0"
+#define VIR_SOCKET_ADDR_IPV6_ALL "::"
 
-# define VIR_SOCKET_ADDR_IPV4_ARPA "in-addr.arpa"
-# define VIR_SOCKET_ADDR_IPV6_ARPA "ip6.arpa"
+#define VIR_SOCKET_ADDR_IPV4_ARPA "in-addr.arpa"
+#define VIR_SOCKET_ADDR_IPV6_ARPA "ip6.arpa"
 
 typedef virSocketAddr *virSocketAddrPtr;
 
@@ -80,11 +87,18 @@ int virSocketAddrParse(virSocketAddrPtr addr,
                        const char *val,
                        int family);
 
+int virSocketAddrParseAny(virSocketAddrPtr addr,
+                          const char *val,
+                          int family,
+                          bool reportError);
+
 int virSocketAddrParseIPv4(virSocketAddrPtr addr,
                            const char *val);
 
 int virSocketAddrParseIPv6(virSocketAddrPtr addr,
                            const char *val);
+
+int virSocketAddrResolveService(const char *service);
 
 void virSocketAddrSetIPv4AddrNetOrder(virSocketAddrPtr s, uint32_t addr);
 void virSocketAddrSetIPv4Addr(virSocketAddrPtr s, uint32_t addr);
@@ -95,6 +109,8 @@ char *virSocketAddrFormat(const virSocketAddr *addr);
 char *virSocketAddrFormatFull(const virSocketAddr *addr,
                               bool withService,
                               const char *separator);
+
+char *virSocketAddrGetPath(virSocketAddrPtr addr);
 
 int virSocketAddrSetPort(virSocketAddrPtr addr, int port);
 
@@ -145,4 +161,6 @@ int virSocketAddrPTRDomain(const virSocketAddr *addr,
                            char **ptr)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 
-#endif /* __VIR_SOCKETADDR_H__ */
+void virSocketAddrFree(virSocketAddrPtr addr);
+
+VIR_DEFINE_AUTOPTR_FUNC(virSocketAddr, virSocketAddrFree);

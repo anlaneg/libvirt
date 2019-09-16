@@ -14,20 +14,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Laine Stump <laine@redhat.com>
  */
 
-#ifndef __VIR_NETDEV_VLAN_CONF_H__
-# define __VIR_NETDEV_VLAN_CONF_H__
+#pragma once
 
-# include "internal.h"
-# include "virnetdevvlan.h"
-# include "virbuffer.h"
-# include "virxml.h"
+#include "internal.h"
+#include "virnetdevvlan.h"
+#include "virbuffer.h"
+#include "virxml.h"
 
 int virNetDevVlanParse(xmlNodePtr node, xmlXPathContextPtr ctxt, virNetDevVlanPtr def);
 int virNetDevVlanFormat(const virNetDevVlan *def, virBufferPtr buf);
-
-#endif /* __VIR_NETDEV_VPORT_PROFILE_CONF_H__ */

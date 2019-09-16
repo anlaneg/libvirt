@@ -18,14 +18,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIRDOMAINOBJLIST_H__
-# define __VIRDOMAINOBJLIST_H__
+#pragma once
 
-# include "domain_conf.h"
+#include "domain_conf.h"
 
 typedef struct _virDomainObjList virDomainObjList;
 typedef virDomainObjList *virDomainObjListPtr;
@@ -34,12 +31,8 @@ virDomainObjListPtr virDomainObjListNew(void);
 
 virDomainObjPtr virDomainObjListFindByID(virDomainObjListPtr doms,
                                          int id);
-virDomainObjPtr virDomainObjListFindByIDRef(virDomainObjListPtr doms,
-                                            int id);
 virDomainObjPtr virDomainObjListFindByUUID(virDomainObjListPtr doms,
                                            const unsigned char *uuid);
-virDomainObjPtr virDomainObjListFindByUUIDRef(virDomainObjListPtr doms,
-                                              const unsigned char *uuid);
 virDomainObjPtr virDomainObjListFindByName(virDomainObjListPtr doms,
                                            const char *name);
 
@@ -72,7 +65,7 @@ void virDomainObjListRemoveLocked(virDomainObjListPtr doms,
 int virDomainObjListLoadAllConfigs(virDomainObjListPtr doms,
                                    const char *configDir,
                                    const char *autostartDir,
-                                   int liveStatus,
+                                   bool liveStatus,
                                    virCapsPtr caps,
                                    virDomainXMLOptionPtr xmlopt,
                                    virDomainLoadConfigNotify notify,
@@ -98,42 +91,48 @@ typedef int (*virDomainObjListIterator)(virDomainObjPtr dom,
                                         void *opaque);
 
 int virDomainObjListForEach(virDomainObjListPtr doms,
+                            bool modify,
                             virDomainObjListIterator callback,
                             void *opaque);
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_ACTIVE   \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_ACTIVE \
                 (VIR_CONNECT_LIST_DOMAINS_ACTIVE | \
                  VIR_CONNECT_LIST_DOMAINS_INACTIVE)
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_PERSISTENT   \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_PERSISTENT \
                 (VIR_CONNECT_LIST_DOMAINS_PERSISTENT | \
                  VIR_CONNECT_LIST_DOMAINS_TRANSIENT)
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_STATE     \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_STATE \
                 (VIR_CONNECT_LIST_DOMAINS_RUNNING | \
                  VIR_CONNECT_LIST_DOMAINS_PAUSED  | \
                  VIR_CONNECT_LIST_DOMAINS_SHUTOFF | \
                  VIR_CONNECT_LIST_DOMAINS_OTHER)
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_MANAGEDSAVE   \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_MANAGEDSAVE \
                 (VIR_CONNECT_LIST_DOMAINS_MANAGEDSAVE | \
                  VIR_CONNECT_LIST_DOMAINS_NO_MANAGEDSAVE)
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_AUTOSTART   \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_AUTOSTART \
                 (VIR_CONNECT_LIST_DOMAINS_AUTOSTART | \
                  VIR_CONNECT_LIST_DOMAINS_NO_AUTOSTART)
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_SNAPSHOT       \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_SNAPSHOT \
                 (VIR_CONNECT_LIST_DOMAINS_HAS_SNAPSHOT | \
                  VIR_CONNECT_LIST_DOMAINS_NO_SNAPSHOT)
 
-# define VIR_CONNECT_LIST_DOMAINS_FILTERS_ALL                   \
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_CHECKPOINT \
+                (VIR_CONNECT_LIST_DOMAINS_HAS_CHECKPOINT | \
+                 VIR_CONNECT_LIST_DOMAINS_NO_CHECKPOINT)
+
+#define VIR_CONNECT_LIST_DOMAINS_FILTERS_ALL \
                 (VIR_CONNECT_LIST_DOMAINS_FILTERS_ACTIVE      | \
                  VIR_CONNECT_LIST_DOMAINS_FILTERS_PERSISTENT  | \
                  VIR_CONNECT_LIST_DOMAINS_FILTERS_STATE       | \
                  VIR_CONNECT_LIST_DOMAINS_FILTERS_MANAGEDSAVE | \
                  VIR_CONNECT_LIST_DOMAINS_FILTERS_AUTOSTART   | \
-                 VIR_CONNECT_LIST_DOMAINS_FILTERS_SNAPSHOT)
+                 VIR_CONNECT_LIST_DOMAINS_FILTERS_SNAPSHOT    | \
+                 VIR_CONNECT_LIST_DOMAINS_FILTERS_CHECKPOINT)
 
 int virDomainObjListCollect(virDomainObjListPtr doms,
                             virConnectPtr conn,
@@ -155,5 +154,3 @@ int virDomainObjListConvert(virDomainObjListPtr domlist,
                             virDomainObjListACLFilter filter,
                             unsigned int flags,
                             bool skip_missing);
-
-#endif /* __VIRDOMAINOBJLIST_H__ */

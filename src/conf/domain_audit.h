@@ -17,15 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_DOMAIN_AUDIT_H__
-# define __VIR_DOMAIN_AUDIT_H__
+#pragma once
 
-# include "domain_conf.h"
-# include "vircgroup.h"
+#include "domain_conf.h"
+#include "vircgroup.h"
 
 void virDomainAuditStart(virDomainObjPtr vm,
                          const char *reason,
@@ -133,6 +130,8 @@ void virDomainAuditShmem(virDomainObjPtr vm,
                          virDomainShmemDefPtr def,
                          const char *reason, bool success)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
-
-
-#endif /* __VIR_DOMAIN_AUDIT_H__ */
+void virDomainAuditInput(virDomainObjPtr vm,
+                         virDomainInputDefPtr input,
+                         const char *reason,
+                         bool success)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);

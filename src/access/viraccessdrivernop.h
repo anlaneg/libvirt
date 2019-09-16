@@ -18,11 +18,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_ACCESS_DRIVER_NOP_H__
-# define __VIR_ACCESS_DRIVER_NOP_H__
+#pragma once
 
-# include "access/viraccessdriver.h"
+#include "access/viraccessdriver.h"
 
 extern virAccessDriver accessDriverNop;
-
-#endif /* __VIR_ACCESS_DRIVER_NOP_H__ */

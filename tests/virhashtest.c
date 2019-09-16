@@ -1,8 +1,5 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 #include "internal.h"
@@ -26,7 +23,7 @@ testHashInit(int size)
     if (!(hash = virHashCreate(size, NULL)))
         return NULL;
 
-    /* entires are added in reverse order so that they will be linked in
+    /* entries are added in reverse order so that they will be linked in
      * collision list in the same order as in the uuids array
      */
     for (i = ARRAY_CARDINALITY(uuids) - 1; i >= 0; i--) {
@@ -44,14 +41,11 @@ testHashInit(int size)
 
     for (i = 0; i < ARRAY_CARDINALITY(uuids); i++) {
         if (!virHashLookup(hash, uuids[i])) {
-            VIR_TEST_VERBOSE("\nentry \"%s\" could not be found\n", uuids[i]);
+            VIR_TEST_VERBOSE("\nentry \"%s\" could not be found", uuids[i]);
             virHashFree(hash);
             return NULL;
         }
     }
-
-    if (size && size != virHashTableSize(hash))
-        VIR_TEST_DEBUG("\n");
 
     return hash;
 }
@@ -72,7 +66,7 @@ testHashCheckCount(virHashTablePtr hash, size_t count)
     size_t iter_count = 0;
 
     if (virHashSize(hash) != count) {
-        VIR_TEST_VERBOSE("\nhash contains %zd instead of %zu elements\n",
+        VIR_TEST_VERBOSE("\nhash contains %zd instead of %zu elements",
                          virHashSize(hash), count);
         return -1;
     }
@@ -80,7 +74,7 @@ testHashCheckCount(virHashTablePtr hash, size_t count)
     virHashForEach(hash, testHashCheckForEachCount, &iter_count);
     if (count != iter_count) {
         VIR_TEST_VERBOSE("\nhash claims to have %zu elements but iteration"
-                         "finds %zu\n", count, iter_count);
+                         "finds %zu", count, iter_count);
         return -1;
     }
 
@@ -128,7 +122,7 @@ testHashUpdate(const void *data ATTRIBUTE_UNUSED)
 
     for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
         if (virHashUpdateEntry(hash, uuids_subset[i], (void *) 1) < 0) {
-            VIR_TEST_VERBOSE("\nentry \"%s\" could not be updated\n",
+            VIR_TEST_VERBOSE("\nentry \"%s\" could not be updated",
                     uuids_subset[i]);
             goto cleanup;
         }
@@ -136,7 +130,7 @@ testHashUpdate(const void *data ATTRIBUTE_UNUSED)
 
     for (i = 0; i < ARRAY_CARDINALITY(uuids_new); i++) {
         if (virHashUpdateEntry(hash, uuids_new[i], (void *) 1) < 0) {
-            VIR_TEST_VERBOSE("\nnew entry \"%s\" could not be updated\n",
+            VIR_TEST_VERBOSE("\nnew entry \"%s\" could not be updated",
                     uuids_new[i]);
             goto cleanup;
         }
@@ -166,7 +160,7 @@ testHashRemove(const void *data ATTRIBUTE_UNUSED)
 
     for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
         if (virHashRemoveEntry(hash, uuids_subset[i]) < 0) {
-            VIR_TEST_VERBOSE("\nentry \"%s\" could not be removed\n",
+            VIR_TEST_VERBOSE("\nentry \"%s\" could not be removed",
                     uuids_subset[i]);
             goto cleanup;
         }
@@ -221,32 +215,6 @@ testHashRemoveForEachAll(void *payload ATTRIBUTE_UNUSED,
 }
 
 
-const int testHashCountRemoveForEachForbidden = ARRAY_CARDINALITY(uuids);
-
-static int
-testHashRemoveForEachForbidden(void *payload ATTRIBUTE_UNUSED,
-                               const void *name,
-                               void *data)
-{
-    virHashTablePtr hash = data;
-    size_t i;
-
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
-        if (STREQ(uuids_subset[i], name)) {
-            int next = (i + 1) % ARRAY_CARDINALITY(uuids_subset);
-
-            if (virHashRemoveEntry(hash, uuids_subset[next]) == 0) {
-                VIR_TEST_VERBOSE(
-                        "\nentry \"%s\" should not be allowed to be removed",
-                        uuids_subset[next]);
-            }
-            break;
-        }
-    }
-    return 0;
-}
-
-
 static int
 testHashRemoveForEach(const void *data)
 {
@@ -286,7 +254,7 @@ testHashSteal(const void *data ATTRIBUTE_UNUSED)
 
     for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
         if (!virHashSteal(hash, uuids_subset[i])) {
-            VIR_TEST_VERBOSE("\nentry \"%s\" could not be stolen\n",
+            VIR_TEST_VERBOSE("\nentry \"%s\" could not be stolen",
                     uuids_subset[i]);
             goto cleanup;
         }
@@ -294,61 +262,6 @@ testHashSteal(const void *data ATTRIBUTE_UNUSED)
 
     if (testHashCheckCount(hash, count) < 0)
         goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    virHashFree(hash);
-    return ret;
-}
-
-
-static int
-testHashIter(void *payload ATTRIBUTE_UNUSED,
-             const void *name ATTRIBUTE_UNUSED,
-             void *data ATTRIBUTE_UNUSED)
-{
-    return 0;
-}
-
-static int
-testHashForEachIter(void *payload ATTRIBUTE_UNUSED,
-                    const void *name ATTRIBUTE_UNUSED,
-                    void *data)
-{
-    virHashTablePtr hash = data;
-
-    if (virHashAddEntry(hash, uuids_new[0], NULL) == 0)
-        VIR_TEST_VERBOSE("\nadding entries in ForEach should be forbidden");
-
-    if (virHashUpdateEntry(hash, uuids_new[0], NULL) == 0)
-        VIR_TEST_VERBOSE("\nupdating entries in ForEach should be forbidden");
-
-    if (virHashSteal(hash, uuids_new[0]) != NULL)
-        VIR_TEST_VERBOSE("\nstealing entries in ForEach should be forbidden");
-
-    if (virHashSteal(hash, uuids_new[0]) != NULL)
-        VIR_TEST_VERBOSE("\nstealing entries in ForEach should be forbidden");
-
-    if (virHashForEach(hash, testHashIter, NULL) >= 0)
-        VIR_TEST_VERBOSE("\niterating through hash in ForEach"
-                " should be forbidden");
-    return 0;
-}
-
-static int
-testHashForEach(const void *data ATTRIBUTE_UNUSED)
-{
-    virHashTablePtr hash;
-    int ret = -1;
-
-    if (!(hash = testHashInit(0)))
-        return -1;
-
-    if (virHashForEach(hash, testHashForEachIter, hash)) {
-        VIR_TEST_VERBOSE("\nvirHashForEach didn't go through all entries");
-        goto cleanup;
-    }
 
     ret = 0;
 
@@ -400,7 +313,7 @@ testHashRemoveSet(const void *data ATTRIBUTE_UNUSED)
 
     if (count != rcount) {
         VIR_TEST_VERBOSE("\nvirHashRemoveSet didn't remove expected number of"
-                  " entries, %d != %u\n",
+                  " entries, %d != %u",
                   rcount, count);
         goto cleanup;
     }
@@ -436,10 +349,10 @@ testHashSearch(const void *data ATTRIBUTE_UNUSED)
     if (!(hash = testHashInit(0)))
         return -1;
 
-    entry = virHashSearch(hash, testHashSearchIter, NULL);
+    entry = virHashSearch(hash, testHashSearchIter, NULL, NULL);
 
     if (!entry || STRNEQ(uuids_subset[testSearchIndex], entry)) {
-        VIR_TEST_VERBOSE("\nvirHashSearch didn't find entry '%s'\n",
+        VIR_TEST_VERBOSE("\nvirHashSearch didn't find entry '%s'",
                   uuids_subset[testSearchIndex]);
         goto cleanup;
     }
@@ -602,23 +515,23 @@ mymain(void)
 {
     int ret = 0;
 
-#define DO_TEST_FULL(name, cmd, data, count)                        \
-    do {                                                            \
-        struct testInfo info = { data, count };                     \
-        if (virTestRun(name, testHash ## cmd, &info) < 0)           \
-            ret = -1;                                               \
+#define DO_TEST_FULL(name, cmd, data, count) \
+    do { \
+        struct testInfo info = { data, count }; \
+        if (virTestRun(name, testHash ## cmd, &info) < 0) \
+            ret = -1; \
     } while (0)
 
-#define DO_TEST_DATA(name, cmd, data)                               \
-    DO_TEST_FULL(name "(" #data ")",                                \
-                 cmd,                                               \
-                 testHash ## cmd ## data,                           \
+#define DO_TEST_DATA(name, cmd, data) \
+    DO_TEST_FULL(name "(" #data ")", \
+                 cmd, \
+                 testHash ## cmd ## data, \
                  testHashCount ## cmd ## data)
 
-#define DO_TEST_COUNT(name, cmd, count)                             \
+#define DO_TEST_COUNT(name, cmd, count) \
     DO_TEST_FULL(name "(" #count ")", cmd, NULL, count)
 
-#define DO_TEST(name, cmd)                                          \
+#define DO_TEST(name, cmd) \
     DO_TEST_FULL(name, cmd, NULL, -1)
 
     DO_TEST_COUNT("Grow", Grow, 1);
@@ -628,9 +541,7 @@ mymain(void)
     DO_TEST("Remove", Remove);
     DO_TEST_DATA("Remove in ForEach", RemoveForEach, Some);
     DO_TEST_DATA("Remove in ForEach", RemoveForEach, All);
-    DO_TEST_DATA("Remove in ForEach", RemoveForEach, Forbidden);
     DO_TEST("Steal", Steal);
-    DO_TEST("Forbidden ops in ForEach", ForEach);
     DO_TEST("RemoveSet", RemoveSet);
     DO_TEST("Search", Search);
     DO_TEST("GetItems", GetItems);
@@ -639,4 +550,4 @@ mymain(void)
     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

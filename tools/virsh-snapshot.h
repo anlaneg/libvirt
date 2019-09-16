@@ -16,18 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Daniel Veillard <veillard@redhat.com>
- *  Karel Zak <kzak@redhat.com>
- *  Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
-#ifndef VIRSH_SNAPSHOT_H
-# define VIRSH_SNAPSHOT_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
 
 extern const vshCmdDef snapshotCmds[];
-
-#endif /* VIRSH_SNAPSHOT_H */

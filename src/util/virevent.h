@@ -17,12 +17,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_EVENT_H__
-# define __VIR_EVENT_H__
-# include "internal.h"
-
-#endif /* __VIR_EVENT_H__ */
+#pragma once
+#include "internal.h"

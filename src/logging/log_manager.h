@@ -16,17 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
+#pragma once
 
-#ifndef __VIR_LOG_MANAGER_H__
-# define __VIR_LOG_MANAGER_H__
+#include "internal.h"
 
-# include "internal.h"
-
-# include "logging/log_protocol.h"
+#include "logging/log_protocol.h"
 
 typedef struct _virLogManager virLogManager;
 typedef virLogManager *virLogManagerPtr;
@@ -64,5 +60,3 @@ int virLogManagerDomainAppendMessage(virLogManagerPtr mgr,
                                      const char *path,
                                      const char *message,
                                      unsigned int flags);
-
-#endif /* __VIR_LOG_MANAGER_H__ */

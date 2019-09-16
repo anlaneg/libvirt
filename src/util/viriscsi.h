@@ -19,10 +19,9 @@
  *
  */
 
-#ifndef __VIR_ISCSI_H__
-# define __VIR_ISCSI_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 char *
 virISCSIGetSession(const char *devpath,
@@ -49,6 +48,8 @@ virISCSIRescanLUNs(const char *session)
 
 int
 virISCSIScanTargets(const char *portal,
+                    const char *initiatoriqn,
+                    bool persist,
                     size_t *ntargetsret,
                     char ***targetsret)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
@@ -66,4 +67,3 @@ virISCSINodeUpdate(const char *portal,
                    const char *value)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
     ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
-#endif

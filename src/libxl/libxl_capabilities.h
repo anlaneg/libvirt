@@ -16,32 +16,30 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jim Fehlig <jfehlig@suse.com>
  */
 
-#ifndef LIBXL_CAPABILITIES_H
-# define LIBXL_CAPABILITIES_H
+#pragma once
 
-# include <libxl.h>
+#include <libxl.h>
 
-# include "virobject.h"
-# include "capabilities.h"
-# include "domain_capabilities.h"
-# include "virfirmware.h"
+#include "virobject.h"
+#include "capabilities.h"
+#include "domain_capabilities.h"
+#include "virfirmware.h"
 
 
-# ifndef LIBXL_FIRMWARE_DIR
-#  define LIBXL_FIRMWARE_DIR "/usr/lib/xen/boot"
-# endif
-# ifndef LIBXL_EXECBIN_DIR
-#  define LIBXL_EXECBIN_DIR "/usr/lib/xen/bin"
-# endif
+#ifndef LIBXL_FIRMWARE_DIR
+# define LIBXL_FIRMWARE_DIR "/usr/lib/xen/boot"
+#endif
+#ifndef LIBXL_EXECBIN_DIR
+# define LIBXL_EXECBIN_DIR "/usr/lib/xen/bin"
+#endif
 
 /* Used for prefix of ifname of any network name generated dynamically
  * by libvirt for Xen, and cannot be used for a persistent network name.  */
-# define LIBXL_GENERATED_PREFIX_XEN "vif"
+#define LIBXL_GENERATED_PREFIX_XEN "vif"
 
+bool libxlCapsHasPVUSB(void);
 
 virCapsPtr
 libxlMakeCapabilities(libxl_ctx *ctx);
@@ -53,5 +51,3 @@ libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
 
 int
 libxlDomainGetEmulatorType(const virDomainDef *def);
-
-#endif /* LIBXL_CAPABILITIES_H */

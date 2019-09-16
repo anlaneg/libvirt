@@ -15,21 +15,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     David L. Leskovec <dlesko at linux.vnet.ibm.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NETDEV_VETH_H__
-# define __VIR_NETDEV_VETH_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 /* Function declarations */
 int virNetDevVethCreate(char **veth1, char **veth2)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 int virNetDevVethDelete(const char *veth)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-
-#endif /* __VIR_NETDEV_VETH_H__ */

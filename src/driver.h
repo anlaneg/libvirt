@@ -19,14 +19,13 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_DRIVER_H__
-# define __VIR_DRIVER_H__
+#pragma once
 
-# include <unistd.h>
+#include <unistd.h>
 
-# include "internal.h"
-# include "libvirt_internal.h"
-# include "viruri.h"
+#include "internal.h"
+#include "libvirt_internal.h"
+#include "viruri.h"
 
 
 /* Status codes returned from driver open call. */
@@ -56,29 +55,39 @@ typedef enum {
  *   != 0  Feature is supported.
  *   0     Feature is not supported.
  */
-# define VIR_DRV_SUPPORTS_FEATURE(drv, conn, feature)                   \
-    ((drv)->connectSupportsFeature ?                                    \
+#define VIR_DRV_SUPPORTS_FEATURE(drv, conn, feature) \
+    ((drv)->connectSupportsFeature ? \
         (drv)->connectSupportsFeature((conn), (feature)) > 0 : 0)
 
 
-# define __VIR_DRIVER_H_INCLUDES___
+#define __VIR_DRIVER_H_INCLUDES___
 
-# include "driver-hypervisor.h"
-# include "driver-interface.h"
-# include "driver-network.h"
-# include "driver-nodedev.h"
-# include "driver-nwfilter.h"
-# include "driver-secret.h"
-# include "driver-state.h"
-# include "driver-stream.h"
-# include "driver-storage.h"
+#include "driver-hypervisor.h"
+#include "driver-interface.h"
+#include "driver-network.h"
+#include "driver-nodedev.h"
+#include "driver-nwfilter.h"
+#include "driver-secret.h"
+#include "driver-state.h"
+#include "driver-stream.h"
+#include "driver-storage.h"
 
-# undef __VIR_DRIVER_H_INCLUDES___
+#undef __VIR_DRIVER_H_INCLUDES___
 
 typedef struct _virConnectDriver virConnectDriver;
 typedef virConnectDriver *virConnectDriverPtr;
 
 struct _virConnectDriver {
+    /* Whether driver permits a server in the URI */
+    bool localOnly;
+    /* Whether driver needs a server in the URI */
+    bool remoteOnly;
+    /*
+     * NULL terminated list of supported URI schemes.
+     *  - Single element { NULL } list indicates no supported schemes
+     *  - NULL list indicates wildcard supporting all schemes
+     */
+    const char **uriSchemes;
     virHypervisorDriverPtr hypervisorDriver;
     virInterfaceDriverPtr interfaceDriver;
     virNetworkDriverPtr networkDriver;
@@ -99,6 +108,22 @@ int virSetSharedNWFilterDriver(virNWFilterDriverPtr driver) ATTRIBUTE_RETURN_CHE
 int virSetSharedSecretDriver(virSecretDriverPtr driver) ATTRIBUTE_RETURN_CHECK;
 int virSetSharedStorageDriver(virStorageDriverPtr driver) ATTRIBUTE_RETURN_CHECK;
 
-void *virDriverLoadModule(const char *name);
+bool virHasDriverForURIScheme(const char *scheme);
 
-#endif /* __VIR_DRIVER_H__ */
+int virDriverLoadModule(const char *name,
+                        const char *regfunc,
+                        bool required);
+
+virConnectPtr virGetConnectInterface(void);
+virConnectPtr virGetConnectNetwork(void);
+virConnectPtr virGetConnectNWFilter(void);
+virConnectPtr virGetConnectNodeDev(void);
+virConnectPtr virGetConnectSecret(void);
+virConnectPtr virGetConnectStorage(void);
+
+int virSetConnectInterface(virConnectPtr conn);
+int virSetConnectNetwork(virConnectPtr conn);
+int virSetConnectNWFilter(virConnectPtr conn);
+int virSetConnectNodeDev(virConnectPtr conn);
+int virSetConnectSecret(virConnectPtr conn);
+int virSetConnectStorage(virConnectPtr conn);

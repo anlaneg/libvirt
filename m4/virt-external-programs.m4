@@ -23,9 +23,16 @@ AC_DEFUN([LIBVIRT_CHECK_EXTERNAL_PROGRAMS], [
   AM_CONDITIONAL([HAVE_RPCGEN], [test "x$ac_cv_path_RPCGEN" != "xno"])
 
   dnl Miscellaneous external programs.
-  AC_PATH_PROG([XMLLINT], [xmllint], [/usr/bin/xmllint])
-  AC_PATH_PROG([XMLCATALOG], [xmlcatalog], [/usr/bin/xmlcatalog])
-  AC_PATH_PROG([XSLTPROC], [xsltproc], [/usr/bin/xsltproc])
+  AC_PATH_PROG([XMLLINT], [xmllint], [])
+  if test -z "$XMLLINT"
+  then
+    AC_MSG_ERROR("xmllint is required to build libvirt")
+  fi
+  AC_PATH_PROG([XSLTPROC], [xsltproc], [])
+  if test -z "$XSLTPROC"
+  then
+    AC_MSG_ERROR("xsltproc is required to build libvirt")
+  fi
   AC_PATH_PROG([AUGPARSE], [augparse], [/usr/bin/augparse])
   AC_PROG_MKDIR_P
   AC_PROG_LN_S
@@ -38,8 +45,7 @@ AC_DEFUN([LIBVIRT_CHECK_EXTERNAL_PROGRAMS], [
   AC_PATH_PROG([DNSMASQ], [dnsmasq], [dnsmasq], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([RADVD], [radvd], [radvd], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([TC], [tc], [tc], [$LIBVIRT_SBIN_PATH])
-  AC_PATH_PROG([UDEVADM], [udevadm], [], [$LIBVIRT_SBIN_PATH])
-  AC_PATH_PROG([UDEVSETTLE], [udevsettle], [], [$LIBVIRT_SBIN_PATH])
+  AC_PATH_PROG([UDEVADM], [udevadm], [udevadm], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([MODPROBE], [modprobe], [modprobe], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([RMMOD], [rmmod], [rmmod], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([MMCTL], [mm-ctl], [mm-ctl], [$LIBVIRT_SBIN_PATH])
@@ -59,23 +65,12 @@ AC_DEFUN([LIBVIRT_CHECK_EXTERNAL_PROGRAMS], [
                      [Location or name of the mm-ctl program])
   AC_DEFINE_UNQUOTED([OVSVSCTL], ["$OVSVSCTL"],
                      [Location or name of the ovs-vsctl program])
-
-  if test -n "$UDEVADM"; then
-    AC_DEFINE_UNQUOTED([UDEVADM], ["$UDEVADM"],
-                       [Location or name of the udevadm program])
-  fi
-  if test -n "$UDEVSETTLE"; then
-    AC_DEFINE_UNQUOTED([UDEVSETTLE], ["$UDEVSETTLE"],
-                       [Location or name of the udevsettle program])
-  fi
-  if test -n "$MODPROBE"; then
-    AC_DEFINE_UNQUOTED([MODPROBE], ["$MODPROBE"],
-                       [Location or name of the modprobe program])
-  fi
-  if test -n "$RMMOD"; then
-    AC_DEFINE_UNQUOTED([RMMOD], ["$RMMOD"],
-                       [Location or name of the rmmod program])
-  fi
+  AC_DEFINE_UNQUOTED([UDEVADM], ["$UDEVADM"],
+                     [Location or name of the udevadm program])
+  AC_DEFINE_UNQUOTED([MODPROBE], ["$MODPROBE"],
+                     [Location or name of the modprobe program])
+  AC_DEFINE_UNQUOTED([RMMOD], ["$RMMOD"],
+                     [Location or name of the rmmod program])
   AC_DEFINE_UNQUOTED([SCRUB], ["$SCRUB"],
                      [Location or name of the scrub program (for wiping algorithms)])
   AC_DEFINE_UNQUOTED([ADDR2LINE], ["$ADDR2LINE"],

@@ -19,12 +19,13 @@
  *
  */
 
-#ifndef __VIR_VMX_H__
-# define __VIR_VMX_H__
+#pragma once
 
-# include "internal.h"
-# include "virconf.h"
-# include "domain_conf.h"
+#include "internal.h"
+#include "virconf.h"
+#include "domain_conf.h"
+
+#define VMX_CONFIG_FORMAT_ARGV "vmware-vmx"
 
 typedef struct _virVMXContext virVMXContext;
 
@@ -45,6 +46,7 @@ typedef int (*virVMXAutodetectSCSIControllerModel)(virDomainDiskDefPtr def,
  * formatFileName is only used by virVMXFormatConfig.
  * autodetectSCSIControllerModel is optionally used by virVMXFormatConfig.
  * datacenterPath is only used by virVMXFormatConfig.
+ * moref is only used by virVMXFormatConfig.
  */
 struct _virVMXContext {
     void *opaque;
@@ -52,6 +54,7 @@ struct _virVMXContext {
     virVMXFormatFileName formatFileName;
     virVMXAutodetectSCSIControllerModel autodetectSCSIControllerModel;
     const char *datacenterPath; /* including folders */
+    const char *moref;
 };
 
 
@@ -62,15 +65,15 @@ struct _virVMXContext {
 
 char *virVMXEscapeHex(const char *string, char escape, const char *special);
 
-# define virVMXEscapeHexPipe(_string) virVMXEscapeHex(_string, '|', "\"")
+#define virVMXEscapeHexPipe(_string) virVMXEscapeHex(_string, '|', "\"")
 
-# define virVMXEscapeHexPercent(_string) virVMXEscapeHex(_string, '%', "/\\")
+#define virVMXEscapeHexPercent(_string) virVMXEscapeHex(_string, '%', "/\\")
 
 int virVMXUnescapeHex(char *string, char escape);
 
-# define virVMXUnescapeHexPipe(_string) virVMXUnescapeHex(_string, '|')
+#define virVMXUnescapeHexPipe(_string) virVMXUnescapeHex(_string, '|')
 
-# define virVMXUnescapeHexPercent(_string) virVMXUnescapeHex(_string, '%')
+#define virVMXUnescapeHexPercent(_string) virVMXUnescapeHex(_string, '%')
 
 char *virVMXConvertToUTF8(const char *encoding, const char *string);
 
@@ -137,5 +140,3 @@ int virVMXFormatParallel(virVMXContext *ctx, virDomainChrDefPtr def,
                          virBufferPtr buffer);
 
 int virVMXFormatSVGA(virDomainVideoDefPtr def, virBufferPtr buffer);
-
-#endif /* __VIR_VMX_H__ */

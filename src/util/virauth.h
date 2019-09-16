@@ -20,11 +20,10 @@
  *
  */
 
-#ifndef __VIR_AUTH_H__
-# define __VIR_AUTH_H__
+#pragma once
 
-# include "internal.h"
-# include "viruri.h"
+#include "internal.h"
+#include "viruri.h"
 
 int virAuthGetConfigFilePath(virConnectPtr conn,
                              char **path);
@@ -53,4 +52,3 @@ char * virAuthGetPasswordPath(const char *path,
                               const char *servicename,
                               const char *username,
                               const char *hostname);
-#endif /* __VIR_AUTH_H__ */

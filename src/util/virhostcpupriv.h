@@ -19,14 +19,15 @@
  *
  */
 
-#ifndef __VIR_HOSTCPU_PRIV_H__
-# define __VIR_HOSTCPU_PRIV_H__
+#ifndef LIBVIRT_VIRHOSTCPUPRIV_H_ALLOW
+# error "virhostcpupriv.h may only be included by virhostcpu.c or test suites"
+#endif /* LIBVIRT_VIRHOSTCPUPRIV_H_ALLOW */
 
-# include "virhostcpu.h"
+#pragma once
 
-# ifdef __linux__
-void virHostCPUSetSysFSSystemPathLinux(const char *path);
+#include "virhostcpu.h"
 
+#ifdef __linux__
 int virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
                                    virArch arch,
                                    unsigned int *cpus,
@@ -40,6 +41,4 @@ int virHostCPUGetStatsLinux(FILE *procstat,
                             int cpuNum,
                             virNodeCPUStatsPtr params,
                             int *nparams);
-# endif
-
-#endif /* __VIR_HOSTCPU_PRIV_H__ */
+#endif

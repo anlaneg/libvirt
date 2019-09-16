@@ -22,21 +22,20 @@
 #include <config.h>
 
 #include "testutils.h"
+#include "viralloc.h"
 
 #if defined (__linux__)
 
 # include "network/bridge_driver_platform.h"
 # include "virbuffer.h"
 
-# define __VIR_FIREWALL_PRIV_H_ALLOW__
+# define LIBVIRT_VIRFIREWALLPRIV_H_ALLOW
 # include "virfirewallpriv.h"
 
-# define __VIR_COMMAND_PRIV_H_ALLOW__
+# define LIBVIRT_VIRCOMMANDPRIV_H_ALLOW
 # include "vircommandpriv.h"
 
 # define VIR_FROM_THIS VIR_FROM_NONE
-
-static const char *abs_top_srcdir;
 
 # ifdef __linux__
 #  define RULESTYPE "linux"
@@ -44,18 +43,34 @@ static const char *abs_top_srcdir;
 #  error "test case not ported to this platform"
 # endif
 
+static void
+testCommandDryRun(const char *const*args ATTRIBUTE_UNUSED,
+                  const char *const*env ATTRIBUTE_UNUSED,
+                  const char *input ATTRIBUTE_UNUSED,
+                  char **output,
+                  char **error,
+                  int *status,
+                  void *opaque ATTRIBUTE_UNUSED)
+{
+    *status = 0;
+    ignore_value(VIR_STRDUP_QUIET(*output, ""));
+    ignore_value(VIR_STRDUP_QUIET(*error, ""));
+}
+
 static int testCompareXMLToArgvFiles(const char *xml,
-                                     const char *cmdline)
+                                     const char *cmdline,
+                                     const char *baseargs)
 {
     char *expectargv = NULL;
     char *actualargv = NULL;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
     virNetworkDefPtr def = NULL;
     int ret = -1;
+    char *actual;
 
-    virCommandSetDryRun(&buf, NULL, NULL);
+    virCommandSetDryRun(&buf, testCommandDryRun, NULL);
 
-    if (!(def = virNetworkDefParseFile(xml)))
+    if (!(def = virNetworkDefParseFile(xml, NULL)))
         goto cleanup;
 
     if (networkAddFirewallRules(def) < 0)
@@ -64,11 +79,18 @@ static int testCompareXMLToArgvFiles(const char *xml,
     if (virBufferError(&buf))
         goto cleanup;
 
-    actualargv = virBufferContentAndReset(&buf);
+    actual = actualargv = virBufferContentAndReset(&buf);
     virTestClearCommandPath(actualargv);
     virCommandSetDryRun(NULL, NULL, NULL);
 
-    if (virTestCompareToFile(actualargv, cmdline) < 0)
+    /* The first network to be created populates the
+     * libvirt global chains. We must skip args for
+     * that if present
+     */
+    if (STRPREFIX(actual, baseargs))
+        actual += strlen(baseargs);
+
+    if (virTestCompareToFile(actual, cmdline) < 0)
         goto cleanup;
 
     ret = 0;
@@ -83,6 +105,7 @@ static int testCompareXMLToArgvFiles(const char *xml,
 
 struct testInfo {
     const char *name;
+    const char *baseargs;
 };
 
 
@@ -100,7 +123,7 @@ testCompareXMLToIPTablesHelper(const void *data)
                     abs_srcdir, info->name, RULESTYPE) < 0)
         goto cleanup;
 
-    result = testCompareXMLToArgvFiles(xml, args);
+    result = testCompareXMLToArgvFiles(xml, args, info->baseargs);
 
  cleanup:
     VIR_FREE(xml);
@@ -108,29 +131,51 @@ testCompareXMLToIPTablesHelper(const void *data)
     return result;
 }
 
+static bool
+hasNetfilterTools(void)
+{
+    return virFileIsExecutable(IPTABLES_PATH) &&
+        virFileIsExecutable(IP6TABLES_PATH) &&
+        virFileIsExecutable(EBTABLES_PATH);
+}
+
 
 static int
 mymain(void)
 {
     int ret = 0;
+    VIR_AUTOFREE(char *)basefile = NULL;
+    VIR_AUTOFREE(char *)baseargs = NULL;
 
-    abs_top_srcdir = getenv("abs_top_srcdir");
-    if (!abs_top_srcdir)
-        abs_top_srcdir = abs_srcdir "/..";
-
-# define DO_TEST(name)                                                  \
-    do {                                                                \
-        static struct testInfo info = {                                 \
-            name,                                                       \
-        };                                                              \
-        if (virTestRun("Network XML-2-iptables " name,                  \
-                       testCompareXMLToIPTablesHelper, &info) < 0)      \
-            ret = -1;                                                   \
+# define DO_TEST(name) \
+    do { \
+        struct testInfo info = { \
+            name, baseargs, \
+        }; \
+        if (virTestRun("Network XML-2-iptables " name, \
+                       testCompareXMLToIPTablesHelper, &info) < 0) \
+            ret = -1; \
     } while (0)
 
     virFirewallSetLockOverride(true);
 
     if (virFirewallSetBackend(VIR_FIREWALL_BACKEND_DIRECT) < 0) {
+        if (!hasNetfilterTools()) {
+            fprintf(stderr, "iptables/ip6tables/ebtables tools not present");
+            return EXIT_AM_SKIP;
+        }
+
+        ret = -1;
+        goto cleanup;
+    }
+
+    if (virAsprintf(&basefile, "%s/networkxml2firewalldata/base.args",
+                    abs_srcdir) < 0) {
+        ret = -1;
+        goto cleanup;
+    }
+
+    if (virTestLoadFile(basefile, &baseargs) < 0) {
         ret = -1;
         goto cleanup;
     }
@@ -141,13 +186,12 @@ mymain(void)
     DO_TEST("nat-no-dhcp");
     DO_TEST("nat-ipv6");
     DO_TEST("route-default");
-    DO_TEST("route-default");
 
  cleanup:
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)
 
 #else /* ! defined (__linux__) */
 

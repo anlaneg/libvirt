@@ -16,15 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *    Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_FIREWALL_H__
-# define __VIR_FIREWALL_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
+#include "virautoclean.h"
 
 typedef struct _virFirewall virFirewall;
 typedef virFirewall *virFirewallPtr;
@@ -54,10 +51,11 @@ void virFirewallFree(virFirewallPtr firewall);
  *
  * Returns the new rule
  */
-# define virFirewallAddRule(firewall, layer, ...) \
+#define virFirewallAddRule(firewall, layer, ...) \
          virFirewallAddRuleFull(firewall, layer, false, NULL, NULL, __VA_ARGS__)
 
 typedef int (*virFirewallQueryCallback)(virFirewallPtr firewall,
+                                        virFirewallLayer layer,
                                         const char *const *lines,
                                         void *opaque);
 
@@ -116,4 +114,4 @@ int virFirewallApply(virFirewallPtr firewall);
 
 void virFirewallSetLockOverride(bool avoid);
 
-#endif /* __VIR_FIREWALL_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virFirewall, virFirewallFree);

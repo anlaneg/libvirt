@@ -23,6 +23,27 @@ AC_DEFUN([LIBVIRT_ARG_LIBSSH],[
 
 AC_DEFUN([LIBVIRT_CHECK_LIBSSH],[
   LIBVIRT_CHECK_PKG([LIBSSH], [libssh], [0.7])
+
+  if test "$with_libssh" = "yes" ; then
+    old_CFLAGS="$CFLAGS"
+    old_LIBS="$LIBS"
+    CFLAGS="$CFLAGS $LIBSSH_CFLAGS"
+    LIBS="$LIBS $LIBSSH_LIBS"
+    AC_CHECK_FUNC([ssh_get_server_publickey],
+      [],
+      [AC_DEFINE_UNQUOTED([ssh_get_server_publickey], [ssh_get_publickey],
+            [ssh_get_publickey is deprecated and replaced by ssh_get_server_publickey.])])
+    AC_CHECK_FUNC([ssh_session_is_known_server],
+      [],
+      [AC_DEFINE_UNQUOTED([ssh_session_is_known_server], [ssh_is_server_known],
+            [ssh_is_server_known is deprecated and replaced by ssh_session_is_known_server.])])
+    AC_CHECK_FUNC([ssh_session_update_known_hosts],
+      [],
+      [AC_DEFINE_UNQUOTED([ssh_session_update_known_hosts], [ssh_write_knownhost],
+            [ssh_write_knownhost is deprecated and replaced by ssh_session_update_known_hosts.])])
+    CFLAGS="$old_CFLAGS"
+    LIBS="$old_LIBS"
+  fi
 ])
 
 AC_DEFUN([LIBVIRT_RESULT_LIBSSH],[

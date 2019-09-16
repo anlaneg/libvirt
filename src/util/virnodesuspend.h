@@ -19,16 +19,12 @@
  *
  */
 
+#pragma once
 
-#ifndef __VIR_NODE_SUSPEND_H__
-# define __VIR_NODE_SUSPEND_H__
+#include "internal.h"
 
-# include "internal.h"
-
-int nodeSuspendForDuration(unsigned int target,
-                           unsigned long long duration,
-                           unsigned int flags);
+int virNodeSuspend(unsigned int target,
+                   unsigned long long duration,
+                   unsigned int flags);
 
 int virNodeSuspendGetTargetMask(unsigned int *bitmask);
-
-#endif /* __VIR_NODE_SUSPEND_H__ */

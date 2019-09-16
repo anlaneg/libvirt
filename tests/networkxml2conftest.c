@@ -1,9 +1,6 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -23,20 +20,25 @@ testCompareXMLToConfFiles(const char *inxml, const char *outconf, dnsmasqCapsPtr
 {
     char *actual = NULL;
     int ret = -1;
-    virNetworkDefPtr dev = NULL;
+    virNetworkDefPtr def = NULL;
     virNetworkObjPtr obj = NULL;
     virCommandPtr cmd = NULL;
     char *pidfile = NULL;
     dnsmasqContext *dctx = NULL;
+    virNetworkXMLOptionPtr xmlopt = NULL;
 
-    if (!(dev = virNetworkDefParseFile(inxml)))
+    if (!(xmlopt = networkDnsmasqCreateXMLConf()))
+        goto fail;
+
+    if (!(def = virNetworkDefParseFile(inxml, xmlopt)))
         goto fail;
 
     if (!(obj = virNetworkObjNew()))
         goto fail;
 
-    obj->def = dev;
-    dctx = dnsmasqContextNew(dev->name, "/var/lib/libvirt/dnsmasq");
+    virNetworkObjSetDef(obj, def);
+
+    dctx = dnsmasqContextNew(def->name, "/var/lib/libvirt/dnsmasq");
 
     if (dctx == NULL)
         goto fail;
@@ -53,8 +55,7 @@ testCompareXMLToConfFiles(const char *inxml, const char *outconf, dnsmasqCapsPtr
                                  "except-interface=lo\n")))
         goto fail;
     VIR_FREE(actual);
-    actual = tmp;
-    tmp = NULL;
+    VIR_STEAL_PTR(actual, tmp);
 #endif
 
     if (virTestCompareToFile(actual, outconf) < 0)
@@ -66,7 +67,8 @@ testCompareXMLToConfFiles(const char *inxml, const char *outconf, dnsmasqCapsPtr
     VIR_FREE(actual);
     VIR_FREE(pidfile);
     virCommandFree(cmd);
-    virObjectUnref(obj);
+    virObjectUnref(xmlopt);
+    virNetworkObjEndAPI(&obj);
     dnsmasqContextFree(dctx);
     return ret;
 }
@@ -111,16 +113,16 @@ mymain(void)
     dnsmasqCapsPtr dhcpv6
         = dnsmasqCapsNewFromBuffer("Dnsmasq version 2.64\n--bind-dynamic", DNSMASQ);
 
-#define DO_TEST(xname, xcaps)                                        \
-    do {                                                             \
-        static testInfo info;                                        \
-                                                                     \
-        info.name = xname;                                           \
-        info.caps = xcaps;                                           \
-        if (virTestRun("Network XML-2-Conf " xname,                  \
-                       testCompareXMLToConfHelper, &info) < 0) {     \
-            ret = -1;                                                \
-        }                                                            \
+#define DO_TEST(xname, xcaps) \
+    do { \
+        static testInfo info; \
+ \
+        info.name = xname; \
+        info.caps = xcaps; \
+        if (virTestRun("Network XML-2-Conf " xname, \
+                       testCompareXMLToConfHelper, &info) < 0) { \
+            ret = -1; \
+        } \
     } while (0)
 
     DO_TEST("isolated-network", restricted);
@@ -137,11 +139,14 @@ mymain(void)
     DO_TEST("nat-network-dns-hosts", full);
     DO_TEST("nat-network-dns-forward-plain", full);
     DO_TEST("nat-network-dns-forwarders", full);
+    DO_TEST("nat-network-dns-forwarder-no-resolv", full);
     DO_TEST("nat-network-dns-local-domain", full);
+    DO_TEST("nat-network-mtu", dhcpv6);
     DO_TEST("dhcp6-network", dhcpv6);
     DO_TEST("dhcp6-nat-network", dhcpv6);
     DO_TEST("dhcp6host-routed-network", dhcpv6);
     DO_TEST("ptr-domains-auto", dhcpv6);
+    DO_TEST("dnsmasq-options", dhcpv6);
 
     virObjectUnref(dhcpv6);
     virObjectUnref(full);
@@ -150,4 +155,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

@@ -16,19 +16,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel P. Berrange <berrange@redhat.com>
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 
-#ifndef __VIR_USB_H__
-# define __VIR_USB_H__
+#pragma once
 
-# include "internal.h"
-# include "virobject.h"
+#include "internal.h"
+#include "virobject.h"
+#include "virautoclean.h"
 
-# define USB_DEVFS "/dev/bus/usb/"
+#define USB_DEVFS "/dev/bus/usb/"
 
 typedef struct _virUSBDevice virUSBDevice;
 typedef virUSBDevice *virUSBDevicePtr;
@@ -88,7 +84,7 @@ int virUSBDeviceFileIterate(virUSBDevicePtr dev,
 
 virUSBDeviceListPtr virUSBDeviceListNew(void);
 int virUSBDeviceListAdd(virUSBDeviceListPtr list,
-                        virUSBDevicePtr dev);
+                        virUSBDevicePtr *dev);
 virUSBDevicePtr virUSBDeviceListGet(virUSBDeviceListPtr list,
                                     int idx);
 size_t virUSBDeviceListCount(virUSBDeviceListPtr list);
@@ -99,4 +95,4 @@ void virUSBDeviceListDel(virUSBDeviceListPtr list,
 virUSBDevicePtr virUSBDeviceListFind(virUSBDeviceListPtr list,
                                      virUSBDevicePtr dev);
 
-#endif /* __VIR_USB_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virUSBDevice, virUSBDeviceFree);

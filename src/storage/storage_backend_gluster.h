@@ -19,12 +19,6 @@
  *
  */
 
-#ifndef __VIR_STORAGE_BACKEND_GLUSTER_H__
-# define __VIR_STORAGE_BACKEND_GLUSTER_H__
+#pragma once
 
-# include "storage_backend.h"
-
-extern virStorageBackend virStorageBackendGluster;
-extern virStorageFileBackend virStorageFileBackendGluster;
-
-#endif /* __VIR_STORAGE_BACKEND_GLUSTER_H__ */
+int virStorageBackendGlusterRegister(void);

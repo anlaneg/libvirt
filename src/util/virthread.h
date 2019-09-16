@@ -19,13 +19,12 @@
  *
  */
 
-#ifndef __THREADS_H_
-# define __THREADS_H_
+#pragma once
 
-# include "internal.h"
-# include "virerror.h"
+#include "internal.h"
+#include "virerror.h"
 
-# include <pthread.h>
+#include <pthread.h>
 
 typedef struct virMutex virMutex;
 typedef virMutex *virMutexPtr;
@@ -71,14 +70,14 @@ struct virOnceControl {
 };
 
 
-# define VIR_MUTEX_INITIALIZER            \
-    {                                     \
+#define VIR_MUTEX_INITIALIZER \
+    { \
         .lock = PTHREAD_MUTEX_INITIALIZER \
     }
 
-# define VIR_ONCE_CONTROL_INITIALIZER \
-    {                                 \
-        .once = PTHREAD_ONCE_INIT     \
+#define VIR_ONCE_CONTROL_INITIALIZER \
+    { \
+        .once = PTHREAD_ONCE_INIT \
     }
 
 typedef void (*virOnceFunc)(void);
@@ -88,7 +87,7 @@ void virThreadOnExit(void);
 
 typedef void (*virThreadFunc)(void *opaque);
 
-# define virThreadCreate(thread, joinable, func, opaque) \
+#define virThreadCreate(thread, joinable, func, opaque) \
     virThreadCreateFull(thread, joinable, func, #func, false, opaque)
 
 int virThreadCreateFull(virThreadPtr thread,
@@ -181,7 +180,7 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
  *
  * Then invoking the macro:
  *
- *  VIR_ONCE_GLOBAL_INIT(virMyObject)
+ *  VIR_ONCE_GLOBAL_INIT(virMyObject);
  *
  * Will create a method
  *
@@ -190,27 +189,26 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
  * Which will ensure that 'virMyObjectOnceInit' is
  * guaranteed to be invoked exactly once.
  */
-# define VIR_ONCE_GLOBAL_INIT(classname)                                \
+#define VIR_ONCE_GLOBAL_INIT(classname) \
     static virOnceControl classname ## OnceControl = VIR_ONCE_CONTROL_INITIALIZER; \
-    static virErrorPtr classname ## OnceError;                          \
-                                                                        \
-    static void classname ## Once(void)                                 \
-    {                                                                   \
-        if (classname ## OnceInit() < 0)                                \
-            classname ## OnceError = virSaveLastError();                \
-    }                                                                   \
-                                                                        \
-    static int classname ## Initialize(void)                            \
-    {                                                                   \
-        if (virOnce(&classname ## OnceControl, classname ## Once) < 0)  \
-            return -1;                                                  \
-                                                                        \
-        if (classname ## OnceError) {                                   \
-            virSetError(classname ## OnceError);                        \
-            return -1;                                                  \
-        }                                                               \
-                                                                        \
-        return 0;                                                       \
-    }
-
-#endif
+    static virErrorPtr classname ## OnceError; \
+ \
+    static void classname ## Once(void) \
+    { \
+        if (classname ## OnceInit() < 0) \
+            classname ## OnceError = virSaveLastError(); \
+    } \
+ \
+    static int classname ## Initialize(void) \
+    { \
+        if (virOnce(&classname ## OnceControl, classname ## Once) < 0) \
+            return -1; \
+ \
+        if (classname ## OnceError) { \
+            virSetError(classname ## OnceError); \
+            return -1; \
+        } \
+ \
+        return 0; \
+    } \
+    struct classname ## EatSemicolon

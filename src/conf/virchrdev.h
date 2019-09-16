@@ -17,14 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Peter Krempa <pkrempa@redhat.com>
  */
-#ifndef __VIR_CHRDEV_H__
-# define __VIR_CHRDEV_H__
 
-# include "internal.h"
-# include "domain_conf.h"
+#pragma once
+
+#include "internal.h"
+#include "domain_conf.h"
 
 typedef struct _virChrdevs virChrdevs;
 typedef virChrdevs *virChrdevsPtr;
@@ -34,4 +32,3 @@ void virChrdevFree(virChrdevsPtr devs);
 
 int virChrdevOpen(virChrdevsPtr devs, virDomainChrSourceDefPtr source,
                   virStreamPtr st, bool force);
-#endif /*__VIR_CHRDEV_H__*/

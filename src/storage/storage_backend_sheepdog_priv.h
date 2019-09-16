@@ -16,14 +16,15 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_STORAGE_BACKEND_SHEEPDOG_PRIV_H__
-# define __VIR_STORAGE_BACKEND_SHEEPDOG_PRIV_H__
+#ifndef LIBVIRT_STORAGE_BACKEND_SHEEPDOG_PRIV_H_ALLOW
+# error "storage_backend_sheepdog_priv.h may only be included by storage_backend_sheepdog.c or test suites"
+#endif /* LIBVIRT_STORAGE_BACKEND_SHEEPDOG_PRIV_H_ALLOW */
 
-# include "conf/storage_conf.h"
+#pragma once
+
+#include "conf/storage_conf.h"
 
 int virStorageBackendSheepdogParseNodeInfo(virStoragePoolDefPtr pool,
                                            char *output);
 int virStorageBackendSheepdogParseVdiList(virStorageVolDefPtr vol,
                                           char *output);
-
-#endif /* __VIR_STORAGE_BACKEND_SHEEPDOG_PRIV_H__ */

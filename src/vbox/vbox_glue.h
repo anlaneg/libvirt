@@ -19,13 +19,10 @@
  *
  */
 
-#ifndef __VBOX_GLUE_H__
-# define __VBOX_GLUE_H__
+#pragma once
 
-# ifdef WIN32
-#  include "vbox_MSCOMGlue.h"
-# else
-#  include "vbox_XPCOMCGlue.h"
-# endif
-
-#endif /* __VBOX_GLUE_H__ */
+#ifdef WIN32
+# include "vbox_MSCOMGlue.h"
+#else
+# include "vbox_XPCOMCGlue.h"
+#endif

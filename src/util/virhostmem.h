@@ -17,14 +17,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_HOSTMEM_H__
-# define __VIR_HOSTMEM_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 int virHostMemGetStats(int cellNum,
                        virNodeMemoryStatsPtr params,
@@ -56,5 +53,3 @@ int virHostMemAllocPages(unsigned int npages,
                          int startCell,
                          unsigned int cellCount,
                          bool add);
-
-#endif /* __VIR_HOSTMEM_H__*/

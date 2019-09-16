@@ -19,10 +19,9 @@
  *
  */
 
-#ifndef __VIR_ROTATING_FILE_H__
-# define __VIR_ROTATING_FILE_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef struct virRotatingFileWriter virRotatingFileWriter;
 typedef virRotatingFileWriter *virRotatingFileWriterPtr;
@@ -58,5 +57,3 @@ ssize_t virRotatingFileReaderConsume(virRotatingFileReaderPtr file,
 
 void virRotatingFileWriterFree(virRotatingFileWriterPtr file);
 void virRotatingFileReaderFree(virRotatingFileReaderPtr file);
-
-#endif /* __VIR_ROTATING_FILE_H__ */

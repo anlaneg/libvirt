@@ -16,15 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_KEYFILE_H__
-# define __VIR_KEYFILE_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 /**
  * virKeyFilePtr:
@@ -60,5 +56,3 @@ const char *virKeyFileGetValueString(virKeyFilePtr conf,
                                      const char *groupname,
                                      const char *valuename)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
-
-#endif /* __VIR_KEYFILE_H__ */

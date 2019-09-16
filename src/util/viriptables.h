@@ -16,16 +16,16 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Mark McLoughlin <markmc@redhat.com>
  */
 
-#ifndef __VIR_IPTABLES_H__
-# define __VIR_IPTABLES_H__
+#pragma once
 
-# include "virsocketaddr.h"
-# include "virfirewall.h"
+#include "virsocketaddr.h"
+#include "virfirewall.h"
+
+int              iptablesSetupPrivateChains      (virFirewallLayer layer);
+
+void             iptablesSetDeletePrivate        (bool pvt);
 
 void             iptablesAddTcpInput             (virFirewallPtr fw,
                                                   virFirewallLayer layer,
@@ -147,5 +147,3 @@ void             iptablesAddOutputFixUdpChecksum (virFirewallPtr fw,
 void             iptablesRemoveOutputFixUdpChecksum (virFirewallPtr fw,
                                                      const char *iface,
                                                      int port);
-
-#endif /* __VIR_IPTABLES_H__ */

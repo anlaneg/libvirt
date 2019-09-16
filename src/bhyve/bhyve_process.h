@@ -19,10 +19,9 @@
  *
  */
 
-#ifndef __BHYVE_PROCESS_H__
-# define __BHYVE_PROCESS_H__
+#pragma once
 
-# include "bhyve_utils.h"
+#include "bhyve_utils.h"
 
 int virBhyveProcessStart(virConnectPtr conn,
                          bhyveConnPtr driver,
@@ -44,5 +43,3 @@ void virBhyveProcessReconnectAll(bhyveConnPtr driver);
 typedef enum {
     VIR_BHYVE_PROCESS_START_AUTODESTROY = 1 << 0,
 } bhyveProcessStartFlags;
-
-#endif /* __BHYVE_PROCESS_H__ */

@@ -16,53 +16,62 @@
 ## License along with this library.  If not, see
 ## <http://www.gnu.org/licenses/>.
 
-DEVHELP_DIR=$(datadir)/gtk-doc/html/libvirt
+HTML_DIR = $(docdir)/html
 
-apihtml =					\
-  html/index.html				\
+modules = \
+	libvirt-common \
+	libvirt-domain \
+	libvirt-domain-checkpoint \
+	libvirt-domain-snapshot \
+	libvirt-event \
+	libvirt-host \
+	libvirt-interface \
+	libvirt-network \
+	libvirt-nodedev \
+	libvirt-nwfilter \
+	libvirt-secret \
+	libvirt-storage \
+	libvirt-stream \
+	virterror \
+	$(NULL)
+
+apihtml = \
+  html/index.html \
   $(apihtml_generated)
 
 apihtml_generated = \
-  html/libvirt-libvirt-common.html		\
-  html/libvirt-libvirt-domain.html		\
-  html/libvirt-libvirt-domain-snapshot.html	\
-  html/libvirt-libvirt-event.html		\
-  html/libvirt-libvirt-host.html		\
-  html/libvirt-libvirt-interface.html		\
-  html/libvirt-libvirt-network.html		\
-  html/libvirt-libvirt-nodedev.html		\
-  html/libvirt-libvirt-nwfilter.html		\
-  html/libvirt-libvirt-secret.html		\
-  html/libvirt-libvirt-storage.html		\
-  html/libvirt-libvirt-stream.html		\
-  html/libvirt-virterror.html
+	$(addprefix html/libvirt-,$(addsuffix .html,$(modules))) \
+	$(NULL)
 
-apipng =	\
-  html/left.png	\
-  html/up.png	\
-  html/home.png	\
+apipng = \
+  html/left.png \
+  html/up.png \
+  html/home.png \
   html/right.png
 
-devhelphtml =			\
-  devhelp/libvirt.devhelp	\
-  devhelp/index.html		\
-  devhelp/general.html		\
-  devhelp/libvirt-virterror.html
-
-css =         \
+css = \
   generic.css \
   libvirt.css \
+  mobile.css \
   main.css
 
-devhelppng =		\
-  devhelp/home.png	\
-  devhelp/left.png	\
-  devhelp/right.png	\
-  devhelp/up.png
+javascript = \
+  js/main.js \
+  $(NULL)
 
-devhelpcss = devhelp/style.css
-
-devhelpxsl = devhelp/devhelp.xsl devhelp/html.xsl
+fonts = \
+  fonts/LICENSE.md \
+  fonts/stylesheet.css \
+  fonts/overpass-bold-italic.woff \
+  fonts/overpass-bold.woff \
+  fonts/overpass-italic.woff \
+  fonts/overpass-light-italic.woff \
+  fonts/overpass-light.woff \
+  fonts/overpass-mono-bold.woff \
+  fonts/overpass-mono-light.woff \
+  fonts/overpass-mono-regular.woff \
+  fonts/overpass-mono-semibold.woff \
+  fonts/overpass-regular.woff
 
 logofiles = \
   logos/logo-base.svg \
@@ -103,6 +112,10 @@ internals_html_in = \
   $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/internals/*.html.in))
 internals_html = $(internals_html_in:%.html.in=%.html)
 
+kbase_html_in = \
+  $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/kbase/*.html.in))
+kbase_html = $(kbase_html_in:%.html.in=%.html)
+
 # Since we ship pre-built html in the tarball, we must also
 # ship the sources, even when those sources are themselves
 # generated.
@@ -112,12 +125,6 @@ dot_html_in = \
   news.html.in \
   $(notdir $(wildcard $(srcdir)/*.html.in))
 dot_html = $(dot_html_in:%.html.in=%.html)
-
-dot_php_in = $(notdir $(wildcard $(srcdir)/*.php.in))
-dot_php_code_in = $(dot_php_in:%.php.in=%.php.code.in)
-dot_php = $(dot_php_in:%.php.in=%.php)
-
-patches = $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/api_extension/*.patch))
 
 xml = \
   libvirt-api.xml \
@@ -155,15 +162,15 @@ fig = \
 schemadir = $(pkgdatadir)/schemas
 schema_DATA = $(wildcard $(srcdir)/schemas/*.rng)
 
-EXTRA_DIST=					\
+EXTRA_DIST= \
   apibuild.py genaclperms.pl \
   site.xsl subsite.xsl newapi.xsl page.xsl \
-  hacking1.xsl hacking2.xsl wrapstring.xsl \
+  wrapstring.xsl \
   $(dot_html) $(dot_html_in) $(gif) $(apihtml) $(apipng) \
-  $(devhelphtml) $(devhelppng) $(devhelpcss) $(devhelpxsl) \
   $(xml) $(qemu_xml) $(lxc_xml) $(admin_xml) $(fig) $(png) $(css) \
-  $(logofiles) $(patches) $(dot_php_in) $(dot_php_code_in) $(dot_php)\
-  $(internals_html_in) $(internals_html) \
+  $(javascript) $(logofiles) \
+  $(internals_html_in) $(internals_html) $(fonts) \
+  $(kbase_html_in) $(kbase_html) \
   aclperms.htmlinc \
   hvsupport.pl \
   $(schema_DATA)
@@ -177,10 +184,16 @@ $(srcdir)/aclperms.htmlinc: $(top_srcdir)/src/access/viraccessperm.h \
 MAINTAINERCLEANFILES = \
   $(addprefix $(srcdir)/,$(dot_html)) \
   $(addprefix $(srcdir)/,$(apihtml)) \
-  $(addprefix $(srcdir)/,$(devhelphtml)) \
   $(addprefix $(srcdir)/,$(internals_html)) \
-  $(addprefix $(srcdir)/,$(dot_php)) \
+  $(addprefix $(srcdir)/,$(kbase_html)) \
   $(srcdir)/hvsupport.html.in $(srcdir)/aclperms.htmlinc
+
+timestamp="$(shell if test -n "$$SOURCE_DATE_EPOCH"; \
+		   then \
+		     date -u --date="@$$SOURCE_DATE_EPOCH"; \
+		   else \
+		     date -u; \
+		   fi)"
 
 all-am: web
 
@@ -189,8 +202,8 @@ qemu_api: $(srcdir)/libvirt-qemu-api.xml $(srcdir)/libvirt-qemu-refs.xml
 lxc_api: $(srcdir)/libvirt-lxc-api.xml $(srcdir)/libvirt-lxc-refs.xml
 admin_api: $(srcdir)/libvirt-admin-api.xml $(srcdir)/libvirt-admin-refs.xml
 
-web: $(dot_html) $(internals_html) html/index.html devhelp/index.html \
-  $(dot_php)
+web: $(dot_html) $(internals_html) $(kbase_html) \
+	html/index.html
 
 hvsupport.html: $(srcdir)/hvsupport.html.in
 
@@ -201,25 +214,17 @@ $(srcdir)/hvsupport.html.in: $(srcdir)/hvsupport.pl $(api_DATA) \
 	$(AM_V_GEN)$(PERL) $(srcdir)/hvsupport.pl $(top_srcdir)/src > $@ \
 		|| { rm $@ && exit 1; }
 
-# xsltproc seems to add the xmlns="" attribute to random output elements:
-# use sed to strip it out, as leaving it there triggers XML errors during
-# further transformation steps
 news.html.in: \
 	  $(srcdir)/news.xml \
 	  $(srcdir)/news-html.xsl
-	$(AM_V_GEN) \
-	if [ -x $(XSLTPROC) ]; then \
-	  $(XSLTPROC) --nonet \
+	$(AM_V_GEN)$(XSLTPROC) --nonet \
 	    $(srcdir)/news-html.xsl \
 	    $(srcdir)/news.xml \
-	  >$@-tmp \
-	    || { rm -f $@-tmp; exit 1; }; \
-	  sed 's/ xmlns=""//g' $@-tmp >$@ \
-	    || { rm -f $@-tmp; exit 1; }; \
-	  rm -f $@-tmp; \
-	fi
+	  >$@ \
+	    || { rm -f $@; exit 1; };
 EXTRA_DIST += \
 	$(srcdir)/news.xml \
+	$(srcdir)/news.rng \
 	$(srcdir)/news-html.xsl
 MAINTAINERCLEANFILES += \
 	$(srcdir)/news.html.in
@@ -229,9 +234,7 @@ MAINTAINERCLEANFILES += \
 
 %.html.tmp: %.html.in site.xsl subsite.xsl page.xsl \
 		$(acl_generated)
-	@if [ -x $(XSLTPROC) ] ; then \
-	  echo "Generating $@"; \
-	  name=`echo $@ | sed -e 's/.tmp//'`; \
+	$(AM_V_GEN)name=`echo $@ | sed -e 's/.tmp//'`; \
 	  dir=`dirname $@` ; \
 	  if test "$$dir" = "."; \
 	  then \
@@ -240,53 +243,23 @@ MAINTAINERCLEANFILES += \
 	    $(MKDIR_P) $$dir; \
 	    style=subsite.xsl; \
 	  fi; \
-	  $(XSLTPROC) --stringparam pagename $$name --nonet \
+	  $(XSLTPROC) --stringparam pagename $$name \
+	    --stringparam timestamp $(timestamp) --nonet \
 	    $(top_srcdir)/docs/$$style $< > $@ \
-	    || { rm $@ && exit 1; }; fi
+	    || { rm $@ && exit 1; }
 
 %.html: %.html.tmp
-	@if test -x $(XMLLINT) && test -x $(XMLCATALOG) ; then \
-	  if $(XMLCATALOG) '$(XML_CATALOG_FILE)' \
-	    "-//W3C//DTD XHTML 1.0 Strict//EN" > /dev/null ; then \
-	  echo "Validating $@" ; \
-	  SGML_CATALOG_FILES='$(XML_CATALOG_FILE)' \
-	  $(XMLLINT) --catalogs --nonet --format --valid $< > $(srcdir)/$@ \
-	  || { rm $(srcdir)/$@ && exit 1; }; \
-	  else echo "missing XHTML1 DTD"; cat $< > $(srcdir)/$@ ; fi ; fi
-
-%.php.tmp: %.php.in site.xsl page.xsl
-	@if [ -x $(XSLTPROC) ] ; then \
-	  echo "Generating $@"; \
-	  $(XSLTPROC) --stringparam pagename $(@:.tmp=) --nonet \
-	    $(top_srcdir)/docs/site.xsl $< > $@ \
-	    || { rm $@ && exit 1; }; fi
-
-%.php: %.php.tmp %.php.code.in
-	@if [ -x $(XSLTPROC) ] ; then \
-	  echo "Scripting $@"; \
-	    sed -e '/<span id="php_placeholder"><\/span>/r '"$(srcdir)/$@.code.in" \
-	    -e /php_placeholder/d < $@.tmp > $(srcdir)/$@ \
-	    || { rm $(srcdir)/$@ && exit 1; }; fi
+	$(AM_V_GEN)$(XMLLINT) --nonet --format $< > $(srcdir)/$@ \
+	  || { rm $(srcdir)/$@ && exit 1; }
 
 $(apihtml_generated): html/index.html
 
 html/index.html: libvirt-api.xml newapi.xsl page.xsl $(APIBUILD_STAMP)
-	$(AM_V_GEN)if [ -x $(XSLTPROC) ] ; then \
-	  $(XSLTPROC) --nonet -o $(srcdir)/ \
+	$(AM_V_GEN)$(XSLTPROC) --nonet -o $(srcdir)/ \
 	  --stringparam builddir '$(abs_top_builddir)' \
-	  $(srcdir)/newapi.xsl $(srcdir)/libvirt-api.xml ; fi && \
-	if test -x $(XMLLINT) && test -x $(XMLCATALOG) ; then \
-	  if $(XMLCATALOG) '$(XML_CATALOG_FILE)' "-//W3C//DTD XHTML 1.0 Strict//EN" \
-	    > /dev/null ; then \
-	  SGML_CATALOG_FILES='$(XML_CATALOG_FILE)' \
-	  $(XMLLINT) --catalogs --nonet --valid --noout $(srcdir)/html/*.html ; \
-	  else echo "missing XHTML1 DTD"; cat $< > $(srcdir)/$@ ; fi ; fi
-
-$(addprefix $(srcdir)/,$(devhelphtml)): $(srcdir)/libvirt-api.xml $(devhelpxsl)
-	$(AM_V_GEN)if [ -x $(XSLTPROC) ] ; then \
-	  $(XSLTPROC) --nonet -o $(srcdir)/devhelp/ \
-	  $(top_srcdir)/docs/devhelp/devhelp.xsl $(srcdir)/libvirt-api.xml ; fi
-
+	  --stringparam timestamp $(timestamp) \
+	  $(srcdir)/newapi.xsl $(srcdir)/libvirt-api.xml && \
+	  $(XMLLINT) --nonet --noout $(srcdir)/html/*.html
 
 python_generated_files = \
 		$(srcdir)/html/libvirt-libvirt-lxc.html \
@@ -312,6 +285,7 @@ $(python_generated_files): $(APIBUILD_STAMP)
 $(APIBUILD_STAMP): $(srcdir)/apibuild.py \
 		$(top_srcdir)/include/libvirt/libvirt.h \
 		$(top_srcdir)/include/libvirt/libvirt-common.h.in \
+		$(top_srcdir)/include/libvirt/libvirt-domain-checkpoint.h \
 		$(top_srcdir)/include/libvirt/libvirt-domain-snapshot.h \
 		$(top_srcdir)/include/libvirt/libvirt-domain.h \
 		$(top_srcdir)/include/libvirt/libvirt-event.h \
@@ -328,6 +302,7 @@ $(APIBUILD_STAMP): $(srcdir)/apibuild.py \
 		$(top_srcdir)/include/libvirt/libvirt-admin.h \
 		$(top_srcdir)/include/libvirt/virterror.h \
 		$(top_srcdir)/src/libvirt.c \
+		$(top_srcdir)/src/libvirt-domain-checkpoint.c \
 		$(top_srcdir)/src/libvirt-domain-snapshot.c \
 		$(top_srcdir)/src/libvirt-domain.c \
 		$(top_srcdir)/src/libvirt-host.c \
@@ -367,6 +342,9 @@ install-data-local:
 	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)
 	for f in $(css) $(dot_html) $(gif) $(png); do \
 	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR); done
+	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/js
+	for f in $(javascript); do \
+	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/js/; done
 	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/logos
 	for f in $(logofiles); do \
 	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/logos; done
@@ -378,16 +356,22 @@ install-data-local:
 	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/internals
 	for f in $(internals_html); do \
 	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/internals; done
-	$(mkinstalldirs) $(DESTDIR)$(DEVHELP_DIR)
-	for file in $(devhelphtml) $(devhelppng) $(devhelpcss); do \
-	    $(INSTALL) -m 0644 $(srcdir)/$${file} $(DESTDIR)$(DEVHELP_DIR) ; \
+	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/kbase
+	for f in $(kbase_html); do \
+	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/kbase; done
+	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/fonts
+	for f in $(fonts); do \
+	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/fonts; \
 	done
 
 uninstall-local:
-	for f in $(css) $(dot_html) $(gif) $(png); do \
+	for f in $(css) $(dot_html) $(gif) $(png) $(fonts); do \
 	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
 	done
 	for f in $(logofiles); do \
+	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
+	done
+	for f in $(javascript); do \
 	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
 	done
 	for h in $(apihtml); do rm -f $(DESTDIR)$(HTML_DIR)/$$h; done
@@ -395,6 +379,6 @@ uninstall-local:
 	for f in $(internals_html); do \
 	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
 	done
-	for f in $(devhelphtml) $(devhelppng) $(devhelpcss); do \
-	  rm -f $(DESTDIR)$(DEVHELP_DIR)/$$(basename $$f); \
+	for f in $(kbase_html); do \
+	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
 	done

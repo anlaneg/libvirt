@@ -22,10 +22,6 @@
 #include <config.h>
 
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
 #include "virconf.h"
 #include "viralloc.h"
 #include "testutils.h"
@@ -37,7 +33,7 @@ static int testConfRoundTrip(const void *opaque)
 {
     const char *name = opaque;
     int ret = -1;
-    virConfPtr conf = NULL;
+    VIR_AUTOPTR(virConf) conf = NULL;
     int len = 10000;
     char *buffer = NULL;
     char *srcfile = NULL;
@@ -72,24 +68,87 @@ static int testConfRoundTrip(const void *opaque)
     VIR_FREE(srcfile);
     VIR_FREE(dstfile);
     VIR_FREE(buffer);
-    virConfFree(conf);
+    return ret;
+}
+
+
+static int testConfMemoryNoNewline(const void *opaque ATTRIBUTE_UNUSED)
+{
+    const char *srcdata = \
+        "ullong = '123456789'\n" \
+        "string = 'foo'\n" \
+        "uint = 12345";
+
+    VIR_AUTOPTR(virConf) conf = virConfReadString(srcdata, 0);
+    int ret = -1;
+    virConfValuePtr val;
+    unsigned long long llvalue;
+    char *str = NULL;
+    int uintvalue;
+
+    if (!conf)
+        return -1;
+
+    if (!(val = virConfGetValue(conf, "ullong")))
+        goto cleanup;
+
+    if (val->type != VIR_CONF_STRING)
+        goto cleanup;
+
+    if (virStrToLong_ull(val->str, NULL, 10, &llvalue) < 0)
+        goto cleanup;
+
+    if (llvalue != 123456789) {
+        fprintf(stderr, "Expected '123' got '%llu'\n", llvalue);
+        goto cleanup;
+    }
+
+    if (virConfGetValueType(conf, "string") !=
+        VIR_CONF_STRING) {
+        fprintf(stderr, "expected a string for 'string'\n");
+        goto cleanup;
+    }
+
+    if (virConfGetValueString(conf, "string", &str) < 0)
+        goto cleanup;
+
+    if (STRNEQ_NULLABLE(str, "foo")) {
+        fprintf(stderr, "Expected 'foo' got '%s'\n", str);
+        goto cleanup;
+    }
+
+    if (virConfGetValueType(conf, "uint") != VIR_CONF_ULLONG) {
+        fprintf(stderr, "expected an unsigned long for 'uint'\n");
+        goto cleanup;
+    }
+
+    if (virConfGetValueInt(conf, "uint", &uintvalue) < 0)
+        goto cleanup;
+
+    if (uintvalue != 12345) {
+        fprintf(stderr, "Expected 12345 got %ud\n", uintvalue);
+        goto cleanup;
+    }
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(str);
     return ret;
 }
 
 
 static int testConfParseInt(const void *opaque ATTRIBUTE_UNUSED)
 {
-    const char *srcdata =                       \
-        "int = -1729\n"                         \
-        "uint = 1729\n"                         \
-        "llong = -6963472309248\n"              \
-        "ullong = 6963472309248\n"              \
-        "size_t = 87539319\n"                   \
-        "ssize_t = -87539319\n"                 \
+    const char *srcdata = \
+        "int = -1729\n" \
+        "uint = 1729\n" \
+        "llong = -6963472309248\n" \
+        "ullong = 6963472309248\n" \
+        "size_t = 87539319\n" \
+        "ssize_t = -87539319\n" \
         "string = \"foo\"\n";
 
-    int ret = -1;
-    virConfPtr conf = virConfReadMem(srcdata, strlen(srcdata), 0);
+    VIR_AUTOPTR(virConf) conf = virConfReadString(srcdata, 0);
     int iv;
     unsigned int ui;
     size_t s;
@@ -103,40 +162,40 @@ static int testConfParseInt(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "int") !=
         VIR_CONF_LLONG) {
         fprintf(stderr, "expected a long for 'int'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueInt(conf, "int", &iv) < 0)
-        goto cleanup;
+        return -1;
 
     if (iv != -1729) {
         fprintf(stderr, "Expected -1729 got %d\n", iv);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueInt(conf, "string", &iv) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
 
     if (virConfGetValueType(conf, "uint") !=
         VIR_CONF_ULLONG) {
         fprintf(stderr, "expected a unsigned long for 'uint'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueUInt(conf, "uint", &ui) < 0)
-        goto cleanup;
+        return -1;
 
     if (ui != 1729) {
         fprintf(stderr, "Expected 1729 got %u\n", ui);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueUInt(conf, "string", &ui) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
 
@@ -144,20 +203,20 @@ static int testConfParseInt(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "llong") !=
         VIR_CONF_LLONG) {
         fprintf(stderr, "expected a long for 'llong'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueLLong(conf, "llong", &l) < 0)
-        goto cleanup;
+        return -1;
 
     if (l != -6963472309248) {
         fprintf(stderr, "Expected -6963472309248 got %lld\n", l);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueLLong(conf, "string", &l) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
 
@@ -165,20 +224,20 @@ static int testConfParseInt(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "ullong") !=
         VIR_CONF_ULLONG) {
         fprintf(stderr, "expected a unsigned long for 'ullong'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueULLong(conf, "ullong", &ul) < 0)
-        goto cleanup;
+        return -1;
 
     if (ul != 6963472309248) {
         fprintf(stderr, "Expected 6963472309248 got %llu\n", ul);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueULLong(conf, "string", &ul) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
 
@@ -186,20 +245,20 @@ static int testConfParseInt(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "size_t") !=
         VIR_CONF_ULLONG) {
         fprintf(stderr, "expected a unsigned long for 'size_T'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueSizeT(conf, "size_t", &s) < 0)
-        goto cleanup;
+        return -1;
 
     if (s != 87539319) {
         fprintf(stderr, "Expected 87539319 got %zu\n", s);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueSizeT(conf, "string", &s) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
 
@@ -207,38 +266,34 @@ static int testConfParseInt(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "ssize_t") !=
         VIR_CONF_LLONG) {
         fprintf(stderr, "expected a unsigned long for 'ssize_t'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueSSizeT(conf, "ssize_t", &ss) < 0)
-        goto cleanup;
+        return -1;
 
     if (ss != -87539319) {
         fprintf(stderr, "Expected -87539319 got %zd\n", ss);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueSSizeT(conf, "string", &ss) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    virConfFree(conf);
-    return ret;
+    return 0;
 }
 
 static int testConfParseBool(const void *opaque ATTRIBUTE_UNUSED)
 {
-    const char *srcdata =                         \
-        "false = 0\n"                             \
-        "true = 1\n"                              \
-        "int = 6963472309248\n"                   \
+    const char *srcdata = \
+        "false = 0\n" \
+        "true = 1\n" \
+        "int = 6963472309248\n" \
         "string = \"foo\"\n";
 
-    int ret = -1;
-    virConfPtr conf = virConfReadMem(srcdata, strlen(srcdata), 0);
+    VIR_AUTOPTR(virConf) conf = virConfReadString(srcdata, 0);
     bool f = true;
     bool t = false;
 
@@ -248,15 +303,15 @@ static int testConfParseBool(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "false") !=
         VIR_CONF_ULLONG) {
         fprintf(stderr, "expected a long for 'false'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueBool(conf, "false", &f) < 0)
-        goto cleanup;
+        return -1;
 
     if (f != false) {
         fprintf(stderr, "Expected 0 got %d\n", f);
-        goto cleanup;
+        return -1;
     }
 
 
@@ -264,45 +319,41 @@ static int testConfParseBool(const void *opaque ATTRIBUTE_UNUSED)
     if (virConfGetValueType(conf, "true") !=
         VIR_CONF_ULLONG) {
         fprintf(stderr, "expected a long for 'true'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueBool(conf, "true", &t) < 0)
-        goto cleanup;
+        return -1;
 
     if (t != true) {
         fprintf(stderr, "Expected 1 got %d\n", t);
-        goto cleanup;
+        return -1;
     }
 
 
 
     if (virConfGetValueBool(conf, "int", &t) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueBool(conf, "string", &t) != -1) {
         fprintf(stderr, "Expected error for 'string' param\n");
-        goto cleanup;
+        return -1;
     }
 
-
-    ret = 0;
- cleanup:
-    virConfFree(conf);
-    return ret;
+    return 0;
 }
 
 
 static int testConfParseString(const void *opaque ATTRIBUTE_UNUSED)
 {
-    const char *srcdata =                         \
-        "int = 6963472309248\n"                   \
+    const char *srcdata = \
+        "int = 6963472309248\n" \
         "string = \"foo\"\n";
 
     int ret = -1;
-    virConfPtr conf = virConfReadMem(srcdata, strlen(srcdata), 0);
+    VIR_AUTOPTR(virConf) conf = virConfReadString(srcdata, 0);
     char *str = NULL;
 
     if (!conf)
@@ -330,19 +381,18 @@ static int testConfParseString(const void *opaque ATTRIBUTE_UNUSED)
     ret = 0;
  cleanup:
     VIR_FREE(str);
-    virConfFree(conf);
     return ret;
 }
 
 
 static int testConfParseStringList(const void *opaque ATTRIBUTE_UNUSED)
 {
-    const char *srcdata =                         \
-        "string_list = [\"foo\", \"bar\"]\n"      \
+    const char *srcdata = \
+        "string_list = [\"foo\", \"bar\"]\n" \
         "string = \"foo\"\n";
 
     int ret = -1;
-    virConfPtr conf = virConfReadMem(srcdata, strlen(srcdata), 0);
+    VIR_AUTOPTR(virConf) conf = virConfReadString(srcdata, 0);
     char **str = NULL;
 
     if (!conf)
@@ -395,7 +445,6 @@ static int testConfParseStringList(const void *opaque ATTRIBUTE_UNUSED)
     ret = 0;
  cleanup:
     virStringListFree(str);
-    virConfFree(conf);
     return ret;
 }
 
@@ -414,6 +463,9 @@ mymain(void)
     if (virTestRun("no-newline", testConfRoundTrip, "no-newline") < 0)
         ret = -1;
 
+    if (virTestRun("memory-no-newline", testConfMemoryNoNewline, NULL) < 0)
+        ret = -1;
+
     if (virTestRun("int", testConfParseInt, NULL) < 0)
         ret = -1;
 
@@ -430,4 +482,4 @@ mymain(void)
 }
 
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

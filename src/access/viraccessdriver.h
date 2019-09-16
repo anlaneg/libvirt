@@ -18,11 +18,10 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_ACCESS_DRIVER_H__
-# define __VIR_ACCESS_DRIVER_H__
+#pragma once
 
-# include "conf/domain_conf.h"
-# include "access/viraccessmanager.h"
+#include "conf/domain_conf.h"
+#include "access/viraccessmanager.h"
 
 typedef int (*virAccessDriverCheckConnectDrv)(virAccessManagerPtr manager,
                                               const char *driverName,
@@ -39,6 +38,11 @@ typedef int (*virAccessDriverCheckNetworkDrv)(virAccessManagerPtr manager,
                                               const char *driverName,
                                               virNetworkDefPtr network,
                                               virAccessPermNetwork av);
+typedef int (*virAccessDriverCheckNetworkPortDrv)(virAccessManagerPtr manager,
+                                                  const char *driverName,
+                                                  virNetworkDefPtr network,
+                                                  virNetworkPortDefPtr port,
+                                                  virAccessPermNetworkPort av);
 typedef int (*virAccessDriverCheckNodeDeviceDrv)(virAccessManagerPtr manager,
                                                  const char *driverName,
                                                  virNodeDeviceDefPtr nodedev,
@@ -47,6 +51,10 @@ typedef int (*virAccessDriverCheckNWFilterDrv)(virAccessManagerPtr manager,
                                                const char *driverName,
                                                virNWFilterDefPtr nwfilter,
                                                virAccessPermNWFilter av);
+typedef int (*virAccessDriverCheckNWFilterBindingDrv)(virAccessManagerPtr manager,
+                                                      const char *driverName,
+                                                      virNWFilterBindingDefPtr binding,
+                                                      virAccessPermNWFilterBinding av);
 typedef int (*virAccessDriverCheckSecretDrv)(virAccessManagerPtr manager,
                                              const char *driverName,
                                              virSecretDefPtr secret,
@@ -78,12 +86,11 @@ struct _virAccessDriver {
     virAccessDriverCheckDomainDrv checkDomain;
     virAccessDriverCheckInterfaceDrv checkInterface;
     virAccessDriverCheckNetworkDrv checkNetwork;
+    virAccessDriverCheckNetworkPortDrv checkNetworkPort;
     virAccessDriverCheckNodeDeviceDrv checkNodeDevice;
     virAccessDriverCheckNWFilterDrv checkNWFilter;
+    virAccessDriverCheckNWFilterBindingDrv checkNWFilterBinding;
     virAccessDriverCheckSecretDrv checkSecret;
     virAccessDriverCheckStoragePoolDrv checkStoragePool;
     virAccessDriverCheckStorageVolDrv checkStorageVol;
 };
-
-
-#endif /* __VIR_ACCESS_DRIVER_H__ */

@@ -16,13 +16,8 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Red Hat Author: Miloslav Trmač <mitr@redhat.com>
  */
 
-#ifndef __VIR_SECRET_DRIVER_H__
-# define __VIR_SECRET_DRIVER_H__
+#pragma once
 
 int secretRegister(void);
-
-#endif /* __VIR_SECRET_DRIVER_H__ */

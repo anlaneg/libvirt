@@ -6,7 +6,6 @@
     "keepaliveInterval": 120,
     "keepaliveCount": 5,
     "keepaliveRequired": true,
-    "mdnsGroupName": "libvirtTest",
     "services": [
         {
             "auth": 0,
@@ -45,7 +44,8 @@
                 "errfd": -1,
                 "pid": -1,
                 "isClient": true
-            }
+            },
+	    "privateData": 1729
         },
         {
             "auth": 2,
@@ -56,7 +56,8 @@
                 "errfd": -1,
                 "pid": -1,
                 "isClient": true
-            }
+            },
+	    "privateData": 1729
         }
     ]
 }

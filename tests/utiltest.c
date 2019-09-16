@@ -1,8 +1,5 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "internal.h"
@@ -37,7 +34,8 @@ static struct testDiskName diskNamesPart[] = {
 };
 
 static const char* diskNamesInvalid[] = {
-    "sda00", "sda01", "sdb-1"
+    "sda00", "sda01", "sdb-1",
+    "vd2"
 };
 
 static int
@@ -80,8 +78,8 @@ testDiskNameToIndex(const void *data ATTRIBUTE_UNUSED)
         idx = virDiskNameToIndex(diskName);
 
         if (idx < 0 || idx != i) {
-            VIR_TEST_DEBUG("\nExpect [%zu]\n", i);
-            VIR_TEST_DEBUG("Actual [%d]\n", idx);
+            VIR_TEST_DEBUG("\nExpect [%zu]", i);
+            VIR_TEST_DEBUG("Actual [%d]", idx);
 
             VIR_FREE(diskName);
 
@@ -110,21 +108,21 @@ testDiskNameParse(const void *data ATTRIBUTE_UNUSED)
             return -1;
 
         if (disk->idx != idx) {
-            VIR_TEST_DEBUG("\nExpect [%d]\n", disk->idx);
-            VIR_TEST_DEBUG("Actual [%d]\n", idx);
+            VIR_TEST_DEBUG("\nExpect [%d]", disk->idx);
+            VIR_TEST_DEBUG("Actual [%d]", idx);
             return -1;
         }
 
         if (disk->partition != partition) {
-            VIR_TEST_DEBUG("\nExpect [%d]\n", disk->partition);
-            VIR_TEST_DEBUG("Actual [%d]\n", partition);
+            VIR_TEST_DEBUG("\nExpect [%d]", disk->partition);
+            VIR_TEST_DEBUG("Actual [%d]", partition);
             return -1;
         }
     }
 
     for (i = 0; i < ARRAY_CARDINALITY(diskNamesInvalid); ++i) {
         if (!virDiskNameParse(diskNamesInvalid[i], &idx, &partition)) {
-            VIR_TEST_DEBUG("Should Fail [%s]\n", diskNamesInvalid[i]);
+            VIR_TEST_DEBUG("Should Fail [%s]", diskNamesInvalid[i]);
             return -1;
         }
     }
@@ -168,9 +166,9 @@ testParseVersionString(const void *data ATTRIBUTE_UNUSED)
                                        versions[i].allowMissing);
 
         if (result != versions[i].result) {
-            VIR_TEST_DEBUG("\nVersion string [%s]\n", versions[i].string);
-            VIR_TEST_DEBUG("Expect result [%d]\n", versions[i].result);
-            VIR_TEST_DEBUG("Actual result [%d]\n", result);
+            VIR_TEST_DEBUG("\nVersion string [%s]", versions[i].string);
+            VIR_TEST_DEBUG("Expect result [%d]", versions[i].result);
+            VIR_TEST_DEBUG("Actual result [%d]", result);
 
             return -1;
         }
@@ -179,9 +177,9 @@ testParseVersionString(const void *data ATTRIBUTE_UNUSED)
             continue;
 
         if (version != versions[i].version) {
-            VIR_TEST_DEBUG("\nVersion string [%s]\n", versions[i].string);
-            VIR_TEST_DEBUG("Expect version [%lu]\n", versions[i].version);
-            VIR_TEST_DEBUG("Actual version [%lu]\n", version);
+            VIR_TEST_DEBUG("\nVersion string [%s]", versions[i].string);
+            VIR_TEST_DEBUG("Expect version [%lu]", versions[i].version);
+            VIR_TEST_DEBUG("Actual version [%lu]", version);
 
             return -1;
         }
@@ -215,9 +213,9 @@ testRoundValueToPowerOfTwo(const void *data ATTRIBUTE_UNUSED)
     for (i = 0; i < ARRAY_CARDINALITY(roundData); i++) {
         result = VIR_ROUND_UP_POWER_OF_TWO(roundData[i].input);
         if (roundData[i].output != result) {
-            VIR_TEST_DEBUG("\nInput number [%u]\n", roundData[i].input);
-            VIR_TEST_DEBUG("Expected number [%u]\n", roundData[i].output);
-            VIR_TEST_DEBUG("Actual number [%u]\n", result);
+            VIR_TEST_DEBUG("\nInput number [%u]", roundData[i].input);
+            VIR_TEST_DEBUG("Expected number [%u]", roundData[i].output);
+            VIR_TEST_DEBUG("Actual number [%u]", result);
 
             return -1;
         }
@@ -227,12 +225,12 @@ testRoundValueToPowerOfTwo(const void *data ATTRIBUTE_UNUSED)
 }
 
 
-#define TEST_OVERFLOW(var, val, expect)                                        \
-    tmp = val;                                                                 \
-    if (VIR_ASSIGN_IS_OVERFLOW(var, tmp) != expect) {                          \
-        fprintf(stderr, "\noverflow check failed: "                            \
-                "var: " #var " val: " #val "\n");                              \
-        return -1;                                                             \
+#define TEST_OVERFLOW(var, val, expect) \
+    tmp = val; \
+    if (VIR_ASSIGN_IS_OVERFLOW(var, tmp) != expect) { \
+        fprintf(stderr, "\noverflow check failed: " \
+                "var: " #var " val: " #val "\n"); \
+        return -1; \
     }
 
 static int
@@ -265,12 +263,12 @@ mymain(void)
 
     virTestQuiesceLibvirtErrors(true);
 
-#define DO_TEST(_name)                                                        \
-        do {                                                                  \
-            if (virTestRun("Util "#_name, test##_name,                        \
-                           NULL) < 0) {                                       \
-                result = -1;                                                  \
-            }                                                                 \
+#define DO_TEST(_name) \
+        do { \
+            if (virTestRun("Util "#_name, test##_name, \
+                           NULL) < 0) { \
+                result = -1; \
+            } \
         } while (0)
 
     DO_TEST(IndexToDiskName);
@@ -283,4 +281,4 @@ mymain(void)
     return result == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

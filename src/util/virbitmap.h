@@ -17,16 +17,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jim Fehlig <jfehlig@novell.com>
  */
 
-#ifndef __BITMAP_H__
-# define __BITMAP_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
+#include "virautoclean.h"
 
-# include <sys/types.h>
+#include <sys/types.h>
 
 
 typedef struct _virBitmap virBitmap;
@@ -80,7 +78,11 @@ bool virBitmapIsBitSet(virBitmapPtr bitmap, size_t b)
 int virBitmapGetBit(virBitmapPtr bitmap, size_t b, bool *result)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3) ATTRIBUTE_RETURN_CHECK;
 
-char *virBitmapString(virBitmapPtr bitmap)
+virBitmapPtr
+virBitmapNewString(const char *string)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+
+char *virBitmapToString(virBitmapPtr bitmap, bool prefix, bool trim)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
 
 char *virBitmapFormat(virBitmapPtr bitmap);
@@ -94,10 +96,8 @@ virBitmapParseSeparator(const char *str,
                         char terminator,
                         virBitmapPtr *bitmap,
                         size_t bitmapSize);
-int
-virBitmapParseUnlimited(const char *str,
-                        virBitmapPtr *bitmap)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+virBitmapPtr
+virBitmapParseUnlimited(const char *str);
 
 virBitmapPtr virBitmapNewCopy(virBitmapPtr src) ATTRIBUTE_NONNULL(1);
 
@@ -138,14 +138,23 @@ ssize_t virBitmapNextClearBit(virBitmapPtr bitmap, ssize_t pos)
 size_t virBitmapCountBits(virBitmapPtr bitmap)
     ATTRIBUTE_NONNULL(1);
 
-char *virBitmapDataToString(const void *data,
-                            int len)
+char *virBitmapDataFormat(const void *data,
+                          int len)
     ATTRIBUTE_NONNULL(1);
 bool virBitmapOverlaps(virBitmapPtr b1,
                        virBitmapPtr b2)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
+void virBitmapIntersect(virBitmapPtr a, virBitmapPtr b)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+int virBitmapUnion(virBitmapPtr a,
+                   const virBitmap *b)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
 void virBitmapSubtract(virBitmapPtr a, virBitmapPtr b)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-#endif
+void virBitmapShrink(virBitmapPtr map, size_t b);
+
+VIR_DEFINE_AUTOPTR_FUNC(virBitmap, virBitmapFree);

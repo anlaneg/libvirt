@@ -18,11 +18,6 @@
  *
  */
 
-#ifndef __VIR_STORAGE_BACKEND_VSTORAGE_H__
-# define __VIR_STORAGE_BACKEND_VSTORAGE_H__
+#pragma once
 
-# include "storage_backend.h"
-
-extern virStorageBackend virStorageBackendVstorage;
-
-#endif /* __VIR_STORAGE_BACKEND_VSTORAGE_H__ */
+int virStorageBackendVstorageRegister(void);

@@ -16,16 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_TIME_H__
-# define __VIR_TIME_H__
+#pragma once
 
-# include <time.h>
+#include <time.h>
 
-# include "internal.h"
+#include "internal.h"
 
 /* The format string we intend to use is:
  *
@@ -33,7 +30,7 @@
  * %4d-%02d-%02d %02d:%02d:%02d.%03d+0000
  *
  */
-# define VIR_TIME_STRING_BUFLEN \
+#define VIR_TIME_STRING_BUFLEN \
     (4 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 3 + 5 + 1)
 /*   Yr      Mon     Day     Hour    Min     Sec     Ms  TZ  NULL */
 
@@ -74,5 +71,3 @@ int virTimeBackOffStart(virTimeBackOffVar *var,
                         unsigned long long first, unsigned long long timeout);
 
 bool virTimeBackOffWait(virTimeBackOffVar *var);
-
-#endif

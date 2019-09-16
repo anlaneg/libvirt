@@ -17,14 +17,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_EVENT_POLL_H__
-# define __VIR_EVENT_POLL_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 /**
  * virEventPollAddHandle: register a callback for monitoring file handle events
@@ -127,6 +124,3 @@ int virEventPollToNativeEvents(int events);
  * return -1 if wakeup failed
  */
 int virEventPollInterrupt(void);
-
-
-#endif /* __VIRTD_EVENT_H__ */

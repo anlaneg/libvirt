@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body class="docs">
     <div class="panel">
@@ -54,38 +54,38 @@
         <dt><a href="virshcmdref.html">Virsh Commands</a></dt>
         <dd>Command reference for virsh</dd>
 
-        <dt><a href="bindings.html">Language bindings</a></dt>
+        <dt><a href="bindings.html">Language bindings and API modules</a></dt>
         <dd>Bindings of the libvirt API for
           <a href="csharp.html">c#</a>,
           <a href="https://godoc.org/github.com/libvirt/libvirt-go">go</a>,
           <a href="java.html">java</a>,
-          <a href="http://libvirt.org/ocaml/">ocaml</a>.
+          <a href="https://libvirt.org/ocaml/">ocaml</a>,
           <a href="http://search.cpan.org/dist/Sys-Virt/">perl</a>,
           <a href="python.html">python</a>,
           <a href="php.html">php</a>,
-          <a href="http://libvirt.org/ruby/">ruby</a></dd>
+          <a href="https://libvirt.org/ruby/">ruby</a>
+          and integration API modules for
+          <a href="dbus.html">D-Bus</a></dd>
 
 
         <dt><a href="format.html">XML schemas</a></dt>
         <dd>Description of the XML schemas for
           <a href="formatdomain.html">domains</a>,
           <a href="formatnetwork.html">networks</a>,
+          <a href="formatnetworkport.html">network ports</a>,
           <a href="formatnwfilter.html">network filtering</a>,
           <a href="formatstorage.html">storage</a>,
           <a href="formatstorageencryption.html">storage encryption</a>,
           <a href="formatcaps.html">capabilities</a>,
           <a href="formatdomaincaps.html">domain capabilities</a>,
+          <a href="formatstoragecaps.html">storage pool capabilities</a>,
           <a href="formatnode.html">node devices</a>,
           <a href="formatsecret.html">secrets</a>,
-          <a href="formatsnapshot.html">snapshots</a></dd>
+          <a href="formatsnapshot.html">snapshots</a>,
+          <a href="formatcheckpoint.html">checkpoints</a></dd>
 
         <dt><a href="uri.html">URI format</a></dt>
         <dd>The URI formats used for connecting to libvirt</dd>
-
-        <dt><a href="locking.html">Disk locking</a></dt>
-        <dd>Ensuring exclusive guest access to disks with
-          <a href="locking-lockd.html">virtlockd</a> or
-          <a href="locking-sanlock.html">Sanlock</a></dd>
 
         <dt><a href="cgroups.html">CGroups</a></dt>
         <dd>Control groups integration</dd>
@@ -94,6 +94,7 @@
         <dd>Reference manual for the C public API, split in
           <a href="html/libvirt-libvirt-common.html">common</a>,
           <a href="html/libvirt-libvirt-domain.html">domain</a>,
+          <a href="html/libvirt-libvirt-domain-checkpoint.html">domain checkpoint</a>,
           <a href="html/libvirt-libvirt-domain-snapshot.html">domain snapshot</a>,
           <a href="html/libvirt-virterror.html">error</a>,
           <a href="html/libvirt-libvirt-event.html">event</a>,
@@ -110,11 +111,14 @@
         <dt><a href="drivers.html">Drivers</a></dt>
         <dd>Hypervisor specific driver information</dd>
 
+        <dt><a href="support.html">Support guarantees</a></dt>
+        <dd>Details of support status for various interfaces</dd>
+
         <dt><a href="hvsupport.html">Driver support</a></dt>
         <dd>matrix of API support per hypervisor per release</dd>
 
-        <dt><a href="secureusage.html">Secure usage</a></dt>
-        <dd>Secure usage of the libvirt APIs</dd>
+        <dt><a href="kbase.html">Knowledge Base</a></dt>
+        <dd>Task oriented guides to key features</dd>
       </dl>
     </div>
 
@@ -150,9 +154,6 @@
 
         <dt><a href="internals/locking.html">Lock managers</a></dt>
         <dd>Use lock managers to protect disk content</dd>
-
-        <dt><a href="internals/oomtesting.html">Out of memory testing</a></dt>
-        <dd>Simulating OOM conditions in the test suite</dd>
 
         <dt><a href="testsuites.html">Functional testing</a></dt>
         <dd>Testing libvirt with <a href="testtck.html">TCK test suite</a> and

@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -72,6 +70,7 @@ virLockDaemonConfigNew(bool privileged ATTRIBUTE_UNUSED)
         return NULL;
 
     data->max_clients = 1024;
+    data->admin_max_clients = 5000;
 
     return data;
 }
@@ -100,6 +99,8 @@ virLockDaemonConfigLoadOptions(virLockDaemonConfigPtr data,
         return -1;
     if (virConfGetValueUInt(conf, "max_clients", &data->max_clients) < 0)
         return -1;
+    if (virConfGetValueUInt(conf, "admin_max_clients", &data->admin_max_clients) < 0)
+        return -1;
 
     return 0;
 }
@@ -113,8 +114,7 @@ virLockDaemonConfigLoadFile(virLockDaemonConfigPtr data,
                             const char *filename,
                             bool allow_missing)
 {
-    virConfPtr conf;
-    int ret;
+    VIR_AUTOPTR(virConf) conf = NULL;
 
     if (allow_missing &&
         access(filename, R_OK) == -1 &&
@@ -125,7 +125,5 @@ virLockDaemonConfigLoadFile(virLockDaemonConfigPtr data,
     if (!conf)
         return -1;
 
-    ret = virLockDaemonConfigLoadOptions(data, conf);
-    virConfFree(conf);
-    return ret;
+    return virLockDaemonConfigLoadOptions(data, conf);
 }

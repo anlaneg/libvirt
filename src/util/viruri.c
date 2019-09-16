@@ -117,7 +117,7 @@ virURIParseParams(virURIPtr uri)
         }
 
         /* Append to the parameter set. */
-        if (virURIParamAppend(uri, name, value ? value : "") < 0) {
+        if (virURIParamAppend(uri, name, NULLSTR_EMPTY(value)) < 0) {
             VIR_FREE(name);
             VIR_FREE(value);
             return -1;
@@ -171,16 +171,20 @@ virURIParse(const char *uri)
         goto error;
     if (VIR_STRDUP(ret->server, xmluri->server) < 0)
         goto error;
-    ret->port = xmluri->port;
+    /* xmluri->port value is not defined if server was
+     * not given. Modern versions libxml2 fill port
+     * differently to old versions in this case, so
+     * don't rely on it. eg libxml2 git commit:
+     *   beb7281055dbf0ed4d041022a67c6c5cfd126f25
+     */
+    if (!ret->server || STREQ(ret->server, ""))
+        ret->port = 0;
+    else
+        ret->port = xmluri->port;
     if (VIR_STRDUP(ret->path, xmluri->path) < 0)
         goto error;
-#ifdef HAVE_XMLURI_QUERY_RAW
     if (VIR_STRDUP(ret->query, xmluri->query_raw) < 0)
         goto error;
-#else
-    if (VIR_STRDUP(ret->query, xmluri->query) < 0)
-        goto error;
-#endif
     if (VIR_STRDUP(ret->fragment, xmluri->fragment) < 0)
         goto error;
     if (VIR_STRDUP(ret->user, xmluri->user) < 0)
@@ -228,11 +232,7 @@ virURIFormat(virURIPtr uri)
     xmluri.server = uri->server;
     xmluri.port = uri->port;
     xmluri.path = uri->path;
-#ifdef HAVE_XMLURI_QUERY_RAW
     xmluri.query_raw = uri->query;
-#else
-    xmluri.query = uri->query;
-#endif
     xmluri.fragment = uri->fragment;
     xmluri.user = uri->user;
 
@@ -342,7 +342,7 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
             virReportError(VIR_ERR_CONF_SYNTAX,
                            _("Malformed 'uri_aliases' config entry '%s', "
                              "aliases may only contain 'a-Z, 0-9, _, -'"),
-                            *aliases);
+                           *aliases);
             return -1;
         }
 

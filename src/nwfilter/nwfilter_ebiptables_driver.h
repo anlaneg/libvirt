@@ -17,20 +17,16 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Stefan Berger <stefanb@us.ibm.com>
  */
-#ifndef VIR_NWFILTER_EBTABLES_DRIVER_H__
-# define VIR_NWFILTER_EBTABLES_DRIVER_H__
 
-# include "nwfilter_tech_driver.h"
+#pragma once
 
-# define MAX_CHAINNAME_LENGTH  32 /* see linux/netfilter_bridge/ebtables.h */
+#include "nwfilter_tech_driver.h"
+
+#define MAX_CHAINNAME_LENGTH  32 /* see linux/netfilter_bridge/ebtables.h */
 
 extern virNWFilterTechDriver ebiptables_driver;
 
-# define EBIPTABLES_DRIVER_ID "ebiptables"
+#define EBIPTABLES_DRIVER_ID "ebiptables"
 
-# define IPTABLES_MAX_COMMENT_LENGTH  256
-
-#endif
+#define IPTABLES_MAX_COMMENT_LENGTH  256

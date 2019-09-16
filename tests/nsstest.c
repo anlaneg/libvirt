@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -24,7 +22,6 @@
 
 #ifdef NSS
 
-# include <stdbool.h>
 # include <arpa/inet.h>
 # include "libvirt_nss.h"
 # include "virsocketaddr.h"
@@ -49,7 +46,7 @@ testGetHostByName(const void *opaque)
     char buf[BUF_SIZE] = { 0 };
     char **addrList;
     int rv, tmp_errno = 0, tmp_herrno = 0;
-    size_t i = 0, j = 0;
+    size_t i = 0;
 
     memset(&resolved, 0, sizeof(resolved));
 
@@ -120,6 +117,7 @@ testGetHostByName(const void *opaque)
     }
 
     addrList = resolved.h_addr_list;
+    i = 0;
     while (*addrList) {
         virSocketAddr sa;
         char *ipAddr;
@@ -138,14 +136,10 @@ testGetHostByName(const void *opaque)
             goto cleanup;
         }
 
-        for (j = 0; data->ipAddr[j]; j++) {
-            if (STREQ(data->ipAddr[j], ipAddr))
-                break;
-        }
-
-        if (!data->ipAddr[j]) {
+        if (STRNEQ_NULLABLE(data->ipAddr[i], ipAddr)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           "Unexpected address %s", ipAddr);
+                           "Unexpected address %s, expecting %s",
+                           ipAddr, NULLSTR(data->ipAddr[i]));
             VIR_FREE(ipAddr);
             goto cleanup;
         }
@@ -155,12 +149,10 @@ testGetHostByName(const void *opaque)
         i++;
     }
 
-    for (j = 0; data->ipAddr[j]; j++)
-        ;
-
-    if (i != j) {
+    if (data->ipAddr[i]) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "Expected %zu addresses, got %zu", j, i);
+                       "Expected %s address, got NULL",
+                       data->ipAddr[i]);
         goto cleanup;
     }
 
@@ -174,14 +166,14 @@ mymain(void)
 {
     int ret = 0;
 
-# define DO_TEST(name, family, ...)                             \
-    do {                                                        \
-        const char *addr[] = { __VA_ARGS__, NULL};              \
-        struct testNSSData data = {                             \
-            .hostname = name, .ipAddr = addr, .af = family,     \
-        };                                                      \
-        if (virTestRun(name, testGetHostByName, &data) < 0)     \
-            ret = -1;                                           \
+# define DO_TEST(name, family, ...) \
+    do { \
+        const char *addr[] = { __VA_ARGS__, NULL}; \
+        struct testNSSData data = { \
+            .hostname = name, .ipAddr = addr, .af = family, \
+        }; \
+        if (virTestRun(name, testGetHostByName, &data) < 0) \
+            ret = -1; \
     } while (0)
 
 # if !defined(LIBVIRT_NSS_GUEST)
@@ -198,7 +190,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/nssmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("nss"))
 #else
 int
 main(void)

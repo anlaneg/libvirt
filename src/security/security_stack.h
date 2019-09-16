@@ -18,10 +18,9 @@
  * Stacked security driver
  */
 
-#include "security_driver.h"
+#pragma once
 
-#ifndef __VIR_SECURITY_STACK
-# define __VIR_SECURITY_STACK
+#include "security_driver.h"
 
 extern virSecurityDriver virSecurityDriverStack;
 
@@ -34,5 +33,3 @@ virSecurityStackGetPrimary(virSecurityManagerPtr mgr);
 
 virSecurityManagerPtr*
 virSecurityStackGetNested(virSecurityManagerPtr mgr);
-
-#endif /* __VIR_SECURITY_STACK */

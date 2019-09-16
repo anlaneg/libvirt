@@ -20,9 +20,6 @@
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -31,7 +28,6 @@
 
 #include "testutils.h"
 #include "internal.h"
-#include "nodeinfo.h"
 #include "viralloc.h"
 #include "vircommand.h"
 #include "virfile.h"
@@ -128,7 +124,7 @@ static int test0(const void *unused ATTRIBUTE_UNUSED)
     if (virCommandRun(cmd, NULL) == 0)
         goto cleanup;
 
-    if (virGetLastError() == NULL)
+    if (virGetLastErrorCode() == VIR_ERR_OK)
         goto cleanup;
 
     virResetLastError();
@@ -309,8 +305,8 @@ static int test6(const void *unused ATTRIBUTE_UNUSED)
 {
     virCommandPtr cmd = virCommandNew(abs_builddir "/commandhelper");
 
-    virCommandAddEnvPassBlockSUID(cmd, "DISPLAY", NULL);
-    virCommandAddEnvPassBlockSUID(cmd, "DOESNOTEXIST", NULL);
+    virCommandAddEnvPass(cmd, "DISPLAY");
+    virCommandAddEnvPass(cmd, "DOESNOTEXIST");
 
     if (virCommandRun(cmd, NULL) < 0) {
         printf("Cannot run child %s\n", virGetLastErrorMessage());
@@ -333,8 +329,8 @@ static int test7(const void *unused ATTRIBUTE_UNUSED)
     virCommandPtr cmd = virCommandNew(abs_builddir "/commandhelper");
 
     virCommandAddEnvPassCommon(cmd);
-    virCommandAddEnvPassBlockSUID(cmd, "DISPLAY", NULL);
-    virCommandAddEnvPassBlockSUID(cmd, "DOESNOTEXIST", NULL);
+    virCommandAddEnvPass(cmd, "DISPLAY");
+    virCommandAddEnvPass(cmd, "DOESNOTEXIST");
 
     if (virCommandRun(cmd, NULL) < 0) {
         printf("Cannot run child %s\n", virGetLastErrorMessage());
@@ -634,7 +630,7 @@ static int test16(const void *unused ATTRIBUTE_UNUSED)
     virCommandAddArg(cmd, "F");
     virCommandAddArg(cmd, "G  H");
 
-    if ((outactual = virCommandToString(cmd)) == NULL) {
+    if ((outactual = virCommandToString(cmd, false)) == NULL) {
         printf("Cannot convert to string: %s\n", virGetLastErrorMessage());
         goto cleanup;
     }
@@ -844,7 +840,7 @@ static const char *const newenv[] = {
     "LANG=C",
     "HOME=/home/test",
     "USER=test",
-    "LOGNAME=test"
+    "LOGNAME=test",
     "TMPDIR=/tmp",
     "DISPLAY=:0.0",
     NULL
@@ -879,12 +875,12 @@ static int test21(const void *unused ATTRIBUTE_UNUSED)
     if (virTestGetVerbose())
         printf("STDOUT:%s\nSTDERR:%s\n", NULLSTR(outbuf), NULLSTR(errbuf));
 
-    if (STRNEQ(outbuf, outbufExpected)) {
+    if (STRNEQ_NULLABLE(outbuf, outbufExpected)) {
         virTestDifference(stderr, outbufExpected, outbuf);
         goto cleanup;
     }
 
-    if (STRNEQ(errbuf, errbufExpected)) {
+    if (STRNEQ_NULLABLE(errbuf, errbufExpected)) {
         virTestDifference(stderr, errbufExpected, errbuf);
         goto cleanup;
     }
@@ -1007,63 +1003,6 @@ test23(const void *unused ATTRIBUTE_UNUSED)
     return ret;
 }
 
-static int test24(const void *unused ATTRIBUTE_UNUSED)
-{
-    char *pidfile = virPidFileBuildPath(abs_builddir, "commandhelper");
-    char *prefix = NULL;
-    int newfd1 = dup(STDERR_FILENO);
-    int newfd2 = dup(STDERR_FILENO);
-    int newfd3 = dup(STDERR_FILENO);
-    int ret = -1;
-    pid_t pid;
-    virCommandPtr cmd = virCommandNew(abs_builddir "/commandhelper");
-
-    if (!pidfile)
-        goto cleanup;
-
-    if (VIR_CLOSE(newfd1) < 0)
-        printf("Cannot close fd %d\n", newfd1);
-
-    virCommandSetPidFile(cmd, pidfile);
-    virCommandDaemonize(cmd);
-    virCommandPassFD(cmd, newfd2, VIR_COMMAND_PASS_FD_CLOSE_PARENT);
-    virCommandPassFD(cmd, newfd3, VIR_COMMAND_PASS_FD_CLOSE_PARENT);
-    virCommandPassListenFDs(cmd);
-
-    if (virCommandRun(cmd, NULL) < 0) {
-        printf("Cannot run child %s\n", virGetLastErrorMessage());
-        goto cleanup;
-    }
-
-    if (virPidFileRead(abs_builddir, "commandhelper", &pid) < 0) {
-        printf("cannot read pidfile\n");
-        goto cleanup;
-    }
-
-    if (virAsprintf(&prefix,
-                    "ENV:LISTEN_FDS=2\nENV:LISTEN_PID=%u\n",
-                    pid) < 0)
-        goto cleanup;
-
-    while (kill(pid, 0) != -1)
-        usleep(100*1000);
-
-    ret = checkoutput("test24", prefix);
-
- cleanup:
-    if (pidfile)
-        unlink(pidfile);
-    VIR_FREE(pidfile);
-    VIR_FREE(prefix);
-    virCommandFree(cmd);
-    VIR_FORCE_CLOSE(newfd1);
-    /* coverity[double_close] */
-    VIR_FORCE_CLOSE(newfd2);
-    VIR_FORCE_CLOSE(newfd3);
-    return ret;
-}
-
-
 static int test25(const void *unused ATTRIBUTE_UNUSED)
 {
     int ret = -1;
@@ -1071,6 +1010,9 @@ static int test25(const void *unused ATTRIBUTE_UNUSED)
     int rv = 0;
     ssize_t tries = 100;
     pid_t pid;
+    gid_t *groups = NULL;
+    int ngroups;
+    virCommandPtr cmd = virCommandNew("some/nonexistent/binary");
 
     if (pipe(pipeFD) < 0) {
         fprintf(stderr, "Unable to create pipe\n");
@@ -1082,6 +1024,10 @@ static int test25(const void *unused ATTRIBUTE_UNUSED)
         goto cleanup;
     }
 
+    if ((ngroups = virGetGroupList(virCommandGetUID(cmd), virCommandGetGID(cmd),
+                                   &groups)) < 0)
+        goto cleanup;
+
     /* Now, fork and try to exec a nonexistent binary. */
     pid = virFork();
     if (pid < 0) {
@@ -1091,9 +1037,8 @@ static int test25(const void *unused ATTRIBUTE_UNUSED)
 
     if (pid == 0) {
         /* Child */
-        virCommandPtr cmd = virCommandNew("some/nonexistent/binary");
+        rv = virCommandExec(cmd, groups, ngroups);
 
-        rv = virCommandExec(cmd);
         if (safewrite(pipeFD[1], &rv, sizeof(rv)) < 0)
             fprintf(stderr, "Unable to write to pipe\n");
         _exit(EXIT_FAILURE);
@@ -1127,9 +1072,186 @@ static int test25(const void *unused ATTRIBUTE_UNUSED)
  cleanup:
     VIR_FORCE_CLOSE(pipeFD[0]);
     VIR_FORCE_CLOSE(pipeFD[1]);
+    VIR_FREE(groups);
+    virCommandFree(cmd);
     return ret;
 }
 
+
+/*
+ * Don't run program; rather, log what would be run.
+ */
+static int test26(const void *unused ATTRIBUTE_UNUSED)
+{
+    virCommandPtr cmd = virCommandNew("true");
+    char *outactual = NULL;
+    const char *outexpect =
+        "A=B \\\n"
+        "C='D  E' \\\n"
+        "true \\\n"
+        "--foo bar \\\n"
+        "--oooh \\\n"
+        "-f \\\n"
+        "--wizz 'eek eek' \\\n"
+        "-w \\\n"
+        "-z \\\n"
+        "-l \\\n"
+        "--mmm flash \\\n"
+        "bang \\\n"
+        "wallop";
+
+    int ret = -1;
+    int fd = -1;
+
+    virCommandAddEnvPair(cmd, "A", "B");
+    virCommandAddEnvPair(cmd, "C", "D  E");
+    virCommandAddArgList(cmd, "--foo", "bar", "--oooh", "-f",
+                         "--wizz", "eek eek", "-w", "-z", "-l",
+                         "--mmm", "flash", "bang", "wallop",
+                         NULL);
+
+    if ((outactual = virCommandToString(cmd, true)) == NULL) {
+        printf("Cannot convert to string: %s\n", virGetLastErrorMessage());
+        goto cleanup;
+    }
+    if ((fd = open(abs_builddir "/commandhelper.log",
+                   O_CREAT | O_TRUNC | O_WRONLY, 0600)) < 0) {
+        printf("Cannot open log file: %s\n", strerror(errno));
+        goto cleanup;
+    }
+    virCommandWriteArgLog(cmd, fd);
+    if (VIR_CLOSE(fd) < 0) {
+        printf("Cannot close log file: %s\n", strerror(errno));
+        goto cleanup;
+    }
+
+    if (STRNEQ(outactual, outexpect)) {
+        virTestDifference(stderr, outexpect, outactual);
+        goto cleanup;
+    }
+
+    ret = checkoutput("test26", NULL);
+
+ cleanup:
+    virCommandFree(cmd);
+    VIR_FORCE_CLOSE(fd);
+    VIR_FREE(outactual);
+    return ret;
+}
+
+static int test27(const void *unused ATTRIBUTE_UNUSED)
+{
+    virCommandPtr cmd = virCommandNew(abs_builddir "/commandhelper");
+    int pipe1[2];
+    int pipe2[2];
+    int ret = -1;
+    size_t buflen = 1024 * 128;
+    char *buffer0 = NULL;
+    char *buffer1 = NULL;
+    char *buffer2 = NULL;
+    char *outactual = NULL;
+    char *erractual = NULL;
+    char *outexpect = NULL;
+# define TEST27_OUTEXPECT_TEMP "BEGIN STDOUT\n" \
+        "%s%s%s" \
+        "END STDOUT\n"
+    char *errexpect = NULL;
+# define TEST27_ERREXPECT_TEMP "BEGIN STDERR\n" \
+        "%s%s%s" \
+        "END STDERR\n"
+
+    if (VIR_ALLOC_N(buffer0, buflen) < 0 ||
+        VIR_ALLOC_N(buffer1, buflen) < 0 ||
+        VIR_ALLOC_N(buffer2, buflen) < 0)
+        goto cleanup;
+
+    memset(buffer0, 'H', buflen - 2);
+    buffer0[buflen - 2] = '\n';
+    buffer0[buflen - 1] = 0;
+
+    memset(buffer1, '1', buflen - 2);
+    buffer1[buflen - 2] = '\n';
+    buffer1[buflen - 1] = 0;
+
+    memset(buffer2, '2', buflen - 2);
+    buffer2[buflen - 2] = '\n';
+    buffer2[buflen - 1] = 0;
+
+    if (virAsprintf(&outexpect, TEST27_OUTEXPECT_TEMP,
+                    buffer0, buffer1, buffer2) < 0 ||
+        virAsprintf(&errexpect, TEST27_ERREXPECT_TEMP,
+                    buffer0, buffer1, buffer2) < 0) {
+        printf("Could not virAsprintf expected output\n");
+        goto cleanup;
+    }
+
+    if (pipe(pipe1) < 0 || pipe(pipe2) < 0) {
+        printf("Could not create pipe: %s\n", strerror(errno));
+        goto cleanup;
+    }
+
+    if (virCommandSetSendBuffer(cmd, pipe1[1],
+            (unsigned char *)buffer1, buflen - 1)  < 0 ||
+        virCommandSetSendBuffer(cmd, pipe2[1],
+            (unsigned char *)buffer2, buflen - 1) < 0) {
+        printf("Could not set send buffers\n");
+        goto cleanup;
+    }
+    pipe1[1] = 0;
+    pipe2[1] = 0;
+    buffer1 = NULL;
+    buffer2 = NULL;
+
+    virCommandAddArg(cmd, "--readfd");
+    virCommandAddArgFormat(cmd, "%d", pipe1[0]);
+    virCommandPassFD(cmd, pipe1[0], 0);
+
+    virCommandAddArg(cmd, "--readfd");
+    virCommandAddArgFormat(cmd, "%d", pipe2[0]);
+    virCommandPassFD(cmd, pipe2[0], 0);
+
+    virCommandSetInputBuffer(cmd, buffer0);
+    virCommandSetOutputBuffer(cmd, &outactual);
+    virCommandSetErrorBuffer(cmd, &erractual);
+
+    if (virCommandRun(cmd, NULL) < 0) {
+        printf("Cannot run child %s\n", virGetLastErrorMessage());
+        goto cleanup;
+    }
+
+    if (!outactual || !erractual)
+        goto cleanup;
+
+    if (STRNEQ(outactual, outexpect)) {
+        virTestDifference(stderr, outexpect, outactual);
+        goto cleanup;
+    }
+    if (STRNEQ(erractual, errexpect)) {
+        virTestDifference(stderr, errexpect, erractual);
+        goto cleanup;
+    }
+
+    if (checkoutput("test27", NULL) < 0)
+        goto cleanup;
+
+    ret = 0;
+
+ cleanup:
+    virCommandFree(cmd);
+    VIR_FORCE_CLOSE(pipe1[0]);
+    VIR_FORCE_CLOSE(pipe2[0]);
+    VIR_FORCE_CLOSE(pipe1[1]);
+    VIR_FORCE_CLOSE(pipe2[1]);
+    VIR_FREE(buffer0);
+    VIR_FREE(buffer1);
+    VIR_FREE(buffer2);
+    VIR_FREE(outactual);
+    VIR_FREE(erractual);
+    VIR_FREE(outexpect);
+    VIR_FREE(errexpect);
+
+    return ret;
+}
 
 static void virCommandThreadWorker(void *opaque)
 {
@@ -1253,9 +1375,9 @@ mymain(void)
 
     environ = (char **)newenv;
 
-# define DO_TEST(NAME)                                                \
-    if (virTestRun("Command Exec " #NAME " test",                     \
-                   NAME, NULL) < 0)                                   \
+# define DO_TEST(NAME) \
+    if (virTestRun("Command Exec " #NAME " test", \
+                   NAME, NULL) < 0) \
         ret = -1
 
     DO_TEST(test0);
@@ -1282,8 +1404,9 @@ mymain(void)
     DO_TEST(test21);
     DO_TEST(test22);
     DO_TEST(test23);
-    DO_TEST(test24);
     DO_TEST(test25);
+    DO_TEST(test26);
+    DO_TEST(test27);
 
     virMutexLock(&test->lock);
     if (test->running) {
@@ -1306,6 +1429,6 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)
 
 #endif /* !WIN32 */

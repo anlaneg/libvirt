@@ -17,16 +17,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Cedric Bosdonnat
  */
+
+#pragma once
 
 #include "internal.h"
 #include "object_event.h"
 #include "object_event_private.h"
-
-#ifndef __NETWORK_EVENT_H__
-# define __NETWORK_EVENT_H__
 
 int
 virNetworkEventStateRegisterID(virConnectPtr conn,
@@ -57,5 +54,3 @@ virNetworkEventLifecycleNew(const char *name,
                             const unsigned char *uuid,
                             int type,
                             int detail);
-
-#endif

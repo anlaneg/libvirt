@@ -16,25 +16,33 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Jiri Denemark <jdenemar@redhat.com>
  */
 
-#ifndef __VIR_CPU_X86_H__
-# define __VIR_CPU_X86_H__
+#pragma once
 
-# include "cpu.h"
-# include "cpu_x86_data.h"
+#include "cpu.h"
+#include "cpu_x86_data.h"
 
 extern struct cpuArchDriver cpuDriverX86;
 
-int virCPUx86DataAddCPUID(virCPUx86Data *data,
-                          const virCPUx86CPUID *cpuid);
+int virCPUx86DataAdd(virCPUDataPtr cpuData,
+                     const virCPUx86DataItem *cpuid);
 
-void virCPUx86DataClear(virCPUx86Data *data);
+int virCPUx86DataSetSignature(virCPUDataPtr cpuData,
+                              unsigned int family,
+                              unsigned int model,
+                              unsigned int stepping);
 
-virCPUDataPtr virCPUx86MakeData(virArch arch,
-                                virCPUx86Data *data);
+uint32_t virCPUx86DataGetSignature(virCPUDataPtr cpuData,
+                                   unsigned int *family,
+                                   unsigned int *model,
+                                   unsigned int *stepping);
 
-#endif /* __VIR_CPU_X86_H__ */
+int virCPUx86DataSetVendor(virCPUDataPtr cpuData,
+                           const char *vendor);
+
+bool virCPUx86FeatureFilterSelectMSR(const char *name,
+                                     void *opaque);
+
+bool virCPUx86FeatureFilterDropMSR(const char *name,
+                                   void *opaque);

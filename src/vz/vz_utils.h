@@ -20,35 +20,35 @@
  *
  */
 
-#ifndef PARALLELS_UTILS_H
-# define PARALLELS_UTILS_H
+#pragma once
 
-# include <Parallels.h>
+#include <Parallels.h>
 
-# include "driver.h"
-# include "conf/domain_conf.h"
-# include "conf/snapshot_conf.h"
-# include "conf/virdomainobjlist.h"
-# include "conf/domain_event.h"
-# include "virthread.h"
-# include "datatypes.h"
+#include "driver.h"
+#include "conf/domain_conf.h"
+#include "conf/snapshot_conf.h"
+#include "conf/virdomainsnapshotobjlist.h"
+#include "conf/virdomainobjlist.h"
+#include "conf/domain_event.h"
+#include "virthread.h"
+#include "datatypes.h"
 
-# define vzParseError()                                                 \
-    virReportErrorHelper(VIR_FROM_TEST, VIR_ERR_OPERATION_FAILED, __FILE__,    \
+#define vzParseError() \
+    virReportErrorHelper(VIR_FROM_TEST, VIR_ERR_OPERATION_FAILED, __FILE__, \
                          __FUNCTION__, __LINE__, _("Can't parse prlctl output"))
 
-# define IS_CT(def)  (def->os.type == VIR_DOMAIN_OSTYPE_EXE)
+#define IS_CT(def)  (def->os.type == VIR_DOMAIN_OSTYPE_EXE)
 
-# define vzDomNotFoundError(domain)                               \
-    do {                                                                 \
-        char uuidstr[VIR_UUID_STRING_BUFLEN];                            \
-        virUUIDFormat(domain->uuid, uuidstr);                            \
-        virReportError(VIR_ERR_NO_DOMAIN,                                \
+#define vzDomNotFoundError(domain) \
+    do { \
+        char uuidstr[VIR_UUID_STRING_BUFLEN]; \
+        virUUIDFormat(domain->uuid, uuidstr); \
+        virReportError(VIR_ERR_NO_DOMAIN, \
                        _("no domain with matching uuid '%s'"), uuidstr); \
     } while (0)
 
-# define PARALLELS_DOMAIN_ROUTED_NETWORK_NAME   "host-routed"
-# define VIRTUOZZO_VER_7 ((unsigned long) 7000000)
+#define PARALLELS_DOMAIN_ROUTED_NETWORK_NAME   "host-routed"
+#define VIRTUOZZO_VER_7 ((unsigned long)7000000)
 
 struct _vzCapabilities {
     virStorageFileFormat vmDiskFormat;
@@ -61,7 +61,7 @@ typedef struct _vzCapabilities vzCapabilities;
 typedef struct _vzCapabilities *vzCapabilitiesPtr;
 
 /* +2 to keep enclosing { and } */
-# define VIR_UUID_STRING_BRACED_BUFLEN (VIR_UUID_STRING_BUFLEN + 2)
+#define VIR_UUID_STRING_BRACED_BUFLEN (VIR_UUID_STRING_BUFLEN + 2)
 
 struct _vzDriver {
     virObjectLockable parent;
@@ -116,11 +116,10 @@ struct vzDomObj {
 
 typedef struct vzDomObj *vzDomObjPtr;
 
-void* vzDomObjAlloc(void);
+void* vzDomObjAlloc(void *opaque);
 void vzDomObjFree(void *p);
 
 virDomainObjPtr vzDomObjFromDomain(virDomainPtr domain);
-virDomainObjPtr vzDomObjFromDomainRef(virDomainPtr domain);
 
 char * vzGetOutput(const char *binary, ...)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
@@ -146,13 +145,11 @@ vzGetDefaultSCSIModel(vzDriverPtr driver,
 
 int vzCheckUnsupportedGraphics(virDomainGraphicsDefPtr gr);
 
-# define PARALLELS_BLOCK_STATS_FOREACH(OP)                              \
-    OP(rd_req, VIR_DOMAIN_BLOCK_STATS_READ_REQ, "read_requests")        \
-    OP(rd_bytes, VIR_DOMAIN_BLOCK_STATS_READ_BYTES, "read_total")       \
-    OP(wr_req, VIR_DOMAIN_BLOCK_STATS_WRITE_REQ, "write_requests")      \
+#define PARALLELS_BLOCK_STATS_FOREACH(OP) \
+    OP(rd_req, VIR_DOMAIN_BLOCK_STATS_READ_REQ, "read_requests") \
+    OP(rd_bytes, VIR_DOMAIN_BLOCK_STATS_READ_BYTES, "read_total") \
+    OP(wr_req, VIR_DOMAIN_BLOCK_STATS_WRITE_REQ, "write_requests") \
     OP(wr_bytes, VIR_DOMAIN_BLOCK_STATS_WRITE_BYTES, "write_total")
-
-#endif
 
 int
 vzDomainObjBeginJob(virDomainObjPtr dom);

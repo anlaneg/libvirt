@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # Copyright (C) 2013 Red Hat, Inc.
 #
@@ -22,7 +22,8 @@ use warnings;
 
 my @objects = (
     "CONNECT", "DOMAIN", "INTERFACE",
-    "NETWORK","NODE_DEVICE", "NWFILTER",
+    "NETWORK_PORT", "NETWORK", "NODE_DEVICE",
+    "NWFILTER_BINDING", "NWFILTER",
      "SECRET", "STORAGE_POOL", "STORAGE_VOL",
     );
 
@@ -74,7 +75,7 @@ while (<>) {
 
 print <<EOF;
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body>
 EOF
@@ -83,7 +84,7 @@ foreach my $object (sort { $a cmp $b } keys %perms) {
     my $class = $class{$object};
     my $olink = lc "object_" . $object;
     print <<EOF;
-<h3><a name="$olink">$class</a></h3>
+<h3><a id="$olink">$class</a></h3>
 <table class="acl">
   <thead>
     <tr>
@@ -105,7 +106,7 @@ EOF
 
         print <<EOF;
     <tr>
-      <td><a name="$plink">$perm</a></td>
+      <td><a id="$plink">$perm</a></td>
       <td>$description</td>
     </tr>
 EOF

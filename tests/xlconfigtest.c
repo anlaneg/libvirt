@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2007, 2010-2011, 2014 Red Hat, Inc.
  * Copyright (c) 2015 SUSE LINUX Products GmbH, Nuernberg, Germany.
+ * Copyright (C) 2014 David Kiarie Kahurani
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,20 +19,15 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- * Author: Kiarie Kahurani <davidkiarie4@gmail.com>
- *
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "internal.h"
 #include "datatypes.h"
-#include "xenconfig/xen_xl.h"
+#include "libxl/xen_xl.h"
 #include "viralloc.h"
 #include "virstring.h"
 #include "testutils.h"
@@ -72,7 +68,7 @@ static int
 testCompareParseXML(const char *xlcfg, const char *xml, bool replaceVars)
 {
     char *gotxlcfgData = NULL;
-    virConfPtr conf = NULL;
+    VIR_AUTOPTR(virConf) conf = NULL;
     virConnectPtr conn = NULL;
     int wrote = 4096;
     int ret = -1;
@@ -97,7 +93,7 @@ testCompareParseXML(const char *xlcfg, const char *xml, bool replaceVars)
             goto fail;
     }
 
-    if (!virDomainDefCheckABIStability(def, def)) {
+    if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
         fprintf(stderr, "ABI stability check failed on %s", xml);
         goto fail;
     }
@@ -117,8 +113,6 @@ testCompareParseXML(const char *xlcfg, const char *xml, bool replaceVars)
  fail:
     VIR_FREE(replacedXML);
     VIR_FREE(gotxlcfgData);
-    if (conf)
-        virConfFree(conf);
     virDomainDefFree(def);
     virObjectUnref(conn);
 
@@ -134,7 +128,7 @@ testCompareFormatXML(const char *xlcfg, const char *xml, bool replaceVars)
 {
     char *xlcfgData = NULL;
     char *gotxml = NULL;
-    virConfPtr conf = NULL;
+    VIR_AUTOPTR(virConf) conf = NULL;
     int ret = -1;
     virConnectPtr conn;
     virDomainDefPtr def = NULL;
@@ -146,7 +140,7 @@ testCompareFormatXML(const char *xlcfg, const char *xml, bool replaceVars)
     if (virTestLoadFile(xlcfg, &xlcfgData) < 0)
         goto fail;
 
-    if (!(conf = virConfReadMem(xlcfgData, strlen(xlcfgData), 0)))
+    if (!(conf = virConfReadString(xlcfgData, 0)))
         goto fail;
 
     if (!(def = xenParseXL(conf, caps, xmlopt)))
@@ -169,8 +163,6 @@ testCompareFormatXML(const char *xlcfg, const char *xml, bool replaceVars)
     ret = 0;
 
  fail:
-    if (conf)
-        virConfFree(conf);
     VIR_FREE(replacedXML);
     VIR_FREE(xlcfgData);
     VIR_FREE(gotxml);
@@ -225,34 +217,36 @@ mymain(void)
     if (!(xmlopt = libxlCreateXMLConf()))
         return EXIT_FAILURE;
 
-#define DO_TEST_PARSE(name, replace)                                    \
-    do {                                                                \
-        struct testInfo info0 = { name, 0, replace };                   \
-        if (virTestRun("Xen XL-2-XML Parse  " name,                     \
-                       testCompareHelper, &info0) < 0)                  \
-            ret = -1;                                                   \
+#define DO_TEST_PARSE(name, replace) \
+    do { \
+        struct testInfo info0 = { name, 0, replace }; \
+        if (virTestRun("Xen XL-2-XML Parse  " name, \
+                       testCompareHelper, &info0) < 0) \
+            ret = -1; \
     } while (0)
 
-#define DO_TEST_FORMAT(name, replace)                                   \
-    do {                                                                \
-        struct testInfo info1 = { name, 1, replace };                   \
-        if (virTestRun("Xen XL-2-XML Format " name,                     \
-                       testCompareHelper, &info1) < 0)                  \
-            ret = -1;                                                   \
+#define DO_TEST_FORMAT(name, replace) \
+    do { \
+        struct testInfo info1 = { name, 1, replace }; \
+        if (virTestRun("Xen XL-2-XML Format " name, \
+                       testCompareHelper, &info1) < 0) \
+            ret = -1; \
     } while (0)
 
-#define DO_TEST(name)                                                   \
-    do {                                                                \
-        DO_TEST_PARSE(name, false);                                     \
-        DO_TEST_FORMAT(name, false);                                    \
+#define DO_TEST(name) \
+    do { \
+        DO_TEST_PARSE(name, false); \
+        DO_TEST_FORMAT(name, false); \
     } while (0)
 
-#define DO_TEST_REPLACE_VARS(name)                                      \
-    do {                                                                \
-        DO_TEST_PARSE(name, true);                                      \
-        DO_TEST_FORMAT(name, true);                                     \
+#define DO_TEST_REPLACE_VARS(name) \
+    do { \
+        DO_TEST_PARSE(name, true); \
+        DO_TEST_FORMAT(name, true); \
     } while (0)
 
+    DO_TEST("fullvirt-ovswitch-tagged");
+    DO_TEST("fullvirt-ovswitch-trunked");
     DO_TEST_REPLACE_VARS("fullvirt-ovmf");
     DO_TEST("paravirt-maxvcpus");
     DO_TEST("new-disk");
@@ -261,6 +255,7 @@ mymain(void)
 #ifdef LIBXL_HAVE_QED
     DO_TEST_FORMAT("disk-qed", false);
 #endif
+    DO_TEST("net-fakemodel");
     DO_TEST("spice");
     DO_TEST("spice-features");
     DO_TEST("vif-rate");
@@ -268,11 +263,23 @@ mymain(void)
     DO_TEST("fullvirt-hpet-timer");
     DO_TEST("fullvirt-tsc-timer");
     DO_TEST("fullvirt-multi-timer");
+    DO_TEST("fullvirt-nestedhvm");
+    DO_TEST("fullvirt-nestedhvm-disabled");
+    DO_TEST("fullvirt-cpuid");
+#ifdef LIBXL_HAVE_VNUMA
+    DO_TEST("fullvirt-vnuma");
+    DO_TEST_PARSE("fullvirt-vnuma-autocomplete", false);
+    DO_TEST_PARSE("fullvirt-vnuma-nodistances", false);
+    DO_TEST_PARSE("fullvirt-vnuma-partialdist", false);
+#endif
 
     DO_TEST("paravirt-cmdline");
     DO_TEST_FORMAT("paravirt-cmdline-extra-root", false);
     DO_TEST_FORMAT("paravirt-cmdline-bogus-extra-root", false);
     DO_TEST("rbd-multihost-noauth");
+    DO_TEST_FORMAT("paravirt-type", false);
+    DO_TEST_FORMAT("fullvirt-type", false);
+    DO_TEST("pvh-type");
 
 #ifdef LIBXL_HAVE_DEVICE_CHANNEL
     DO_TEST("channel-pty");
@@ -289,7 +296,12 @@ mymain(void)
     DO_TEST_FORMAT("fullvirt-direct-kernel-boot-extra", false);
     DO_TEST_FORMAT("fullvirt-direct-kernel-boot-bogus-extra", false);
 #endif
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    DO_TEST("max-gntframes");
+#endif
+
     DO_TEST("vif-typename");
+    DO_TEST("vif-multi-ip");
     DO_TEST("usb");
     DO_TEST("usbctrl");
 
@@ -299,4 +311,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

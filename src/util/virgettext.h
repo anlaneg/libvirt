@@ -17,9 +17,7 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  */
-#ifndef __VIR_GETTEXT_H__
-# define __VIR_GETTEXT_H__
+
+#pragma once
 
 int virGettextInitialize(void);
-
-#endif /* __VIR_GETTEXT_H__ */

@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # augeas-gentest.pl: Generate an augeas test file, from an
 #                    example config file + test file template
@@ -16,38 +16,28 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library.  If not, see
 # <http://www.gnu.org/licenses/>.
-#
-# Authors:
-#     Daniel P. Berrange <berrange@redhat.com>
 
 use strict;
 use warnings;
 
-die "syntax: $0 CONFIG TEMPLATE AUGTEST\n" unless @ARGV == 3;
+die "syntax: $0 CONFIG TEMPLATE\n" unless @ARGV == 2;
 
 my $config = shift @ARGV;
 my $template = shift @ARGV;
-my $augtest = shift @ARGV;
-
-open AUGTEST, ">", $augtest or die "cannot create $augtest: $!";
-
-$SIG{__DIE__} = sub {
-    unlink $augtest;
-};
 
 open CONFIG, "<", $config or die "cannot read $config: $!";
 open TEMPLATE, "<", $template or die "cannot read $template: $!";
 
 my $group = 0;
 while (<TEMPLATE>) {
-    if (/::CONFIG::/) {
+    if (/\@CONFIG\@/) {
         my $group = 0;
-        print AUGTEST "  let conf = \"";
+        print "  let conf = \"";
         while (<CONFIG>) {
             if (/^#\w/) {
                 s/^#//;
                 s/\"/\\\"/g;
-                print AUGTEST $_;
+                print $_;
                 $group = /\[\s$/;
             } elsif ($group) {
                 s/\"/\\\"/g;
@@ -56,16 +46,15 @@ while (<TEMPLATE>) {
                 }
                 if (/^#/) {
                     s/^#//;
-                    print AUGTEST $_;
+                    print $_;
                 }
             }
         }
-        print AUGTEST "\"\n";
+        print "\"\n";
     } else {
-        print AUGTEST $_;
+        print $_;
     }
 }
 
 close TEMPLATE;
 close CONFIG;
-close AUGTEST or die "cannot save $augtest: $!";

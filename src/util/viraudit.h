@@ -19,12 +19,10 @@
  *
  */
 
+#pragma once
 
-#ifndef __LIBVIRT_AUDIT_H__
-# define __LIBVIRT_AUDIT_H__
-
-# include "internal.h"
-# include "virlog.h"
+#include "internal.h"
+#include "virlog.h"
 
 typedef enum {
     VIR_AUDIT_RECORD_MACHINE_CONTROL,
@@ -32,7 +30,7 @@ typedef enum {
     VIR_AUDIT_RECORD_RESOURCE,
 } virAuditRecordType;
 
-int virAuditOpen(void);
+int virAuditOpen(unsigned int audit_level);
 
 void virAuditLog(bool enabled);
 
@@ -47,15 +45,13 @@ char *virAuditEncode(const char *key, const char *value);
 
 void virAuditClose(void);
 
-# define VIR_AUDIT(type, success, ...)				\
-    virAuditSend(&virLogSelf, __FILE__, __LINE__, __func__,     \
+#define VIR_AUDIT(type, success, ...) \
+    virAuditSend(&virLogSelf, __FILE__, __LINE__, __func__, \
                  NULL, NULL, type, success, __VA_ARGS__);
 
-# define VIR_AUDIT_USER(type, success, clienttty, clientaddr, ...)	\
-    virAuditSend(&virLogSelf, __FILE__, __LINE__, __func__,             \
+#define VIR_AUDIT_USER(type, success, clienttty, clientaddr, ...) \
+    virAuditSend(&virLogSelf, __FILE__, __LINE__, __func__, \
                  clienttty, clientaddr, type, success, __VA_ARGS__);
 
-# define VIR_AUDIT_STR(str) \
+#define VIR_AUDIT_STR(str) \
     ((str) ? (str) : "?")
-
-#endif /* __LIBVIRT_AUDIT_H__ */

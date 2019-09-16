@@ -20,11 +20,8 @@
  *
  */
 
-#ifndef __ESX_INTERFACE_DRIVER_H__
-# define __ESX_INTERFACE_DRIVER_H__
+#pragma once
 
-# include "driver.h"
+#include "driver.h"
 
 extern virInterfaceDriver esxInterfaceDriver;
-
-#endif /* __ESX_INTERFACE_DRIVER_H__ */

@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # Copyright (C) 2013 Red Hat, Inc.
 #
@@ -37,10 +37,11 @@ while (<>) {
 
             next if $api eq "no";
             next if $api eq "name";
+            next if $impl eq "NULL";
 
             my $suffix = $impl;
             my $prefix = $impl;
-            $prefix =~ s/^([a-z]+(?:Unified)?)(.*?)$/$1/;
+            $prefix =~ s/^([a-z]+)(.*?)$/$1/;
 
             if (defined $mainprefix) {
                 if ($mainprefix ne $prefix) {
@@ -52,7 +53,7 @@ while (<>) {
             }
 
             if ($api !~ /^$mainprefix/) {
-                $suffix =~ s/^[a-z]+(?:Unified)?//;
+                $suffix =~ s/^[a-z]+//;
                 $suffix =~ s/^([A-Z]+)/lc $1/e;
             }
 
@@ -67,7 +68,7 @@ while (<>) {
                 $status = 1;
             }
         }
-    } elsif (/^(?:static\s+)?(vir(?:\w+)?Driver)\s+/) {
+    } elsif (/^(?:static\s+)?(vir(?:\w+)?Driver)\s+(?!.*;)/) {
         next if $1 eq "virNWFilterCallbackDriver" ||
                 $1 eq "virNWFilterTechDriver" ||
                 $1 eq "virConnectDriver";

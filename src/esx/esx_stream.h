@@ -19,14 +19,11 @@
  *
  */
 
-#ifndef __ESX_STREAM_H__
-# define __ESX_STREAM_H__
+#pragma once
 
-# include "internal.h"
-# include "esx_private.h"
+#include "internal.h"
+#include "esx_private.h"
 
 int esxStreamOpenUpload(virStreamPtr stream, esxPrivate *priv, const char *url);
 int esxStreamOpenDownload(virStreamPtr stream, esxPrivate *priv, const char *url,
                           unsigned long long offset, unsigned long long length);
-
-#endif /* __ESX_STREAM_H__ */

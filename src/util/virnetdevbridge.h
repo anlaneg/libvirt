@@ -14,17 +14,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Mark McLoughlin <markmc@redhat.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NETDEV_BRIDGE_H__
-# define __VIR_NETDEV_BRIDGE_H__
+#pragma once
 
-# include "internal.h"
-# include "virmacaddr.h"
+#include "internal.h"
+#include "virmacaddr.h"
 
 int virNetDevBridgeCreate(const char *brname)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
@@ -93,4 +88,3 @@ int virNetDevBridgeFDBAdd(const virMacAddr *mac, const char *ifname,
 int virNetDevBridgeFDBDel(const virMacAddr *mac, const char *ifname,
                           unsigned int flags)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
-#endif /* __VIR_NETDEV_BRIDGE_H__ */

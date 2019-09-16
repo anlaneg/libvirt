@@ -19,12 +19,11 @@
  *
  */
 
+#pragma once
 
-#ifndef __VIR_TYPED_PARAM_H_
-# define __VIR_TYPED_PARAM_H_
-
-# include "internal.h"
-# include "virutil.h"
+#include "internal.h"
+#include "virutil.h"
+#include "virenum.h"
 
 /**
  * VIR_TYPED_PARAM_MULTIPLE:
@@ -32,7 +31,7 @@
  * Flag indicating that the params has multiple occurrences of the parameter.
  * Only used as a flag for @type argument of the virTypedParamsValidate.
  */
-# define VIR_TYPED_PARAM_MULTIPLE (1U << 31)
+#define VIR_TYPED_PARAM_MULTIPLE (1U << 31)
 
 verify(!(VIR_TYPED_PARAM_LAST & VIR_TYPED_PARAM_MULTIPLE));
 
@@ -79,8 +78,7 @@ virTypedParamsFilter(virTypedParameterPtr params,
                      int nparams,
                      const char *name,
                      virTypedParameterPtr **ret)
-    ATTRIBUTE_RETURN_CHECK  ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_NONNULL(4);
+    ATTRIBUTE_RETURN_CHECK;
 
 
 int virTypedParameterAssign(virTypedParameterPtr param, const char *name,
@@ -115,25 +113,24 @@ int virTypedParamsDeserialize(virTypedParameterRemotePtr remote_params,
 
 int virTypedParamsSerialize(virTypedParameterPtr params,
                             int nparams,
+                            int limit,
                             virTypedParameterRemotePtr *remote_params_val,
                             unsigned int *remote_params_len,
                             unsigned int flags);
 
-VIR_ENUM_DECL(virTypedParameter)
+VIR_ENUM_DECL(virTypedParameter);
 
-# define VIR_TYPED_PARAMS_DEBUG(params, nparams)                            \
-    do {                                                                    \
-        int _i;                                                             \
-        if (!params)                                                        \
-            break;                                                          \
-        for (_i = 0; _i < (nparams); _i++) {                                \
-            char *_value = virTypedParameterToString((params) + _i);        \
-            VIR_DEBUG("params[\"%s\"]=(%s)%s",                              \
-                      (params)[_i].field,                                   \
-                      virTypedParameterTypeToString((params)[_i].type),     \
-                      NULLSTR(_value));                                     \
-            VIR_FREE(_value);                                               \
-        }                                                                   \
+#define VIR_TYPED_PARAMS_DEBUG(params, nparams) \
+    do { \
+        int _i; \
+        if (!params) \
+            break; \
+        for (_i = 0; _i < (nparams); _i++) { \
+            char *_value = virTypedParameterToString((params) + _i); \
+            VIR_DEBUG("params[\"%s\"]=(%s)%s", \
+                      (params)[_i].field, \
+                      virTypedParameterTypeToString((params)[_i].type), \
+                      NULLSTR(_value)); \
+            VIR_FREE(_value); \
+        } \
     } while (0)
-
-#endif /* __VIR_TYPED_PARAM_H */

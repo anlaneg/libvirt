@@ -100,14 +100,15 @@
     margin-right: auto;
     padding: 0px;
     padding-bottom: 1em;
-    max-width: 60em;
+    max-width: 95%;
+    width: 70em;
 }
 
 body.index #content,
 body.docs #content,
 body.hvsupport #content
 {
-    max-width: inherit;
+    width: inherit;
 }
 
 pre {
@@ -273,6 +274,12 @@ span.since {
     font-weight: bold;
 }
 
+span.removed {
+    color: darkred;
+    font-style: italic;
+    font-weight: bold;
+}
+
 img.diagram {
     background: rgb(230,230,230);
     border: 2px dotted rgb(178,178,178);
@@ -393,6 +400,7 @@ table.acl {
 
 table.acl tr, table.acl td {
     padding: 0.3em;
+    border: 1px solid #ccc;
 }
 
 table.acl thead {
@@ -535,4 +543,66 @@ dl.mail dt a {
 dl.mail dt a:hover {
     color:  rgb(255, 230, 0);
     text-decoration: none;
+}
+
+td.enumvalue {
+    white-space: nowrap;
+}
+
+#advancedsearch {
+    display: none;
+    vertical-align: bottom;
+    position: absolute;
+    padding: 1em;
+    padding-top: 0em;
+    margin-top: 0em;
+    top: 100px;
+    right: 0px;
+    width: 13em;
+    text-align: left;
+    color: white;
+    background: rgb(0, 95, 97);
+    border-left: 3px solid rgb(60, 133, 124);
+    border-bottom: 3px solid rgb(60, 133, 124);
+}
+
+/* Use div.advancedsearch, not #advancedsearch because the
+ * 'advancedsearch' class is set dynamically when javascript
+ * loads. This ensures that the advancedsearch options are
+ * not displayed when javascript is disabled.
+*/
+#search:hover div.advancedsearch {
+    display: table;
+}
+
+#advancedsearch span {
+    display: block;
+}
+
+#advancedsearch input[type=radio] {
+    height: inherit;
+    display: inline;
+}
+
+#advancedsearch label {
+    display: inline;
+}
+
+.removedhv {
+    color: darkred;
+}
+
+ul.news-section-content {
+    margin-top: 0.5em;
+}
+
+ul.news-section-content li dl dt {
+    margin: 0;
+}
+
+ul.news-section-content li dl dd {
+    margin-left: 1em;
+    margin-right: 0;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
 }

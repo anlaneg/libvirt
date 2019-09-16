@@ -19,13 +19,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_LXC_CGROUP_H__
-# define __VIR_LXC_CGROUP_H__
+#pragma once
 
-# include "vircgroup.h"
-# include "domain_conf.h"
-# include "lxc_fuse.h"
-# include "virusb.h"
+#include "vircgroup.h"
+#include "domain_conf.h"
+#include "lxc_fuse.h"
+#include "virusb.h"
 
 virCgroupPtr virLXCCgroupCreate(virDomainDefPtr def,
                                 pid_t initpid,
@@ -47,5 +46,3 @@ int
 virLXCTeardownHostUSBDeviceCgroup(virUSBDevicePtr dev,
                                   const char *path,
                                   void *opaque);
-
-#endif /* __VIR_LXC_CGROUP_H__ */

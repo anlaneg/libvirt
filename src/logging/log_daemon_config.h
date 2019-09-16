@@ -17,14 +17,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_LOG_DAEMON_CONFIG_H__
-# define __VIR_LOG_DAEMON_CONFIG_H__
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef struct _virLogDaemonConfig virLogDaemonConfig;
 typedef virLogDaemonConfig *virLogDaemonConfigPtr;
@@ -34,6 +31,7 @@ struct _virLogDaemonConfig {
     char *log_filters;
     char *log_outputs;
     unsigned int max_clients;
+    unsigned int admin_max_clients;
 
     size_t max_backups;
     size_t max_size;
@@ -46,5 +44,3 @@ void virLogDaemonConfigFree(virLogDaemonConfigPtr data);
 int virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
                                const char *filename,
                                bool allow_missing);
-
-#endif /* __LIBVIRTD_CONFIG_H__ */
