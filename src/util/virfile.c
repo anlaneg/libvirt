@@ -1653,6 +1653,8 @@ virFileReadLink(const char *linkpath, char **resultpath)
 char *
 virFindFileInPath(const char *file)
 {
+	//在PATH中查找file文件对应的可执行文件路径，
+	//例如qemu-img返回/usr/bin/qemu-img
     const char *origpath = NULL;
     char *path = NULL;
     char *pathiter;
@@ -3013,7 +3015,7 @@ int virFileChownFiles(const char *name,
     return ret;
 }
 
-
+//提供等价shell实现：mkdir -m mode -p path
 static int
 virFileMakePathHelper(char *path, mode_t mode)
 {
@@ -3026,18 +3028,22 @@ virFileMakePathHelper(char *path, mode_t mode)
         if (S_ISDIR(st.st_mode))
             return 0;
 
+        //path已存在，但非目录，报错
         errno = ENOTDIR;
         return -1;
     }
 
+    //遇到其它errno,则直接返失败
     if (errno != ENOENT)
         return -1;
 
+    //目录不存在，创建它（必须'/'开头）
     if ((p = strrchr(path, '/')) == NULL) {
         errno = EINVAL;
         return -1;
     }
 
+    //递归确认及创建各层目录
     if (p != path) {
         *p = '\0';
 
@@ -3047,6 +3053,7 @@ virFileMakePathHelper(char *path, mode_t mode)
         *p = '/';
     }
 
+    //创建目录
     if (mkdir(path, mode) < 0 && errno != EEXIST)
         return -1;
 
@@ -3062,9 +3069,11 @@ virFileMakePathHelper(char *path, mode_t mode)
 int
 virFileMakePath(const char *path)
 {
+	//以0777 mode创建path目录
     return virFileMakePathWithMode(path, 0777);
 }
 
+//创建path目录，并指定mode
 int
 virFileMakePathWithMode(const char *path,
                         mode_t mode)

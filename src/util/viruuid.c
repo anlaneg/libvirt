@@ -153,6 +153,7 @@ virUUIDParse(const char *uuidstr, unsigned char *uuid)
 const char *
 virUUIDFormat(const unsigned char *uuid, char *uuidstr)
 {
+	//显示字符串格式的uuid
     snprintf(uuidstr, VIR_UUID_STRING_BUFLEN,
              "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
              uuid[0], uuid[1], uuid[2], uuid[3],

@@ -113,6 +113,7 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
     if (!(cfg = virObjectNew(virQEMUDriverConfigClass)))
         return NULL;
 
+    //构造qemu的uri
     cfg->uri = privileged ? "qemu:///system" : "qemu:///session";
 
     if (privileged) {
@@ -995,9 +996,9 @@ virQEMUDriverConfigLoadCapsFiltersEntry(virQEMUDriverConfigPtr cfg,
     return 0;
 }
 
-
+//加载qemu driver配置文件
 int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
-                                const char *filename,
+                                const char *filename/*配置文件名*/,
                                 bool privileged)
 {
     VIR_AUTOPTR(virConf) conf = NULL;
@@ -1006,16 +1007,20 @@ int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
      * libvirt emits an error.
      */
     if (access(filename, R_OK) == -1) {
+    		//qemu配置文件不存在
         VIR_INFO("Could not read qemu config file %s", filename);
         return 0;
     }
 
+    //读取并解析配置文件
     if (!(conf = virConfReadFile(filename, 0)))
         return -1;
 
+    //tls相关配置项
     if (virQEMUDriverConfigLoadDefaultTLSEntry(cfg, conf) < 0)
         return -1;
 
+    //vnc相关配置项
     if (virQEMUDriverConfigLoadVNCEntry(cfg, conf) < 0)
         return -1;
 
@@ -1081,6 +1086,7 @@ int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
 int
 virQEMUDriverConfigValidate(virQEMUDriverConfigPtr cfg)
 {
+	//qemu driver配置校验
     if (cfg->defaultTLSx509certdirPresent) {
         if (!virFileExists(cfg->defaultTLSx509certdir)) {
             virReportError(VIR_ERR_CONF_SYNTAX,

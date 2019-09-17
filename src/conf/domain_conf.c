@@ -29537,6 +29537,7 @@ virDomainObjSetState(virDomainObjPtr dom, virDomainState state, int reason)
         return;
     }
 
+    //设置domain状态
     dom->state.state = state;
     if (reason > 0 && reason < last)
         dom->state.reason = reason;

@@ -1388,6 +1388,7 @@ typedef virHypervisorDriver *virHypervisorDriverPtr;
  */
 struct _virHypervisorDriver {
     const char *name; /* the name of the driver */
+    //在拿不到defaultURI时，各驱动逐个尝试，获取相应uri
     virDrvConnectURIProbe connectURIProbe;
     virDrvConnectOpen connectOpen;
     virDrvConnectClose connectClose;

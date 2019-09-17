@@ -43,21 +43,24 @@ VIR_LOG_INIT("util.conf");
 typedef struct _virConfParserCtxt virConfParserCtxt;
 typedef virConfParserCtxt *virConfParserCtxtPtr;
 
+//解析上下文件
 struct _virConfParserCtxt {
-    const char* filename;
+    const char* filename;//正在解析的文件名
     const char* base;//起始位置
-    const char* cur;
+    const char* cur;//当前位置
     const char *end;//终止位置
-    int line;
+    int line;//当前行号
 
     virConfPtr conf;
 };
 
+//当前字符
 #define CUR (*ctxt->cur)
 #define NEXT if (ctxt->cur < ctxt->end) ctxt->cur++;
 #define IS_EOL(c) (((c) == '\n') || ((c) == '\r'))
 
 #define SKIP_BLANKS_AND_EOL \
+	/*自当前字符开始遍历，跳过blank,eof，遇到'\n'行号加1*/\
   do { while ((ctxt->cur < ctxt->end) && (c_isblank(CUR) || IS_EOL(CUR))) { \
          if (CUR == '\n') ctxt->line++; \
          ctxt->cur++; } } while (0)
@@ -223,6 +226,7 @@ virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm/*
     if (name)
         VIR_DEBUG("Add entry %s %p", name, value);
 
+    //申请空间，填充name,value,comment
     if (VIR_ALLOC(ret) < 0)
         return NULL;
 
@@ -231,8 +235,10 @@ virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm/*
     ret->comment = comm;
 
     if (conf->entries == NULL) {
+    		//首个key,value对
         conf->entries = ret;
     } else {
+    		//非首个时，将ret串在conf->entries的结尾
         prev = conf->entries;
         while (prev->next != NULL)
             prev = prev->next;
@@ -587,6 +593,7 @@ virConfParseName(virConfParserCtxtPtr ctxt)
 static int
 virConfParseComment(virConfParserCtxtPtr ctxt)
 {
+	//注释行解析
     const char *base;
     char *comm;
 
@@ -594,9 +601,12 @@ virConfParseComment(virConfParserCtxtPtr ctxt)
         return -1;
     NEXT;
     base = ctxt->cur;
+    //一直移动解析，跳过被注释的字符，直接遇到'\r','\n'
     while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR))) NEXT;
+    //ctxt->cur位置为注释结尾，取注释的字符串记在comm中
     if (VIR_STRNDUP(comm, base, ctxt->cur - base) < 0)
         return -1;
+    //添加注释信息到conf
     if (virConfAddEntry(ctxt->conf, NULL, NULL, comm) == NULL) {
         VIR_FREE(comm);
         return -1;
@@ -617,6 +627,7 @@ virConfParseSeparator(virConfParserCtxtPtr ctxt)
 {
     SKIP_BLANKS;
     if (ctxt->cur >= ctxt->end)
+    		//解析结束
         return 0;
     if (IS_EOL(CUR)) {
         SKIP_BLANKS_AND_EOL;
@@ -646,12 +657,16 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
     virConfValuePtr value;
     char *comm = NULL;
 
+    //跳过前导的blanks
     SKIP_BLANKS_AND_EOL;
     if (CUR == '#')
+    		//解析以注释符开头的行
         return virConfParseComment(ctxt);
+    //遇到key=value行，先解析key
     name = virConfParseName(ctxt);
     if (name == NULL)
         return -1;
+    //跳过'='前的空字符
     SKIP_BLANKS;
     if (CUR != '=') {
         virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("expecting an assignment"));
@@ -659,13 +674,17 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
         return -1;
     }
     NEXT;
+    //跳过'='后的空字符
     SKIP_BLANKS;
+    //解析value
     value = virConfParseValue(ctxt);
     if (value == NULL) {
         VIR_FREE(name);
         return -1;
     }
+    //跳过value后的空字符
     SKIP_BLANKS;
+    //如果value后有注释，则解析注释
     if (CUR == '#') {
         NEXT;
         base = ctxt->cur;
@@ -701,9 +720,10 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
  *         read or parse the file, use virConfFree() to free the data.
  */
 static virConfPtr
-virConfParse(const char *filename/*文件名*/, const char *content, int len,
+virConfParse(const char *filename/*文件名*/, const char *content/*文件内容缓存*/, int len,
              unsigned int flags)
 {
+	//解析ini格式的配置文件，返回conf
     virConfParserCtxt ctxt;
 
     ctxt.filename = filename;
@@ -715,13 +735,17 @@ virConfParse(const char *filename/*文件名*/, const char *content, int len,
     if (ctxt.conf == NULL)
         return NULL;
 
+    //自首行开始解析，直到结尾
     while (ctxt.cur < ctxt.end) {
+    		//解析 key=value #comment 格式
         if (virConfParseStatement(&ctxt) < 0)
             goto error;
+        //解析语句结束符，支持'\n','\r',';'三种
         if (virConfParseSeparator(&ctxt) < 0)
             goto error;
     }
 
+    //返回解析成功的conf
     return ctxt.conf;
 
  error:
@@ -746,6 +770,7 @@ virConfParse(const char *filename/*文件名*/, const char *content, int len,
 virConfPtr
 virConfReadFile(const char *filename, unsigned int flags)
 {
+	//解析给定的配置文件
     char *content;
     int len;
     virConfPtr conf;
@@ -757,6 +782,7 @@ virConfReadFile(const char *filename, unsigned int flags)
         return NULL;
     }
 
+    //将所有文件读入到缓存content中
     if ((len = virFileReadAll(filename, MAX_CONFIG_FILE_SIZE, &content)) < 0)
         return NULL;
 
@@ -838,6 +864,7 @@ virConfGetValue(virConfPtr conf, const char *setting)
 {
     virConfEntryPtr cur;
 
+    //在配置中查找setting对应的value
     if (conf == NULL)
         return NULL;
 
@@ -893,6 +920,7 @@ int virConfGetValueString(virConfPtr conf,
                           const char *setting,
                           char **value)
 {
+	//取setting对应的value,必须为string类型
     virConfValuePtr cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value string %p %d",
@@ -901,6 +929,7 @@ int virConfGetValueString(virConfPtr conf,
     if (!cval)
         return 0;
 
+    //cval必须为字符串类型
     if (cval->type != VIR_CONF_STRING) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("%s: expected a string for '%s' parameter"),

@@ -53,7 +53,7 @@ struct _virHashEntry {
 struct _virHashTable {
     virHashEntryPtr *table;
     uint32_t seed;
-    size_t size;
+    size_t size;//hash表桶数
     size_t nbElems;
     virHashDataFree dataFree;
     virHashKeyCode keyCode;
@@ -309,6 +309,7 @@ virHashFree(virHashTablePtr table)
     VIR_FREE(table);
 }
 
+//向hashtable中添加元素
 static int
 virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
                         void *userdata,
@@ -566,7 +567,7 @@ virHashRemoveEntry(virHashTablePtr table, const void *name)
  * Returns 0 on success or -1 on failure.
  */
 int
-virHashForEach(virHashTablePtr table, virHashIterator iter, void *data)
+virHashForEach(virHashTablePtr table, virHashIterator iter/*元素遍历回调*/, void *data)
 {
     size_t i;
     int ret = -1;
@@ -574,6 +575,7 @@ virHashForEach(virHashTablePtr table, virHashIterator iter, void *data)
     if (table == NULL || iter == NULL)
         return -1;
 
+    //遍历桶及桶上的链，通过iter回调，遍历每个元素
     for (i = 0; i < table->size; i++) {
         virHashEntryPtr entry = table->table[i];
         while (entry) {

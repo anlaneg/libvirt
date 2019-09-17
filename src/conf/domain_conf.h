@@ -2348,8 +2348,8 @@ struct _virDomainVirtioOptions {
  */
 struct _virDomainDef {
     int virtType; /* enum virDomainVirtType */
-    int id;
-    unsigned char uuid[VIR_UUID_BUFLEN];
+    int id;//domain id号
+    unsigned char uuid[VIR_UUID_BUFLEN];//uuid数组
 
     unsigned char genid[VIR_UUID_BUFLEN];
     bool genidRequested;

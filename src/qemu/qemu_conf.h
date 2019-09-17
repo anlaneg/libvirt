@@ -75,6 +75,7 @@ typedef virQEMUDriverConfig *virQEMUDriverConfigPtr;
 struct _virQEMUDriverConfig {
     virObject parent;
 
+    //各driver对应的uri
     const char *uri;
 
     uid_t user;
@@ -249,6 +250,7 @@ struct _virQEMUDriver {
     virDomainObjListPtr domains;
 
     /* Immutable pointer */
+    //qemu-img可执行文件对应的path
     char *qemuImgBinary;
 
     /* Immutable pointer, lockless APIs. Pointless abstraction */

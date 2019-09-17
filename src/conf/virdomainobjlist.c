@@ -47,11 +47,11 @@ struct _virDomainObjList {
 
     /* uuid string -> virDomainObj  mapping
      * for O(1), lockless lookup-by-uuid */
-    virHashTable *objs;
+    virHashTable *objs;//通过uuid映射vm
 
     /* name -> virDomainObj mapping for O(1),
      * lockless lookup-by-name */
-    virHashTable *objsName;
+    virHashTable *objsName;//通过name映射uuid
 };
 
 
@@ -242,13 +242,16 @@ static int
 virDomainObjListAddObjLocked(virDomainObjListPtr doms,
                              virDomainObjPtr vm)
 {
+	//将vm加入到doms中
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
+    //添加uuid与vm的映射
     virUUIDFormat(vm->def->uuid, uuidstr);
     if (virHashAddEntry(doms->objs, uuidstr, vm) < 0)
         return -1;
     virObjectRef(vm);
 
+    //添加name与vm的映射
     if (virHashAddEntry(doms->objsName, vm->def->name, vm) < 0) {
         virHashRemoveEntry(doms->objs, uuidstr);
         return -1;
@@ -337,6 +340,7 @@ virDomainObjListAddLocked(virDomainObjListPtr doms,
             goto error;
         vm->def = def;
 
+        //添加此vm
         if (virDomainObjListAddObjLocked(doms, vm) < 0) {
             vm->def = NULL;
             goto error;
@@ -696,7 +700,7 @@ struct virDomainIDData {
     virConnectPtr conn;
     int numids;
     int maxids;
-    int *ids;
+    int *ids;//收集domain的ids
 };
 
 
@@ -711,6 +715,8 @@ virDomainObjListCopyActiveIDs(void *payload,
     if (data->filter &&
         !data->filter(data->conn, obj->def))
         goto cleanup;
+
+    //收集active的obj
     if (virDomainObjIsActive(obj) && data->numids < data->maxids)
         data->ids[data->numids++] = obj->def->id;
  cleanup:
@@ -729,6 +735,7 @@ virDomainObjListGetActiveIDs(virDomainObjListPtr doms,
     struct virDomainIDData data = { filter, conn,
                                     0, maxids, ids };
     virObjectRWLockRead(doms);
+    //通过virDomainObjListCopyActiveIDs遍历每个domains
     virHashForEach(doms->objs, virDomainObjListCopyActiveIDs, &data);
     virObjectRWUnlock(doms);
     return data.numids;

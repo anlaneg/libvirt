@@ -49,6 +49,7 @@ typedef virStateDriver *virStateDriverPtr;
 
 struct _virStateDriver {
     const char *name;
+    //初始化Driver时调用
     virDrvStateInitialize stateInitialize;
     virDrvStateCleanup stateCleanup;
     virDrvStateReload stateReload;

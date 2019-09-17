@@ -724,6 +724,7 @@ qemuDomainFindMaxID(virDomainObjPtr vm,
  *
  * Initialization function for the QEMU daemon
  */
+//初始化qemu_driver
 static int
 qemuStateInitialize(bool privileged,
                     virStateInhibitCallback callback,
@@ -766,12 +767,14 @@ qemuStateInitialize(bool privileged,
     if (privileged)
         qemu_driver->hostsysinfo = virSysinfoRead();
 
+    //初始化配置结构体
     if (!(qemu_driver->config = cfg = virQEMUDriverConfigNew(privileged)))
         goto error;
 
     if (virAsprintf(&driverConf, "%s/qemu.conf", cfg->configBaseDir) < 0)
         goto error;
 
+    //加载qemu dirver配置文件
     if (virQEMUDriverConfigLoadFile(cfg, driverConf, privileged) < 0)
         goto error;
     VIR_FREE(driverConf);
@@ -792,6 +795,8 @@ qemuStateInitialize(bool privileged,
                              cfg->libDir);
         goto error;
     }
+
+    //创建cacheDir目录
     if (virFileMakePath(cfg->cacheDir) < 0) {
         virReportSystemError(errno, _("Failed to create cache dir %s"),
                              cfg->cacheDir);
@@ -1262,6 +1267,7 @@ qemuStateCleanup(void)
     return 0;
 }
 
+//自qemu_driver中获取cfg，并取相应uri
 static int
 qemuConnectURIProbe(char **uri)
 {
@@ -1281,7 +1287,7 @@ qemuConnectURIProbe(char **uri)
     return ret;
 }
 
-//qemu对应的连接函数
+//qemu对应的连接函数(校验uri,设置qemu_driver)
 static virDrvOpenStatus qemuConnectOpen(virConnectPtr conn,
                                         virConnectAuthPtr auth ATTRIBUTE_UNUSED,
                                         virConfPtr conf ATTRIBUTE_UNUSED,
@@ -1295,6 +1301,7 @@ static virDrvOpenStatus qemuConnectOpen(virConnectPtr conn,
         return VIR_DRV_OPEN_ERROR;
     }
 
+    //uri path校验
     if (virQEMUDriverIsPrivileged(qemu_driver)) {
         if (STRNEQ(conn->uri->path, "/system") &&
             STRNEQ(conn->uri->path, "/session")) {
@@ -1315,6 +1322,7 @@ static virDrvOpenStatus qemuConnectOpen(virConnectPtr conn,
     if (virConnectOpenEnsureACL(conn) < 0)
         return VIR_DRV_OPEN_ERROR;
 
+    //将私有数据设置为qemu_driver
     conn->privateData = qemu_driver;
 
     return VIR_DRV_OPEN_SUCCESS;
@@ -1835,6 +1843,7 @@ static int qemuConnectListDomains(virConnectPtr conn, int *ids, int nids)
     if (virConnectListDomainsEnsureACL(conn) < 0)
         return -1;
 
+    //遍历active的IDs
     n = virDomainObjListGetActiveIDs(driver->domains, ids, nids,
                                      virConnectListDomainsCheckACL, conn);
 
@@ -23435,9 +23444,9 @@ qemuDomainGetGuestInfo(virDomainPtr dom,
 }
 
 static virHypervisorDriver qemuHypervisorDriver = {
-	//qemu连接
     .name = QEMU_DRIVER_NAME,
     .connectURIProbe = qemuConnectURIProbe,
+	//qemu连接
     .connectOpen = qemuConnectOpen, /* 0.2.0 */
     .connectClose = qemuConnectClose, /* 0.2.0 */
     .connectSupportsFeature = qemuConnectSupportsFeature, /* 0.5.0 */
@@ -23691,9 +23700,11 @@ static virStateDriver qemuStateDriver = {
 
 int qemuRegister(void)
 {
+	//注册connectDriver,用于管理Driver
     if (virRegisterConnectDriver(&qemuConnectDriver,
                                  true) < 0)
         return -1;
+    //注册stateDriver，用于管理Driver状态
     if (virRegisterStateDriver(&qemuStateDriver) < 0)
         return -1;
     return 0;

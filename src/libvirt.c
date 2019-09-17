@@ -101,7 +101,9 @@ VIR_LOG_INIT("libvirt");
 static virConnectDriverPtr virConnectDriverTab[MAX_DRIVERS];
 //已注册的ConnectDriver总数
 static int virConnectDriverTabCount;
+//用于记录已注册的StateDriver
 static virStateDriverPtr virStateDriverTab[MAX_DRIVERS];
+//用于记录已注册的stateDriver总数
 static int virStateDriverTabCount;
 
 static virNetworkDriverPtr virSharedNetworkDriver;
@@ -557,7 +559,7 @@ virSetSharedNWFilterDriver(virNWFilterDriverPtr driver)
 //注册链接driver
 int
 virRegisterConnectDriver(virConnectDriverPtr driver,
-                         bool setSharedDrivers)
+                         bool setSharedDrivers/*是否使用公享的driver*/)
 {
     VIR_DEBUG("driver=%p name=%s", driver,
               driver ? NULLSTR(driver->hypervisorDriver->name) : "(null)");
@@ -634,6 +636,7 @@ virHasDriverForURIScheme(const char *scheme)
 int
 virRegisterStateDriver(virStateDriverPtr driver)
 {
+	//注册stateDriver,用于管理Driver状态
     virCheckNonNullArgReturn(driver, -1);
 
     if (virStateDriverTabCount >= MAX_DRIVERS) {
@@ -659,6 +662,7 @@ virRegisterStateDriver(virStateDriverPtr driver)
  *
  * Returns 0 if all succeed, -1 upon any failure.
  */
+//初始化所有virtualization的驱动
 int
 virStateInitialize(bool privileged,
                    bool mandatory,
@@ -670,6 +674,7 @@ virStateInitialize(bool privileged,
     if (virInitialize() < 0)
         return -1;
 
+    //初始化所有virtualization Driver(通过StateDriver->stateInitialize完成）
     for (i = 0; i < virStateDriverTabCount; i++) {
         if (virStateDriverTab[i]->stateInitialize) {
             virDrvStateInitResult ret;
@@ -806,18 +811,20 @@ virGetVersion(unsigned long *libVer, const char *type ATTRIBUTE_UNUSED,
     return -1;
 }
 
-
+//使用defaultURI
 static int
 virConnectGetDefaultURI(virConfPtr conf,
                         char **name)
 {
     int ret = -1;
+    //自环境变量中取defaultURI
     const char *defname = getenv("LIBVIRT_DEFAULT_URI");
     if (defname && *defname) {
         VIR_DEBUG("Using LIBVIRT_DEFAULT_URI '%s'", defname);
         if (VIR_STRDUP(*name, defname) < 0)
             goto cleanup;
     } else {
+    		//在配置文件中尝试uri_default
         if (virConfGetValueString(conf, "uri_default", name) < 0)
             goto cleanup;
 
@@ -898,6 +905,7 @@ virConnectOpenInternal(const char *name,
      * if detectable.
      */
     if (name) {
+    		//有name指定，使用name做为uristr
         if (VIR_STRDUP(uristr, name) < 0)
             goto failed;
     } else {
@@ -905,6 +913,7 @@ virConnectOpenInternal(const char *name,
             goto failed;
 
         if (uristr == NULL) {
+        		//仍然没有拿到默认的URI,采用driver的connectURIProbe函数尝试uri
             VIR_DEBUG("Trying to probe for default URI");
             for (i = 0; i < virConnectDriverTabCount && uristr == NULL; i++) {
                 if (virConnectDriverTab[i]->hypervisorDriver->connectURIProbe) {

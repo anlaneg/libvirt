@@ -269,6 +269,7 @@ virObjectLockableNew(virClassPtr klass)
         return NULL;
     }
 
+    //申请klass对应的obj
     if (!(obj = virObjectNew(klass)))
         return NULL;
 
