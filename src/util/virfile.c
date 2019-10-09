@@ -1300,9 +1300,11 @@ virBuildPathInternal(char **path, ...)
 
     va_start(ap, path);
 
+    //取首个参数，并添加进buf中
     path_component = va_arg(ap, char *);
     virBufferAdd(&buf, path_component, -1);
 
+    //一直取参，并添加‘／’构造path
     while ((path_component = va_arg(ap, char *)) != NULL) {
         virBufferAddChar(&buf, '/');
         virBufferAdd(&buf, path_component, -1);
@@ -1310,6 +1312,7 @@ virBuildPathInternal(char **path, ...)
 
     va_end(ap);
 
+    //获取构造好的path
     *path = virBufferContentAndReset(&buf);
     if (*path == NULL)
         ret = -1;
@@ -1407,7 +1410,7 @@ virFileReadHeaderQuiet(const char *path,
 /* A wrapper around saferead_lim that maps a failure due to
    exceeding the maximum size limitation to EOVERFLOW.  */
 int
-virFileReadLimFD(int fd, int maxlen, char **buf)
+virFileReadLimFD(int fd, int maxlen/*读取的最大长度*/, char **buf)
 {
     size_t len;
     char *s;
@@ -1432,8 +1435,9 @@ virFileReadLimFD(int fd, int maxlen, char **buf)
 
 //读文件的内容到buf
 int
-virFileReadAll(const char *path, int maxlen, char **buf)
+virFileReadAll(const char *path, int maxlen/*读取的最大长度*/, char **buf)
 {
+	//打开文件
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         virReportSystemError(errno, _("Failed to open file '%s'"), path);
@@ -1872,6 +1876,7 @@ virFileIsRegular(const char *path)
 bool
 virFileExists(const char *path)
 {
+	//检查所给的目录或者文件是否存在
     return access(path, F_OK) == 0;
 }
 
@@ -1885,6 +1890,7 @@ virFileExists(const char *path)
 bool
 virFileIsExecutable(const char *file)
 {
+	//检查所给文件是否可执行
     struct stat sb;
 
     /* We would also want to check faccessat if we cared about ACLs,

@@ -45,6 +45,7 @@ VIR_LOG_INIT("util.alloc");
 int virAlloc(void *ptrptr,
              size_t size)
 {
+	//申请size大小的内存，并返回其对应的指针
     *(void **)ptrptr = calloc(1, size);
     if (*(void **)ptrptr == NULL)
         abort();

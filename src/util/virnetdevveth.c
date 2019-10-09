@@ -124,6 +124,7 @@ int virNetDevVethCreate(char** veth1, char** veth2)
 
         int status;
         if (!*veth1) {
+        		//如果未给出veth1,则构造veth1对应的名称
             int veth1num;
             if ((veth1num = virNetDevVethGetFreeNum(vethNum)) < 0)
                 goto cleanup;
@@ -133,6 +134,7 @@ int virNetDevVethCreate(char** veth1, char** veth2)
             vethNum = veth1num + 1;
         }
         if (!*veth2) {
+        		//如果未给出veth2,则构造veth2对应的名称
             int veth2num;
             if ((veth2num = virNetDevVethGetFreeNum(vethNum)) < 0)
                 goto cleanup;
@@ -142,6 +144,7 @@ int virNetDevVethCreate(char** veth1, char** veth2)
             vethNum = veth2num + 1;
         }
 
+        //通过ip link添加veth类型的两个接口veth1,veth2
         cmd = virCommandNew("ip");
         virCommandAddArgList(cmd, "link", "add",
                              *veth1 ? *veth1 : veth1auto,
@@ -194,6 +197,7 @@ int virNetDevVethCreate(char** veth1, char** veth2)
  */
 int virNetDevVethDelete(const char *veth)
 {
+	//通过ip link delete删除veth接口
     int status;
     VIR_AUTOPTR(virCommand) cmd = virCommandNewArgList("ip", "link",
                                                        "del", veth, NULL);

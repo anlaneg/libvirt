@@ -806,10 +806,12 @@ virXMLParseHelper(int domcode,
     pctxt->sax->error = catchXMLError;
 
     if (filename) {
+    		/*如果指定了文件名，则通过文件名创建xml对象*/
         xml = xmlCtxtReadFile(pctxt, filename, NULL,
                               XML_PARSE_NONET |
                               XML_PARSE_NOWARNING);
     } else {
+    		/*通过文件内容，创建xml对象*/
         xml = xmlCtxtReadDoc(pctxt, BAD_CAST xmlStr, url, NULL,
                              XML_PARSE_NONET |
                              XML_PARSE_NOWARNING);
@@ -817,6 +819,7 @@ virXMLParseHelper(int domcode,
     if (!xml)
         goto error;
 
+    //xml对象必须有一个根元素
     if (xmlDocGetRootElement(xml) == NULL) {
         virGenericReportError(domcode, VIR_ERR_INTERNAL_ERROR,
                               "%s", _("missing root element"));

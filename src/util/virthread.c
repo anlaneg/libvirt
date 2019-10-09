@@ -128,10 +128,12 @@ void virRWLockUnlock(virRWLockPtr m)
     pthread_rwlock_unlock(&m->lock);
 }
 
+//条件变量初始化
 int virCondInit(virCondPtr c)
 {
     int ret;
     if ((ret = pthread_cond_init(&c->cond, NULL)) != 0) {
+
         errno = ret;
         return -1;
     }

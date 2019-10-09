@@ -7293,6 +7293,7 @@ qemuProcessCreatePretendCmd(virQEMUDriverPtr driver,
         goto cleanup;
 
     VIR_DEBUG("Building emulator command line");
+    //构建qemu命令行
     cmd = qemuBuildCommandLine(driver,
                                NULL,
                                driver->securityManager,

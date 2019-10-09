@@ -31,12 +31,15 @@ virEnumToString(const char * const *types,
                 int type);
 
 #define VIR_ENUM_IMPL(name, lastVal, ...) \
+	/*定义枚举类型对应字符串值*/\
     static const char *const name ## TypeList[] = { __VA_ARGS__ }; \
+    /*枚举类型转字符串值*/\
     const char *name ## TypeToString(int type) { \
         return virEnumToString(name ## TypeList, \
                                ARRAY_CARDINALITY(name ## TypeList), \
                                type); \
     } \
+	/*枚举字符串值转枚举类型*/\
     int name ## TypeFromString(const char *type) { \
         return virEnumFromString(name ## TypeList, \
                                  ARRAY_CARDINALITY(name ## TypeList), \

@@ -95,7 +95,7 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-#define virXMLParse(filename, xmlStr, url) \
+#define virXMLParse(filename, xmlStr/*xml内容*/, url) \
     virXMLParseHelper(VIR_FROM_THIS, filename, xmlStr, url, NULL)
 
 /**

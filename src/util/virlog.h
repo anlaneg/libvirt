@@ -72,6 +72,7 @@ struct _virLogSource {
  * log statements in a file are conditionally disabled
  * at compile time due to configure options.
  */
+//构造各模块对应的log
 #define VIR_LOG_INIT(n) \
     static ATTRIBUTE_UNUSED virLogSource virLogSelf = { \
         .name = "" n "", \

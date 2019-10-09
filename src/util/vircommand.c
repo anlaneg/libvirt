@@ -940,6 +940,7 @@ virCommandNewArgs(const char *const*args)
 virCommandPtr
 virCommandNewArgList(const char *binary, ...)
 {
+	//构造命令行参数
     virCommandPtr cmd;
     va_list list;
 
@@ -967,6 +968,7 @@ virCommandNewVAList(const char *binary, va_list list)
     if (!cmd || cmd->has_error)
         return cmd;
 
+    //构造命令行参数
     while ((arg = va_arg(list, const char *)) != NULL)
         virCommandAddArg(cmd, arg);
     return cmd;
@@ -1440,6 +1442,7 @@ virCommandAddEnvPass(virCommandPtr cmd, const char *name)
 void
 virCommandAddEnvPassCommon(virCommandPtr cmd)
 {
+	//构造公共的环境变量参数
     if (!cmd || cmd->has_error)
         return;
 
@@ -1490,6 +1493,7 @@ virCommandAddEnvXDG(virCommandPtr cmd, const char *baseDir)
 void
 virCommandAddArg(virCommandPtr cmd, const char *val)
 {
+	//构造命令行参数
     char *arg;
 
     if (!cmd || cmd->has_error)
@@ -2386,6 +2390,7 @@ int virCommandExec(virCommandPtr cmd ATTRIBUTE_UNUSED, gid_t *groups ATTRIBUTE_U
 int
 virCommandRun(virCommandPtr cmd, int *exitstatus)
 {
+	//执行一个外部命令
     int ret = 0;
     char *outbuf = NULL;
     char *errbuf = NULL;

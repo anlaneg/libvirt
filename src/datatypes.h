@@ -523,7 +523,7 @@ struct _virConnect {
 
     /* The underlying hypervisor driver and network driver. */
     virHypervisorDriverPtr driver;
-    virNetworkDriverPtr networkDriver;
+    virNetworkDriverPtr networkDriver;//network对应的driver
     virInterfaceDriverPtr interfaceDriver;
     virStorageDriverPtr storageDriver;
     virNodeDeviceDriverPtr nodeDeviceDriver;

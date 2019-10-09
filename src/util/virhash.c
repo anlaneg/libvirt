@@ -42,9 +42,9 @@ VIR_LOG_INIT("util.hash");
 typedef struct _virHashEntry virHashEntry;
 typedef virHashEntry *virHashEntryPtr;
 struct _virHashEntry {
-    struct _virHashEntry *next;
+    struct _virHashEntry *next;//指向下一个entry
     void *name;
-    void *payload;
+    void *payload;//hash value值
 };
 
 /*

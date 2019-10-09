@@ -3535,7 +3535,7 @@ virDomainObjNew(virDomainXMLOptionPtr xmlopt)
     return NULL;
 }
 
-
+//构造domain的默认对象
 virDomainDefPtr
 virDomainDefNew(void)
 {
@@ -11466,12 +11466,14 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
 
     type = virXMLPropString(node, "type");
     if (type != NULL) {
+    		//type字符串取值转对应枚举
         if ((int)(def->type = virDomainNetTypeFromString(type)) < 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unknown interface type '%s'"), type);
             goto error;
         }
     } else {
+    		//默认为"user"类型interface
         def->type = VIR_DOMAIN_NET_TYPE_USER;
     }
 
@@ -19720,6 +19722,7 @@ virDomainDefParseXML(xmlDocPtr xml,
             return NULL;
     }
 
+    //构造domain默认值
     if (!(def = virDomainDefNew()))
         return NULL;
 
@@ -20812,10 +20815,16 @@ virDomainDefParseXML(xmlDocPtr xml,
     VIR_FREE(nodes);
 
     /* analysis of the network devices */
+    //分析./devices/interface下所有节点
+
+    //1.获得所有interface数目
     if ((n = virXPathNodeSet("./devices/interface", ctxt, &nodes)) < 0)
         goto error;
+    //2.申请n个def->nets对象
     if (n && VIR_ALLOC_N(def->nets, n) < 0)
         goto error;
+
+    //3.遍历解析net的xml配置
     netprefix = caps->host.netprefix;
     for (i = 0; i < n; i++) {
         virDomainNetDefPtr net = virDomainNetDefParseXML(xmlopt,
@@ -21510,8 +21519,8 @@ virDomainObjParseXML(xmlDocPtr xml,
 
 
 static virDomainDefPtr
-virDomainDefParse(const char *xmlStr,
-                  const char *filename,
+virDomainDefParse(const char *xmlStr/*xml文件内容*/,
+                  const char *filename/*xml文件名称*/,
                   virCapsPtr caps,
                   virDomainXMLOptionPtr xmlopt,
                   void *parseOpaque,
@@ -21522,9 +21531,11 @@ virDomainDefParse(const char *xmlStr,
     int keepBlanksDefault = xmlKeepBlanksDefault(0);
     xmlNodePtr root;
 
+    //根据文件名称或文件内容创建xml对象
     if (!(xml = virXMLParse(filename, xmlStr, _("(domain_definition)"))))
         goto cleanup;
 
+    //取根节点，且根节点名称必须为domain
     root = xmlDocGetRootElement(xml);
     if (!virXMLNodeNameEqual(root, "domain")) {
         virReportError(VIR_ERR_XML_ERROR,
@@ -21543,7 +21554,7 @@ virDomainDefParse(const char *xmlStr,
 }
 
 virDomainDefPtr
-virDomainDefParseString(const char *xmlStr,
+virDomainDefParseString(const char *xmlStr/*xml内容*/,
                         virCapsPtr caps,
                         virDomainXMLOptionPtr xmlopt,
                         void *parseOpaque,
@@ -21564,8 +21575,8 @@ virDomainDefParseFile(const char *filename,
 
 
 virDomainDefPtr
-virDomainDefParseNode(xmlDocPtr xml,
-                      xmlNodePtr root,
+virDomainDefParseNode(xmlDocPtr xml/*xml对象*/,
+                      xmlNodePtr root/*xml根元素*/,
                       virCapsPtr caps,
                       virDomainXMLOptionPtr xmlopt,
                       void *parseOpaque,

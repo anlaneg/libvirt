@@ -7555,7 +7555,7 @@ static char
 
 static char *qemuConnectDomainXMLToNative(virConnectPtr conn,
                                           const char *format,
-                                          const char *xmlData,
+                                          const char *xmlData/*xml文件内容*/,
                                           unsigned int flags)
 {
     virQEMUDriverPtr driver = conn->privateData;

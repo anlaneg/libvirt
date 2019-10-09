@@ -241,6 +241,8 @@ virNetDevBandwidthSet(const char *ifname,
             (virAsprintf(&burst, "%llukb", tx->burst) < 0))
             goto cleanup;
 
+        //创建并执行命令：
+        //tc qdisc add dev $ifname root handle 1: htb default 2
         cmd = virCommandNew(TC);
         virCommandAddArgList(cmd, "qdisc", "add", "dev", ifname, "root",
                              "handle", "1:", "htb", "default",

@@ -1078,7 +1078,7 @@ virDomainNumaGetMaxCPUID(virDomainNumaPtr numa)
     return ret;
 }
 
-
+//申请并构造virDomainNuma对象
 virDomainNumaPtr
 virDomainNumaNew(void)
 {

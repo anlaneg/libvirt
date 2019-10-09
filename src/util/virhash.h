@@ -42,7 +42,7 @@ typedef void (*virHashDataFree) (void *payload, const void *name);
  *
  * Returns -1 to stop the iteration, e.g. in case of an error
  */
-typedef int (*virHashIterator) (void *payload, const void *name, void *data);
+typedef int (*virHashIterator) (void *payload, const void *name, void *data/*用户传入的参数*/);
 /**
  * virHashSearcher:
  * @payload: the data in the hash

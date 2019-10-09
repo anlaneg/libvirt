@@ -240,6 +240,7 @@ struct _virNetworkDef {
     char *name;
     int   connections; /* # of guest interfaces connected to this network */
 
+    //桥名称
     char *bridge;       /* Name of bridge device */
     char *bridgeZone;  /* name of firewalld zone for bridge */
     int  macTableManager; /* enum virNetworkBridgeMACTableManager */

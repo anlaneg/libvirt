@@ -861,6 +861,7 @@ char *virNetDevGetName(int ifindex)
  * Returns 0 on success, -1 on failure
  */
 #if defined(SIOCGIFINDEX) && defined(HAVE_STRUCT_IFREQ)
+//取接口ifname对应的ifindex
 int virNetDevGetIndex(const char *ifname, int *ifindex)
 {
     struct ifreq ifreq;
@@ -881,6 +882,7 @@ int virNetDevGetIndex(const char *ifname, int *ifindex)
         return -1;
     }
 
+    //取接口ifname对应的ifindex
     if (ioctl(fd, SIOCGIFINDEX, &ifreq) < 0) {
         virReportSystemError(errno,
                              _("Unable to get index for interface %s"), ifname);

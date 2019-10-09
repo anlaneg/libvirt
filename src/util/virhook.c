@@ -39,6 +39,7 @@
 
 VIR_LOG_INIT("util.hook");
 
+//hook对应的目录
 #define LIBVIRT_HOOK_DIR SYSCONFDIR "/libvirt/hooks"
 
 VIR_ENUM_DECL(virHookDriver);
@@ -139,6 +140,7 @@ virHookCheck(int no, const char *driver)
         return -1;
     }
 
+    //构造driver对应的目录 /etc/libvirt/hooks/network
     if (virBuildPath(&path, LIBVIRT_HOOK_DIR, driver) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Failed to build path for %s hook"),
@@ -146,11 +148,13 @@ virHookCheck(int no, const char *driver)
         return -1;
     }
 
+    //如果文件不存在，则报错
     if (!virFileExists(path)) {
         VIR_DEBUG("No hook script %s", path);
         return 0;
     }
 
+    //文件必须可执行
     if (!virFileIsExecutable(path)) {
         VIR_WARN("Non-executable hook script %s", path);
         return 0;
@@ -175,16 +179,21 @@ virHookInitialize(void)
     int res, ret = 0;
 
     virHooksFound = 0;
+    //遍历drivr hook
     for (i = 0; i < VIR_HOOK_DRIVER_LAST; i++) {
+    		//检查driver hook是否存在，且hook文件可执行
         res = virHookCheck(i, virHookDriverTypeToString(i));
         if (res < 0)
             return -1;
 
         if (res == 1) {
+        		//标记此hook已找到
             virHooksFound |= (1 << i);
             ret++;
         }
     }
+
+    //返回hook的总数
     return ret;
 }
 
@@ -200,12 +209,16 @@ virHookInitialize(void)
 int
 virHookPresent(int driver)
 {
+	//driver的必须在hook枚举范围以内
     if ((driver < VIR_HOOK_DRIVER_DAEMON) ||
         (driver >= VIR_HOOK_DRIVER_LAST))
         return 0;
+
+    //virHooksFound校验
     if (virHooksFound == -1)
         return 0;
 
+    //检查此driver对应的hook是否存在
     if ((virHooksFound & (1 << driver)) == 0)
         return 0;
     return 1;
@@ -231,12 +244,12 @@ virHookPresent(int driver)
  *          invalid parameters, and -1 if script returned an error
  */
 int
-virHookCall(int driver,
+virHookCall(int driver/*要调用的hook点名称*/,
             const char *id,
             int op,
             int sub_op,
             const char *extra,
-            const char *input,
+            const char *input/*hook输入函数*/,
             char **output)
 {
     int ret;
@@ -283,6 +296,7 @@ virHookCall(int driver,
             opstr = virHookLibxlOpTypeToString(op);
             break;
         case VIR_HOOK_DRIVER_NETWORK:
+        		//获得network driver hook时的opstr
             opstr = virHookNetworkOpTypeToString(op);
     }
     if (opstr == NULL) {
@@ -291,12 +305,15 @@ virHookCall(int driver,
                        drvstr, op);
         return 1;
     }
+
+    //取subopstr
     subopstr = virHookSubopTypeToString(sub_op);
     if (subopstr == NULL)
         subopstr = "-";
     if (extra == NULL)
         extra = "-";
 
+    //构造hook对应的path
     if (virBuildPath(&path, LIBVIRT_HOOK_DIR, drvstr) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Failed to build path for %s hook"),

@@ -310,7 +310,7 @@ networkObjFromNetwork(virNetworkPtr net)
     return obj;
 }
 
-
+//调用network hook
 static int
 networkRunHook(virNetworkObjPtr obj,
                virNetworkPortDefPtr port,
@@ -324,6 +324,7 @@ networkRunHook(virNetworkObjPtr obj,
     int ret = -1;
 
     if (virHookPresent(VIR_HOOK_DRIVER_NETWORK)) {
+    		//drvier network对应的hook存在
         if (!obj) {
             VIR_DEBUG("Not running hook as @obj is NULL");
             ret = 0;
@@ -331,6 +332,7 @@ networkRunHook(virNetworkObjPtr obj,
         }
         def = virNetworkObjGetDef(obj);
 
+        //构造调用hook所需的<hookData>标签
         virBufferAddLit(&buf, "<hookData>\n");
         virBufferAdjustIndent(&buf, 2);
         if (virNetworkDefFormatBuf(&buf, def, network_driver->xmlopt, 0) < 0)
@@ -344,6 +346,7 @@ networkRunHook(virNetworkObjPtr obj,
         if (virBufferCheckError(&buf) < 0)
             goto cleanup;
 
+        //传入构造好的<hookData>调用hook
         xml = virBufferContentAndReset(&buf);
         hookret = virHookCall(VIR_HOOK_DRIVER_NETWORK, def->name,
                               op, sub_op, NULL, xml, NULL);
@@ -2490,6 +2493,7 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
 
     /* Create and configure the bridge device */
     if (!def->bridge) {
+    		//桥名称未指定，报错
         /* bridge name can only be empty if the config files were
          * edited directly. Otherwise networkValidate() (called after
          * parsing the XML from networkCreateXML() and
@@ -2503,6 +2507,8 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
                        def->name);
         return -1;
     }
+
+    //创建桥
     if (virNetDevBridgeCreate(def->bridge) < 0)
         return -1;
 
@@ -2749,6 +2755,7 @@ networkStartNetworkBridge(virNetworkObjPtr obj)
      * type BRIDGE, is started. On failure, undo anything you've done,
      * and return -1. On success return 0.
      */
+    //配置bandwidth
     if (virNetDevBandwidthSet(def->bridge, def->bandwidth, true, true) < 0)
         goto error;
 
@@ -2941,6 +2948,7 @@ networkStartNetwork(virNetworkDriverStatePtr driver,
 
     /* Run an early hook to set-up missing devices.
      * If the script raised an error abort the launch. */
+    //运行network hook "op_start"
     if (networkRunHook(obj, NULL,
                        VIR_HOOK_NETWORK_OP_START,
                        VIR_HOOK_SUBOP_BEGIN) < 0)
@@ -2957,6 +2965,7 @@ networkStartNetwork(virNetworkDriverStatePtr driver,
         break;
 
     case VIR_NETWORK_FORWARD_BRIDGE:
+    		//按桥模式转发，创建相应的桥
         if (def->bridge) {
             if (networkStartNetworkBridge(obj) < 0)
                 goto cleanup;

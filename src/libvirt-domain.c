@@ -2668,7 +2668,7 @@ virConnectDomainXMLFromNative(virConnectPtr conn,
 char *
 virConnectDomainXMLToNative(virConnectPtr conn,
                             const char *nativeFormat,
-                            const char *domainXml,
+                            const char *domainXml/*传入的xml文件内容*/,
                             unsigned int flags)
 {
     VIR_DEBUG("conn=%p, format=%s, xml=%s, flags=0x%x",
@@ -6490,6 +6490,7 @@ virConnectListAllDomains(virConnectPtr conn,
 
     if (conn->driver->connectListAllDomains) {
         int ret;
+        /*列出满足flags的domain,返回列出的domain总数*/
         ret = conn->driver->connectListAllDomains(conn, domains, flags);
         if (ret < 0)
             goto error;

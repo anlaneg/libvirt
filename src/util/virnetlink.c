@@ -497,8 +497,8 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
  * the condition.
  */
 int
-virNetlinkNewLink(const char *ifname,
-                  const char *type,
+virNetlinkNewLink(const char *ifname/*要创建的link名称*/,
+                  const char *type/*要创建的link类型*/,
                   virNetlinkNewLinkDataPtr extra_args,
                   int *error)
 {

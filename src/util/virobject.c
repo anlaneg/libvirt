@@ -255,7 +255,7 @@ virObjectNew(virClassPtr klass)
     return obj;
 }
 
-
+//new一个obj
 void *
 virObjectLockableNew(virClassPtr klass)
 {

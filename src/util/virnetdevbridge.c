@@ -403,6 +403,7 @@ virNetDevBridgeCreate(const char *brname)
     /* use a netlink RTM_NEWLINK message to create the bridge */
     int error = 0;
 
+    //创建link bridge
     if (virNetlinkNewLink(brname, "bridge", NULL, &error) < 0) {
 # if defined(HAVE_STRUCT_IFREQ) && defined(SIOCBRADDBR)
         if (error == -EOPNOTSUPP) {
@@ -947,7 +948,7 @@ virNetDevBridgeSetVlanFiltering(const char *brname ATTRIBUTE_UNUSED,
  */
 static int
 virNetDevBridgeFDBAddDel(const virMacAddr *mac, const char *ifname,
-                         unsigned int flags, bool isAdd)
+                         unsigned int flags, bool isAdd/*是否添加fdb*/)
 {
     struct nlmsgerr *err;
     unsigned int recvbuflen;
@@ -955,6 +956,7 @@ virNetDevBridgeFDBAddDel(const virMacAddr *mac, const char *ifname,
     VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
     VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
 
+    //取ifname对应的ifindex
     if (virNetDevGetIndex(ifname, &ndm.ndm_ifindex) < 0)
         return -1;
 
@@ -976,6 +978,7 @@ virNetDevBridgeFDBAddDel(const virMacAddr *mac, const char *ifname,
     if (!(ndm.ndm_state & (NUD_PERMANENT | NUD_REACHABLE)))
         ndm.ndm_state |= NUD_PERMANENT;
 
+    //构造neighbour的添加或删除
     nl_msg = nlmsg_alloc_simple(isAdd ? RTM_NEWNEIGH : RTM_DELNEIGH,
                                 NLM_F_REQUEST |
                                 (isAdd ? (NLM_F_CREATE | NLM_F_EXCL) : 0));
@@ -986,6 +989,8 @@ virNetDevBridgeFDBAddDel(const virMacAddr *mac, const char *ifname,
 
     if (nlmsg_append(nl_msg, &ndm, sizeof(ndm), NLMSG_ALIGNTO) < 0)
         goto buffer_too_small;
+
+    //添加mac地址
     if (nla_put(nl_msg, NDA_LLADDR, VIR_MAC_BUFLEN, mac) < 0)
         goto buffer_too_small;
 
@@ -994,6 +999,7 @@ virNetDevBridgeFDBAddDel(const virMacAddr *mac, const char *ifname,
      * but those aren't required for our application
      */
 
+    //发送消息，收取响应
     if (virNetlinkCommand(nl_msg, &resp, &recvbuflen, 0, 0,
                           NETLINK_ROUTE, 0) < 0) {
         return -1;
@@ -1048,6 +1054,7 @@ virNetDevBridgeFDBAddDel(const virMacAddr *mac ATTRIBUTE_UNUSED,
 
 #endif
 
+//向ifname桥添加fdb表项，用于vm报文转发
 int
 virNetDevBridgeFDBAdd(const virMacAddr *mac, const char *ifname,
                       unsigned int flags)
@@ -1055,7 +1062,7 @@ virNetDevBridgeFDBAdd(const virMacAddr *mac, const char *ifname,
     return virNetDevBridgeFDBAddDel(mac, ifname, flags, true);
 }
 
-
+//移除ifname桥删除fdb表项
 int
 virNetDevBridgeFDBDel(const virMacAddr *mac, const char *ifname,
                       unsigned int flags)

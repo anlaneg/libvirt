@@ -240,7 +240,7 @@ virDomainObjListFindByName(virDomainObjListPtr doms,
  */
 static int
 virDomainObjListAddObjLocked(virDomainObjListPtr doms,
-                             virDomainObjPtr vm)
+                             virDomainObjPtr vm/*要添加的vm*/)
 {
 	//将vm加入到doms中
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -336,6 +336,7 @@ virDomainObjListAddLocked(virDomainObjListPtr doms,
             goto error;
         }
 
+        //创建domain obj
         if (!(vm = virDomainObjNew(xmlopt)))
             goto error;
         vm->def = def;
@@ -709,9 +710,12 @@ virDomainObjListCopyActiveIDs(void *payload,
                               const void *name ATTRIBUTE_UNUSED,
                               void *opaque)
 {
+	//domain obj指针
     virDomainObjPtr obj = payload;
     struct virDomainIDData *data = opaque;
     virObjectLock(obj);
+
+    //如有filter函数，则执行filter
     if (data->filter &&
         !data->filter(data->conn, obj->def))
         goto cleanup;

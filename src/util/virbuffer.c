@@ -152,6 +152,7 @@ virBufferGrow(virBufferPtr buf, unsigned int len)
 void
 virBufferAdd(virBufferPtr buf, const char *str, int len)
 {
+	//向buf中添加字符串
     unsigned int needSize;
     int indent;
 
@@ -223,6 +224,7 @@ virBufferAddBuffer(virBufferPtr buf, virBufferPtr toadd)
 void
 virBufferAddChar(virBufferPtr buf, char c)
 {
+	//向buffer中添单个字符
     virBufferAdd(buf, &c, 1);
 }
 

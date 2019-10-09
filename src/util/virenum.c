@@ -56,9 +56,9 @@ virTristateSwitchFromBool(bool val)
         return VIR_TRISTATE_SWITCH_OFF;
 }
 
-
+//枚举类型对应的是枚举字符串的数组下标
 int
-virEnumFromString(const char * const *types,
+virEnumFromString(const char * const *types/*枚举字符串*/,
                   unsigned int ntypes,
                   const char *type)
 {

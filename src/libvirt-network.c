@@ -580,6 +580,7 @@ virNetworkCreate(virNetworkPtr network)
 
     virCheckReadOnlyGoto(conn->flags, error);
 
+    //通过networkDriver创建network
     if (conn->networkDriver && conn->networkDriver->networkCreate) {
         int ret;
         ret = conn->networkDriver->networkCreate(network);
