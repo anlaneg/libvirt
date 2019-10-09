@@ -476,6 +476,7 @@ virshUsage(void)
                       "  commands (non interactive mode):\n\n"), progname,
             progname);
 
+    //显示各cmdgroups中所有commands(跳过被标记为别名的commands)
     for (grp = cmdGroups; grp->name; grp++) {
         fprintf(stdout, _(" %s (help keyword '%s')\n"),
                 grp->name, grp->keyword);
@@ -835,6 +836,7 @@ static const vshCmdGrp cmdGroups[] = {
     {VIRSH_CMD_GRP_CHECKPOINT, "checkpoint", checkpointCmds},
     {VIRSH_CMD_GRP_IFACE, "interface", ifaceCmds},
     {VIRSH_CMD_GRP_NWFILTER, "filter", nwfilterCmds},
+	//注册network对应的命令group
     {VIRSH_CMD_GRP_NETWORK, "network", networkCmds},
     {VIRSH_CMD_GRP_NODEDEV, "nodedev", nodedevCmds},
     {VIRSH_CMD_GRP_SECRET, "secret", secretCmds},
@@ -908,7 +910,7 @@ main(int argc, char **argv)
 
     virFileActivateDirOverrideForProg(argv[0]);
 
-    if (!vshInit(ctl, cmdGroups/*注册的命令行*/, NULL))
+    if (!vshInit(ctl, cmdGroups/*注册cmdgroups,用于命令行映射*/, NULL))
         exit(EXIT_FAILURE);
 
     //执行命令行解析

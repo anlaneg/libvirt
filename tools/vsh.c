@@ -632,6 +632,7 @@ vshCmddefSearch(const char *cmdname)
         return vshCmdDefSearchSet(cmdname);
 }
 
+//给定cmd group name,查找其对应的cmdgroup
 const vshCmdGrp *
 vshCmdGrpSearch(const char *grpname)
 {

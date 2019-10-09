@@ -10220,6 +10220,7 @@ cmdDomXMLToNative(vshControl *ctl, const vshCmd *cmd)
     if (dom) {
         xmlData = virDomainGetXMLDesc(dom, flags);
     } else if (xmlFile) {
+    		//读取xml文件的内容到xmlData
         if (virFileReadAll(xmlFile, VSH_MAX_XML_FILE, &xmlData) < 0)
             goto cleanup;
     } else {

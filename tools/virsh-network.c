@@ -66,7 +66,7 @@
 
 virNetworkPtr
 virshCommandOptNetworkBy(vshControl *ctl, const vshCmd *cmd,
-                         const char **name, unsigned int flags)
+                         const char **name/*出参*/, unsigned int flags)
 {
     virNetworkPtr network = NULL;
     const char *n = NULL;
@@ -844,6 +844,7 @@ static const vshCmdOptDef opts_network_start[] = {
     {.name = NULL}
 };
 
+//执行net-statrt命令响应
 static bool
 cmdNetworkStart(vshControl *ctl, const vshCmd *cmd)
 {
@@ -854,6 +855,7 @@ cmdNetworkStart(vshControl *ctl, const vshCmd *cmd)
     if (!(network = virshCommandOptNetwork(ctl, cmd, &name)))
          return false;
 
+    //创建指定network
     if (virNetworkCreate(network) == 0) {
         vshPrintExtra(ctl, _("Network %s started\n"), name);
     } else {

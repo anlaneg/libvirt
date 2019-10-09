@@ -1585,7 +1585,7 @@ virshDomainSorter(const void *a, const void *b)
 
 struct virshDomainList {
     virDomainPtr *domains;
-    size_t ndomains;
+    size_t ndomains;//domain总数
 };
 typedef struct virshDomainList *virshDomainListPtr;
 
@@ -1628,7 +1628,7 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
     /* try the list with flags support (0.9.13 and later) */
     if ((ret = virConnectListAllDomains(priv->conn, &list->domains,
                                         flags)) >= 0) {
-        list->ndomains = ret;
+        list->ndomains = ret;/*列出domain总数*/
         goto finished;
     }
 
@@ -1644,9 +1644,9 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
                                          VIR_CONNECT_LIST_DOMAINS_INACTIVE);
 
         vshResetLibvirtError();
-        if ((ret = virConnectListAllDomains(priv->conn, &list->domains,
+        if ((ret = virConnectListAllDomains(priv->conn, &list->domains/*出参，列出对应的domain*/,
                                             newflags)) >= 0) {
-            list->ndomains = ret;
+            list->ndomains = ret;//列出的domain总数
             goto filter;
         }
     }
@@ -1953,6 +1953,7 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
         vshCommandOptBool(cmd, "state-shutoff"))
         flags = VIR_CONNECT_LIST_DOMAINS_INACTIVE;
 
+    //列出active,inactive的domain
     if (vshCommandOptBool(cmd, "all"))
         flags = VIR_CONNECT_LIST_DOMAINS_INACTIVE |
                 VIR_CONNECT_LIST_DOMAINS_ACTIVE;
@@ -2002,6 +2003,7 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
         dom = list->domains[i];
         id = virDomainGetID(dom);
         if (id != (unsigned int) -1)
+        		//显示domain的id号
             snprintf(id_buf, sizeof(id_buf), "%d", id);
         else
             ignore_value(virStrcpyStatic(id_buf, "-"));
