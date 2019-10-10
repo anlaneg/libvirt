@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #if STATIC_ANALYSIS
 # undef NDEBUG /* Don't let a prior NDEBUG definition cause trouble.  */
@@ -62,8 +63,13 @@
 #include "libvirt/virterror.h"
 
 #include "c-strcase.h"
-#include "ignore-value.h"
-#include "count-leading-zeros.h"
+
+/* Merely casting to (void) is not sufficient since the
+ * introduction of the "warn_unused_result" attribute
+ */
+#define ignore_value(x) \
+    (__extension__ ({ __typeof__ (x) __x = (x); (void) __x; }))
+
 
 /* String equality tests, suggested by Jim Meyering. */
 #define STREQ(a, b) (strcmp(a, b) == 0)
@@ -494,6 +500,12 @@
     } while (0)
 
 
+/* Count leading zeros in an unsigned int.
+ *
+ * Wrapper needed as __builtin_clz is undefined if value is zero
+ */
+#define VIR_CLZ(value) \
+    (value ? __builtin_clz(value) : (8 * sizeof(unsigned)))
 
 /* divide value by size, rounding up */
 #define VIR_DIV_UP(value, size) (((value) + (size) - 1) / (size))
@@ -505,7 +517,7 @@
  * for 0 or number more than 2^31 (for 32bit unsigned int). */
 #define VIR_ROUND_UP_POWER_OF_TWO(value) \
     ((value) > 0 && (value) <= 1U << (sizeof(unsigned int) * 8 - 1) ? \
-     1U << (sizeof(unsigned int) * 8 - count_leading_zeros((value) - 1)) : 0)
+     1U << (sizeof(unsigned int) * 8 - VIR_CLZ((value) - 1)) : 0)
 
 
 /* Specific error values for use in forwarding programs such as

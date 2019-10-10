@@ -2746,28 +2746,20 @@ virNWFilterDefPtr
 virNWFilterDefParseNode(xmlDocPtr xml,
                         xmlNodePtr root)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virNWFilterDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (STRNEQ((const char *)root->name, "filter")) {
         virReportError(VIR_ERR_XML_ERROR,
                        "%s",
                        _("unknown root element for nw filter"));
-        goto cleanup;
+        return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virNWFilterDefParseXML(ctxt);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virNWFilterDefParseXML(ctxt);
 }
 
 

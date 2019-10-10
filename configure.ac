@@ -16,7 +16,7 @@ dnl You should have received a copy of the GNU Lesser General Public
 dnl License along with this library.  If not, see
 dnl <http://www.gnu.org/licenses/>.
 
-AC_INIT([libvirt], [5.8.0], [libvir-list@redhat.com], [], [https://libvirt.org])
+AC_INIT([libvirt], [5.9.0], [libvir-list@redhat.com], [], [https://libvirt.org])
 AC_CONFIG_SRCDIR([src/libvirt.c])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_HEADERS([config.h])
@@ -122,12 +122,6 @@ dnl Checks for C compiler.
 AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_CPP
-
-dnl Setting AB_VERSION makes the 'autobuild' lines of configure output
-dnl slightly more useful
-if test -d $srcdir/.git && git --version >/dev/null 2>&1 ; then
-  AB_VERSION=`cd $srcdir && git describe --match 'v[[0-9]]*' 2>/dev/null`
-fi
 
 dnl autoconf 2.70 adds a --runstatedir option so that downstreams
 dnl can point to /run instead of the historic /var/run, but
@@ -704,6 +698,18 @@ AC_PATH_PROGS([PYTHON], [python3 python2 python])
 if test -z "$PYTHON"; then
     AC_MSG_ERROR(['python3', 'python2' or 'python' binary is required to build libvirt])
 fi
+AC_PATH_PROG([FLAKE8], [flake8])
+if test -z "$FLAKE8"; then
+    AC_MSG_WARN(['flake8' binary is required to check python code style])
+fi
+
+dnl Python3 < 3.7 treats the C locale as 7-bit only.
+dnl We must force env vars so it treats it as UTF-8
+dnl regardless of the user's locale.
+RUNUTF8="LC_ALL= LANG=C LC_CTYPE=en_US.UTF-8"
+AC_SUBST(RUNUTF8)
+
+
 AC_PATH_PROG([PERL], [perl])
 if test -z "$PERL"; then
          AC_MSG_ERROR(['perl' binary is required to build libvirt])
@@ -763,18 +769,6 @@ if test "$enable_test_coverage" = yes; then
   AC_SUBST([COVERAGE_LDFLAGS], [$COVERAGE_FLAGS])
   WARN_CFLAGS=$save_WARN_CFLAGS
 fi
-
-LIBVIRT_ARG_ENABLE([TEST_LOCKING], [thread locking tests using CIL], [no])
-case "$enable_test_locking" in
-  yes|no) ;;
-  *) AC_MSG_ERROR([bad value ${enable_test_locking} for test-locking option]) ;;
-esac
-
-if test "$enable_test_locking" = "yes"; then
-  LOCK_CHECKING_CFLAGS="-save-temps"
-  AC_SUBST([LOCK_CHECKING_CFLAGS])
-fi
-AM_CONDITIONAL([WITH_CIL],[test "$enable_test_locking" = "yes"])
 
 dnl Cygwin, MinGW and MSVC checks
 LIBVIRT_WIN_CHECK_COMMON
@@ -908,6 +902,12 @@ AC_DEFINE_UNQUOTED([STATIC_ANALYSIS], [$t],
 AC_DEFINE_UNQUOTED([isbase64],[libvirt_gl_isbase64],[Hack to avoid symbol clash])
 AC_DEFINE_UNQUOTED([base64_encode],[libvirt_gl_base64_encode],[Hack to avoid symbol clash])
 AC_DEFINE_UNQUOTED([base64_encode_alloc],[libvirt_gl_base64_encode_alloc],[Hack to avoid symbol clash])
+
+GNUmakefile=GNUmakefile
+m4_if(m4_version_compare([2.61a.100],
+        m4_defn([m4_PACKAGE_VERSION])), [1], [],
+      [AC_CONFIG_LINKS([$GNUmakefile:$GNUmakefile], [],
+        [GNUmakefile=$GNUmakefile])])
 
 AC_CONFIG_FILES([run],
                 [chmod +x,-w run])

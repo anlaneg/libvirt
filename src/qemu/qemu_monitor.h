@@ -382,9 +382,6 @@ struct _qemuMonitorCallbacks {
     qemuMonitorDomainRdmaGidStatusChangedCallback domainRdmaGidStatusChanged;
 };
 
-char *qemuMonitorEscapeArg(const char *in);
-char *qemuMonitorUnescapeArg(const char *in);
-
 qemuMonitorPtr qemuMonitorOpen(virDomainObjPtr vm,
                                virDomainChrSourceDefPtr config,
                                bool retry,
@@ -429,12 +426,6 @@ int qemuMonitorUpdateVideoVram64Size(qemuMonitorPtr mon,
                                      virDomainVideoDefPtr video,
                                      const char *videoName)
     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
-int qemuMonitorHMPCommandWithFd(qemuMonitorPtr mon,
-                                const char *cmd,
-                                int scm_fd,
-                                char **reply);
-#define qemuMonitorHMPCommand(mon, cmd, reply) \
-    qemuMonitorHMPCommandWithFd(mon, cmd, -1, reply)
 
 int qemuMonitorEmitEvent(qemuMonitorPtr mon, const char *event,
                          long long seconds, unsigned int micros,
@@ -651,14 +642,14 @@ virJSONValuePtr qemuMonitorQueryBlockstats(qemuMonitorPtr mon);
 typedef struct _qemuBlockStats qemuBlockStats;
 typedef qemuBlockStats *qemuBlockStatsPtr;
 struct _qemuBlockStats {
-    long long rd_req;
-    long long rd_bytes;
-    long long wr_req;
-    long long wr_bytes;
-    long long rd_total_times;
-    long long wr_total_times;
-    long long flush_req;
-    long long flush_total_times;
+    unsigned long long rd_req;
+    unsigned long long rd_bytes;
+    unsigned long long wr_req;
+    unsigned long long wr_bytes;
+    unsigned long long rd_total_times;
+    unsigned long long wr_total_times;
+    unsigned long long flush_req;
+    unsigned long long flush_total_times;
     unsigned long long capacity;
     unsigned long long physical;
 
@@ -735,11 +726,11 @@ int qemuMonitorChangeMedia(qemuMonitorPtr mon,
 
 int qemuMonitorSaveVirtualMemory(qemuMonitorPtr mon,
                                  unsigned long long offset,
-                                 size_t length,
+                                 unsigned long long length,
                                  const char *path);
 int qemuMonitorSavePhysicalMemory(qemuMonitorPtr mon,
                                   unsigned long long offset,
-                                  size_t length,
+                                  unsigned long long length,
                                   const char *path);
 
 int qemuMonitorSetMigrationSpeed(qemuMonitorPtr mon,
@@ -874,14 +865,12 @@ int qemuMonitorGraphicsRelocate(qemuMonitorPtr mon,
 int qemuMonitorSendFileHandle(qemuMonitorPtr mon,
                               const char *fdname,
                               int fd);
-int qemuMonitorAddFd(qemuMonitorPtr mon, int fdset, int fd, const char *name);
 
-/* These two functions preserve previous error and only set their own
+/* This function preserves previous error and only set their own
  * error if no error was set before.
  */
 int qemuMonitorCloseFileHandle(qemuMonitorPtr mon,
                                const char *fdname);
-int qemuMonitorRemoveFd(qemuMonitorPtr mon, int fdset, int fd);
 
 int qemuMonitorAddNetdev(qemuMonitorPtr mon,
                          const char *netdevstr,
@@ -1157,11 +1146,22 @@ typedef enum {
 
 int qemuMonitorGetCPUModelExpansion(qemuMonitorPtr mon,
                                     qemuMonitorCPUModelExpansionType type,
-                                    const char *model_name,
+                                    virCPUDefPtr cpu,
                                     bool migratable,
+                                    bool fail_no_props,
                                     qemuMonitorCPUModelInfoPtr *model_info);
 
 void qemuMonitorCPUModelInfoFree(qemuMonitorCPUModelInfoPtr model_info);
+
+int qemuMonitorGetCPUModelBaseline(qemuMonitorPtr mon,
+                                   virCPUDefPtr cpu_a,
+                                   virCPUDefPtr cpu_b,
+                                   qemuMonitorCPUModelInfoPtr *baseline);
+
+int qemuMonitorGetCPUModelComparison(qemuMonitorPtr mon,
+                                     virCPUDefPtr cpu_a,
+                                     virCPUDefPtr cpu_b,
+                                     char **result);
 
 qemuMonitorCPUModelInfoPtr
 qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig);
@@ -1348,3 +1348,38 @@ VIR_DEFINE_AUTOPTR_FUNC(qemuMonitorJobInfo, qemuMonitorJobInfoFree);
 int qemuMonitorGetJobInfo(qemuMonitorPtr mon,
                           qemuMonitorJobInfoPtr **jobs,
                           size_t *njobs);
+
+int
+qemuMonitorTransactionBitmapAdd(virJSONValuePtr actions,
+                                const char *node,
+                                const char *name,
+                                bool persistent,
+                                bool disabled);
+int
+qemuMonitorTransactionBitmapRemove(virJSONValuePtr actions,
+                                   const char *node,
+                                   const char *name);
+int
+qemuMonitorTransactionBitmapEnable(virJSONValuePtr actions,
+                                   const char *node,
+                                   const char *name);
+int
+qemuMonitorTransactionBitmapDisable(virJSONValuePtr actions,
+                                    const char *node,
+                                    const char *name);
+int
+qemuMonitorTransactionBitmapMerge(virJSONValuePtr actions,
+                                  const char *node,
+                                  const char *target,
+                                  virJSONValuePtr *sources);
+
+int
+qemuMonitorTransactionSnapshotLegacy(virJSONValuePtr actions,
+                                     const char *device,
+                                     const char *path,
+                                     const char *format,
+                                     bool existing);
+int
+qemuMonitorTransactionSnapshotBlockdev(virJSONValuePtr actions,
+                                       const char *node,
+                                       const char *overlay);

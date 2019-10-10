@@ -209,13 +209,12 @@ virDomainCheckpointDefParseNode(xmlDocPtr xml,
                                 void *parseOpaque,
                                 unsigned int flags)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virDomainCheckpointDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
     VIR_AUTOFREE(char *) schema = NULL;
 
     if (!virXMLNodeNameEqual(root, "domaincheckpoint")) {
         virReportError(VIR_ERR_XML_ERROR, "%s", _("domaincheckpoint"));
-        goto cleanup;
+        return NULL;
     }
 
     /* This is a new enough API to make schema validation unconditional */
@@ -227,17 +226,11 @@ virDomainCheckpointDefParseNode(xmlDocPtr xml,
     if (virXMLValidateAgainstSchema(schema, xml) < 0)
         return NULL;
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virDomainCheckpointDefParse(ctxt, caps, xmlopt, parseOpaque, flags);
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virDomainCheckpointDefParse(ctxt, caps, xmlopt, parseOpaque, flags);
 }
 
 virDomainCheckpointDefPtr
@@ -539,8 +532,7 @@ virDomainCheckpointDefFormat(virDomainCheckpointDefPtr def,
 
 
 int
-virDomainCheckpointRedefinePrep(virDomainPtr domain,
-                                virDomainObjPtr vm,
+virDomainCheckpointRedefinePrep(virDomainObjPtr vm,
                                 virDomainCheckpointDefPtr *defptr,
                                 virDomainMomentObjPtr *chk,
                                 virDomainXMLOptionPtr xmlopt,
@@ -551,13 +543,13 @@ virDomainCheckpointRedefinePrep(virDomainPtr domain,
     virDomainMomentObjPtr other = NULL;
     virDomainCheckpointDefPtr otherdef = NULL;
 
-    virUUIDFormat(domain->uuid, uuidstr);
+    virUUIDFormat(vm->def->uuid, uuidstr);
 
     if (virDomainCheckpointCheckCycles(vm->checkpoints, def, vm->def->name) < 0)
         return -1;
 
     if (!def->parent.dom ||
-        memcmp(def->parent.dom->uuid, domain->uuid, VIR_UUID_BUFLEN)) {
+        memcmp(def->parent.dom->uuid, vm->def->uuid, VIR_UUID_BUFLEN)) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("definition for checkpoint %s must use uuid %s"),
                        def->parent.name, uuidstr);

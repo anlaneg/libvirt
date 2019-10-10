@@ -114,6 +114,9 @@ int virDriverLoadModule(const char *name,
                         const char *regfunc,
                         bool required);
 
+int virDriverShouldAutostart(const char *name,
+                             bool *autostart);
+
 virConnectPtr virGetConnectInterface(void);
 virConnectPtr virGetConnectNetwork(void);
 virConnectPtr virGetConnectNWFilter(void);
@@ -127,3 +130,7 @@ int virSetConnectNWFilter(virConnectPtr conn);
 int virSetConnectNodeDev(virConnectPtr conn);
 int virSetConnectSecret(virConnectPtr conn);
 int virSetConnectStorage(virConnectPtr conn);
+
+bool virConnectValidateURIPath(const char *uriPath,
+                               const char *entityName,
+                               bool privileged);

@@ -3566,6 +3566,14 @@
             <ref name="virtioOptions"/>
           </optional>
           <optional>
+            <attribute name="name">
+              <choice>
+                <value>qemu</value>
+                <value>vhostuser</value>
+              </choice>
+            </attribute>
+          </optional>
+          <optional>
             <attribute name="vgaconf">
               <choice>
                 <value>io</value>
@@ -3590,6 +3598,7 @@
                 <value>gop</value>
                 <value>none</value>
                 <value>bochs</value>
+                <value>ramfb</value>
               </choice>
             </attribute>
             <group>
@@ -3638,6 +3647,11 @@
               <optional>
                 <attribute name="accel2d">
                   <ref name="virYesNo"/>
+                </attribute>
+              </optional>
+              <optional>
+                <attribute name="rendernode">
+                  <ref name="absFilePath"/>
                 </attribute>
               </optional>
             </element>
@@ -5106,6 +5120,11 @@
           </optional>
           <optional>
             <ref name="msrs"/>
+          </optional>
+          <optional>
+            <element name="ccf-assist">
+              <ref name="featurestate"/>
+            </element>
           </optional>
         </interleave>
       </element>

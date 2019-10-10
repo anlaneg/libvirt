@@ -170,7 +170,7 @@
   <flag name='nbd-bitmap'/>
   <flag name='bochs-display'/>
   <flag name='migration-file-drop-cache'/>
-  <flag name='net-socket-dgram'/>
+  <flag name='machine.pseries.cap-ccf-assist'/>
   <version>4000000</version>
   <kvmVersion>0</kvmVersion>
   <microcodeVersion>42900758</microcodeVersion>
@@ -180,12 +180,12 @@
   <cpu type='kvm' name='ppc'/>
   <cpu type='kvm' name='ppc32'/>
   <cpu type='kvm' name='ppc64'/>
-  <cpu type='kvm' name='power9'/>
+  <cpu type='kvm' name='POWER9'/>
   <cpu type='kvm' name='power8nvl'/>
-  <cpu type='kvm' name='power8'/>
+  <cpu type='kvm' name='POWER8'/>
   <cpu type='kvm' name='power8e'/>
   <cpu type='kvm' name='power7+'/>
-  <cpu type='kvm' name='power7'/>
+  <cpu type='kvm' name='POWER7'/>
   <cpu type='kvm' name='power5gs'/>
   <cpu type='kvm' name='power5+'/>
   <cpu type='kvm' name='970mp'/>
@@ -618,12 +618,12 @@
   <cpu type='tcg' name='ppc'/>
   <cpu type='tcg' name='ppc32'/>
   <cpu type='tcg' name='ppc64'/>
-  <cpu type='tcg' name='power9'/>
+  <cpu type='tcg' name='POWER9'/>
   <cpu type='tcg' name='power8nvl'/>
-  <cpu type='tcg' name='power8'/>
+  <cpu type='tcg' name='POWER8'/>
   <cpu type='tcg' name='power8e'/>
   <cpu type='tcg' name='power7+'/>
-  <cpu type='tcg' name='power7'/>
+  <cpu type='tcg' name='POWER7'/>
   <cpu type='tcg' name='power5gs'/>
   <cpu type='tcg' name='power5+'/>
   <cpu type='tcg' name='970mp'/>

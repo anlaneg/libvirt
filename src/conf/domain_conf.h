@@ -1376,6 +1376,16 @@ struct _virDomainWatchdogDef {
 };
 
 
+/* the backend driver used for virtio interfaces */
+typedef enum {
+    VIR_DOMAIN_VIDEO_BACKEND_TYPE_DEFAULT = 0,
+    VIR_DOMAIN_VIDEO_BACKEND_TYPE_QEMU,
+    VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER,
+
+    VIR_DOMAIN_VIDEO_BACKEND_TYPE_LAST
+} virDomainVideoBackendType;
+
+
 typedef enum {
     VIR_DOMAIN_VIDEO_TYPE_DEFAULT,
     VIR_DOMAIN_VIDEO_TYPE_VGA,
@@ -1389,6 +1399,7 @@ typedef enum {
     VIR_DOMAIN_VIDEO_TYPE_GOP,
     VIR_DOMAIN_VIDEO_TYPE_NONE,
     VIR_DOMAIN_VIDEO_TYPE_BOCHS,
+    VIR_DOMAIN_VIDEO_TYPE_RAMFB,
 
     VIR_DOMAIN_VIDEO_TYPE_LAST
 } virDomainVideoType;
@@ -1407,14 +1418,18 @@ VIR_ENUM_DECL(virDomainVideoVGAConf);
 struct _virDomainVideoAccelDef {
     int accel2d; /* enum virTristateBool */
     int accel3d; /* enum virTristateBool */
+    char *rendernode;
 };
 
 
 struct _virDomainVideoDriverDef {
    virDomainVideoVGAConf vgaconf;
+    char *vhost_user_binary;
 };
 
 struct _virDomainVideoDef {
+    virObjectPtr privateData;
+
     int type;   /* enum virDomainVideoType */
     unsigned int ram;  /* kibibytes (multiples of 1024) */
     unsigned int vram; /* kibibytes (multiples of 1024) */
@@ -1426,6 +1441,7 @@ struct _virDomainVideoDef {
     virDomainVideoDriverDefPtr driver;
     virDomainDeviceInfo info;
     virDomainVirtioOptionsPtr virtio;
+    virDomainVideoBackendType backend;
 };
 
 /* graphics console modes */
@@ -1740,6 +1756,7 @@ typedef enum {
     VIR_DOMAIN_FEATURE_HTM,
     VIR_DOMAIN_FEATURE_NESTED_HV,
     VIR_DOMAIN_FEATURE_MSRS,
+    VIR_DOMAIN_FEATURE_CCF_ASSIST,
 
     VIR_DOMAIN_FEATURE_LAST
 } virDomainFeature;
@@ -2716,6 +2733,7 @@ struct _virDomainXMLPrivateDataCallbacks {
     virDomainXMLPrivateDataNewFunc    vsockNew;
     virDomainXMLPrivateDataNewFunc    graphicsNew;
     virDomainXMLPrivateDataNewFunc    networkNew;
+    virDomainXMLPrivateDataNewFunc    videoNew;
     virDomainXMLPrivateDataFormatFunc format;
     virDomainXMLPrivateDataParseFunc  parse;
     /* following function shall return a pointer which will be used as the
@@ -2857,7 +2875,7 @@ void virDomainSoundDefFree(virDomainSoundDefPtr def);
 void virDomainMemballoonDefFree(virDomainMemballoonDefPtr def);
 void virDomainNVRAMDefFree(virDomainNVRAMDefPtr def);
 void virDomainWatchdogDefFree(virDomainWatchdogDefPtr def);
-virDomainVideoDefPtr virDomainVideoDefNew(void);
+virDomainVideoDefPtr virDomainVideoDefNew(virDomainXMLOptionPtr xmlopt);
 void virDomainVideoDefFree(virDomainVideoDefPtr def);
 void virDomainVideoDefClear(virDomainVideoDefPtr def);
 virDomainHostdevDefPtr virDomainHostdevDefNew(void);
@@ -2892,6 +2910,7 @@ bool virDomainDefHasDeviceAddress(virDomainDefPtr def,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 
 void virDomainDefFree(virDomainDefPtr vm);
+VIR_DEFINE_AUTOPTR_FUNC(virDomainDef, virDomainDefFree);
 
 virDomainChrSourceDefPtr
 virDomainChrSourceDefNew(virDomainXMLOptionPtr xmlopt);
@@ -3049,7 +3068,8 @@ bool virDomainDefCheckABIStabilityFlags(virDomainDefPtr src,
                                         virDomainXMLOptionPtr xmlopt,
                                         unsigned int flags);
 
-int virDomainDefAddImplicitDevices(virDomainDefPtr def);
+int virDomainDefAddImplicitDevices(virDomainDefPtr def,
+                                   virDomainXMLOptionPtr xmlopt);
 
 virDomainIOThreadIDDefPtr virDomainIOThreadIDFind(const virDomainDef *def,
                                                   unsigned int iothread_id);
@@ -3156,6 +3176,7 @@ virDomainNetDefPtr virDomainNetFind(virDomainDefPtr def, const char *device);
 virDomainNetDefPtr virDomainNetFindByName(virDomainDefPtr def, const char *ifname);
 bool virDomainHasNet(virDomainDefPtr def, virDomainNetDefPtr net);
 int virDomainNetInsert(virDomainDefPtr def, virDomainNetDefPtr net);
+int virDomainNetUpdate(virDomainDefPtr def, size_t netidx, virDomainNetDefPtr newnet);
 virDomainNetDefPtr virDomainNetRemove(virDomainDefPtr def, size_t i);
 void virDomainNetRemoveHostdev(virDomainDefPtr def, virDomainNetDefPtr net);
 
@@ -3308,22 +3329,12 @@ int virDomainChrDefForeach(virDomainDefPtr def,
                            virDomainChrDefIterator iter,
                            void *opaque);
 
-typedef int (*virDomainDiskDefPathIterator)(virDomainDiskDefPtr disk,
-                                            const char *path,
-                                            size_t depth,
-                                            void *opaque);
-
 typedef int (*virDomainUSBDeviceDefIterator)(virDomainDeviceInfoPtr info,
                                              void *opaque);
 int virDomainUSBDeviceDefForeach(virDomainDefPtr def,
                                  virDomainUSBDeviceDefIterator iter,
                                  void *opaque,
                                  bool skipHubs);
-
-int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
-                                bool ignoreOpenFailure,
-                                virDomainDiskDefPathIterator iter,
-                                void *opaque);
 
 void
 virDomainObjSetState(virDomainObjPtr obj, virDomainState state, int reason)
@@ -3422,6 +3433,7 @@ VIR_ENUM_DECL(virDomainWatchdogModel);
 VIR_ENUM_DECL(virDomainWatchdogAction);
 VIR_ENUM_DECL(virDomainPanicModel);
 VIR_ENUM_DECL(virDomainVideo);
+VIR_ENUM_DECL(virDomainVideoBackend);
 VIR_ENUM_DECL(virDomainHostdevMode);
 VIR_ENUM_DECL(virDomainHostdevSubsys);
 VIR_ENUM_DECL(virDomainHostdevCaps);

@@ -19,6 +19,10 @@
 LCOV = lcov
 GENHTML = genhtml
 
+# when building from tarball -Werror isn't auto enabled
+# so force it explicitly
+DISTCHECK_CONFIGURE_FLAGS = --enable-werror
+
 SUBDIRS = . gnulib/lib include/libvirt src tools docs gnulib/tests \
   tests po examples
 
@@ -37,17 +41,17 @@ EXTRA_DIST = \
   libvirt-admin.pc.in \
   Makefile.nonreentrant \
   autogen.sh \
-  cfg.mk \
+  GNUmakefile \
   run.in \
   README.md \
   AUTHORS.in \
   build-aux/augeas-gentest.pl \
   build-aux/check-spacing.pl \
-  build-aux/gitlog-to-changelog \
   build-aux/header-ifdef.pl \
   build-aux/minimize-po.pl \
   build-aux/mock-noinline.pl \
   build-aux/prohibit-duplicate-header.pl \
+  build-aux/syntax-check.mk \
   build-aux/useless-if-before-free \
   build-aux/vc-list-files \
   ci/Makefile \
@@ -69,7 +73,7 @@ NEWS: \
 	    $(srcdir)/docs/news.xml \
 	  >$@-tmp \
 	    || { rm -f $@-tmp; exit 1; }; \
-	  $(PYTHON) $(srcdir)/docs/reformat-news.py $@-tmp >$@ \
+	  $(RUNUTF8) $(PYTHON) $(srcdir)/docs/reformat-news.py $@-tmp >$@ \
 	    || { rm -f $@-tmp; exit 1; }; \
 	  rm -f $@-tmp; \
 	fi
@@ -104,6 +108,10 @@ clean-cov:
 	rm -rf $(top_builddir)/coverage
 
 MAINTAINERCLEANFILES = .git-module-status
+
+distclean-local: clean-GNUmakefile
+clean-GNUmakefile:
+	test '$(srcdir)' = . || rm -f $(top_builddir)/GNUmakefile
 
 dist-hook: gen-AUTHORS
 

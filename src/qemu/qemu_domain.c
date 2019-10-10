@@ -35,6 +35,7 @@
 #include "qemu_slirp.h"
 #include "qemu_extdevice.h"
 #include "qemu_blockjob.h"
+#include "qemu_checkpoint.h"
 #include "viralloc.h"
 #include "virlog.h"
 #include "virerror.h"
@@ -118,6 +119,37 @@ VIR_ENUM_IMPL(qemuDomainNamespace,
               QEMU_DOMAIN_NS_LAST,
               "mount",
 );
+
+
+/**
+ * qemuDomainObjFromDomain:
+ * @domain: Domain pointer that has to be looked up
+ *
+ * This function looks up @domain and returns the appropriate virDomainObjPtr
+ * that has to be released by calling virDomainObjEndAPI().
+ *
+ * Returns the domain object with incremented reference counter which is locked
+ * on success, NULL otherwise.
+ */
+virDomainObjPtr
+qemuDomainObjFromDomain(virDomainPtr domain)
+{
+    virDomainObjPtr vm;
+    virQEMUDriverPtr driver = domain->conn->privateData;
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+    vm = virDomainObjListFindByUUID(driver->domains, domain->uuid);
+    if (!vm) {
+        virUUIDFormat(domain->uuid, uuidstr);
+        virReportError(VIR_ERR_NO_DOMAIN,
+                       _("no domain with matching uuid '%s' (%s)"),
+                       uuidstr, domain->name);
+        return NULL;
+    }
+
+    return vm;
+}
+
 
 struct _qemuDomainLogContext {
     virObject parent;
@@ -1306,6 +1338,48 @@ qemuDomainNetworkPrivateDispose(void *obj ATTRIBUTE_UNUSED)
     qemuDomainNetworkPrivatePtr priv = obj;
 
     qemuSlirpFree(priv->slirp);
+}
+
+
+static virClassPtr qemuDomainVideoPrivateClass;
+static void qemuDomainVideoPrivateDispose(void *obj);
+
+
+static int
+qemuDomainVideoPrivateOnceInit(void)
+{
+    if (!VIR_CLASS_NEW(qemuDomainVideoPrivate, virClassForObject()))
+        return -1;
+
+    return 0;
+}
+
+VIR_ONCE_GLOBAL_INIT(qemuDomainVideoPrivate);
+
+
+static virObjectPtr
+qemuDomainVideoPrivateNew(void)
+{
+    qemuDomainVideoPrivatePtr priv;
+
+    if (qemuDomainVideoPrivateInitialize() < 0)
+        return NULL;
+
+    if (!(priv = virObjectNew(qemuDomainVideoPrivateClass)))
+        return NULL;
+
+    priv->vhost_user_fd = -1;
+
+    return (virObjectPtr) priv;
+}
+
+
+static void
+qemuDomainVideoPrivateDispose(void *obj)
+{
+    qemuDomainVideoPrivatePtr priv = obj;
+
+    VIR_FORCE_CLOSE(priv->vhost_user_fd);
 }
 
 
@@ -3668,6 +3742,7 @@ virDomainXMLPrivateDataCallbacks virQEMUDriverPrivateDataCallbacks = {
     .vsockNew = qemuDomainVsockPrivateNew,
     .graphicsNew = qemuDomainGraphicsPrivateNew,
     .networkNew = qemuDomainNetworkPrivateNew,
+    .videoNew = qemuDomainVideoPrivateNew,
     .parse = qemuDomainObjPrivateXMLParse,
     .format = qemuDomainObjPrivateXMLFormat,
     .getParseOpaque = qemuDomainObjPrivateXMLGetParseOpaque,
@@ -4655,6 +4730,7 @@ qemuDomainDefValidateFeatures(const virDomainDef *def,
         case VIR_DOMAIN_FEATURE_HPT:
         case VIR_DOMAIN_FEATURE_HTM:
         case VIR_DOMAIN_FEATURE_NESTED_HV:
+        case VIR_DOMAIN_FEATURE_CCF_ASSIST:
             if (def->features[i] != VIR_TRISTATE_SWITCH_ABSENT &&
                 !qemuDomainIsPSeries(def)) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -5650,6 +5726,7 @@ qemuDomainDeviceDefValidateVideo(const virDomainVideoDef *video)
     case VIR_DOMAIN_VIDEO_TYPE_QXL:
     case VIR_DOMAIN_VIDEO_TYPE_VIRTIO:
     case VIR_DOMAIN_VIDEO_TYPE_BOCHS:
+    case VIR_DOMAIN_VIDEO_TYPE_RAMFB:
     case VIR_DOMAIN_VIDEO_TYPE_LAST:
         break;
     }
@@ -5808,6 +5885,8 @@ qemuDomainDeviceDefValidateDisk(const virDomainDiskDef *disk,
 {
     const char *driverName = virDomainDiskGetDriver(disk);
     virStorageSourcePtr n;
+    int idx;
+    int partition;
 
     if (disk->src->shared && !disk->src->readonly &&
         !qemuBlockStorageSourceSupportsConcurrentAccess(disk->src)) {
@@ -5872,6 +5951,19 @@ qemuDomainDeviceDefValidateDisk(const virDomainDiskDef *disk,
         disk->bus == VIR_DOMAIN_DISK_BUS_VIRTIO) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("disk type 'virtio' of '%s' does not support ejectable media"),
+                       disk->dst);
+        return -1;
+    }
+
+    if (virDiskNameParse(disk->dst, &idx, &partition) < 0) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("invalid disk target '%s'"), disk->dst);
+        return -1;
+    }
+
+    if (partition != 0) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("invalid disk target '%s', partitions can't appear in disk targets"),
                        disk->dst);
         return -1;
     }
@@ -9528,36 +9620,6 @@ qemuDomainSnapshotWriteMetadata(virDomainObjPtr vm,
     return ret;
 }
 
-int
-qemuDomainCheckpointWriteMetadata(virDomainObjPtr vm,
-                                  virDomainMomentObjPtr checkpoint,
-                                  virCapsPtr caps,
-                                  virDomainXMLOptionPtr xmlopt,
-                                  const char *checkpointDir)
-{
-    unsigned int flags = VIR_DOMAIN_CHECKPOINT_FORMAT_SECURE;
-    virDomainCheckpointDefPtr def = virDomainCheckpointObjGetDef(checkpoint);
-    VIR_AUTOFREE(char *) newxml = NULL;
-    VIR_AUTOFREE(char *) chkDir = NULL;
-    VIR_AUTOFREE(char *) chkFile = NULL;
-
-    newxml = virDomainCheckpointDefFormat(def, caps, xmlopt, flags);
-    if (newxml == NULL)
-        return -1;
-
-    if (virAsprintf(&chkDir, "%s/%s", checkpointDir, vm->def->name) < 0)
-        return -1;
-    if (virFileMakePath(chkDir) < 0) {
-        virReportSystemError(errno, _("cannot create checkpoint directory '%s'"),
-                             chkDir);
-        return -1;
-    }
-
-    if (virAsprintf(&chkFile, "%s/%s.xml", chkDir, def->parent.name) < 0)
-        return -1;
-
-    return virXMLSaveFile(chkFile, NULL, "checkpoint-edit", newxml);
-}
 
 /* The domain is expected to be locked and inactive. Return -1 on normal
  * failure, 1 if we skipped a disk due to try_all.  */
@@ -9755,137 +9817,6 @@ qemuDomainSnapshotDiscardAllMetadata(virQEMUDriverPtr driver,
 }
 
 
-/* Discard one checkpoint (or its metadata), without reparenting any children.  */
-int
-qemuDomainCheckpointDiscard(virQEMUDriverPtr driver,
-                            virDomainObjPtr vm,
-                            virDomainMomentObjPtr chk,
-                            bool update_parent,
-                            bool metadata_only)
-{
-    virDomainMomentObjPtr parent = NULL;
-    virDomainMomentObjPtr moment;
-    virDomainCheckpointDefPtr parentdef = NULL;
-    size_t i, j;
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = virQEMUDriverGetConfig(driver);
-    VIR_AUTOFREE(char *) chkFile = NULL;
-
-    if (!metadata_only && !virDomainObjIsActive(vm)) {
-        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                       _("cannot remove checkpoint from inactive domain"));
-        return -1;
-    }
-
-    if (virAsprintf(&chkFile, "%s/%s/%s.xml", cfg->checkpointDir,
-                    vm->def->name, chk->def->name) < 0)
-        return -1;
-
-    if (!metadata_only) {
-        qemuDomainObjPrivatePtr priv = vm->privateData;
-        bool success = true;
-        bool search_parents;
-        virDomainCheckpointDefPtr chkdef = virDomainCheckpointObjGetDef(chk);
-
-        qemuDomainObjEnterMonitor(driver, vm);
-        parent = virDomainCheckpointFindByName(vm->checkpoints,
-                                               chk->def->parent_name);
-        for (i = 0; i < chkdef->ndisks; i++) {
-            virDomainCheckpointDiskDef *disk = &chkdef->disks[i];
-            const char *node;
-
-            if (disk->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
-                continue;
-
-            node = qemuDomainDiskNodeFormatLookup(vm, disk->name);
-            /* If any ancestor checkpoint has a bitmap for the same
-             * disk, then this bitmap must be merged to the
-             * ancestor. */
-            search_parents = true;
-            for (moment = parent;
-                 search_parents && moment;
-                 moment = virDomainCheckpointFindByName(vm->checkpoints,
-                                                        parentdef->parent.parent_name)) {
-                parentdef = virDomainCheckpointObjGetDef(moment);
-                for (j = 0; j < parentdef->ndisks; j++) {
-                    virDomainCheckpointDiskDef *disk2;
-                    VIR_AUTOPTR(virJSONValue) arr = NULL;
-
-                    disk2 = &parentdef->disks[j];
-                    if (STRNEQ(disk->name, disk2->name) ||
-                        disk2->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
-                        continue;
-                    search_parents = false;
-
-                    arr = virJSONValueNewArray();
-                    if (!arr ||
-                        virJSONValueArrayAppendString(arr, disk->bitmap) < 0) {
-                        success = false;
-                        break;
-                    }
-                    if (chk == virDomainCheckpointGetCurrent(vm->checkpoints) &&
-                        qemuMonitorEnableBitmap(priv->mon, node,
-                                                disk2->bitmap) < 0) {
-                        success = false;
-                        break;
-                    }
-                    if (qemuMonitorMergeBitmaps(priv->mon, node,
-                                                disk2->bitmap, &arr) < 0) {
-                        success = false;
-                        break;
-                    }
-                }
-            }
-            if (qemuMonitorDeleteBitmap(priv->mon, node, disk->bitmap) < 0) {
-                success = false;
-                break;
-            }
-        }
-        if (qemuDomainObjExitMonitor(driver, vm) < 0 || !success)
-            return -1;
-    }
-
-    if (chk == virDomainCheckpointGetCurrent(vm->checkpoints)) {
-        virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
-        if (update_parent && parent) {
-            virDomainCheckpointSetCurrent(vm->checkpoints, parent);
-            if (qemuDomainCheckpointWriteMetadata(vm, parent, driver->caps,
-                                                  driver->xmlopt,
-                                                  cfg->checkpointDir) < 0) {
-                VIR_WARN("failed to set parent checkpoint '%s' as current",
-                         chk->def->parent_name);
-                virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
-            }
-        }
-    }
-
-    if (unlink(chkFile) < 0)
-        VIR_WARN("Failed to unlink %s", chkFile);
-    if (update_parent)
-        virDomainMomentDropParent(chk);
-    virDomainCheckpointObjListRemove(vm->checkpoints, chk);
-
-    return 0;
-}
-
-int
-qemuDomainCheckpointDiscardAllMetadata(virQEMUDriverPtr driver,
-                                       virDomainObjPtr vm)
-{
-    virQEMUMomentRemove rem = {
-        .driver = driver,
-        .vm = vm,
-        .metadata_only = true,
-        .momentDiscard = qemuDomainCheckpointDiscard,
-    };
-
-    virDomainCheckpointForEach(vm->checkpoints, qemuDomainMomentDiscardAll,
-                               &rem);
-    virDomainCheckpointObjListRemoveAll(vm->checkpoints);
-
-    return rem.err;
-}
-
-
 static void
 qemuDomainRemoveInactiveCommon(virQEMUDriverPtr driver,
                                virDomainObjPtr vm)
@@ -9908,7 +9839,7 @@ qemuDomainRemoveInactiveCommon(virQEMUDriverPtr driver,
         VIR_WARN("unable to remove snapshot directory %s", snapDir);
     }
     /* Remove any checkpoint metadata prior to removing the domain */
-    if (qemuDomainCheckpointDiscardAllMetadata(driver, vm) < 0) {
+    if (qemuCheckpointDiscardAllMetadata(driver, vm) < 0) {
         VIR_WARN("unable to remove all checkpoints for domain %s",
                  vm->def->name);
     } else if (virAsprintf(&chkDir, "%s/%s", cfg->checkpointDir,
@@ -12777,9 +12708,14 @@ bool
 qemuDomainSupportsVideoVga(virDomainVideoDefPtr video,
                            virQEMUCapsPtr qemuCaps)
 {
-    if (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO &&
-        !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIRTIO_VGA))
-        return false;
+    if (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO) {
+        if (video->backend == VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER) {
+            if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VHOST_USER_VGA))
+                return false;
+        } else if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIRTIO_VGA)) {
+            return false;
+        }
+    }
 
     return true;
 }
@@ -15595,4 +15531,28 @@ qemuDomainDefHasManagedPR(virDomainObjPtr vm)
     virHashForEach(priv->blockjobs, qemuDomainDefHasManagedPRBlockjobIterator, &jobPR);
 
     return jobPR;
+}
+
+
+/**
+ * qemuDomainSupportsCheckpointsBlockjobs:
+ * @vm: domain object
+ *
+ * Checks whether a block job is supported in possible combination with
+ * checkpoints (qcow2 bitmaps). Returns -1 if unsupported and reports an error
+ * 0 in case everything is supported.
+ */
+int
+qemuDomainSupportsCheckpointsBlockjobs(virDomainObjPtr vm)
+{
+    qemuDomainObjPrivatePtr priv = vm->privateData;
+
+    if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_INCREMENTAL_BACKUP) &&
+        virDomainListCheckpoints(vm->checkpoints, NULL, NULL, NULL, 0) > 0) {
+        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                       _("cannot perform block operations while checkpoint exists"));
+        return -1;
+    }
+
+    return 0;
 }

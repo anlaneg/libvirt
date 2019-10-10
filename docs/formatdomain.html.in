@@ -2059,6 +2059,7 @@
     &lt;tseg unit='MiB'&gt;48&lt;/tseg&gt;
   &lt;/smm&gt;
   &lt;htm state='on'/&gt;
+  &lt;ccf-assist state='on'/&gt;
   &lt;msrs unknown='ignore'/&gt;
 &lt;/features&gt;
 ...</pre>
@@ -2356,6 +2357,14 @@
           not defined, or set to <code>fault</code>, unknown reads and writes
           will not be ignored.
           <span class="since">Since 5.1.0</span> (bhyve only)
+      </dd>
+      <dt><code>ccf-assist</code></dt>
+      <dd>Configure ccf-assist (Count Cache Flush Assist) availability for
+          pSeries guests.
+          Possible values for the <code>state</code> attribute
+          are <code>on</code> and <code>off</code>. If the attribute is not
+          defined, the hypervisor default will be used.
+          <span class="since">Since 5.9.0</span> (QEMU/KVM only)
       </dd>
     </dl>
 
@@ -6997,6 +7006,7 @@ qemu-kvm -net nic,model=? /dev/null
     &lt;model type='vga' vram='16384' heads='1'&gt;
       &lt;acceleration accel3d='yes' accel2d='yes'/&gt;
     &lt;/model&gt;
+    &lt;driver name='qemu'/&gt;
   &lt;/video&gt;
 &lt;/devices&gt;
 ...</pre>
@@ -7031,9 +7041,10 @@ qemu-kvm -net nic,model=? /dev/null
           "vbox", "qxl" (<span class="since">since 0.8.6</span>),
           "virtio" (<span class="since">since 1.3.0</span>),
           "gop" (<span class="since">since 3.2.0</span>),
-          "none" (<span class="since">since 4.6.0</span>, or "bochs"
-          (<span class="since">since 5.6.0</span>)
-          depending on the hypervisor features available.
+          "bochs" (<span class="since">since 5.6.0</span>), "ramfb"
+          (<span class="since">since 5.9.0</span>), or "none"
+          (<span class="since">since 4.6.0</span>,  depending on the hypervisor
+          features available.
           The purpose of the type <code>none</code> is to instruct libvirt not
           to add a default video device in the guest (see the paragraph above).
           This legacy behaviour can be inconvenient in cases where GPU mediated
@@ -7081,6 +7092,12 @@ qemu-kvm -net nic,model=? /dev/null
         <dd>Enable 3D acceleration (for vbox driver
         <span class="since">since 0.7.1</span>, qemu driver
         <span class="since">since 1.3.0</span>)</dd>
+
+        <dt><code>rendernode</code></dt>
+        <dd>Absolute path to a host's DRI device to be used for
+        rendering (for 'vhostuser' driver only, <span
+        class="since">since 5.8.0</span>). If none is specified,
+        libvirt will pick one available.</dd>
         </dl>
       </dd>
 
@@ -7097,7 +7114,16 @@ qemu-kvm -net nic,model=? /dev/null
       <dd>
         The subelement <code>driver</code> can be used to tune the device:
         <dl>
-          <dt>virtio options</dt>
+          <dt><code>name</code></dt>
+          <dd>
+            Specify the backend driver to use, either "qemu" or
+            "vhostuser" depending on the hypervisor features available
+            (<span class="since">since 5.8.0</span>).  "qemu" is the
+            default QEMU backend. "vhostuser" will use a separate
+            vhost-user process backend (for <code>virtio</code>
+            device).
+          </dd>
+        <dt>virtio options</dt>
           <dd>
           <a href="#elementsVirtio">Virtio-specific options</a> can also be
           set (<span class="since">Since 3.5.0</span>)
@@ -8533,7 +8559,6 @@ qemu-kvm -net nic,model=? /dev/null
   &lt;memory model='nvdimm'&gt;
     &lt;source&gt;
       &lt;path&gt;/tmp/nvdimm&lt;/path&gt;
-      &lt;alignsize unit='KiB'&gt;2048&lt;/alignsize&gt;
     &lt;/source&gt;
     &lt;target&gt;
       &lt;size unit='KiB'&gt;524288&lt;/size&gt;
@@ -8544,9 +8569,10 @@ qemu-kvm -net nic,model=? /dev/null
       &lt;readonly/&gt;
     &lt;/target&gt;
   &lt;/memory&gt;
-  &lt;memory model='nvdimm'&gt;
+  &lt;memory model='nvdimm' access='shared'&gt;
     &lt;source&gt;
       &lt;path&gt;/dev/dax0.0&lt;/path&gt;
+      &lt;alignsize unit='KiB'&gt;2048&lt;/alignsize&gt;
       &lt;pmem/&gt;
     &lt;/source&gt;
     &lt;target&gt;
@@ -8580,6 +8606,8 @@ qemu-kvm -net nic,model=? /dev/null
           module basis. Values are the same as
           <a href="#elementsMemoryBacking">Memory Backing</a>:
           <code>shared</code> and <code>private</code>.
+          For <code>nvdimm</code> model, if using real NVDIMM DAX device as
+          backend, <code>shared</code> is required.
         </p>
       </dd>
 
@@ -8643,7 +8671,8 @@ qemu-kvm -net nic,model=? /dev/null
               alignment used to mmap the address range for the backend
               <code>path</code>. If not supplied the host page size is used.
               For example, to mmap a real NVDIMM device a 2M-aligned page may
-              be required.
+              be required, and host page size is 4KB, then we need to set this
+              element to 2MB.
               <span class="since">Since 5.0.0</span>
             </p>
           </dd>

@@ -528,12 +528,22 @@ testCompareXMLToArgv(const void *data)
        }
     }
 
+    for (i = 0; i < vm->def->nvideos; i++) {
+        virDomainVideoDefPtr video = vm->def->videos[i];
+
+        if (video->backend == VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER) {
+            qemuDomainVideoPrivatePtr vpriv = QEMU_DOMAIN_VIDEO_PRIVATE(video);
+
+            vpriv->vhost_user_fd = 1729;
+        }
+    }
+
     if (flags & FLAG_SLIRP_HELPER) {
         for (i = 0; i < vm->def->nnets; i++) {
             virDomainNetDefPtr net = vm->def->nets[i];
 
             if (net->type == VIR_DOMAIN_NET_TYPE_USER &&
-                virQEMUCapsGet(info->qemuCaps, QEMU_CAPS_NET_SOCKET_DGRAM)) {
+                virQEMUCapsGet(info->qemuCaps, QEMU_CAPS_DBUS_VMSTATE)) {
                 qemuSlirpPtr slirp = qemuSlirpNew();
                 slirp->fd[0] = 42;
                 QEMU_DOMAIN_NETWORK_PRIVATE(net)->slirp = slirp;
@@ -686,6 +696,16 @@ mymain(void)
                             abs_srcdir "/qemufirmwaredata/usr/share/qemu/firmware");
     virFileWrapperAddPrefix("/home/user/.config/qemu/firmware",
                             abs_srcdir "/qemufirmwaredata/home/user/.config/qemu/firmware");
+
+    virFileWrapperAddPrefix(SYSCONFDIR "/qemu/vhost-user",
+                            abs_srcdir "/qemuvhostuserdata/etc/qemu/vhost-user");
+    virFileWrapperAddPrefix(PREFIX "/share/qemu/vhost-user",
+                            abs_srcdir "/qemuvhostuserdata/usr/share/qemu/vhost-user");
+    virFileWrapperAddPrefix("/home/user/.config/qemu/vhost-user",
+                            abs_srcdir "/qemuvhostuserdata/home/user/.config/qemu/vhost-user");
+
+    virFileWrapperAddPrefix("/usr/libexec/qemu/vhost-user",
+                            abs_srcdir "/qemuvhostuserdata/usr/libexec/qemu/vhost-user");
 
 /**
  * The following set of macros allows testing of XML -> argv conversion with a
@@ -1087,6 +1107,7 @@ mymain(void)
     DO_TEST("disk-no-boot", NONE);
     DO_TEST_PARSE_ERROR("disk-device-lun-type-invalid",
                         QEMU_CAPS_VIRTIO_SCSI);
+    DO_TEST_CAPS_LATEST_PARSE_ERROR("disk-attaching-partition-nosupport");
     DO_TEST_FAILURE("disk-usb-nosupport", NONE);
     DO_TEST("disk-usb-device",
             QEMU_CAPS_DEVICE_USB_STORAGE);
@@ -1746,7 +1767,9 @@ mymain(void)
     DO_TEST("cpu-Haswell3", QEMU_CAPS_KVM);
     DO_TEST("cpu-Haswell-noTSX", QEMU_CAPS_KVM);
     DO_TEST("cpu-host-model-cmt", NONE);
+    DO_TEST_CAPS_VER("cpu-host-model-cmt", "4.0.0");
     DO_TEST("cpu-tsc-frequency", QEMU_CAPS_KVM);
+    DO_TEST_CAPS_VER("cpu-tsc-frequency", "4.0.0");
     DO_TEST_CAPS_VER("cpu-translation", "4.0.0");
     DO_TEST_CAPS_LATEST("cpu-translation");
     qemuTestSetHostCPU(driver.caps, NULL);
@@ -1937,6 +1960,7 @@ mymain(void)
             QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
             QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
             QEMU_CAPS_MACHINE_PSERIES_CAP_NESTED_HV,
+            QEMU_CAPS_MACHINE_PSERIES_CAP_CCF_ASSIST,
             QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
     DO_TEST_FAILURE("pseries-features",
                     QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
@@ -2060,6 +2084,7 @@ mymain(void)
             QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
             QEMU_CAPS_VIRTIO_GPU_MAX_OUTPUTS);
     DO_TEST_CAPS_LATEST("video-bochs-display-device");
+    DO_TEST_CAPS_LATEST("video-ramfb-display-device");
     DO_TEST("video-none-device",
             QEMU_CAPS_VNC);
     DO_TEST_PARSE_ERROR("video-invalid-multiple-devices", NONE);
@@ -2892,8 +2917,7 @@ mymain(void)
     DO_TEST("virtio-options", QEMU_CAPS_VIRTIO_SCSI, QEMU_CAPS_VIRTIO_KEYBOARD,
             QEMU_CAPS_VIRTIO_MOUSE, QEMU_CAPS_VIRTIO_TABLET,
             QEMU_CAPS_VIRTIO_INPUT_HOST,
-            QEMU_CAPS_DEVICE_VIRTIO_GPU,
-            QEMU_CAPS_VIRTIO_GPU_VIRGL,
+            QEMU_CAPS_DEVICE_VHOST_USER_GPU,
             QEMU_CAPS_DEVICE_VIRTIO_RNG,
             QEMU_CAPS_OBJECT_RNG_RANDOM,
             QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
@@ -3006,6 +3030,9 @@ mymain(void)
     DO_TEST_CAPS_LATEST("os-firmware-efi");
     DO_TEST_CAPS_LATEST("os-firmware-efi-secboot");
     DO_TEST_CAPS_ARCH_LATEST("aarch64-os-firmware-efi", "aarch64");
+
+    DO_TEST_CAPS_LATEST("vhost-user-vga");
+    DO_TEST_CAPS_LATEST("vhost-user-gpu-secondary");
 
     if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
         virFileDeleteTree(fakerootdir);

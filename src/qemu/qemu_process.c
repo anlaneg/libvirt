@@ -1941,7 +1941,6 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
     qemuDomainObjPrivatePtr priv = vm->privateData;
     qemuMonitorPtr mon = NULL;
     unsigned long long timeout = 0;
-    virDomainChrSourceDefPtr monConfig;
 
     if (qemuSecuritySetDaemonSocketLabel(driver->securityManager, vm->def) < 0) {
         VIR_ERROR(_("Failed to set security context for monitor for %s"),
@@ -1955,16 +1954,10 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
      * 1GiB of guest RAM. */
     timeout = vm->def->mem.total_memory / (1024 * 1024);
 
-    /* Hold an extra reference because we can't allow 'vm' to be
-     * deleted until the monitor gets its own reference. */
-    virObjectRef(vm);
-
     ignore_value(virTimeMillisNow(&priv->monStart));
-    monConfig = virObjectRef(priv->monConfig);
-    virObjectUnlock(vm);
 
     mon = qemuMonitorOpen(vm,
-                          monConfig,
+                          priv->monConfig,
                           retry,
                           timeout,
                           &monitorCallbacks,
@@ -1978,15 +1971,7 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
                                 qemuProcessMonitorLogFree);
     }
 
-    virObjectLock(vm);
-    virObjectUnref(monConfig);
-    virObjectUnref(vm);
     priv->monStart = 0;
-
-    if (!virDomainObjIsActive(vm)) {
-        qemuMonitorClose(mon);
-        mon = NULL;
-    }
     priv->mon = mon;
 
     if (qemuSecurityClearSocketLabel(driver->securityManager, vm->def) < 0) {
@@ -4379,7 +4364,7 @@ qemuProcessFetchCPUDefinitions(virQEMUDriverPtr driver,
     if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
         goto error;
 
-    models = virQEMUCapsFetchCPUDefinitions(priv->mon);
+    models = virQEMUCapsFetchCPUDefinitions(priv->mon, vm->def->os.arch);
 
     if (qemuDomainObjExitMonitor(driver, vm) < 0)
         goto error;
@@ -5266,33 +5251,46 @@ qemuProcessStartValidateVideo(virDomainObjPtr vm,
     for (i = 0; i < vm->def->nvideos; i++) {
         video = vm->def->videos[i];
 
-        if ((video->type == VIR_DOMAIN_VIDEO_TYPE_VGA &&
-             !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VGA)) ||
-            (video->type == VIR_DOMAIN_VIDEO_TYPE_CIRRUS &&
-             !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_CIRRUS_VGA)) ||
-            (video->type == VIR_DOMAIN_VIDEO_TYPE_VMVGA &&
-             !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VMWARE_SVGA)) ||
-            (video->type == VIR_DOMAIN_VIDEO_TYPE_QXL &&
-             !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_QXL)) ||
-            (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO &&
-             !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIRTIO_GPU)) ||
-            (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO &&
-             video->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW &&
-             !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIRTIO_GPU_CCW))) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("this QEMU does not support '%s' video device"),
-                           virDomainVideoTypeToString(video->type));
-            return -1;
-        }
-
-        if (video->accel) {
-            if (video->accel->accel3d == VIR_TRISTATE_SWITCH_ON &&
-                (video->type != VIR_DOMAIN_VIDEO_TYPE_VIRTIO ||
-                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_GPU_VIRGL))) {
+        if (video->backend == VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER) {
+            if (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO &&
+                !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VHOST_USER_GPU)) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("this QEMU does not support 'vhost-user' video device"));
+                return -1;
+            }
+        } else {
+            if ((video->type == VIR_DOMAIN_VIDEO_TYPE_VGA &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VGA)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_CIRRUS &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_CIRRUS_VGA)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_VMVGA &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VMWARE_SVGA)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_QXL &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_QXL)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIRTIO_GPU)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO &&
+                 video->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIRTIO_GPU_CCW)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_BOCHS &&
+                !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_BOCHS_DISPLAY)) ||
+                (video->type == VIR_DOMAIN_VIDEO_TYPE_RAMFB &&
+                 !virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_RAMFB))) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("%s 3d acceleration is not supported"),
+                               _("this QEMU does not support '%s' video device"),
                                virDomainVideoTypeToString(video->type));
                 return -1;
+            }
+
+            if (video->accel) {
+                if (video->accel->accel3d == VIR_TRISTATE_SWITCH_ON &&
+                    (video->type != VIR_DOMAIN_VIDEO_TYPE_VIRTIO ||
+                     !virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_GPU_VIRGL))) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                   _("%s 3d acceleration is not supported"),
+                                   virDomainVideoTypeToString(video->type));
+                    return -1;
+                }
             }
         }
     }
@@ -5756,7 +5754,7 @@ qemuProcessNetworkPrepareDevices(virQEMUDriverPtr driver,
                 goto cleanup;
         } else if (actualType == VIR_DOMAIN_NET_TYPE_USER &&
                    !priv->disableSlirp &&
-                   virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_NET_SOCKET_DGRAM)) {
+                   virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_DBUS_VMSTATE)) {
             qemuSlirpPtr slirp = qemuInterfacePrepareSlirp(driver, net);
 
             QEMU_DOMAIN_NETWORK_PRIVATE(net)->slirp = slirp;
@@ -6356,6 +6354,10 @@ qemuProcessPrepareDomain(virQEMUDriverPtr driver,
 
     VIR_DEBUG("Prepare bios/uefi paths");
     if (qemuFirmwareFillDomain(driver, vm, flags) < 0)
+        goto cleanup;
+
+    VIR_DEBUG("Preparing external devices");
+    if (qemuExtDevicesPrepareDomain(driver, vm) < 0)
         goto cleanup;
 
     for (i = 0; i < vm->def->nchannels; i++) {
@@ -8653,7 +8655,8 @@ qemuProcessQMPConnectMonitor(qemuProcessQMPPtr proc)
     monConfig.data.nix.listen = false;
 
     if (!(xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL, NULL, NULL)) ||
-        !(proc->vm = virDomainObjNew(xmlopt)))
+        !(proc->vm = virDomainObjNew(xmlopt)) ||
+        !(proc->vm->def = virDomainDefNew()))
         goto cleanup;
 
     proc->vm->pid = proc->pid;

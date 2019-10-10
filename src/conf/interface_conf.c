@@ -819,8 +819,7 @@ virInterfaceDefPtr
 virInterfaceDefParseNode(xmlDocPtr xml,
                          xmlNodePtr root)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virInterfaceDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (!virXMLNodeNameEqual(root, "interface")) {
         virReportError(VIR_ERR_XML_ERROR,
@@ -830,18 +829,11 @@ virInterfaceDefParseNode(xmlDocPtr xml,
         return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virInterfaceDefParseXML(ctxt, VIR_INTERFACE_TYPE_LAST);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virInterfaceDefParseXML(ctxt, VIR_INTERFACE_TYPE_LAST);
 }
 
 

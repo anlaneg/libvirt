@@ -258,6 +258,7 @@ storageStateInitialize(bool privileged,
 {
     VIR_AUTOFREE(char *) configdir = NULL;
     VIR_AUTOFREE(char *) rundir = NULL;
+    bool autostart = true;
 
     if (VIR_ALLOC(driver) < 0)
         return VIR_DRV_STATE_INIT_ERROR;
@@ -319,7 +320,11 @@ storageStateInitialize(bool privileged,
 
     storagePoolUpdateAllState();
 
-    storageDriverAutostart();
+    if (virDriverShouldAutostart(driver->stateDir, &autostart) < 0)
+        goto error;
+
+    if (autostart)
+        storageDriverAutostart();
 
     driver->storageEventState = virObjectEventStateNew();
 
@@ -411,21 +416,10 @@ storageConnectOpen(virConnectPtr conn,
         return VIR_DRV_OPEN_ERROR;
     }
 
-    if (driver->privileged) {
-        if (STRNEQ(conn->uri->path, "/system")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unexpected storage URI path '%s', try storage:///system"),
-                           conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    } else {
-        if (STRNEQ(conn->uri->path, "/session")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unexpected storage URI path '%s', try storage:///session"),
-                           conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    }
+    if (!virConnectValidateURIPath(conn->uri->path,
+                                   "storage",
+                                   driver->privileged))
+        return VIR_DRV_OPEN_ERROR;
 
     if (virConnectOpenEnsureACL(conn) < 0)
         return VIR_DRV_OPEN_ERROR;

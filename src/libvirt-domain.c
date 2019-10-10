@@ -152,7 +152,8 @@ virDomainGetConnect(virDomainPtr dom)
  * object is finally released. This will also happen if the
  * client application crashes / loses its connection to the
  * libvirtd daemon. Any domains marked for auto destroy will
- * block attempts at migration, save-to-file, or snapshots.
+ * block attempts at migration. Hypervisors may also block save-to-file,
+ * or snapshots.
  *
  * virDomainFree should be used to free the resources after the
  * domain object is no longer needed.
@@ -217,7 +218,8 @@ virDomainCreateXML(virConnectPtr conn, const char *xmlDesc,
  * object is finally released. This will also happen if the
  * client application crashes / loses its connection to the
  * libvirtd daemon. Any domains marked for auto destroy will
- * block attempts at migration, save-to-file, or snapshots.
+ * block attempts at migration. Hypervisors may also block
+ * save-to-file, or snapshots.
  *
  * virDomainFree should be used to free the resources after the
  * domain object is no longer needed.
@@ -6566,7 +6568,8 @@ virDomainCreate(virDomainPtr domain)
  * object is finally released. This will also happen if the
  * client application crashes / loses its connection to the
  * libvirtd daemon. Any domains marked for auto destroy will
- * block attempts at migration, save-to-file, or snapshots.
+ * block attempts at migration. Hypervisors may also block save-to-file,
+ * or snapshots.
  *
  * If the VIR_DOMAIN_START_BYPASS_CACHE flag is set, and there is a
  * managed save file for this domain (created by virDomainManagedSave()),
@@ -6693,11 +6696,6 @@ virDomainCreateWithFiles(virDomainPtr domain, unsigned int nfiles,
  * Provides a boolean value indicating whether the domain
  * configured to be automatically started when the host
  * machine boots.
- *
- * Please note that this might result in unexpected behaviour if
- * used for some session URIs. Since the session daemon is started
- * with --timeout it comes and goes and as it does so it
- * autostarts domains which might have been shut off recently.
  *
  * Returns -1 in case of error, 0 in case of success
  */

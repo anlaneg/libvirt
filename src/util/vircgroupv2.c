@@ -155,6 +155,8 @@ virCgroupV2CopyPlacement(virCgroupPtr group,
                          const char *path,
                          virCgroupPtr parent)
 {
+    VIR_DEBUG("group=%p path=%s parent=%p", group, path, parent);
+
     if (path[0] == '/') {
         if (VIR_STRDUP(group->unified.placement, path) < 0)
             return -1;
@@ -194,10 +196,17 @@ virCgroupV2DetectMounts(virCgroupPtr group,
 static int
 virCgroupV2DetectPlacement(virCgroupPtr group,
                            const char *path,
-                           const char *controllers ATTRIBUTE_UNUSED,
+                           const char *controllers,
                            const char *selfpath)
 {
     if (group->unified.placement)
+        return 0;
+
+    VIR_DEBUG("group=%p path=%s controllers=%s selfpath=%s",
+              group, path, controllers, selfpath);
+
+    /* controllers == "" indicates the cgroupv2 controller path */
+    if (STRNEQ(controllers, ""))
         return 0;
 
     /*
@@ -330,7 +339,7 @@ static int
 virCgroupV2GetAnyController(virCgroupPtr group)
 {
     /* The least significant bit is position 1. */
-    return ffs(group->unified.controllers) - 1;
+    return __builtin_ffs(group->unified.controllers) - 1;
 }
 
 

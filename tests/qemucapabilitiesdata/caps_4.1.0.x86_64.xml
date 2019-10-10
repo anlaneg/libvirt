@@ -209,11 +209,13 @@
   <flag name='canonical-cpu-features'/>
   <flag name='bochs-display'/>
   <flag name='migration-file-drop-cache'/>
-  <flag name='net-socket-dgram'/>
-  <version>4000050</version>
+  <flag name='vhost-user-gpu'/>
+  <flag name='vhost-user-vga'/>
+  <flag name='ramfb'/>
+  <version>4001000</version>
   <kvmVersion>0</kvmVersion>
   <microcodeVersion>43100759</microcodeVersion>
-  <package>v4.0.0-1481-g33d6099906</package>
+  <package>v4.1.0</package>
   <arch>x86_64</arch>
   <hostCPU type='kvm' model='base' migratability='yes'>
     <property name='cmov' type='boolean' value='true' migratable='yes'/>
@@ -350,6 +352,7 @@
     <property name='xop' type='boolean' value='false'/>
     <property name='ibpb' type='boolean' value='false'/>
     <property name='avx' type='boolean' value='true' migratable='yes'/>
+    <property name='core-capability' type='boolean' value='false'/>
     <property name='movdiri' type='boolean' value='false'/>
     <property name='acpi' type='boolean' value='false'/>
     <property name='avx512bw' type='boolean' value='false'/>
@@ -372,6 +375,7 @@
     <property name='nodeid-msr' type='boolean' value='false'/>
     <property name='md-clear' type='boolean' value='true' migratable='yes'/>
     <property name='misalignsse' type='boolean' value='false'/>
+    <property name='split-lock-detect' type='boolean' value='false'/>
     <property name='min-xlevel' type='number' value='2147483656'/>
     <property name='bmi1' type='boolean' value='true' migratable='yes'/>
     <property name='bmi2' type='boolean' value='true' migratable='yes'/>
@@ -547,6 +551,7 @@
     <property name='xop' type='boolean' value='false'/>
     <property name='ibpb' type='boolean' value='false'/>
     <property name='avx' type='boolean' value='false'/>
+    <property name='core-capability' type='boolean' value='false'/>
     <property name='movdiri' type='boolean' value='false'/>
     <property name='acpi' type='boolean' value='true' migratable='yes'/>
     <property name='avx512bw' type='boolean' value='false'/>
@@ -569,6 +574,7 @@
     <property name='nodeid-msr' type='boolean' value='false'/>
     <property name='md-clear' type='boolean' value='false'/>
     <property name='misalignsse' type='boolean' value='false'/>
+    <property name='split-lock-detect' type='boolean' value='false'/>
     <property name='min-xlevel' type='number' value='2147483658'/>
     <property name='bmi1' type='boolean' value='true' migratable='yes'/>
     <property name='bmi2' type='boolean' value='true' migratable='yes'/>
@@ -612,8 +618,18 @@
   <cpu type='kvm' name='max' usable='yes'/>
   <cpu type='kvm' name='host' usable='yes'/>
   <cpu type='kvm' name='base' usable='yes'/>
+  <cpu type='kvm' name='qemu64-v1' usable='yes'/>
   <cpu type='kvm' name='qemu64' usable='yes'/>
+  <cpu type='kvm' name='qemu32-v1' usable='yes'/>
   <cpu type='kvm' name='qemu32' usable='yes'/>
+  <cpu type='kvm' name='phenom-v1' usable='no'>
+    <blocker name='mmxext'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='3dnowext'/>
+    <blocker name='3dnow'/>
+    <blocker name='sse4a'/>
+    <blocker name='npt'/>
+  </cpu>
   <cpu type='kvm' name='phenom' usable='no'>
     <blocker name='mmxext'/>
     <blocker name='fxsr-opt'/>
@@ -622,21 +638,82 @@
     <blocker name='sse4a'/>
     <blocker name='npt'/>
   </cpu>
+  <cpu type='kvm' name='pentium3-v1' usable='yes'/>
   <cpu type='kvm' name='pentium3' usable='yes'/>
+  <cpu type='kvm' name='pentium2-v1' usable='yes'/>
   <cpu type='kvm' name='pentium2' usable='yes'/>
+  <cpu type='kvm' name='pentium-v1' usable='yes'/>
   <cpu type='kvm' name='pentium' usable='yes'/>
+  <cpu type='kvm' name='n270-v1' usable='yes'/>
   <cpu type='kvm' name='n270' usable='yes'/>
+  <cpu type='kvm' name='kvm64-v1' usable='yes'/>
   <cpu type='kvm' name='kvm64' usable='yes'/>
+  <cpu type='kvm' name='kvm32-v1' usable='yes'/>
   <cpu type='kvm' name='kvm32' usable='yes'/>
+  <cpu type='kvm' name='coreduo-v1' usable='yes'/>
   <cpu type='kvm' name='coreduo' usable='yes'/>
+  <cpu type='kvm' name='core2duo-v1' usable='yes'/>
   <cpu type='kvm' name='core2duo' usable='yes'/>
+  <cpu type='kvm' name='athlon-v1' usable='no'>
+    <blocker name='mmxext'/>
+    <blocker name='3dnowext'/>
+    <blocker name='3dnow'/>
+  </cpu>
   <cpu type='kvm' name='athlon' usable='no'>
     <blocker name='mmxext'/>
     <blocker name='3dnowext'/>
     <blocker name='3dnow'/>
   </cpu>
+  <cpu type='kvm' name='Westmere-v2' usable='yes'/>
+  <cpu type='kvm' name='Westmere-v1' usable='yes'/>
   <cpu type='kvm' name='Westmere-IBRS' usable='yes'/>
   <cpu type='kvm' name='Westmere' usable='yes'/>
+  <cpu type='kvm' name='Snowridge-v1' usable='no'>
+    <blocker name='clwb'/>
+    <blocker name='sha-ni'/>
+    <blocker name='gfni'/>
+    <blocker name='cldemote'/>
+    <blocker name='movdiri'/>
+    <blocker name='movdir64b'/>
+    <blocker name='core-capability'/>
+    <blocker name='split-lock-detect'/>
+  </cpu>
+  <cpu type='kvm' name='Snowridge' usable='no'>
+    <blocker name='clwb'/>
+    <blocker name='sha-ni'/>
+    <blocker name='gfni'/>
+    <blocker name='cldemote'/>
+    <blocker name='movdiri'/>
+    <blocker name='movdir64b'/>
+    <blocker name='core-capability'/>
+    <blocker name='split-lock-detect'/>
+  </cpu>
+  <cpu type='kvm' name='Skylake-Server-v2' usable='no'>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='clwb'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='pku'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='pku'/>
+  </cpu>
+  <cpu type='kvm' name='Skylake-Server-v1' usable='no'>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='clwb'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='pku'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='pku'/>
+  </cpu>
   <cpu type='kvm' name='Skylake-Server-IBRS' usable='no'>
     <blocker name='avx512f'/>
     <blocker name='avx512dq'/>
@@ -663,17 +740,39 @@
     <blocker name='avx512f'/>
     <blocker name='pku'/>
   </cpu>
+  <cpu type='kvm' name='Skylake-Client-v2' usable='yes'/>
+  <cpu type='kvm' name='Skylake-Client-v1' usable='yes'/>
   <cpu type='kvm' name='Skylake-Client-IBRS' usable='yes'/>
   <cpu type='kvm' name='Skylake-Client' usable='yes'/>
+  <cpu type='kvm' name='SandyBridge-v2' usable='yes'/>
+  <cpu type='kvm' name='SandyBridge-v1' usable='yes'/>
   <cpu type='kvm' name='SandyBridge-IBRS' usable='yes'/>
   <cpu type='kvm' name='SandyBridge' usable='yes'/>
+  <cpu type='kvm' name='Penryn-v1' usable='yes'/>
   <cpu type='kvm' name='Penryn' usable='yes'/>
+  <cpu type='kvm' name='Opteron_G5-v1' usable='no'>
+    <blocker name='sse4a'/>
+    <blocker name='misalignsse'/>
+    <blocker name='xop'/>
+    <blocker name='fma4'/>
+    <blocker name='tbm'/>
+    <blocker name='npt'/>
+    <blocker name='nrip-save'/>
+  </cpu>
   <cpu type='kvm' name='Opteron_G5' usable='no'>
     <blocker name='sse4a'/>
     <blocker name='misalignsse'/>
     <blocker name='xop'/>
     <blocker name='fma4'/>
     <blocker name='tbm'/>
+    <blocker name='npt'/>
+    <blocker name='nrip-save'/>
+  </cpu>
+  <cpu type='kvm' name='Opteron_G4-v1' usable='no'>
+    <blocker name='sse4a'/>
+    <blocker name='misalignsse'/>
+    <blocker name='xop'/>
+    <blocker name='fma4'/>
     <blocker name='npt'/>
     <blocker name='nrip-save'/>
   </cpu>
@@ -685,14 +784,34 @@
     <blocker name='npt'/>
     <blocker name='nrip-save'/>
   </cpu>
+  <cpu type='kvm' name='Opteron_G3-v1' usable='no'>
+    <blocker name='sse4a'/>
+    <blocker name='misalignsse'/>
+  </cpu>
   <cpu type='kvm' name='Opteron_G3' usable='no'>
     <blocker name='sse4a'/>
     <blocker name='misalignsse'/>
   </cpu>
+  <cpu type='kvm' name='Opteron_G2-v1' usable='yes'/>
   <cpu type='kvm' name='Opteron_G2' usable='yes'/>
+  <cpu type='kvm' name='Opteron_G1-v1' usable='yes'/>
   <cpu type='kvm' name='Opteron_G1' usable='yes'/>
+  <cpu type='kvm' name='Nehalem-v2' usable='yes'/>
+  <cpu type='kvm' name='Nehalem-v1' usable='yes'/>
   <cpu type='kvm' name='Nehalem-IBRS' usable='yes'/>
   <cpu type='kvm' name='Nehalem' usable='yes'/>
+  <cpu type='kvm' name='KnightsMill-v1' usable='no'>
+    <blocker name='avx512f'/>
+    <blocker name='avx512pf'/>
+    <blocker name='avx512er'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512-vpopcntdq'/>
+    <blocker name='avx512-4vnniw'/>
+    <blocker name='avx512-4fmaps'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+  </cpu>
   <cpu type='kvm' name='KnightsMill' usable='no'>
     <blocker name='avx512f'/>
     <blocker name='avx512pf'/>
@@ -705,8 +824,33 @@
     <blocker name='avx512f'/>
     <blocker name='avx512f'/>
   </cpu>
+  <cpu type='kvm' name='IvyBridge-v2' usable='yes'/>
+  <cpu type='kvm' name='IvyBridge-v1' usable='yes'/>
   <cpu type='kvm' name='IvyBridge-IBRS' usable='yes'/>
   <cpu type='kvm' name='IvyBridge' usable='yes'/>
+  <cpu type='kvm' name='Icelake-Server-v1' usable='no'>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='clwb'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='avx512vbmi'/>
+    <blocker name='pku'/>
+    <blocker name='avx512vbmi2'/>
+    <blocker name='gfni'/>
+    <blocker name='vaes'/>
+    <blocker name='vpclmulqdq'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='avx512bitalg'/>
+    <blocker name='avx512-vpopcntdq'/>
+    <blocker name='la57'/>
+    <blocker name='wbnoinvd'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='pku'/>
+  </cpu>
   <cpu type='kvm' name='Icelake-Server' usable='no'>
     <blocker name='avx512f'/>
     <blocker name='avx512dq'/>
@@ -730,6 +874,19 @@
     <blocker name='avx512f'/>
     <blocker name='pku'/>
   </cpu>
+  <cpu type='kvm' name='Icelake-Client-v1' usable='no'>
+    <blocker name='avx512vbmi'/>
+    <blocker name='pku'/>
+    <blocker name='avx512vbmi2'/>
+    <blocker name='gfni'/>
+    <blocker name='vaes'/>
+    <blocker name='vpclmulqdq'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='avx512bitalg'/>
+    <blocker name='avx512-vpopcntdq'/>
+    <blocker name='wbnoinvd'/>
+    <blocker name='pku'/>
+  </cpu>
   <cpu type='kvm' name='Icelake-Client' usable='no'>
     <blocker name='avx512vbmi'/>
     <blocker name='pku'/>
@@ -743,10 +900,37 @@
     <blocker name='wbnoinvd'/>
     <blocker name='pku'/>
   </cpu>
+  <cpu type='kvm' name='Haswell-v4' usable='yes'/>
+  <cpu type='kvm' name='Haswell-v3' usable='yes'/>
+  <cpu type='kvm' name='Haswell-v2' usable='yes'/>
+  <cpu type='kvm' name='Haswell-v1' usable='yes'/>
   <cpu type='kvm' name='Haswell-noTSX-IBRS' usable='yes'/>
   <cpu type='kvm' name='Haswell-noTSX' usable='yes'/>
   <cpu type='kvm' name='Haswell-IBRS' usable='yes'/>
   <cpu type='kvm' name='Haswell' usable='yes'/>
+  <cpu type='kvm' name='EPYC-v2' usable='no'>
+    <blocker name='sha-ni'/>
+    <blocker name='mmxext'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='cr8legacy'/>
+    <blocker name='sse4a'/>
+    <blocker name='misalignsse'/>
+    <blocker name='osvw'/>
+    <blocker name='ibpb'/>
+    <blocker name='npt'/>
+    <blocker name='nrip-save'/>
+  </cpu>
+  <cpu type='kvm' name='EPYC-v1' usable='no'>
+    <blocker name='sha-ni'/>
+    <blocker name='mmxext'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='cr8legacy'/>
+    <blocker name='sse4a'/>
+    <blocker name='misalignsse'/>
+    <blocker name='osvw'/>
+    <blocker name='npt'/>
+    <blocker name='nrip-save'/>
+  </cpu>
   <cpu type='kvm' name='EPYC-IBPB' usable='no'>
     <blocker name='sha-ni'/>
     <blocker name='mmxext'/>
@@ -767,6 +951,18 @@
     <blocker name='sse4a'/>
     <blocker name='misalignsse'/>
     <blocker name='osvw'/>
+    <blocker name='ibpb'/>
+    <blocker name='npt'/>
+    <blocker name='nrip-save'/>
+  </cpu>
+  <cpu type='kvm' name='Dhyana-v1' usable='no'>
+    <blocker name='mmxext'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='cr8legacy'/>
+    <blocker name='sse4a'/>
+    <blocker name='misalignsse'/>
+    <blocker name='osvw'/>
+    <blocker name='ibpb'/>
     <blocker name='npt'/>
     <blocker name='nrip-save'/>
   </cpu>
@@ -781,8 +977,26 @@
     <blocker name='npt'/>
     <blocker name='nrip-save'/>
   </cpu>
+  <cpu type='kvm' name='Conroe-v1' usable='yes'/>
   <cpu type='kvm' name='Conroe' usable='yes'/>
-  <cpu type='kvm' name='Cascadelake-Server' usable='no'>
+  <cpu type='kvm' name='Cascadelake-Server-v2' usable='no'>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='clwb'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='pku'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='pku'/>
+    <blocker name='rdctl-no'/>
+    <blocker name='ibrs-all'/>
+    <blocker name='mds-no'/>
+  </cpu>
+  <cpu type='kvm' name='Cascadelake-Server-v1' usable='no'>
     <blocker name='avx512f'/>
     <blocker name='avx512dq'/>
     <blocker name='clwb'/>
@@ -796,34 +1010,153 @@
     <blocker name='avx512f'/>
     <blocker name='pku'/>
   </cpu>
+  <cpu type='kvm' name='Cascadelake-Server' usable='no'>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='clwb'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='pku'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512f'/>
+    <blocker name='pku'/>
+    <blocker name='rdctl-no'/>
+    <blocker name='ibrs-all'/>
+    <blocker name='mds-no'/>
+  </cpu>
+  <cpu type='kvm' name='Broadwell-v4' usable='yes'/>
+  <cpu type='kvm' name='Broadwell-v3' usable='yes'/>
+  <cpu type='kvm' name='Broadwell-v2' usable='yes'/>
+  <cpu type='kvm' name='Broadwell-v1' usable='yes'/>
   <cpu type='kvm' name='Broadwell-noTSX-IBRS' usable='yes'/>
   <cpu type='kvm' name='Broadwell-noTSX' usable='yes'/>
   <cpu type='kvm' name='Broadwell-IBRS' usable='yes'/>
   <cpu type='kvm' name='Broadwell' usable='yes'/>
+  <cpu type='kvm' name='486-v1' usable='yes'/>
   <cpu type='kvm' name='486' usable='yes'/>
   <cpu type='tcg' name='max' usable='yes'/>
   <cpu type='tcg' name='host' usable='no'>
     <blocker name='kvm'/>
   </cpu>
   <cpu type='tcg' name='base' usable='yes'/>
+  <cpu type='tcg' name='qemu64-v1' usable='yes'/>
   <cpu type='tcg' name='qemu64' usable='yes'/>
+  <cpu type='tcg' name='qemu32-v1' usable='yes'/>
   <cpu type='tcg' name='qemu32' usable='yes'/>
+  <cpu type='tcg' name='phenom-v1' usable='no'>
+    <blocker name='fxsr-opt'/>
+  </cpu>
   <cpu type='tcg' name='phenom' usable='no'>
     <blocker name='fxsr-opt'/>
   </cpu>
+  <cpu type='tcg' name='pentium3-v1' usable='yes'/>
   <cpu type='tcg' name='pentium3' usable='yes'/>
+  <cpu type='tcg' name='pentium2-v1' usable='yes'/>
   <cpu type='tcg' name='pentium2' usable='yes'/>
+  <cpu type='tcg' name='pentium-v1' usable='yes'/>
   <cpu type='tcg' name='pentium' usable='yes'/>
+  <cpu type='tcg' name='n270-v1' usable='yes'/>
   <cpu type='tcg' name='n270' usable='yes'/>
+  <cpu type='tcg' name='kvm64-v1' usable='yes'/>
   <cpu type='tcg' name='kvm64' usable='yes'/>
+  <cpu type='tcg' name='kvm32-v1' usable='yes'/>
   <cpu type='tcg' name='kvm32' usable='yes'/>
+  <cpu type='tcg' name='coreduo-v1' usable='yes'/>
   <cpu type='tcg' name='coreduo' usable='yes'/>
+  <cpu type='tcg' name='core2duo-v1' usable='yes'/>
   <cpu type='tcg' name='core2duo' usable='yes'/>
+  <cpu type='tcg' name='athlon-v1' usable='yes'/>
   <cpu type='tcg' name='athlon' usable='yes'/>
+  <cpu type='tcg' name='Westmere-v2' usable='no'>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='Westmere-v1' usable='yes'/>
   <cpu type='tcg' name='Westmere-IBRS' usable='no'>
     <blocker name='spec-ctrl'/>
   </cpu>
-  <cpu type='tcg' name='Westmere' usable='yes'/>
+  <cpu type='tcg' name='Westmere' usable='no'>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='Snowridge-v1' usable='no'>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='rdseed'/>
+    <blocker name='sha-ni'/>
+    <blocker name='umip'/>
+    <blocker name='gfni'/>
+    <blocker name='cldemote'/>
+    <blocker name='movdiri'/>
+    <blocker name='movdir64b'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='arch-capabilities'/>
+    <blocker name='core-capability'/>
+    <blocker name='ssbd'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+    <blocker name='split-lock-detect'/>
+  </cpu>
+  <cpu type='tcg' name='Snowridge' usable='no'>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='rdseed'/>
+    <blocker name='sha-ni'/>
+    <blocker name='umip'/>
+    <blocker name='gfni'/>
+    <blocker name='cldemote'/>
+    <blocker name='movdiri'/>
+    <blocker name='movdir64b'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='arch-capabilities'/>
+    <blocker name='core-capability'/>
+    <blocker name='ssbd'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+    <blocker name='split-lock-detect'/>
+  </cpu>
+  <cpu type='tcg' name='Skylake-Server-v2' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='rdseed'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='Skylake-Server-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='rdseed'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+  </cpu>
   <cpu type='tcg' name='Skylake-Server-IBRS' usable='no'>
     <blocker name='fma'/>
     <blocker name='pcid'/>
@@ -862,6 +1195,38 @@
     <blocker name='avx512cd'/>
     <blocker name='avx512bw'/>
     <blocker name='avx512vl'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='Skylake-Client-v2' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='rdseed'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='Skylake-Client-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='rdseed'/>
     <blocker name='3dnowprefetch'/>
     <blocker name='xsavec'/>
   </cpu>
@@ -893,8 +1258,20 @@
     <blocker name='invpcid'/>
     <blocker name='rtm'/>
     <blocker name='rdseed'/>
+    <blocker name='spec-ctrl'/>
     <blocker name='3dnowprefetch'/>
     <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='SandyBridge-v2' usable='no'>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='SandyBridge-v1' usable='no'>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
   </cpu>
   <cpu type='tcg' name='SandyBridge-IBRS' usable='no'>
     <blocker name='x2apic'/>
@@ -906,8 +1283,21 @@
     <blocker name='x2apic'/>
     <blocker name='tsc-deadline'/>
     <blocker name='avx'/>
+    <blocker name='spec-ctrl'/>
   </cpu>
+  <cpu type='tcg' name='Penryn-v1' usable='yes'/>
   <cpu type='tcg' name='Penryn' usable='yes'/>
+  <cpu type='tcg' name='Opteron_G5-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='misalignsse'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xop'/>
+    <blocker name='fma4'/>
+    <blocker name='tbm'/>
+    <blocker name='nrip-save'/>
+  </cpu>
   <cpu type='tcg' name='Opteron_G5' usable='no'>
     <blocker name='fma'/>
     <blocker name='avx'/>
@@ -919,6 +1309,14 @@
     <blocker name='tbm'/>
     <blocker name='nrip-save'/>
   </cpu>
+  <cpu type='tcg' name='Opteron_G4-v1' usable='no'>
+    <blocker name='avx'/>
+    <blocker name='misalignsse'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xop'/>
+    <blocker name='fma4'/>
+    <blocker name='nrip-save'/>
+  </cpu>
   <cpu type='tcg' name='Opteron_G4' usable='no'>
     <blocker name='avx'/>
     <blocker name='misalignsse'/>
@@ -927,15 +1325,43 @@
     <blocker name='fma4'/>
     <blocker name='nrip-save'/>
   </cpu>
+  <cpu type='tcg' name='Opteron_G3-v1' usable='no'>
+    <blocker name='misalignsse'/>
+  </cpu>
   <cpu type='tcg' name='Opteron_G3' usable='no'>
     <blocker name='misalignsse'/>
   </cpu>
+  <cpu type='tcg' name='Opteron_G2-v1' usable='yes'/>
   <cpu type='tcg' name='Opteron_G2' usable='yes'/>
+  <cpu type='tcg' name='Opteron_G1-v1' usable='yes'/>
   <cpu type='tcg' name='Opteron_G1' usable='yes'/>
+  <cpu type='tcg' name='Nehalem-v2' usable='no'>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='Nehalem-v1' usable='yes'/>
   <cpu type='tcg' name='Nehalem-IBRS' usable='no'>
     <blocker name='spec-ctrl'/>
   </cpu>
-  <cpu type='tcg' name='Nehalem' usable='yes'/>
+  <cpu type='tcg' name='Nehalem' usable='no'>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='KnightsMill-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='avx512f'/>
+    <blocker name='rdseed'/>
+    <blocker name='avx512pf'/>
+    <blocker name='avx512er'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512-vpopcntdq'/>
+    <blocker name='avx512-4vnniw'/>
+    <blocker name='avx512-4fmaps'/>
+    <blocker name='3dnowprefetch'/>
+  </cpu>
   <cpu type='tcg' name='KnightsMill' usable='no'>
     <blocker name='fma'/>
     <blocker name='x2apic'/>
@@ -953,6 +1379,19 @@
     <blocker name='avx512-4fmaps'/>
     <blocker name='3dnowprefetch'/>
   </cpu>
+  <cpu type='tcg' name='IvyBridge-v2' usable='no'>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='IvyBridge-v1' usable='no'>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+  </cpu>
   <cpu type='tcg' name='IvyBridge-IBRS' usable='no'>
     <blocker name='x2apic'/>
     <blocker name='tsc-deadline'/>
@@ -965,6 +1404,39 @@
     <blocker name='tsc-deadline'/>
     <blocker name='avx'/>
     <blocker name='f16c'/>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='Icelake-Server-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='rdseed'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='avx512vbmi'/>
+    <blocker name='umip'/>
+    <blocker name='avx512vbmi2'/>
+    <blocker name='gfni'/>
+    <blocker name='vaes'/>
+    <blocker name='vpclmulqdq'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='avx512bitalg'/>
+    <blocker name='avx512-vpopcntdq'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='ssbd'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='wbnoinvd'/>
+    <blocker name='xsavec'/>
   </cpu>
   <cpu type='tcg' name='Icelake-Server' usable='no'>
     <blocker name='fma'/>
@@ -983,6 +1455,33 @@
     <blocker name='avx512cd'/>
     <blocker name='avx512bw'/>
     <blocker name='avx512vl'/>
+    <blocker name='avx512vbmi'/>
+    <blocker name='umip'/>
+    <blocker name='avx512vbmi2'/>
+    <blocker name='gfni'/>
+    <blocker name='vaes'/>
+    <blocker name='vpclmulqdq'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='avx512bitalg'/>
+    <blocker name='avx512-vpopcntdq'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='ssbd'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='wbnoinvd'/>
+    <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='Icelake-Client-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='rdseed'/>
     <blocker name='avx512vbmi'/>
     <blocker name='umip'/>
     <blocker name='avx512vbmi2'/>
@@ -1025,6 +1524,52 @@
     <blocker name='wbnoinvd'/>
     <blocker name='xsavec'/>
   </cpu>
+  <cpu type='tcg' name='Haswell-v4' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='Haswell-v3' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='Haswell-v2' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+  </cpu>
+  <cpu type='tcg' name='Haswell-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+  </cpu>
   <cpu type='tcg' name='Haswell-noTSX-IBRS' usable='no'>
     <blocker name='fma'/>
     <blocker name='pcid'/>
@@ -1066,10 +1611,40 @@
     <blocker name='tsc-deadline'/>
     <blocker name='avx'/>
     <blocker name='f16c'/>
-    <blocker name='hle'/>
     <blocker name='avx2'/>
     <blocker name='invpcid'/>
-    <blocker name='rtm'/>
+    <blocker name='spec-ctrl'/>
+  </cpu>
+  <cpu type='tcg' name='EPYC-v2' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='rdseed'/>
+    <blocker name='sha-ni'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='misalignsse'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='osvw'/>
+    <blocker name='topoext'/>
+    <blocker name='ibpb'/>
+    <blocker name='nrip-save'/>
+    <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='EPYC-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='rdseed'/>
+    <blocker name='sha-ni'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='misalignsse'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='osvw'/>
+    <blocker name='topoext'/>
+    <blocker name='nrip-save'/>
+    <blocker name='xsavec'/>
   </cpu>
   <cpu type='tcg' name='EPYC-IBPB' usable='no'>
     <blocker name='fma'/>
@@ -1099,6 +1674,22 @@
     <blocker name='3dnowprefetch'/>
     <blocker name='osvw'/>
     <blocker name='topoext'/>
+    <blocker name='ibpb'/>
+    <blocker name='nrip-save'/>
+    <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='Dhyana-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='rdseed'/>
+    <blocker name='fxsr-opt'/>
+    <blocker name='misalignsse'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='osvw'/>
+    <blocker name='topoext'/>
+    <blocker name='ibpb'/>
     <blocker name='nrip-save'/>
     <blocker name='xsavec'/>
   </cpu>
@@ -1117,8 +1708,37 @@
     <blocker name='nrip-save'/>
     <blocker name='xsavec'/>
   </cpu>
+  <cpu type='tcg' name='Conroe-v1' usable='yes'/>
   <cpu type='tcg' name='Conroe' usable='yes'/>
-  <cpu type='tcg' name='Cascadelake-Server' usable='no'>
+  <cpu type='tcg' name='Cascadelake-Server-v2' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='rdseed'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='arch-capabilities'/>
+    <blocker name='ssbd'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+    <blocker name='rdctl-no'/>
+    <blocker name='ibrs-all'/>
+    <blocker name='skip-l1dfl-vmentry'/>
+    <blocker name='mds-no'/>
+  </cpu>
+  <cpu type='tcg' name='Cascadelake-Server-v1' usable='no'>
     <blocker name='fma'/>
     <blocker name='pcid'/>
     <blocker name='x2apic'/>
@@ -1140,6 +1760,88 @@
     <blocker name='ssbd'/>
     <blocker name='3dnowprefetch'/>
     <blocker name='xsavec'/>
+  </cpu>
+  <cpu type='tcg' name='Cascadelake-Server' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='avx512f'/>
+    <blocker name='avx512dq'/>
+    <blocker name='rdseed'/>
+    <blocker name='avx512cd'/>
+    <blocker name='avx512bw'/>
+    <blocker name='avx512vl'/>
+    <blocker name='avx512vnni'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='arch-capabilities'/>
+    <blocker name='ssbd'/>
+    <blocker name='3dnowprefetch'/>
+    <blocker name='xsavec'/>
+    <blocker name='rdctl-no'/>
+    <blocker name='ibrs-all'/>
+    <blocker name='skip-l1dfl-vmentry'/>
+    <blocker name='mds-no'/>
+  </cpu>
+  <cpu type='tcg' name='Broadwell-v4' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rdseed'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='3dnowprefetch'/>
+  </cpu>
+  <cpu type='tcg' name='Broadwell-v3' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='rdseed'/>
+    <blocker name='spec-ctrl'/>
+    <blocker name='3dnowprefetch'/>
+  </cpu>
+  <cpu type='tcg' name='Broadwell-v2' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rdseed'/>
+    <blocker name='3dnowprefetch'/>
+  </cpu>
+  <cpu type='tcg' name='Broadwell-v1' usable='no'>
+    <blocker name='fma'/>
+    <blocker name='pcid'/>
+    <blocker name='x2apic'/>
+    <blocker name='tsc-deadline'/>
+    <blocker name='avx'/>
+    <blocker name='f16c'/>
+    <blocker name='hle'/>
+    <blocker name='avx2'/>
+    <blocker name='invpcid'/>
+    <blocker name='rtm'/>
+    <blocker name='rdseed'/>
+    <blocker name='3dnowprefetch'/>
   </cpu>
   <cpu type='tcg' name='Broadwell-noTSX-IBRS' usable='no'>
     <blocker name='fma'/>
@@ -1188,13 +1890,13 @@
     <blocker name='tsc-deadline'/>
     <blocker name='avx'/>
     <blocker name='f16c'/>
-    <blocker name='hle'/>
     <blocker name='avx2'/>
     <blocker name='invpcid'/>
-    <blocker name='rtm'/>
     <blocker name='rdseed'/>
+    <blocker name='spec-ctrl'/>
     <blocker name='3dnowprefetch'/>
   </cpu>
+  <cpu type='tcg' name='486-v1' usable='yes'/>
   <cpu type='tcg' name='486' usable='yes'/>
   <machine name='pc-i440fx-4.1' alias='pc' hotplugCpus='yes' maxCpus='255' default='yes'/>
   <machine name='pc-0.15' hotplugCpus='yes' maxCpus='255'/>

@@ -125,6 +125,10 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     # We do "bad" function casts all the time for event callbacks
     wantwarn="$wantwarn -Wno-cast-function-type"
 
+    # CLang incorrectly complains about dup typedefs win gnu99 mode
+    # so use this CLang-specific arg to keep it quiet
+    wantwarn="$wantwarn -Wno-typedef-redefinition"
+
     # GNULIB expects this to be part of -Wc++-compat, but we turn
     # that one off, so we need to manually enable this again
     wantwarn="$wantwarn -Wjump-misses-init"
@@ -188,6 +192,11 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     then
       wantwarn="$wantwarn -Werror"
     fi
+
+    # Request the gnu99 standard which is the best choice with
+    # gcc 4.8.0. Not a warning flag, but the probing mechanism
+    # is convenient
+    wantwarn="$wantwarn -std=gnu99"
 
     # Check for $CC support of each warning
     for w in $wantwarn; do

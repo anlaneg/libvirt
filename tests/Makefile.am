@@ -127,6 +127,7 @@ EXTRA_DIST = \
 	qemustatusxml2xmldata \
 	qemumemlockdata \
 	qemufirmwaredata \
+	qemuvhostuserdata \
 	secretxml2xmlin \
 	securityselinuxhelperdata \
 	securityselinuxlabeldata \
@@ -290,6 +291,7 @@ test_programs += qemuxml2argvtest qemuxml2xmltest \
 	qemumigparamstest \
 	qemusecuritytest \
 	qemufirmwaretest \
+	qemuvhostusertest \
 	$(NULL)
 test_helpers += qemucapsprobe
 test_libraries += libqemumonitortestutils.la \
@@ -329,10 +331,6 @@ if WITH_BHYVE
 test_programs += bhyvexml2argvtest bhyvexml2xmltest bhyveargv2xmltest
 test_libraries += libbhyvexml2argvmock.la libbhyveargv2xmlmock.la
 endif WITH_BHYVE
-
-if WITH_CIL
-test_programs += objectlocking
-endif WITH_CIL
 
 if WITH_YAJL
 test_programs += virjsontest
@@ -692,6 +690,13 @@ qemufirmwaretest_SOURCES = \
 	$(NULL)
 qemufirmwaretest_LDADD = $(qemu_LDADDS)
 
+qemuvhostusertest_SOURCES = \
+	qemuvhostusertest.c \
+	testutils.h testutils.c \
+	virfilewrapper.c virfilewrapper.h \
+	$(NULL)
+qemuvhostusertest_LDADD = $(qemu_LDADDS)
+
 else ! WITH_QEMU
 EXTRA_DIST += qemuxml2argvtest.c qemuxml2xmltest.c \
 	qemudomaincheckpointxml2xmltest.c qemudomainsnapshotxml2xmltest.c \
@@ -706,6 +711,7 @@ EXTRA_DIST += qemuxml2argvtest.c qemuxml2xmltest.c \
 	qemusecuritytest.c qemusecuritytest.h \
 	qemusecuritymock.c \
 	qemufirmwaretest.c \
+	qemuvhostusertest.c \
 	$(QEMUMONITORTESTUTILS_SOURCES)
 endif ! WITH_QEMU
 
@@ -1537,27 +1543,4 @@ else ! WITH_LINUX
 EXTRA_DIST += virscsitest.c
 endif  ! WITH_LINUX
 
-if WITH_CIL
-CILOPTFLAGS =
-CILOPTINCS =
-CILOPTPACKAGES = -package unix,str,cil
-CILOPTLIBS = -linkpkg
-
-objectlocking_SOURCES = objectlocking.ml
-
-%.cmx: %.ml
-	ocamlfind ocamlopt $(CILOPTFLAGS) $(CILOPTINCS) $(CILOPTPACKAGES) -c $<
-
-objectlocking: objectlocking.cmx objectlocking-files.txt
-	ocamlfind ocamlopt $(CILOPTFLAGS) $(CILOPTINCS) $(CILOPTPACKAGES) \
-	  $(CILOPTLIBS) $< -o $@
-
-objectlocking-files.txt:
-	find $(top_builddir)/src/ -name '*.i' > $@
-
-else ! WITH_CIL
-EXTRA_DIST += objectlocking.ml
-endif ! WITH_CIL
-
-CLEANFILES = *.cov *.gcov .libs/*.gcda .libs/*.gcno *.gcno *.gcda *.cmi *.cmx \
-	objectlocking-files.txt
+CLEANFILES = *.cov *.gcov .libs/*.gcda .libs/*.gcno *.gcno *.gcda

@@ -718,6 +718,7 @@ networkStateInitialize(bool privileged,
     int ret = VIR_DRV_STATE_INIT_ERROR;
     char *configdir = NULL;
     char *rundir = NULL;
+    bool autostart = true;
 #ifdef WITH_FIREWALLD
     DBusConnection *sysbus = NULL;
 #endif
@@ -818,9 +819,14 @@ networkStateInitialize(bool privileged,
     networkReloadFirewallRules(network_driver, true);
     networkRefreshDaemons(network_driver);
 
-    virNetworkObjListForEach(network_driver->networks,
-                             networkAutostartConfig,
-                             network_driver);
+    if (virDriverShouldAutostart(network_driver->stateDir, &autostart) < 0)
+        goto error;
+
+    if (autostart) {
+        virNetworkObjListForEach(network_driver->networks,
+                                 networkAutostartConfig,
+                                 network_driver);
+    }
 
     network_driver->networkEventState = virObjectEventStateNew();
 
@@ -941,21 +947,10 @@ networkConnectOpen(virConnectPtr conn,
         return VIR_DRV_OPEN_ERROR;
     }
 
-    if (network_driver->privileged) {
-        if (STRNEQ(conn->uri->path, "/system")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unexpected network URI path '%s', try network:///system"),
-                           conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    } else {
-        if (STRNEQ(conn->uri->path, "/session")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unexpected network URI path '%s', try network:///session"),
-                           conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    }
+    if (!virConnectValidateURIPath(conn->uri->path,
+                                   "network",
+                                   network_driver->privileged))
+        return VIR_DRV_OPEN_ERROR;
 
     if (virConnectOpenEnsureACL(conn) < 0)
         return VIR_DRV_OPEN_ERROR;
@@ -5580,7 +5575,7 @@ networkPortCreateXML(virNetworkPtr net,
     virNetworkDriverStatePtr driver = networkGetDriver();
     virNetworkObjPtr obj;
     virNetworkDefPtr def;
-    virNetworkPortDefPtr portdef = NULL;
+    VIR_AUTOPTR(virNetworkPortDef) portdef = NULL;
     virNetworkPortPtr ret = NULL;
     int rc;
 
@@ -5630,13 +5625,13 @@ networkPortCreateXML(virNetworkPtr net,
 
         virErrorPreserveLast(&save_err);
         ignore_value(networkReleasePort(obj, portdef));
-        virNetworkPortDefFree(portdef);
         virErrorRestore(&save_err);
 
         goto cleanup;
     }
 
     ret = virGetNetworkPort(net, portdef->uuid);
+    portdef = NULL;
  cleanup:
     virNetworkObjEndAPI(&obj);
     return ret;

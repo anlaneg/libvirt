@@ -501,6 +501,18 @@ struct _qemuDomainVsockPrivate {
 };
 
 
+#define QEMU_DOMAIN_VIDEO_PRIVATE(dev) \
+    ((qemuDomainVideoPrivatePtr) (dev)->privateData)
+
+typedef struct _qemuDomainVideoPrivate qemuDomainVideoPrivate;
+typedef qemuDomainVideoPrivate *qemuDomainVideoPrivatePtr;
+struct _qemuDomainVideoPrivate {
+    virObject parent;
+
+    int vhost_user_fd;
+};
+
+
 #define QEMU_DOMAIN_GRAPHICS_PRIVATE(dev) \
     ((qemuDomainGraphicsPrivatePtr) (dev)->privateData)
 
@@ -581,6 +593,7 @@ struct _qemuDomainXmlNsDef {
     char **capsdel;
 };
 
+virDomainObjPtr qemuDomainObjFromDomain(virDomainPtr domain);
 
 qemuDomainSaveCookiePtr qemuDomainSaveCookieNew(virDomainObjPtr vm);
 
@@ -778,21 +791,6 @@ int qemuDomainMomentDiscardAll(void *payload,
 
 int qemuDomainSnapshotDiscardAllMetadata(virQEMUDriverPtr driver,
                                          virDomainObjPtr vm);
-
-int qemuDomainCheckpointWriteMetadata(virDomainObjPtr vm,
-                                      virDomainMomentObjPtr checkpoint,
-                                      virCapsPtr caps,
-                                      virDomainXMLOptionPtr xmlopt,
-                                      const char *checkpointDir);
-
-int qemuDomainCheckpointDiscard(virQEMUDriverPtr driver,
-                                virDomainObjPtr vm,
-                                virDomainMomentObjPtr chk,
-                                bool update_current,
-                                bool metadata_only);
-
-int qemuDomainCheckpointDiscardAllMetadata(virQEMUDriverPtr driver,
-                                           virDomainObjPtr vm);
 
 void qemuDomainRemoveInactive(virQEMUDriverPtr driver,
                               virDomainObjPtr vm);
@@ -1219,3 +1217,7 @@ qemuDomainPausedReasonToSuspendedEvent(virDomainPausedReason reason);
 int
 qemuDomainValidateActualNetDef(const virDomainNetDef *net,
                                virQEMUCapsPtr qemuCaps);
+
+int
+qemuDomainSupportsCheckpointsBlockjobs(virDomainObjPtr vm)
+    ATTRIBUTE_RETURN_CHECK;

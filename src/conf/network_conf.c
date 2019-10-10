@@ -2114,8 +2114,7 @@ virNetworkDefParseNode(xmlDocPtr xml,
                        xmlNodePtr root,
                        virNetworkXMLOptionPtr xmlopt)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virNetworkDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (!virXMLNodeNameEqual(root, "network")) {
         virReportError(VIR_ERR_XML_ERROR,
@@ -2125,18 +2124,11 @@ virNetworkDefParseNode(xmlDocPtr xml,
         return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virNetworkDefParseXML(ctxt, xmlopt);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virNetworkDefParseXML(ctxt, xmlopt);
 }
 
 
@@ -3643,57 +3635,56 @@ virNetworkDefUpdateSection(virNetworkDefPtr def,
                            const char *xml,
                            unsigned int flags)  /* virNetworkUpdateFlags */
 {
-    int ret = -1;
-    xmlDocPtr doc;
-    xmlXPathContextPtr ctxt = NULL;
+    VIR_AUTOPTR(xmlDoc) doc = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (!(doc = virXMLParseStringCtxt(xml, _("network_update_xml"), &ctxt)))
-        goto cleanup;
+        return -1;
 
     switch (section) {
     case VIR_NETWORK_SECTION_BRIDGE:
-       ret = virNetworkDefUpdateBridge(def, command, parentIndex, ctxt, flags);
+        return virNetworkDefUpdateBridge(def, command, parentIndex, ctxt, flags);
         break;
 
     case VIR_NETWORK_SECTION_DOMAIN:
-        ret = virNetworkDefUpdateDomain(def, command, parentIndex, ctxt, flags);
+        return virNetworkDefUpdateDomain(def, command, parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_IP:
-        ret = virNetworkDefUpdateIP(def, command, parentIndex, ctxt, flags);
+        return virNetworkDefUpdateIP(def, command, parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_IP_DHCP_HOST:
-        ret = virNetworkDefUpdateIPDHCPHost(def, command,
-                                            parentIndex, ctxt, flags);
-        break;
-    case VIR_NETWORK_SECTION_IP_DHCP_RANGE:
-        ret = virNetworkDefUpdateIPDHCPRange(def, command,
+        return virNetworkDefUpdateIPDHCPHost(def, command,
                                              parentIndex, ctxt, flags);
         break;
+    case VIR_NETWORK_SECTION_IP_DHCP_RANGE:
+        return virNetworkDefUpdateIPDHCPRange(def, command,
+                                              parentIndex, ctxt, flags);
+        break;
     case VIR_NETWORK_SECTION_FORWARD:
-        ret = virNetworkDefUpdateForward(def, command,
-                                         parentIndex, ctxt, flags);
+        return virNetworkDefUpdateForward(def, command,
+                                          parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_FORWARD_INTERFACE:
-        ret = virNetworkDefUpdateForwardInterface(def, command,
-                                                  parentIndex, ctxt, flags);
+        return virNetworkDefUpdateForwardInterface(def, command,
+                                                   parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_FORWARD_PF:
-        ret = virNetworkDefUpdateForwardPF(def, command,
-                                           parentIndex, ctxt, flags);
+        return virNetworkDefUpdateForwardPF(def, command,
+                                            parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_PORTGROUP:
-        ret = virNetworkDefUpdatePortGroup(def, command,
-                                           parentIndex, ctxt, flags);
+        return virNetworkDefUpdatePortGroup(def, command,
+                                            parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_DNS_HOST:
-        ret = virNetworkDefUpdateDNSHost(def, command,
-                                         parentIndex, ctxt, flags);
+        return virNetworkDefUpdateDNSHost(def, command,
+                                          parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_DNS_TXT:
-        ret = virNetworkDefUpdateDNSTxt(def, command, parentIndex, ctxt, flags);
+        return virNetworkDefUpdateDNSTxt(def, command, parentIndex, ctxt, flags);
         break;
     case VIR_NETWORK_SECTION_DNS_SRV:
-        ret = virNetworkDefUpdateDNSSrv(def, command, parentIndex, ctxt, flags);
+        return virNetworkDefUpdateDNSSrv(def, command, parentIndex, ctxt, flags);
         break;
     default:
         virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
@@ -3701,8 +3692,5 @@ virNetworkDefUpdateSection(virNetworkDefPtr def,
         break;
     }
 
- cleanup:
-    xmlFreeDoc(doc);
-    xmlXPathFreeContext(ctxt);
-    return ret;
+    return -1;
 }

@@ -29,7 +29,6 @@
 #include "internal.h"
 #include "virbitmap.h"
 #include "virbuffer.h"
-#include "count-one-bits.h"
 #include "datatypes.h"
 #include "domain_conf.h"
 #include "virlog.h"
@@ -430,12 +429,11 @@ virDomainSnapshotDefParseNode(xmlDocPtr xml,
                               bool *current,
                               unsigned int flags)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virDomainSnapshotDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (!virXMLNodeNameEqual(root, "domainsnapshot")) {
         virReportError(VIR_ERR_XML_ERROR, "%s", _("domainsnapshot"));
-        goto cleanup;
+        return NULL;
     }
 
     if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_VALIDATE) {
@@ -445,22 +443,16 @@ virDomainSnapshotDefParseNode(xmlDocPtr xml,
                                      abs_top_srcdir "/docs/schemas",
                                      PKGDATADIR "/schemas");
         if (!schema)
-            goto cleanup;
+            return NULL;
         if (virXMLValidateAgainstSchema(schema, xml) < 0)
-            goto cleanup;
+            return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virDomainSnapshotDefParse(ctxt, caps, xmlopt, parseOpaque, current, flags);
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virDomainSnapshotDefParse(ctxt, caps, xmlopt, parseOpaque, current, flags);
 }
 
 virDomainSnapshotDefPtr
@@ -993,8 +985,7 @@ virDomainSnapshotIsExternal(virDomainMomentObjPtr snap)
 }
 
 int
-virDomainSnapshotRedefinePrep(virDomainPtr domain,
-                              virDomainObjPtr vm,
+virDomainSnapshotRedefinePrep(virDomainObjPtr vm,
                               virDomainSnapshotDefPtr *defptr,
                               virDomainMomentObjPtr *snap,
                               virDomainXMLOptionPtr xmlopt,
@@ -1013,7 +1004,7 @@ virDomainSnapshotRedefinePrep(virDomainPtr domain,
     if (other)
         otherdef = virDomainSnapshotObjGetDef(other);
     check_if_stolen = other && otherdef->parent.dom;
-    if (virDomainSnapshotRedefineValidate(def, domain->uuid, other, xmlopt,
+    if (virDomainSnapshotRedefineValidate(def, vm->def->uuid, other, xmlopt,
                                           flags) < 0) {
         /* revert any stealing of the snapshot domain definition */
         if (check_if_stolen && def->parent.dom && !otherdef->parent.dom)

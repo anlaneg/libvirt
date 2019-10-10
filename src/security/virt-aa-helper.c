@@ -911,27 +911,47 @@ file_iterate_pci_cb(virPCIDevicePtr dev ATTRIBUTE_UNUSED,
 }
 
 static int
-add_file_path(virDomainDiskDefPtr disk,
-              const char *path,
+add_file_path(virStorageSourcePtr src,
               size_t depth,
-              void *opaque)
+              virBufferPtr buf)
 {
-    virBufferPtr buf = opaque;
     int ret;
 
+    /* execute the callback only for local storage */
+    if (!src->path || !virStorageSourceIsLocalStorage(src))
+        return 0;
+
     if (depth == 0) {
-        if (disk->src->readonly)
-            ret = vah_add_file(buf, path, "rk");
+        if (src->readonly)
+            ret = vah_add_file(buf, src->path, "rk");
         else
-            ret = vah_add_file(buf, path, "rwk");
+            ret = vah_add_file(buf, src->path, "rwk");
     } else {
-        ret = vah_add_file(buf, path, "rk");
+        ret = vah_add_file(buf, src->path, "rk");
     }
 
     if (ret != 0)
         ret = -1;
 
     return ret;
+}
+
+
+static int
+storage_source_add_files(virStorageSourcePtr src,
+                         virBufferPtr buf,
+                         size_t depth)
+{
+    virStorageSourcePtr tmp;
+
+    for (tmp = src; virStorageSourceIsBacking(tmp); tmp = tmp->backingStore) {
+        if (add_file_path(tmp, depth, buf) < 0)
+            return -1;
+
+        depth++;
+    }
+
+    return 0;
 }
 
 static int
@@ -972,12 +992,9 @@ get_files(vahControl * ctl)
         if (!virStorageSourceHasBacking(disk->src))
             virStorageFileGetMetadata(disk->src, -1, -1, false);
 
-        /* XXX passing ignoreOpenFailure = true to get back to the behavior
-         * from before using virDomainDiskDefForeachPath. actually we should
-         * be passing ignoreOpenFailure = false and handle open errors more
-         * careful than just ignoring them.
+         /* XXX should handle open errors more careful than just ignoring them.
          */
-        if (virDomainDiskDefForeachPath(disk, true, add_file_path, &buf) < 0)
+        if (storage_source_add_files(disk->src, &buf, 0) < 0)
             goto cleanup;
     }
 
@@ -1238,10 +1255,10 @@ get_files(vahControl * ctl)
              * directory, log, and PID files.
              */
             virBufferAsprintf(&buf,
-                "  \"%s/lib/libvirt/swtpm/%s/%s/**\" rw,\n",
+                "  \"%s/lib/libvirt/swtpm/%s/%s/**\" rwk,\n",
                 LOCALSTATEDIR, uuidstr, tpmpath);
             virBufferAsprintf(&buf,
-                "  \"%s/log/swtpm/libvirt/qemu/%s-swtpm.log\" a,\n",
+                "  \"%s/log/swtpm/libvirt/qemu/%s-swtpm.log\" w,\n",
                 LOCALSTATEDIR, ctl->def->name);
             virBufferAsprintf(&buf,
                 "  \"%s/libvirt/qemu/swtpm/%s-swtpm.pid\" rw,\n",
@@ -1421,7 +1438,6 @@ main(int argc, char **argv)
     char *include_file = NULL;
 
     if (virGettextInitialize() < 0 ||
-        virThreadInitialize() < 0 ||
         virErrorInitialize() < 0) {
         fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
         exit(EXIT_FAILURE);

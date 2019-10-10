@@ -1541,6 +1541,7 @@ static int lxcStateInitialize(bool privileged,
 {
     virCapsPtr caps = NULL;
     virLXCDriverConfigPtr cfg = NULL;
+    bool autostart = true;
 
     /* Check that the user is root, silently disable if not */
     if (!privileged) {
@@ -1630,7 +1631,11 @@ static int lxcStateInitialize(bool privileged,
                                        NULL, NULL) < 0)
         goto cleanup;
 
-    virLXCProcessAutostartAll(lxc_driver);
+    if (virDriverShouldAutostart(cfg->stateDir, &autostart) < 0)
+        goto cleanup;
+
+    if (autostart)
+        virLXCProcessAutostartAll(lxc_driver);
 
     virObjectUnref(caps);
     return VIR_DRV_STATE_INIT_COMPLETE;
@@ -3486,8 +3491,10 @@ lxcDomainUpdateDeviceConfig(virDomainDefPtr vmdef,
                                          false) < 0)
             return -1;
 
-        virDomainNetDefFree(vmdef->nets[idx]);
-        vmdef->nets[idx] = net;
+        if (virDomainNetUpdate(vmdef, idx, net) < 0)
+            return -1;
+
+        virDomainNetDefFree(oldDev.data.net);
         dev->data.net = NULL;
         ret = 0;
 

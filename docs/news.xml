@@ -39,9 +39,48 @@
      -->
 
 <libvirt>
-  <release version="v5.8.0" date="unreleased">
+  <release version="v5.9.0" date="unreleased">
     <section title="New features">
+      <change>
+        <summary>
+          qemu: Introduce a new video model of type 'ramfb'
+        </summary>
+        <description>
+          Introduce a new video model type to the domain XML that supports the
+          <code>ramfb</code> standalone device in qemu.
+        </description>
+      </change>
+      <change>
+        <summary>
+          qemu: Implement the ccf-assist pSeries feature
+        </summary>
+        <description>
+          Users can now decide whether ccf-assist (Count Cache Flush Assist)
+          support should be available to pSeries guests.
+        </description>
+      </change>
     </section>
+    <section title="Improvements">
+    </section>
+    <section title="Bug fixes">
+      <change>
+        <summary>
+          lib: autostart objects exactly once
+        </summary>
+        <description>
+          If libvirtd or any of the sub-daemons is started with socket
+          activation then objects might be autostarted more than once.
+          For instance, if a domain under <code> qemu:///session </code>
+          URI is mark as autostarted and the session daemon is started then the
+          domain is started with it. If user shuts the domain down and the
+          session daemon is started again, the user's wish to keep the
+          domain shut off is ignored and the domain is autostarted again.
+          This is now fixed.
+        </description>
+      </change>
+    </section>
+  </release>
+  <release version="v5.8.0" date="2019-10-05">
     <section title="Removed features">
       <change>
         <summary>
@@ -53,10 +92,6 @@
           known user base.
         </description>
       </change>
-    </section>
-    <section title="Improvements">
-    </section>
-    <section title="Bug fixes">
     </section>
   </release>
   <release version="v5.7.0" date="2019-09-03">

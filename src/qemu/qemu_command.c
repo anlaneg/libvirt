@@ -114,6 +114,7 @@ VIR_ENUM_IMPL(qemuVideo,
               "" /* don't support gop */,
               "" /* 'none' doesn't make sense here */,
               "bochs-display",
+              "", /* ramfb can't be used with -vga */
 );
 
 VIR_ENUM_DECL(qemuDeviceVideo);
@@ -132,6 +133,7 @@ VIR_ENUM_IMPL(qemuDeviceVideo,
               "" /* don't support gop */,
               "" /* 'none' doesn't make sense here */,
               "bochs-display",
+              "ramfb",
 );
 
 VIR_ENUM_DECL(qemuDeviceVideoSecondary);
@@ -150,6 +152,7 @@ VIR_ENUM_IMPL(qemuDeviceVideoSecondary,
               "" /* don't support gop */,
               "" /* 'none' doesn't make sense here */,
               "" /* no secondary device for bochs */,
+              "" /* no secondary device for ramfb */,
 );
 
 VIR_ENUM_DECL(qemuSoundCodec);
@@ -1289,12 +1292,6 @@ qemuCheckDiskConfig(virDomainDiskDefPtr disk,
 {
     if (qemuCheckDiskConfigBlkdeviotune(disk, qemuCaps) < 0)
         return -1;
-
-    if (virDiskNameToIndex(disk->dst) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unsupported disk type '%s'"), disk->dst);
-        return -1;
-    }
 
     if (disk->wwn) {
         if ((disk->bus != VIR_DOMAIN_DISK_BUS_IDE) &&
@@ -3333,7 +3330,7 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
     VIR_AUTOFREE(char *) memPath = NULL;
     bool prealloc = false;
     virBitmapPtr nodemask = NULL;
-    int ret = -1;
+    int rc;
     VIR_AUTOPTR(virJSONValue) props = NULL;
     bool nodeSpecified = virDomainNumatuneNodeSpecified(def->numa, mem->targetNode);
     unsigned long long pagesize = mem->pagesize;
@@ -3431,7 +3428,7 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
         useHugepage = false;
     } else if (useHugepage && pagesize == 0) {
         if (qemuBuildMemoryGetDefaultPagesize(cfg, &pagesize) < 0)
-            goto cleanup;
+            return -1;
     }
 
     if (!(props = virJSONValueNewObject()))
@@ -3443,70 +3440,70 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
         if (useHugepage &&
             (virJSONValueObjectAdd(props, "b:hugetlb", useHugepage, NULL) < 0 ||
              virJSONValueObjectAdd(props, "U:hugetlbsize", pagesize << 10, NULL) < 0)) {
-            goto cleanup;
+            return -1;
         }
 
         if (qemuBuildMemoryBackendPropsShare(props, memAccess) < 0)
-            goto cleanup;
+            return -1;
 
     } else if (useHugepage || mem->nvdimmPath || memAccess ||
         def->mem.source == VIR_DOMAIN_MEMORY_SOURCE_FILE) {
 
         if (mem->nvdimmPath) {
             if (VIR_STRDUP(memPath, mem->nvdimmPath) < 0)
-                goto cleanup;
+                return -1;
             if (!priv->memPrealloc)
                 prealloc = true;
         } else if (useHugepage) {
             if (qemuGetDomainHupageMemPath(def, cfg, pagesize, &memPath) < 0)
-                goto cleanup;
+                return -1;
             if (!priv->memPrealloc)
                 prealloc = true;
         } else {
             /* We can have both pagesize and mem source. If that's the case,
              * prefer hugepages as those are more specific. */
             if (qemuGetMemoryBackingPath(def, cfg, mem->info.alias, &memPath) < 0)
-                goto cleanup;
+                return -1;
         }
 
         if (virJSONValueObjectAdd(props,
                                   "B:prealloc", prealloc,
                                   "s:mem-path", memPath,
                                   NULL) < 0)
-            goto cleanup;
+            return -1;
 
         if (!mem->nvdimmPath &&
             discard == VIR_TRISTATE_BOOL_YES) {
             if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD)) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                                _("this QEMU doesn't support memory discard"));
-                goto cleanup;
+                return -1;
             }
 
             if (virJSONValueObjectAdd(props,
                                       "B:discard-data", true,
                                       NULL) < 0)
-                goto cleanup;
+                return -1;
         }
 
         if (qemuBuildMemoryBackendPropsShare(props, memAccess) < 0)
-            goto cleanup;
+            return -1;
     } else {
         backendType = "memory-backend-ram";
     }
 
     if (virJSONValueObjectAdd(props, "U:size", mem->size * 1024, NULL) < 0)
-        goto cleanup;
+        return -1;
 
     if (mem->alignsize) {
         if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_OBJECT_MEMORY_FILE_ALIGN)) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("nvdimm align property is not available "
                              "with this QEMU binary"));
-            goto cleanup;
+            return -1;
         }
         if (virJSONValueObjectAdd(props, "U:align", mem->alignsize * 1024, NULL) < 0)
-            goto cleanup;
+            return -1;
     }
 
     if (mem->nvdimmPmem) {
@@ -3514,10 +3511,10 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("nvdimm pmem property is not available "
                              "with this QEMU binary"));
-            goto cleanup;
+            return -1;
         }
         if (virJSONValueObjectAdd(props, "s:pmem", "on", NULL) < 0)
-            goto cleanup;
+            return -1;
     }
 
     if (mem->sourceNodes) {
@@ -3525,17 +3522,17 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
     } else {
         if (virDomainNumatuneMaybeGetNodeset(def->numa, priv->autoNodeset,
                                              &nodemask, mem->targetNode) < 0)
-            goto cleanup;
+            return -1;
     }
 
     if (nodemask) {
         if (!virNumaNodesetIsAvailable(nodemask))
-            goto cleanup;
+            return -1;
         if (virJSONValueObjectAdd(props,
                                   "m:host-nodes", nodemask,
                                   "S:policy", qemuNumaPolicyTypeToString(mode),
                                   NULL) < 0)
-            goto cleanup;
+            return -1;
     }
 
     /* If none of the following is requested... */
@@ -3547,7 +3544,7 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
         !force) {
         /* report back that using the new backend is not necessary
          * to achieve the desired configuration */
-        ret = 1;
+        rc = 1;
     } else {
         /* otherwise check the required capability */
         if (STREQ(backendType, "memory-backend-file") &&
@@ -3555,30 +3552,29 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("this qemu doesn't support the "
                              "memory-backend-file object"));
-            goto cleanup;
+            return -1;
         } else if (STREQ(backendType, "memory-backend-ram") &&
                    !virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_OBJECT_MEMORY_RAM)) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("this qemu doesn't support the "
                              "memory-backend-ram object"));
-            goto cleanup;
+            return -1;
         } else if (STREQ(backendType, "memory-backend-memory") &&
                    !virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_OBJECT_MEMORY_MEMFD)) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("this qemu doesn't support the "
                              "memory-backend-memfd object"));
-            goto cleanup;
+            return -1;
         }
 
-        ret = 0;
+        rc = 0;
     }
 
     if (!(*backendProps = qemuMonitorCreateObjectPropsWrap(backendType, alias,
                                                            &props)))
-        ret = -1;
+        return -1;
 
- cleanup:
-    return ret;
+    return rc;
 }
 
 
@@ -3591,14 +3587,13 @@ qemuBuildMemoryCellBackendStr(virDomainDefPtr def,
 {
     VIR_AUTOPTR(virJSONValue) props = NULL;
     VIR_AUTOFREE(char *) alias = NULL;
-    int ret = -1;
     int rc;
     virDomainMemoryDef mem = { 0 };
     unsigned long long memsize = virDomainNumaGetNodeMemorySize(def->numa,
                                                                 cell);
 
     if (virAsprintf(&alias, "ram-node%zu", cell) < 0)
-        goto cleanup;
+        return -1;
 
     mem.size = memsize;
     mem.targetNode = cell;
@@ -3606,16 +3601,12 @@ qemuBuildMemoryCellBackendStr(virDomainDefPtr def,
 
     if ((rc = qemuBuildMemoryBackendProps(&props, alias, cfg,
                                           priv, def, &mem, false)) < 0)
-        goto cleanup;
+        return -1;
 
     if (virQEMUBuildObjectCommandlineFromJSON(buf, props) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = rc;
-
- cleanup:
-
-    return ret;
+    return rc;
 }
 
 
@@ -3906,7 +3897,6 @@ qemuBuildNicDevStr(virDomainDefPtr def,
 
 char *
 qemuBuildHostNetStr(virDomainNetDefPtr net,
-                    virQEMUDriverPtr driver,
                     char **tapfd,
                     size_t tapfdSize,
                     char **vhostfd,
@@ -3916,15 +3906,13 @@ qemuBuildHostNetStr(virDomainNetDefPtr net,
     bool is_tap = false;
     VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     virDomainNetType netType = virDomainNetGetActualType(net);
-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
     size_t i;
-    char *ret = NULL;
 
     if (net->script && netType != VIR_DOMAIN_NET_TYPE_ETHERNET) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("scripts are not supported on interfaces of type %s"),
                        virDomainNetTypeToString(netType));
-        goto cleanup;
+        return NULL;
     }
 
     switch (netType) {
@@ -3991,7 +3979,7 @@ qemuBuildHostNetStr(virDomainNetDefPtr net,
                 const char *prefix = "";
 
                 if (!(addr = virSocketAddrFormat(&ip->address)))
-                    goto cleanup;
+                    return NULL;
 
                 if (VIR_SOCKET_ADDR_IS_FAMILY(&ip->address, AF_INET))
                     prefix = "net=";
@@ -4048,12 +4036,9 @@ qemuBuildHostNetStr(virDomainNetDefPtr net,
 
     virBufferTrim(&buf, ",", -1);
     if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
+        return NULL;
 
-    ret = virBufferContentAndReset(&buf);
- cleanup:
-    virObjectUnref(cfg);
-    return ret;
+    return virBufferContentAndReset(&buf);
 }
 
 
@@ -4484,9 +4469,9 @@ qemuBuildSoundCommandLine(virCommandPtr cmd,
             virCommandAddArg(cmd, str);
             if (sound->model == VIR_DOMAIN_SOUND_MODEL_ICH6 ||
                 sound->model == VIR_DOMAIN_SOUND_MODEL_ICH9) {
-                char *codecstr = NULL;
 
                 for (j = 0; j < sound->ncodecs; j++) {
+                    VIR_AUTOFREE(char *) codecstr = NULL;
                     virCommandAddArg(cmd, "-device");
                     if (!(codecstr =
                           qemuBuildSoundCodecStr(sound, sound->codecs[j],
@@ -4495,9 +4480,9 @@ qemuBuildSoundCommandLine(virCommandPtr cmd,
 
                     }
                     virCommandAddArg(cmd, codecstr);
-                    VIR_FREE(codecstr);
                 }
                 if (j == 0) {
+                    VIR_AUTOFREE(char *) codecstr = NULL;
                     virDomainSoundCodecDef codec = {
                         VIR_DOMAIN_SOUND_CODEC_TYPE_DUPLEX,
                         0
@@ -4510,7 +4495,6 @@ qemuBuildSoundCommandLine(virCommandPtr cmd,
 
                     }
                     virCommandAddArg(cmd, codecstr);
-                    VIR_FREE(codecstr);
                 }
             }
         }
@@ -4526,16 +4510,23 @@ qemuBuildDeviceVideoStr(const virDomainDef *def,
                         virQEMUCapsPtr qemuCaps)
 {
     VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
-    const char *model;
+    const char *model = NULL;
 
     /* We try to chose the best model for primary video device by preferring
      * model with VGA compatibility mode.  For some video devices on some
      * architectures there might not be such model so fallback to one
      * without VGA compatibility mode. */
-    if (video->primary && qemuDomainSupportsVideoVga(video, qemuCaps))
-        model = qemuDeviceVideoTypeToString(video->type);
-    else
-        model = qemuDeviceVideoSecondaryTypeToString(video->type);
+    if (video->backend == VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER) {
+        if (video->primary && qemuDomainSupportsVideoVga(video, qemuCaps))
+            model = "vhost-user-vga";
+        else
+            model = "vhost-user-gpu";
+    } else {
+        if (video->primary && qemuDomainSupportsVideoVga(video, qemuCaps))
+            model = qemuDeviceVideoTypeToString(video->type);
+        else
+            model = qemuDeviceVideoSecondaryTypeToString(video->type);
+    }
 
     if (!model || STREQ(model, "")) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -4544,8 +4535,8 @@ qemuBuildDeviceVideoStr(const virDomainDef *def,
         return NULL;
     }
 
-    if (STREQ(model, "virtio-gpu")) {
-        if (qemuBuildVirtioDevStr(&buf, "virtio-gpu", qemuCaps,
+    if (STREQ(model, "virtio-gpu") || STREQ(model, "vhost-user-gpu")) {
+        if (qemuBuildVirtioDevStr(&buf, model, qemuCaps,
                                   VIR_DOMAIN_DEVICE_VIDEO, video) < 0) {
             return NULL;
         }
@@ -4555,9 +4546,12 @@ qemuBuildDeviceVideoStr(const virDomainDef *def,
 
     virBufferAsprintf(&buf, ",id=%s", video->info.alias);
 
-    if (video->accel && video->accel->accel3d == VIR_TRISTATE_SWITCH_ON) {
-        virBufferAsprintf(&buf, ",virgl=%s",
-                          virTristateSwitchTypeToString(video->accel->accel3d));
+    if (video->backend != VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER &&
+        video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO) {
+        if (video->accel && video->accel->accel3d == VIR_TRISTATE_SWITCH_ON) {
+            virBufferAsprintf(&buf, ",virgl=%s",
+                              virTristateSwitchTypeToString(video->accel->accel3d));
+        }
     }
 
     if (video->type == VIR_DOMAIN_VIDEO_TYPE_QXL) {
@@ -4585,6 +4579,10 @@ qemuBuildDeviceVideoStr(const virDomainDef *def,
             if (video->heads)
                 virBufferAsprintf(&buf, ",max_outputs=%u", video->heads);
         }
+    } else if (video->backend == VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER) {
+        if (video->heads)
+            virBufferAsprintf(&buf, ",max_outputs=%u", video->heads);
+        virBufferAsprintf(&buf, ",chardev=chr-vu-%s", video->info.alias);
     } else if (video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO) {
         if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_GPU_MAX_OUTPUTS)) {
             if (video->heads)
@@ -4696,12 +4694,49 @@ qemuBuildVgaVideoCommand(virCommandPtr cmd,
 }
 
 
+static char *
+qemuBuildVhostUserChardevStr(const char *alias,
+                             int *fd,
+                             virCommandPtr cmd)
+{
+    char *chardev = NULL;
+
+    if (*fd == -1) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Attempt to pass closed vhostuser FD"));
+        return NULL;
+    }
+
+    if (virAsprintf(&chardev, "socket,id=chr-vu-%s,fd=%d", alias, *fd) < 0)
+        return NULL;
+
+    virCommandPassFD(cmd, *fd, VIR_COMMAND_PASS_FD_CLOSE_PARENT);
+    *fd = -1;
+
+    return chardev;
+}
+
+
 static int
 qemuBuildVideoCommandLine(virCommandPtr cmd,
                           const virDomainDef *def,
                           virQEMUCapsPtr qemuCaps)
 {
     size_t i;
+
+    for (i = 0; i < def->nvideos; i++) {
+        VIR_AUTOFREE(char *) chardev = NULL;
+        virDomainVideoDefPtr video = def->videos[i];
+
+        if (video->backend == VIR_DOMAIN_VIDEO_BACKEND_TYPE_VHOSTUSER) {
+            if (!(chardev = qemuBuildVhostUserChardevStr(video->info.alias,
+                                &QEMU_DOMAIN_VIDEO_PRIVATE(video)->vhost_user_fd,
+                                cmd)))
+                return -1;
+
+            virCommandAddArgList(cmd, "-chardev", chardev, NULL);
+        }
+    }
 
     for (i = 0; i < def->nvideos; i++) {
         VIR_AUTOFREE(char *) str = NULL;
@@ -7377,6 +7412,26 @@ qemuBuildMachineCommandLine(virCommandPtr cmd,
         virBufferAsprintf(&buf, ",cap-nested-hv=%s", str);
     }
 
+    if (def->features[VIR_DOMAIN_FEATURE_CCF_ASSIST] != VIR_TRISTATE_SWITCH_ABSENT) {
+        const char *str;
+
+        if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_MACHINE_PSERIES_CAP_CCF_ASSIST)) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("ccf-assist configuration is not supported by this "
+                             "QEMU binary"));
+            return -1;
+        }
+
+        str = virTristateSwitchTypeToString(def->features[VIR_DOMAIN_FEATURE_CCF_ASSIST]);
+        if (!str) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Invalid setting for ccf-assist state"));
+            return -1;
+        }
+
+        virBufferAsprintf(&buf, ",cap-ccf-assist=%s", str);
+    }
+
     if (cpu && cpu->model &&
         cpu->mode == VIR_CPU_MODE_HOST_MODEL &&
         qemuDomainIsPSeries(def) &&
@@ -8553,7 +8608,7 @@ qemuBuildInterfaceCommandLine(virQEMUDriverPtr driver,
     if (chardev)
         virCommandAddArgList(cmd, "-chardev", chardev, NULL);
 
-    if (!(host = qemuBuildHostNetStr(net, driver,
+    if (!(host = qemuBuildHostNetStr(net,
                                      tapfdName, tapfdSize,
                                      vhostfdName, vhostfdSize,
                                      slirpfdName)))

@@ -695,36 +695,30 @@ virStoragePoolSourcePtr
 virStoragePoolDefParseSourceString(const char *srcSpec,
                                    int pool_type)
 {
-    xmlDocPtr doc = NULL;
+    VIR_AUTOPTR(xmlDoc) doc = NULL;
     xmlNodePtr node = NULL;
-    xmlXPathContextPtr xpath_ctxt = NULL;
-    virStoragePoolSourcePtr ret = NULL;
+    VIR_AUTOPTR(xmlXPathContext) xpath_ctxt = NULL;
     VIR_AUTOPTR(virStoragePoolSource) def = NULL;
 
     if (!(doc = virXMLParseStringCtxt(srcSpec,
                                       _("(storage_source_specification)"),
                                       &xpath_ctxt)))
-        goto cleanup;
+        return NULL;
 
     if (VIR_ALLOC(def) < 0)
-        goto cleanup;
+        return NULL;
 
     if (!(node = virXPathNode("/source", xpath_ctxt))) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("root element was not source"));
-        goto cleanup;
+        return NULL;
     }
 
     if (virStoragePoolDefParseSource(xpath_ctxt, def, pool_type,
                                      node) < 0)
-        goto cleanup;
+        return NULL;
 
-    VIR_STEAL_PTR(ret, def);
- cleanup:
-    xmlFreeDoc(doc);
-    xmlXPathFreeContext(xpath_ctxt);
-
-    return ret;
+    VIR_RETURN_PTR(def);
 }
 
 
@@ -1013,28 +1007,21 @@ virStoragePoolDefPtr
 virStoragePoolDefParseNode(xmlDocPtr xml,
                            xmlNodePtr root)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virStoragePoolDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (!virXMLNodeNameEqual(root, "pool")) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("unexpected root element <%s>, "
                          "expecting <pool>"),
                        root->name);
-        goto cleanup;
+        return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virStoragePoolDefParseXML(ctxt);
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virStoragePoolDefParseXML(ctxt);
 }
 
 
@@ -1457,28 +1444,21 @@ virStorageVolDefParseNode(virStoragePoolDefPtr pool,
                           xmlNodePtr root,
                           unsigned int flags)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virStorageVolDefPtr def = NULL;
+    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
 
     if (!virXMLNodeNameEqual(root, "volume")) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("unexpected root element <%s>, "
                          "expecting <volume>"),
                        root->name);
-        goto cleanup;
+        return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virStorageVolDefParseXML(pool, ctxt, flags);
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virStorageVolDefParseXML(pool, ctxt, flags);
 }
 
 

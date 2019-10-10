@@ -518,8 +518,16 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
     /* 335 */
     QEMU_CAPS_DEVICE_BOCHS_DISPLAY, /* -device bochs-display */
     QEMU_CAPS_MIGRATION_FILE_DROP_CACHE, /* migration with disk cache on is safe for type='file' disks */
-    QEMU_CAPS_NET_SOCKET_DGRAM, /* -net socket,fd= with dgram socket */
     QEMU_CAPS_DBUS_VMSTATE, /* -object dbus-vmstate */
+    QEMU_CAPS_DEVICE_VHOST_USER_GPU, /* -device vhost-user-gpu */
+    QEMU_CAPS_DEVICE_VHOST_USER_VGA, /* -device vhost-user-vga */
+
+    /* 340 */
+    QEMU_CAPS_INCREMENTAL_BACKUP, /* incremental backup is supported */
+    QEMU_CAPS_QUERY_CPU_MODEL_BASELINE, /* qmp query-cpu-model-baseline */
+    QEMU_CAPS_QUERY_CPU_MODEL_COMPARISON, /* qmp query-cpu-model-comparison */
+    QEMU_CAPS_DEVICE_RAMFB, /* -device ramfb */
+    QEMU_CAPS_MACHINE_PSERIES_CAP_CCF_ASSIST, /* -machine pseries.cap-ccf-assist */
 
     QEMU_CAPS_LAST /* this must always be the last item */
 } virQEMUCapsFlags;
@@ -561,7 +569,8 @@ int virQEMUCapsAddCPUDefinitions(virQEMUCapsPtr qemuCaps,
                                  virDomainCapsCPUUsable usable);
 virDomainCapsCPUModelsPtr virQEMUCapsGetCPUDefinitions(virQEMUCapsPtr qemuCaps,
                                                        virDomainVirtType type);
-virDomainCapsCPUModelsPtr virQEMUCapsFetchCPUDefinitions(qemuMonitorPtr mon);
+virDomainCapsCPUModelsPtr virQEMUCapsFetchCPUDefinitions(qemuMonitorPtr mon,
+                                                         virArch arch);
 
 typedef enum {
     /* Host CPU definition reported in domain capabilities. */
