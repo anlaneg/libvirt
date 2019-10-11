@@ -395,6 +395,7 @@ virStringListGetFirstWithPrefix(char **strings,
 int
 virStrToLong_i(char const *s, char **end_ptr, int base, int *result)
 {
+	//字符串转换为整数
     long int val;
     char *p;
     int err;

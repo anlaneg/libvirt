@@ -861,7 +861,7 @@ virConnectCheckURIMissingSlash(const char *uristr, virURIPtr uri)
     return 0;
 }
 
-
+//执行uri $name的打开
 static virConnectPtr
 virConnectOpenInternal(const char *name,
                        virConnectAuthPtr auth,
@@ -881,9 +881,11 @@ virConnectOpenInternal(const char *name,
     if (virConfLoadConfig(&conf, "libvirt.conf") < 0)
         goto failed;
 
+    //指定了空名称
     if (name && name[0] == '\0')
         name = NULL;
 
+    //转换"xen","xen://"到"xen:///system"
     /* Convert xen -> xen:///system for back compat */
     if (name && STRCASEEQ(name, "xen"))
         name = "xen:///system";
@@ -904,6 +906,7 @@ virConnectOpenInternal(const char *name,
         if (VIR_STRDUP(uristr, name) < 0)
             goto failed;
     } else {
+    		//未指定name,自配置文件中提取默认的uristr
         if (virConnectGetDefaultURI(conf, &uristr) < 0)
             goto failed;
 
@@ -968,6 +971,7 @@ virConnectOpenInternal(const char *name,
             goto failed;
         }
     } else {
+    		//没有uristr情况
         VIR_DEBUG("no name, allowing driver auto-select");
     }
 

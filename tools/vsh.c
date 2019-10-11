@@ -1394,7 +1394,9 @@ struct _vshCommandParser {
     //命令行当前解析位置
     char *pos;
     /* vshCommandArgvGetArg() */
+    //当前参数解释位置
     char **arg_pos;
+    //参数解释终止位置
     char **arg_end;
 };
 
@@ -1652,15 +1654,18 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
  * --------------------
  */
 
+//获取下一个参数
 static vshCommandToken ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
 vshCommandArgvGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
                      bool report ATTRIBUTE_UNUSED)
 {
     if (parser->arg_pos == parser->arg_end) {
+    		//已达到最后一个参数，返回结束
         *res = NULL;
         return VSH_TK_END;
     }
 
+    //取arg_pos指向的参数（copy一份），arg_pos跳一格，返回参数
     *res = vshStrdup(ctl, *parser->arg_pos);
     parser->arg_pos++;
     return VSH_TK_ARG;
@@ -2239,6 +2244,7 @@ vshEventCleanup(vshControl *ctl)
 void
 vshOpenLogFile(vshControl *ctl)
 {
+	//打开日志文件
     if (ctl->logfile == NULL)
         return;
 
@@ -2337,6 +2343,7 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
 void
 vshCloseLogFile(vshControl *ctl)
 {
+	//关闭日志文件
     char ebuf[1024];
 
     /* log file close */
@@ -3064,7 +3071,9 @@ vshReadline(vshControl *ctl, const char *prompt)
     char *r;
     int len;
 
+    //输出提示符
     fputs(prompt, stdout);
+    //自stdin中读取一行数据
     r = fgets(line, sizeof(line), stdin);
     if (r == NULL) return NULL; /* EOF */
 
@@ -3073,6 +3082,7 @@ vshReadline(vshControl *ctl, const char *prompt)
     if (len > 0 && r[len-1] == '\n')
         r[len-1] = '\0';
 
+    //返回读取到的数据
     return vshStrdup(ctl, r);
 }
 

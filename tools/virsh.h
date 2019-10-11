@@ -138,6 +138,7 @@ typedef struct _virshCtrlData virshCtrlData;
  */
 struct _virshControl {
     virConnectPtr conn;         /* connection to hypervisor (MAY BE NULL) */
+    //-r参数指定的只读连接
     bool readonly;              /* connect readonly (first time only, not
                                  * during explicit connect command)
                                  */
@@ -147,6 +148,7 @@ struct _virshControl {
                                    virDomainSnapshotNumChildren */
     bool blockJobNoBytes;       /* true if _BANDWIDTH_BYTE blockjob flags
                                    are missing */
+    //通过-e参数指定的console转义字符
     const char *escapeChar;     /* String representation of
                                    console escape character */
 };

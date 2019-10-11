@@ -190,20 +190,29 @@ struct _vshCmd {
  * vshControl
  */
 struct _vshControl {
+	//进程名称（写死的）
     const char *name;           /* hardcoded name of the binary that cannot
                                  * be changed without recompilation compared
                                  * to program name */
+    //环境变量前缀
     const char *env_prefix;     /* hardcoded environment variable prefix */
+    //-c参数指定的连接名称
     char *connname;             /* connection name */
+    //当前进程名称（动态获取的）
     char *progname;             /* program name */
     vshCmd *cmd;                /* the current command */
     char *cmdstr;               /* string with command */
     //是否为交互模式
     bool imode;                 /* interactive mode? */
+    //-q参数指定的quiet模式
     bool quiet;                 /* quiet mode */
+    //-t参数指定的timing
     bool timing;                /* print timing info? */
+    //debug级别（-d参数设定）
     int debug;                  /* print debug messages? */
+    //日志文件路径（-l参数设定）
     char *logfile;              /* log file name */
+    //日志文件logfile对应的fd
     int log_fd;                 /* log file descriptor */
     char *historydir;           /* readline history directory name */
     char *historyfile;          /* readline history file name */
@@ -215,12 +224,15 @@ struct _vshControl {
                                  * event to occur */
     int eventTimerId;           /* id of event loop timeout registration */
 
+    //-k参数指定的keepalive间隔
     int keepalive_interval;     /* Client keepalive interval */
+    //-K参数指定的keepalive数目
     int keepalive_count;        /* Client keepalive count */
 
 #ifndef WIN32
     struct termios termattr;    /* settings of the tty terminal */
 #endif
+    //是否tty终端
     bool istty;                 /* is the terminal a tty */
 
     const vshClientHooks *hooks;/* mandatory client specific hooks */

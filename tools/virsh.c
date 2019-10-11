@@ -138,10 +138,12 @@ virshConnect(vshControl *ctl, const char *uri, bool readonly)
     bool agentCreated = false;
 
     if (ctl->keepalive_interval >= 0) {
+    		//如果指定了interval,则使用指定的数
         interval = ctl->keepalive_interval;
         keepalive_forced = true;
     }
     if (ctl->keepalive_count >= 0) {
+    		//如果指定了keepalive count,则使用命令行指定的
         count = ctl->keepalive_count;
         keepalive_forced = true;
     }
@@ -229,6 +231,7 @@ virshReconnect(vshControl *ctl, const char *name, bool readonly, bool force)
                                   "disconnect from the hypervisor"));
     }
 
+    //创建连接
     priv->conn = virshConnect(ctl, name ? name : ctl->connname, readonly);
 
     if (!priv->conn) {
@@ -711,6 +714,7 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
             }
             break;
         case 'h':
+        		//显示帮助
             virshUsage();
             exit(EXIT_SUCCESS);
             break;
@@ -747,6 +751,7 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
             ctl->keepalive_count = keepalive;
             break;
         case 'l':
+        		//日志文件
             vshCloseLogFile(ctl);
             ctl->logfile = vshStrdup(ctl, optarg);
             vshOpenLogFile(ctl);
@@ -761,12 +766,14 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
             priv->readonly = true;
             break;
         case 'v':
+        		//显示版本号
             if (STRNEQ_NULLABLE(optarg, "long")) {
                 puts(VERSION);
                 exit(EXIT_SUCCESS);
             }
             ATTRIBUTE_FALLTHROUGH;
         case 'V':
+        		//显示更详细版本号
             virshShowVersion(ctl);
             exit(EXIT_SUCCESS);
         case ':':
@@ -794,15 +801,18 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
     }
 
     if (argc == optind) {
+    		//后面无命令，认定交互模式
         ctl->imode = true;
     } else {
         /* parse command */
-    	//存在command参数，认为非交互模式
+    		//存在command参数，认为非交互模式
         ctl->imode = false;
         if (argc - optind == 1) {
+        		//仅剩余一个参数，按字符串解析
             vshDebug(ctl, VSH_ERR_INFO, "commands: \"%s\"\n", argv[optind]);
             return vshCommandStringParse(ctl, argv[optind], NULL);
         } else {
+        		//解析多个字符串
             return vshCommandArgvParse(ctl, argc - optind, argv + optind);
         }
     }
@@ -879,6 +889,7 @@ main(int argc, char **argv)
     //指定ctl的私有数据为virshCtl
     ctl->privData = &virshCtl;
 
+    //设置进程名称
     if (!(progname = strrchr(argv[0], '/')))
         progname = argv[0];
     else
@@ -920,15 +931,16 @@ main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    //未指事实上connname,使用默认env
     if (!ctl->connname)
         ctl->connname = vshStrdup(ctl,
                                   getenv("VIRSH_DEFAULT_CONNECT_URI"));
 
     if (!ctl->imode) {
-    	//非交互模式，执行指定的cmd
+    		//非交互模式，执行指定的cmd
         ret = vshCommandRun(ctl, ctl->cmd);
     } else {
-    	//交互模式处理
+    		//交互模式处理
         /* interactive mode */
         if (!ctl->quiet) {
             vshPrint(ctl,
@@ -950,12 +962,14 @@ main(int argc, char **argv)
 #if WITH_READLINE
                 add_history(ctl->cmdstr);
 #endif
+                //自stdin读取到数据并运行
                 if (vshCommandStringParse(ctl, ctl->cmdstr, NULL))
                     vshCommandRun(ctl, ctl->cmd);
             }
             VIR_FREE(ctl->cmdstr);
         } while (ctl->imode);
 
+        //退出运行
         if (ctl->cmdstr == NULL)
             fputc('\n', stdout);        /* line break after alone prompt */
     }
