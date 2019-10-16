@@ -219,6 +219,9 @@ struct _virQEMUDriverConfig {
     char **capabilityfilters;
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virQEMUDriverConfig, virObjectUnref);
+
+
 /* Main driver state */
 struct _virQEMUDriver {
     virMutex lock;

@@ -506,6 +506,11 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
                           def->features[VIR_DOMAIN_FEATURE_ACPI] ==
                           VIR_TRISTATE_SWITCH_ON);
 
+        /* copy SLIC table path to acpi_firmware */
+        if (def->os.slic_table &&
+                VIR_STRDUP(b_info->u.hvm.acpi_firmware, def->os.slic_table) < 0)
+            return -1;
+
         if (def->nsounds > 0) {
             /*
              * Use first sound device.  man xl.cfg(5) describes soundhw as
@@ -999,8 +1004,7 @@ libxlMakeNetworkDiskSrc(virStorageSourcePtr src, char **srcstr)
             goto cleanup;
 
         /* RBD expects an encoded secret */
-        if (!(base64secret = virStringEncodeBase64(secret, secretlen)))
-            goto cleanup;
+        base64secret = g_base64_encode(secret, secretlen);
     }
 
     if (!(*srcstr = libxlMakeNetworkDiskSrcStr(src, username, base64secret)))
@@ -1342,7 +1346,7 @@ libxlMakeNic(virDomainDefPtr def,
             if (VIR_STRDUP(x_nic->bridge,
                            virBufferCurrentContent(&buf)) < 0)
                 goto cleanup;
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
         case VIR_DOMAIN_NET_TYPE_ETHERNET:
             if (VIR_STRDUP(x_nic->script, script) < 0)
                 goto cleanup;

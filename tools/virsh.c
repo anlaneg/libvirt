@@ -397,7 +397,7 @@ virshInit(vshControl *ctl)
 }
 
 static void
-virshDeinitTimer(int timer ATTRIBUTE_UNUSED, void *opaque ATTRIBUTE_UNUSED)
+virshDeinitTimer(int timer G_GNUC_UNUSED, void *opaque G_GNUC_UNUSED)
 {
     /* nothing to be done here */
 }
@@ -504,7 +504,7 @@ virshUsage(void)
  * Show version and options compiled in
  */
 static void
-virshShowVersion(vshControl *ctl ATTRIBUTE_UNUSED)
+virshShowVersion(vshControl *ctl G_GNUC_UNUSED)
 {
     /* FIXME - list a copyright blurb, as in GNU programs?  */
     vshPrint(ctl, _("Virsh command line tool of libvirt %s\n"), VERSION);
@@ -771,7 +771,7 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
                 puts(VERSION);
                 exit(EXIT_SUCCESS);
             }
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
         case 'V':
         		//显示更详细版本号
             virshShowVersion(ctl);

@@ -48,11 +48,11 @@ void virJSONValueHashFree(void *opaque, const void *name);
 virJSONType virJSONValueGetType(const virJSONValue *value);
 
 int virJSONValueObjectCreate(virJSONValuePtr *obj, ...)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
+    ATTRIBUTE_NONNULL(1) G_GNUC_NULL_TERMINATED;
 int virJSONValueObjectCreateVArgs(virJSONValuePtr *obj, va_list args)
     ATTRIBUTE_NONNULL(1);
 int virJSONValueObjectAdd(virJSONValuePtr obj, ...)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
+    ATTRIBUTE_NONNULL(1) G_GNUC_NULL_TERMINATED;
 int virJSONValueObjectAddVArgs(virJSONValuePtr obj, va_list args)
     ATTRIBUTE_NONNULL(1);
 
@@ -147,7 +147,7 @@ char *virJSONValueToString(virJSONValuePtr object,
 int virJSONValueToBuffer(virJSONValuePtr object,
                          virBufferPtr buf,
                          bool pretty)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 typedef int (*virJSONValueObjectIteratorFunc)(const char *key,
                                               virJSONValuePtr value,

@@ -276,7 +276,7 @@ ppc64MapFree(struct ppc64_map *map)
 }
 
 static int
-ppc64VendorParse(xmlXPathContextPtr ctxt ATTRIBUTE_UNUSED,
+ppc64VendorParse(xmlXPathContextPtr ctxt G_GNUC_UNUSED,
                  const char *name,
                  void *data)
 {
@@ -452,7 +452,7 @@ ppc64Compute(virCPUDefPtr host,
     if (cpu->arch != VIR_ARCH_NONE) {
         bool found = false;
 
-        for (i = 0; i < ARRAY_CARDINALITY(archs); i++) {
+        for (i = 0; i < G_N_ELEMENTS(archs); i++) {
             if (archs[i] == cpu->arch) {
                 found = true;
                 break;
@@ -510,7 +510,7 @@ ppc64Compute(virCPUDefPtr host,
                 ret = tmp;
                 goto cleanup;
             }
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
 
         case VIR_CPU_MODE_HOST_PASSTHROUGH:
             /* host-model and host-passthrough:
@@ -678,7 +678,7 @@ virCPUppc64GetHost(virCPUDefPtr cpu,
 
 static int
 virCPUppc64Update(virCPUDefPtr guest,
-                  const virCPUDef *host ATTRIBUTE_UNUSED)
+                  const virCPUDef *host G_GNUC_UNUSED)
 {
     /*
      * - host-passthrough doesn't even get here
@@ -697,9 +697,9 @@ virCPUppc64Update(virCPUDefPtr guest,
 static virCPUDefPtr
 virCPUppc64Baseline(virCPUDefPtr *cpus,
                     unsigned int ncpus,
-                    virDomainCapsCPUModelsPtr models ATTRIBUTE_UNUSED,
-                    const char **features ATTRIBUTE_UNUSED,
-                    bool migratable ATTRIBUTE_UNUSED)
+                    virDomainCapsCPUModelsPtr models G_GNUC_UNUSED,
+                    const char **features G_GNUC_UNUSED,
+                    bool migratable G_GNUC_UNUSED)
 {
     struct ppc64_map *map;
     const struct ppc64_model *model;
@@ -824,7 +824,7 @@ virCPUppc64DriverGetModels(char ***models)
 struct cpuArchDriver cpuDriverPPC64 = {
     .name       = "ppc64",
     .arch       = archs,
-    .narch      = ARRAY_CARDINALITY(archs),
+    .narch      = G_N_ELEMENTS(archs),
     .compare    = virCPUppc64Compare,
     .decode     = ppc64DriverDecode,
     .encode     = NULL,

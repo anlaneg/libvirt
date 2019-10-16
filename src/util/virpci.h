@@ -34,6 +34,9 @@ typedef virPCIDeviceAddress *virPCIDeviceAddressPtr;
 typedef struct _virPCIDeviceList virPCIDeviceList;
 typedef virPCIDeviceList *virPCIDeviceListPtr;
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virPCIDeviceList, virObjectUnref);
+
+
 #define VIR_DOMAIN_DEVICE_ZPCI_MAX_UID UINT16_MAX
 #define VIR_DOMAIN_DEVICE_ZPCI_MAX_FID UINT32_MAX
 
@@ -225,7 +228,7 @@ int virPCIGetNetName(const char *device_link_sysfs_path,
 
 int virPCIGetSysfsFile(char *virPCIDeviceName,
                              char **pci_sysfs_device_link)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 bool virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
                                 bool report);

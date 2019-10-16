@@ -168,7 +168,7 @@ static struct virPerfEventAttr attrs[] = {
         .attrConfig = PERF_COUNT_SW_EMULATION_FAULTS
     },
 };
-verify(ARRAY_CARDINALITY(attrs) == VIR_PERF_EVENT_LAST);
+verify(G_N_ELEMENTS(attrs) == VIR_PERF_EVENT_LAST);
 typedef struct virPerfEventAttr *virPerfEventAttrPtr;
 
 
@@ -322,9 +322,9 @@ virPerfRdtAttrInit(void)
 
 
 int
-virPerfEventEnable(virPerfPtr perf ATTRIBUTE_UNUSED,
-                   virPerfEventType type ATTRIBUTE_UNUSED,
-                   pid_t pid ATTRIBUTE_UNUSED)
+virPerfEventEnable(virPerfPtr perf G_GNUC_UNUSED,
+                   virPerfEventType type G_GNUC_UNUSED,
+                   pid_t pid G_GNUC_UNUSED)
 {
     virReportSystemError(ENXIO, "%s",
                          _("Perf not supported on this platform"));
@@ -332,8 +332,8 @@ virPerfEventEnable(virPerfPtr perf ATTRIBUTE_UNUSED,
 }
 
 int
-virPerfEventDisable(virPerfPtr perf ATTRIBUTE_UNUSED,
-                    virPerfEventType type ATTRIBUTE_UNUSED)
+virPerfEventDisable(virPerfPtr perf G_GNUC_UNUSED,
+                    virPerfEventType type G_GNUC_UNUSED)
 {
     virReportSystemError(ENXIO, "%s",
                          _("Perf not supported on this platform"));
@@ -341,16 +341,16 @@ virPerfEventDisable(virPerfPtr perf ATTRIBUTE_UNUSED,
 }
 
 bool
-virPerfEventIsEnabled(virPerfPtr perf ATTRIBUTE_UNUSED,
-                      virPerfEventType type ATTRIBUTE_UNUSED)
+virPerfEventIsEnabled(virPerfPtr perf G_GNUC_UNUSED,
+                      virPerfEventType type G_GNUC_UNUSED)
 {
     return false;
 }
 
 int
-virPerfReadEvent(virPerfPtr perf ATTRIBUTE_UNUSED,
-                 virPerfEventType type ATTRIBUTE_UNUSED,
-                 uint64_t *value ATTRIBUTE_UNUSED)
+virPerfReadEvent(virPerfPtr perf G_GNUC_UNUSED,
+                 virPerfEventType type G_GNUC_UNUSED,
+                 uint64_t *value G_GNUC_UNUSED)
 {
     virReportSystemError(ENXIO, "%s",
                          _("Perf not supported on this platform"));

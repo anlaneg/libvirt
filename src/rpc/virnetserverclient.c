@@ -759,13 +759,13 @@ int virNetServerClientGetUNIXIdentity(virNetServerClientPtr client,
 static virIdentityPtr
 virNetServerClientCreateIdentity(virNetServerClientPtr client)
 {
-    char *username = NULL;
-    char *groupname = NULL;
-    char *seccontext = NULL;
-    virIdentityPtr ret = NULL;
+    g_autofree char *username = NULL;
+    g_autofree char *groupname = NULL;
+    g_autofree char *seccontext = NULL;
+    g_autoptr(virIdentity) ret = NULL;
 
     if (!(ret = virIdentityNew()))
-        goto error;
+        return NULL;
 
     if (client->sock && virNetSocketIsLocal(client->sock)) {
         gid_t gid;
@@ -775,59 +775,50 @@ virNetServerClientCreateIdentity(virNetServerClientPtr client)
         if (virNetSocketGetUNIXIdentity(client->sock,
                                         &uid, &gid, &pid,
                                         &timestamp) < 0)
-            goto error;
+            return NULL;
 
         if (!(username = virGetUserName(uid)))
-            goto error;
+            return NULL;
         if (virIdentitySetUserName(ret, username) < 0)
-            goto error;
+            return NULL;
         if (virIdentitySetUNIXUserID(ret, uid) < 0)
-            goto error;
+            return NULL;
 
         if (!(groupname = virGetGroupName(gid)))
-            goto error;
+            return NULL;
         if (virIdentitySetGroupName(ret, groupname) < 0)
-            goto error;
+            return NULL;
         if (virIdentitySetUNIXGroupID(ret, gid) < 0)
-            goto error;
+            return NULL;
 
         if (virIdentitySetProcessID(ret, pid) < 0)
-            goto error;
+            return NULL;
         if (virIdentitySetProcessTime(ret, timestamp) < 0)
-            goto error;
+            return NULL;
     }
 
 #if WITH_SASL
     if (client->sasl) {
         const char *identity = virNetSASLSessionGetIdentity(client->sasl);
         if (virIdentitySetSASLUserName(ret, identity) < 0)
-            goto error;
+            return NULL;
     }
 #endif
 
     if (client->tls) {
         const char *identity = virNetTLSSessionGetX509DName(client->tls);
         if (virIdentitySetX509DName(ret, identity) < 0)
-            goto error;
+            return NULL;
     }
 
     if (client->sock &&
         virNetSocketGetSELinuxContext(client->sock, &seccontext) < 0)
-        goto error;
+        return NULL;
     if (seccontext &&
         virIdentitySetSELinuxContext(ret, seccontext) < 0)
-        goto error;
+        return NULL;
 
- cleanup:
-    VIR_FREE(username);
-    VIR_FREE(groupname);
-    VIR_FREE(seccontext);
-    return ret;
-
- error:
-    virObjectUnref(ret);
-    ret = NULL;
-    goto cleanup;
+    return g_steal_pointer(&ret);
 }
 
 
@@ -838,7 +829,7 @@ virIdentityPtr virNetServerClientGetIdentity(virNetServerClientPtr client)
     if (!client->identity)
         client->identity = virNetServerClientCreateIdentity(client);
     if (client->identity)
-        ret = virObjectRef(client->identity);
+        ret = g_object_ref(client->identity);
     virObjectUnlock(client);
     return ret;
 }
@@ -848,10 +839,10 @@ void virNetServerClientSetIdentity(virNetServerClientPtr client,
                                    virIdentityPtr identity)
 {
     virObjectLock(client);
-    virObjectUnref(client->identity);
+    g_clear_object(&client->identity);
     client->identity = identity;
     if (client->identity)
-        virObjectRef(client->identity);
+        g_object_ref(client->identity);
     virObjectUnlock(client);
 }
 
@@ -988,7 +979,7 @@ void virNetServerClientDispose(void *obj)
     if (client->privateData)
         client->privateDataFreeFunc(client->privateData);
 
-    virObjectUnref(client->identity);
+    g_clear_object(&client->identity);
 
 #if WITH_SASL
     virObjectUnref(client->sasl);
@@ -1683,7 +1674,7 @@ virNetServerClientGetInfo(virNetServerClientPtr client,
         goto cleanup;
     }
 
-    *identity = virObjectRef(client->identity);
+    *identity = g_object_ref(client->identity);
 
     ret = 0;
  cleanup:

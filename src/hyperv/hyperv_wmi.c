@@ -909,7 +909,7 @@ hypervInvokeMethod(hypervPrivate *priv, hypervInvokeParamsListPtr params,
                 case MSVM_CONCRETEJOB_JOBSTATE_SHUTTING_DOWN:
                     hypervFreeObject(priv, (hypervObject *)job);
                     job = NULL;
-                    usleep(100 * 1000); /* sleep 100 ms */
+                    g_usleep(100 * 1000); /* sleep 100 ms */
                     timeout -= 100;
                     continue;
                 case MSVM_CONCRETEJOB_JOBSTATE_COMPLETED:
@@ -1127,7 +1127,7 @@ hypervEnumAndPull(hypervPrivate *priv, hypervWqlQueryPtr wqlQuery,
 }
 
 void
-hypervFreeObject(hypervPrivate *priv ATTRIBUTE_UNUSED, hypervObject *object)
+hypervFreeObject(hypervPrivate *priv G_GNUC_UNUSED, hypervObject *object)
 {
     hypervObject *next;
 #if WS_SERIALIZER_FREE_MEM_WORKS
@@ -1418,7 +1418,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
                 hypervFreeObject(priv, (hypervObject *)concreteJob);
                 concreteJob = NULL;
 
-                usleep(100 * 1000);
+                g_usleep(100 * 1000);
                 continue;
 
               case MSVM_CONCRETEJOB_JOBSTATE_COMPLETED:

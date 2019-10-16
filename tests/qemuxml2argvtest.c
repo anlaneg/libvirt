@@ -37,10 +37,10 @@
 static virQEMUDriver driver;
 
 static unsigned char *
-fakeSecretGetValue(virSecretPtr obj ATTRIBUTE_UNUSED,
+fakeSecretGetValue(virSecretPtr obj G_GNUC_UNUSED,
                    size_t *value_size,
-                   unsigned int fakeflags ATTRIBUTE_UNUSED,
-                   unsigned int internalFlags ATTRIBUTE_UNUSED)
+                   unsigned int fakeflags G_GNUC_UNUSED,
+                   unsigned int internalFlags G_GNUC_UNUSED)
 {
     char *secret;
     if (VIR_STRDUP(secret, "AQCVn5hO6HzFAhAAq0NCv8jtJcIcE+HOBlMQ1A") < 0)
@@ -199,7 +199,7 @@ fakeStorageVolGetPath(virStorageVolPtr vol)
 
 static char *
 fakeStoragePoolGetXMLDesc(virStoragePoolPtr pool,
-                          unsigned int flags_unused ATTRIBUTE_UNUSED)
+                          unsigned int flags_unused G_GNUC_UNUSED)
 {
     char *xmlpath = NULL;
     char *xmlbuf = NULL;
@@ -278,7 +278,7 @@ fakeNWFilterBindingLookupByPortDev(virConnectPtr conn,
 
 
 static int
-fakeNWFilterBindingDelete(virNWFilterBindingPtr binding ATTRIBUTE_UNUSED)
+fakeNWFilterBindingDelete(virNWFilterBindingPtr binding G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -316,43 +316,43 @@ testAddCPUModels(virQEMUCapsPtr caps, bool skipLegacy)
 
     if (ARCH_IS_X86(arch)) {
         if (virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_KVM, x86Models,
-                                         ARRAY_CARDINALITY(x86Models),
+                                         G_N_ELEMENTS(x86Models),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0 ||
             virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_QEMU, x86Models,
-                                         ARRAY_CARDINALITY(x86Models),
+                                         G_N_ELEMENTS(x86Models),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0)
             return -1;
 
         if (!skipLegacy) {
             if (virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_KVM,
                                              x86LegacyModels,
-                                             ARRAY_CARDINALITY(x86LegacyModels),
+                                             G_N_ELEMENTS(x86LegacyModels),
                                              VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0 ||
                 virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_QEMU,
                                              x86LegacyModels,
-                                             ARRAY_CARDINALITY(x86LegacyModels),
+                                             G_N_ELEMENTS(x86LegacyModels),
                                              VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0)
                 return -1;
         }
     } else if (ARCH_IS_ARM(arch)) {
         if (virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_KVM, armModels,
-                                         ARRAY_CARDINALITY(armModels),
+                                         G_N_ELEMENTS(armModels),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0 ||
             virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_QEMU, armModels,
-                                         ARRAY_CARDINALITY(armModels),
+                                         G_N_ELEMENTS(armModels),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0)
             return -1;
     } else if (ARCH_IS_PPC64(arch)) {
         if (virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_KVM, ppc64Models,
-                                         ARRAY_CARDINALITY(ppc64Models),
+                                         G_N_ELEMENTS(ppc64Models),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0 ||
             virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_QEMU, ppc64Models,
-                                         ARRAY_CARDINALITY(ppc64Models),
+                                         G_N_ELEMENTS(ppc64Models),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0)
             return -1;
     } else if (ARCH_IS_S390(arch)) {
         if (virQEMUCapsAddCPUDefinitions(caps, VIR_DOMAIN_VIRT_KVM, s390xModels,
-                                         ARRAY_CARDINALITY(s390xModels),
+                                         G_N_ELEMENTS(s390xModels),
                                          VIR_DOMCAPS_CPU_USABLE_UNKNOWN) < 0)
             return -1;
     }

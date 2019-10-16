@@ -28,7 +28,6 @@
 #include "storage_conf.h"
 #include "viralloc.h"
 #include "virlog.h"
-#include "base64.h"
 #include "viruuid.h"
 #include "virstring.h"
 #include "virrandom.h"
@@ -218,8 +217,7 @@ virStorageBackendRBDOpenRADOSConn(virStorageBackendRBDStatePtr ptr,
                                      &secret_value, &secret_value_size) < 0)
             goto cleanup;
 
-        if (!(rados_key = virStringEncodeBase64(secret_value, secret_value_size)))
-            goto cleanup;
+        rados_key = g_base64_encode(secret_value, secret_value_size);
 
         if (virStorageBackendRBDRADOSConfSet(ptr->cluster,
                                              "key", rados_key) < 0)
@@ -452,7 +450,7 @@ volStorageBackendRBDUseFastDiff(uint64_t features, uint64_t flags)
 }
 
 static int
-virStorageBackendRBDRefreshVolInfoCb(uint64_t offset ATTRIBUTE_UNUSED,
+virStorageBackendRBDRefreshVolInfoCb(uint64_t offset G_GNUC_UNUSED,
                                      size_t len,
                                      int exists,
                                      void *arg)
@@ -492,8 +490,8 @@ virStorageBackendRBDSetAllocation(virStorageVolDefPtr vol,
 
 #else
 static int
-volStorageBackendRBDGetFlags(rbd_image_t image ATTRIBUTE_UNUSED,
-                             const char *volname ATTRIBUTE_UNUSED,
+volStorageBackendRBDGetFlags(rbd_image_t image G_GNUC_UNUSED,
+                             const char *volname G_GNUC_UNUSED,
                              uint64_t *flags)
 {
     *flags = 0;
@@ -501,16 +499,16 @@ volStorageBackendRBDGetFlags(rbd_image_t image ATTRIBUTE_UNUSED,
 }
 
 static int
-volStorageBackendRBDUseFastDiff(uint64_t features ATTRIBUTE_UNUSED,
-                                uint64_t feature_flags ATTRIBUTE_UNUSED)
+volStorageBackendRBDUseFastDiff(uint64_t features G_GNUC_UNUSED,
+                                uint64_t feature_flags G_GNUC_UNUSED)
 {
     return false;
 }
 
 static int
-virStorageBackendRBDSetAllocation(virStorageVolDefPtr vol ATTRIBUTE_UNUSED,
-                                  rbd_image_t *image ATTRIBUTE_UNUSED,
-                                  rbd_image_info_t *info ATTRIBUTE_UNUSED)
+virStorageBackendRBDSetAllocation(virStorageVolDefPtr vol G_GNUC_UNUSED,
+                                  rbd_image_t *image G_GNUC_UNUSED,
+                                  rbd_image_info_t *info G_GNUC_UNUSED)
 {
     return false;
 }
@@ -1015,9 +1013,9 @@ virStorageBackendRBDImageInfo(rbd_image_t image,
 
 /* Callback function for rbd_diff_iterate() */
 static int
-virStorageBackendRBDIterateCb(uint64_t offset ATTRIBUTE_UNUSED,
-                              size_t length ATTRIBUTE_UNUSED,
-                              int exists ATTRIBUTE_UNUSED,
+virStorageBackendRBDIterateCb(uint64_t offset G_GNUC_UNUSED,
+                              size_t length G_GNUC_UNUSED,
+                              int exists G_GNUC_UNUSED,
                               void *arg)
 {
     /*

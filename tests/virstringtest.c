@@ -261,7 +261,7 @@ testStrdupLookup2(size_t i)
 }
 
 static int
-testStrdup(const void *data ATTRIBUTE_UNUSED)
+testStrdup(const void *data G_GNUC_UNUSED)
 {
     char *array[] = { NULL, NULL };
     size_t i = 0;
@@ -325,13 +325,13 @@ testStrdup(const void *data ATTRIBUTE_UNUSED)
 
     ret = 0;
  cleanup:
-    for (i = 0; i < ARRAY_CARDINALITY(array); i++)
+    for (i = 0; i < G_N_ELEMENTS(array); i++)
         VIR_FREE(array[i]);
     return ret;
 }
 
 static int
-testStrndupNegative(const void *opaque ATTRIBUTE_UNUSED)
+testStrndupNegative(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
     char *dst;
@@ -367,7 +367,7 @@ testStrndupNegative(const void *opaque ATTRIBUTE_UNUSED)
 
 
 static int
-testStringSortCompare(const void *opaque ATTRIBUTE_UNUSED)
+testStringSortCompare(const void *opaque G_GNUC_UNUSED)
 {
     const char *randlist[] = {
         "tasty", "astro", "goat", "chicken", "turducken",
@@ -384,12 +384,12 @@ testStringSortCompare(const void *opaque ATTRIBUTE_UNUSED)
     int ret = -1;
     size_t i;
 
-    qsort(randlist, ARRAY_CARDINALITY(randlist), sizeof(randlist[0]),
+    qsort(randlist, G_N_ELEMENTS(randlist), sizeof(randlist[0]),
           virStringSortCompare);
-    qsort(randrlist, ARRAY_CARDINALITY(randrlist), sizeof(randrlist[0]),
+    qsort(randrlist, G_N_ELEMENTS(randrlist), sizeof(randrlist[0]),
           virStringSortRevCompare);
 
-    for (i = 0; i < ARRAY_CARDINALITY(randlist); i++) {
+    for (i = 0; i < G_N_ELEMENTS(randlist); i++) {
         if (STRNEQ(randlist[i], sortlist[i])) {
             fprintf(stderr, "sortlist[%zu] '%s' != randlist[%zu] '%s'\n",
                     i, sortlist[i], i, randlist[i]);
@@ -513,7 +513,7 @@ struct stringReplaceData {
 };
 
 static int
-testStringReplace(const void *opaque ATTRIBUTE_UNUSED)
+testStringReplace(const void *opaque G_GNUC_UNUSED)
 {
     const struct stringReplaceData *data = opaque;
     char *result;
@@ -690,7 +690,7 @@ testStringToDouble(const void *opaque)
 /* The point of this test is to check whether all members of the array are
  * freed. The test has to be checked using valgrind. */
 static int
-testVirStringListFreeCount(const void *opaque ATTRIBUTE_UNUSED)
+testVirStringListFreeCount(const void *opaque G_GNUC_UNUSED)
 {
     char **list;
 

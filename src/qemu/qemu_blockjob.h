@@ -134,6 +134,7 @@ struct _qemuBlockJobData {
     bool invalidData; /* the job data (except name) is not valid */
     bool reconnected; /* internal field for tracking whether job is live after reconnect to qemu */
 };
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuBlockJobData, virObjectUnref);
 
 int
 qemuBlockJobRegister(qemuBlockJobDataPtr job,
@@ -211,7 +212,7 @@ void qemuBlockJobSyncEnd(virDomainObjPtr vm,
 
 qemuBlockJobDataPtr
 qemuBlockJobGetByDisk(virDomainDiskDefPtr disk)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
 qemuBlockjobState
 qemuBlockjobConvertMonitorStatus(int monitorstatus);

@@ -1708,9 +1708,9 @@ virshPrintJobProgress(const char *label, unsigned long long remaining,
 
 static volatile sig_atomic_t intCaught;
 
-static void virshCatchInt(int sig ATTRIBUTE_UNUSED,
-                          siginfo_t *siginfo ATTRIBUTE_UNUSED,
-                          void *context ATTRIBUTE_UNUSED)
+static void virshCatchInt(int sig G_GNUC_UNUSED,
+                          siginfo_t *siginfo G_GNUC_UNUSED,
+                          void *context G_GNUC_UNUSED)
 {
     intCaught = 1;
 }
@@ -1735,10 +1735,10 @@ struct _virshBlockJobWaitData {
 
 
 static void
-virshBlockJobStatusHandler(virConnectPtr conn ATTRIBUTE_UNUSED,
-                           virDomainPtr dom ATTRIBUTE_UNUSED,
+virshBlockJobStatusHandler(virConnectPtr conn G_GNUC_UNUSED,
+                           virDomainPtr dom G_GNUC_UNUSED,
                            const char *disk,
-                           int type ATTRIBUTE_UNUSED,
+                           int type G_GNUC_UNUSED,
                            int status,
                            void *opaque)
 {
@@ -1945,7 +1945,7 @@ virshBlockJobWait(virshBlockJobWaitDataPtr data)
             break;
         }
 
-        usleep(500 * 1000);
+        g_usleep(500 * 1000);
     }
 
     /* print 100% completed */
@@ -2596,14 +2596,14 @@ virshBlockJobInfo(vshControl *ctl,
             switch (last_error->code) {
             case VIR_ERR_INVALID_ARG:
                 priv->blockJobNoBytes = true;
-                ATTRIBUTE_FALLTHROUGH;
+                G_GNUC_FALLTHROUGH;
             case VIR_ERR_OVERFLOW:
                 if (!bytes && !raw) {
                     /* try again with MiB/s, unless forcing bytes */
                     vshResetLibvirtError();
                     break;
                 }
-                ATTRIBUTE_FALLTHROUGH;
+                G_GNUC_FALLTHROUGH;
             default:
                 goto cleanup;
             }
@@ -9563,7 +9563,7 @@ struct virshQemuEventData {
 typedef struct virshQemuEventData virshQemuEventData;
 
 static void
-virshEventQemuPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventQemuPrint(virConnectPtr conn G_GNUC_UNUSED,
                     virDomainPtr dom,
                     const char *event,
                     long long seconds,
@@ -10905,7 +10905,7 @@ virshMigrateTimeout(vshControl *ctl,
 }
 
 static void
-virshMigrateIteration(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshMigrateIteration(virConnectPtr conn G_GNUC_UNUSED,
                       virDomainPtr dom,
                       int iteration,
                       void *opaque)
@@ -11766,7 +11766,7 @@ cmdDomHostname(vshControl *ctl, const vshCmd *cmd)
  * @n2 second node
  * returns true in case n1 covers n2, false otherwise.
  */
-ATTRIBUTE_UNUSED
+G_GNUC_UNUSED
 static bool
 virshNodeIsSuperset(xmlNodePtr n1, xmlNodePtr n2)
 {
@@ -13030,7 +13030,7 @@ virshEventPrint(virshDomEventData *data,
 }
 
 static void
-virshEventGenericPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventGenericPrint(virConnectPtr conn G_GNUC_UNUSED,
                        virDomainPtr dom,
                        void *opaque)
 {
@@ -13043,7 +13043,7 @@ virshEventGenericPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventLifecyclePrint(virConnectPtr conn G_GNUC_UNUSED,
                          virDomainPtr dom,
                          int event,
                          int detail,
@@ -13059,7 +13059,7 @@ virshEventLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventRTCChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventRTCChangePrint(virConnectPtr conn G_GNUC_UNUSED,
                          virDomainPtr dom,
                          long long utcoffset,
                          void *opaque)
@@ -13073,7 +13073,7 @@ virshEventRTCChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventWatchdogPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventWatchdogPrint(virConnectPtr conn G_GNUC_UNUSED,
                         virDomainPtr dom,
                         int action,
                         void *opaque)
@@ -13087,7 +13087,7 @@ virshEventWatchdogPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventIOErrorPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventIOErrorPrint(virConnectPtr conn G_GNUC_UNUSED,
                        virDomainPtr dom,
                        const char *srcPath,
                        const char *devAlias,
@@ -13105,7 +13105,7 @@ virshEventIOErrorPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventGraphicsPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventGraphicsPrint(virConnectPtr conn G_GNUC_UNUSED,
                         virDomainPtr dom,
                         int phase,
                         const virDomainEventGraphicsAddress *local,
@@ -13137,7 +13137,7 @@ virshEventGraphicsPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventIOErrorReasonPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventIOErrorReasonPrint(virConnectPtr conn G_GNUC_UNUSED,
                              virDomainPtr dom,
                              const char *srcPath,
                              const char *devAlias,
@@ -13158,7 +13158,7 @@ virshEventIOErrorReasonPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventBlockJobPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventBlockJobPrint(virConnectPtr conn G_GNUC_UNUSED,
                         virDomainPtr dom,
                         const char *disk,
                         int type,
@@ -13177,7 +13177,7 @@ virshEventBlockJobPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventDiskChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventDiskChangePrint(virConnectPtr conn G_GNUC_UNUSED,
                           virDomainPtr dom,
                           const char *oldSrc,
                           const char *newSrc,
@@ -13198,7 +13198,7 @@ virshEventDiskChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventTrayChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventTrayChangePrint(virConnectPtr conn G_GNUC_UNUSED,
                           virDomainPtr dom,
                           const char *alias,
                           int reason,
@@ -13214,9 +13214,9 @@ virshEventTrayChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventPMChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventPMChangePrint(virConnectPtr conn G_GNUC_UNUSED,
                         virDomainPtr dom,
-                        int reason ATTRIBUTE_UNUSED,
+                        int reason G_GNUC_UNUSED,
                         void *opaque)
 {
     /* As long as libvirt.h doesn't define any reasons, we might as
@@ -13225,7 +13225,7 @@ virshEventPMChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventBalloonChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventBalloonChangePrint(virConnectPtr conn G_GNUC_UNUSED,
                              virDomainPtr dom,
                              unsigned long long actual,
                              void *opaque)
@@ -13239,7 +13239,7 @@ virshEventBalloonChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventDeviceRemovedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventDeviceRemovedPrint(virConnectPtr conn G_GNUC_UNUSED,
                              virDomainPtr dom,
                              const char *alias,
                              void *opaque)
@@ -13253,7 +13253,7 @@ virshEventDeviceRemovedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventDeviceAddedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventDeviceAddedPrint(virConnectPtr conn G_GNUC_UNUSED,
                            virDomainPtr dom,
                            const char *alias,
                            void *opaque)
@@ -13267,7 +13267,7 @@ virshEventDeviceAddedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventTunablePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventTunablePrint(virConnectPtr conn G_GNUC_UNUSED,
                        virDomainPtr dom,
                        virTypedParameterPtr params,
                        int nparams,
@@ -13305,7 +13305,7 @@ VIR_ENUM_IMPL(virshEventAgentLifecycleReason,
 
 #define UNKNOWNSTR(str) (str ? str : N_("unsupported value"))
 static void
-virshEventAgentLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventAgentLifecyclePrint(virConnectPtr conn G_GNUC_UNUSED,
                               virDomainPtr dom,
                               int state,
                               int reason,
@@ -13322,7 +13322,7 @@ virshEventAgentLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventMigrationIterationPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventMigrationIterationPrint(virConnectPtr conn G_GNUC_UNUSED,
                                   virDomainPtr dom,
                                   int iteration,
                                   void *opaque)
@@ -13338,7 +13338,7 @@ virshEventMigrationIterationPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-virshEventJobCompletedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventJobCompletedPrint(virConnectPtr conn G_GNUC_UNUSED,
                             virDomainPtr dom,
                             virTypedParameterPtr params,
                             int nparams,
@@ -13362,7 +13362,7 @@ virshEventJobCompletedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 
 
 static void
-virshEventDeviceRemovalFailedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventDeviceRemovalFailedPrint(virConnectPtr conn G_GNUC_UNUSED,
                                    virDomainPtr dom,
                                    const char *alias,
                                    void *opaque)
@@ -13383,7 +13383,7 @@ VIR_ENUM_IMPL(virshEventMetadataChangeType,
               N_("element"));
 
 static void
-virshEventMetadataChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventMetadataChangePrint(virConnectPtr conn G_GNUC_UNUSED,
                               virDomainPtr dom,
                               int type,
                               const char *nsuri,
@@ -13400,7 +13400,7 @@ virshEventMetadataChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 
 
 static void
-virshEventBlockThresholdPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+virshEventBlockThresholdPrint(virConnectPtr conn G_GNUC_UNUSED,
                               virDomainPtr dom,
                               const char *dev,
                               const char *path,
@@ -13468,7 +13468,7 @@ virshDomainEventCallback virshDomainEventCallbacks[] = {
     { "block-threshold",
       VIR_DOMAIN_EVENT_CALLBACK(virshEventBlockThresholdPrint), },
 };
-verify(VIR_DOMAIN_EVENT_ID_LAST == ARRAY_CARDINALITY(virshDomainEventCallbacks));
+verify(VIR_DOMAIN_EVENT_ID_LAST == G_N_ELEMENTS(virshDomainEventCallbacks));
 
 static const vshCmdInfo info_event[] = {
     {.name = "help",

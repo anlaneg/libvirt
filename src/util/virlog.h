@@ -68,13 +68,13 @@ struct _virLogSource {
 };
 
 /*
- * ATTRIBUTE_UNUSED is to make gcc keep quiet if all the
+ * G_GNUC_UNUSED is to make gcc keep quiet if all the
  * log statements in a file are conditionally disabled
  * at compile time due to configure options.
  */
 //构造各模块对应的log
 #define VIR_LOG_INIT(n) \
-    static ATTRIBUTE_UNUSED virLogSource virLogSelf = { \
+    static G_GNUC_UNUSED virLogSource virLogSelf = { \
         .name = "" n "", \
         .priority = VIR_LOG_ERROR, \
         .serial = 0, \
@@ -207,7 +207,7 @@ void virLogMessage(virLogSourcePtr source,
                    int linenr,
                    const char *funcname,
                    virLogMetadataPtr metadata,
-                   const char *fmt, ...) ATTRIBUTE_FMT_PRINTF(7, 8);
+                   const char *fmt, ...) G_GNUC_PRINTF(7, 8);
 void virLogVMessage(virLogSourcePtr source,
                     virLogPriority priority,
                     const char *filename,
@@ -215,7 +215,7 @@ void virLogVMessage(virLogSourcePtr source,
                     const char *funcname,
                     virLogMetadataPtr metadata,
                     const char *fmt,
-                    va_list vargs) ATTRIBUTE_FMT_PRINTF(7, 0);
+                    va_list vargs) G_GNUC_PRINTF(7, 0);
 
 bool virLogProbablyLogMessage(const char *str);
 virLogOutputPtr virLogOutputNew(virLogOutputFunc f,

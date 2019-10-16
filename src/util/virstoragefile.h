@@ -292,6 +292,9 @@ struct _virStorageSource {
     /* backing chain of the storage source */
     virStorageSourcePtr backingStore;
 
+    /* external data store storage source */
+    virStorageSourcePtr externalDataStore;
+
     /* metadata for storage driver access to remote and local volumes */
     virStorageDriverDataPtr drv;
 
@@ -302,6 +305,8 @@ struct _virStorageSource {
     /* Name of the child backing store recorded in metadata of the
      * current file.  */
     char *backingStoreRaw;
+    /* Name of the child data file recorded in metadata of the current file. */
+    char *externalDataStoreRaw;
 
     /* metadata that allows identifying given storage source */
     char *nodeformat;  /* name of the format handler object */
@@ -339,18 +344,14 @@ struct _virStorageSource {
     bool hostcdrom; /* backing device is a cdrom */
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virStorageSource, virObjectUnref);
+
 
 #ifndef DEV_BSIZE
 # define DEV_BSIZE 512
 #endif
 
 int virStorageFileProbeFormat(const char *path, uid_t uid, gid_t gid);
-
-int virStorageFileGetMetadataInternal(virStorageSourcePtr meta,
-                                      char *buf,
-                                      size_t len,
-                                      int *backingFormat)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 virStorageSourcePtr virStorageFileGetMetadataFromFD(const char *path,
                                                     int fd,

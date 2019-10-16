@@ -250,7 +250,7 @@ static int virSecuritySELinuxRestoreFileLabel(virSecurityManagerPtr mgr,
  *         -1 otherwise.
  */
 static int
-virSecuritySELinuxTransactionRun(pid_t pid ATTRIBUTE_UNUSED,
+virSecuritySELinuxTransactionRun(pid_t pid G_GNUC_UNUSED,
                                  void *opaque)
 {
     virSecuritySELinuxContextListPtr list = opaque;
@@ -266,9 +266,11 @@ virSecuritySELinuxTransactionRun(pid_t pid ATTRIBUTE_UNUSED,
             return -1;
 
         for (i = 0; i < list->nItems; i++) {
-            const char *p = list->items[i]->path;
+            virSecuritySELinuxContextItemPtr item = list->items[i];
+            const char *p = item->path;
 
-            VIR_APPEND_ELEMENT_COPY_INPLACE(paths, npaths, p);
+            if (item->remember)
+                VIR_APPEND_ELEMENT_COPY_INPLACE(paths, npaths, p);
         }
 
         if (!(state = virSecurityManagerMetadataLock(list->manager, paths, npaths)))
@@ -700,7 +702,7 @@ virSecuritySELinuxLXCInitialize(virSecurityManagerPtr mgr)
 }
 #else
 static int
-virSecuritySELinuxLXCInitialize(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+virSecuritySELinuxLXCInitialize(virSecurityManagerPtr mgr G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("libselinux does not support LXC contexts path"));
@@ -791,7 +793,7 @@ virSecuritySELinuxQEMUInitialize(virSecurityManagerPtr mgr)
 static int
 virSecuritySELinuxInitialize(virSecurityManagerPtr mgr)
 {
-    VIR_DEBUG("SELinuxInitialize %s", virSecurityManagerGetDriver(mgr));
+    VIR_DEBUG("SELinuxInitialize %s", virSecurityManagerGetVirtDriver(mgr));
 
     if (virThreadLocalInit(&contextList,
                            virSecuritySELinuxContextListFree) < 0) {
@@ -800,7 +802,7 @@ virSecuritySELinuxInitialize(virSecurityManagerPtr mgr)
         return -1;
     }
 
-    if (STREQ(virSecurityManagerGetDriver(mgr),  "LXC")) {
+    if (STREQ(virSecurityManagerGetVirtDriver(mgr), "LXC")) {
         return virSecuritySELinuxLXCInitialize(mgr);
     } else {
         return virSecuritySELinuxQEMUInitialize(mgr);
@@ -829,7 +831,7 @@ virSecuritySELinuxGenLabel(virSecurityManagerPtr mgr,
 
     data = virSecurityManagerGetPrivateData(mgr);
 
-    VIR_DEBUG("label=%s", virSecurityManagerGetDriver(mgr));
+    VIR_DEBUG("label=%s", virSecurityManagerGetVirtDriver(mgr));
     if (seclabel->type == VIR_DOMAIN_SECLABEL_DYNAMIC &&
         seclabel->label) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -1068,13 +1070,13 @@ virSecuritySELinuxDriverClose(virSecurityManagerPtr mgr)
 
 
 static const char *
-virSecuritySELinuxGetModel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+virSecuritySELinuxGetModel(virSecurityManagerPtr mgr G_GNUC_UNUSED)
 {
     return SECURITY_SELINUX_NAME;
 }
 
 static const char *
-virSecuritySELinuxGetDOI(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+virSecuritySELinuxGetDOI(virSecurityManagerPtr mgr G_GNUC_UNUSED)
 {
     /*
      * Where will the DOI come from?  SELinux configuration, or qemu
@@ -1147,7 +1149,7 @@ virSecuritySELinuxTransactionStart(virSecurityManagerPtr mgr)
  *         -1 otherwise.
  */
 static int
-virSecuritySELinuxTransactionCommit(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxTransactionCommit(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                     pid_t pid,
                                     bool lock)
 {
@@ -1197,7 +1199,7 @@ virSecuritySELinuxTransactionCommit(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
  * Cancels and frees any out standing transaction.
  */
 static void
-virSecuritySELinuxTransactionAbort(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+virSecuritySELinuxTransactionAbort(virSecurityManagerPtr mgr G_GNUC_UNUSED)
 {
     virSecuritySELinuxContextListPtr list;
 
@@ -1211,8 +1213,8 @@ virSecuritySELinuxTransactionAbort(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
 }
 
 static int
-virSecuritySELinuxGetProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                  virDomainDefPtr def ATTRIBUTE_UNUSED,
+virSecuritySELinuxGetProcessLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
+                                  virDomainDefPtr def G_GNUC_UNUSED,
                                   pid_t pid,
                                   virSecurityLabelPtr sec)
 {
@@ -1460,7 +1462,7 @@ virSecuritySELinuxFSetFilecon(int fd, char *tcon)
 
 /* Set fcon to the appropriate label for path and mode, or return -1.  */
 static int
-getContext(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+getContext(virSecurityManagerPtr mgr G_GNUC_UNUSED,
            const char *newpath, mode_t mode, security_context_t *fcon)
 {
 #if HAVE_SELINUX_LABEL_H
@@ -1680,14 +1682,14 @@ virSecuritySELinuxSetTPMFileLabel(virSecurityManagerPtr mgr,
     switch (tpm->type) {
     case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
         tpmdev = tpm->data.passthrough.source.data.file.path;
-        rc = virSecuritySELinuxSetFilecon(mgr, tpmdev, seclabel->imagelabel, true);
+        rc = virSecuritySELinuxSetFilecon(mgr, tpmdev, seclabel->imagelabel, false);
         if (rc < 0)
             return -1;
 
         if ((cancel_path = virTPMCreateCancelPath(tpmdev)) != NULL) {
             rc = virSecuritySELinuxSetFilecon(mgr,
                                               cancel_path,
-                                              seclabel->imagelabel, true);
+                                              seclabel->imagelabel, false);
             VIR_FREE(cancel_path);
             if (rc < 0) {
                 virSecuritySELinuxRestoreTPMFileLabelInt(mgr, def, tpm);
@@ -1699,7 +1701,7 @@ virSecuritySELinuxSetTPMFileLabel(virSecurityManagerPtr mgr,
         break;
     case VIR_DOMAIN_TPM_TYPE_EMULATOR:
         tpmdev = tpm->data.emulator.source.data.nix.path;
-        rc = virSecuritySELinuxSetFilecon(mgr, tpmdev, seclabel->imagelabel, true);
+        rc = virSecuritySELinuxSetFilecon(mgr, tpmdev, seclabel->imagelabel, false);
         if (rc < 0)
             return -1;
         break;
@@ -1728,10 +1730,10 @@ virSecuritySELinuxRestoreTPMFileLabelInt(virSecurityManagerPtr mgr,
     switch (tpm->type) {
     case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
         tpmdev = tpm->data.passthrough.source.data.file.path;
-        rc = virSecuritySELinuxRestoreFileLabel(mgr, tpmdev, true);
+        rc = virSecuritySELinuxRestoreFileLabel(mgr, tpmdev, false);
 
         if ((cancel_path = virTPMCreateCancelPath(tpmdev)) != NULL) {
-            if (virSecuritySELinuxRestoreFileLabel(mgr, cancel_path, true) < 0)
+            if (virSecuritySELinuxRestoreFileLabel(mgr, cancel_path, false) < 0)
                 rc = -1;
             VIR_FREE(cancel_path);
         }
@@ -1747,10 +1749,10 @@ virSecuritySELinuxRestoreTPMFileLabelInt(virSecurityManagerPtr mgr,
 
 
 static int
-virSecuritySELinuxRestoreImageLabelInt(virSecurityManagerPtr mgr,
-                                       virDomainDefPtr def,
-                                       virStorageSourcePtr src,
-                                       bool migrated)
+virSecuritySELinuxRestoreImageLabelSingle(virSecurityManagerPtr mgr,
+                                          virDomainDefPtr def,
+                                          virStorageSourcePtr src,
+                                          bool migrated)
 {
     virSecurityLabelDefPtr seclabel;
     virSecurityDeviceLabelDefPtr disk_seclabel;
@@ -1803,10 +1805,30 @@ virSecuritySELinuxRestoreImageLabelInt(virSecurityManagerPtr mgr,
 
 
 static int
+virSecuritySELinuxRestoreImageLabelInt(virSecurityManagerPtr mgr,
+                                       virDomainDefPtr def,
+                                       virStorageSourcePtr src,
+                                       bool migrated)
+{
+    if (virSecuritySELinuxRestoreImageLabelSingle(mgr, def, src, migrated) < 0)
+        return -1;
+
+    if (src->externalDataStore &&
+        virSecuritySELinuxRestoreImageLabelSingle(mgr,
+                                                  def,
+                                                  src->externalDataStore,
+                                                  migrated) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int
 virSecuritySELinuxRestoreImageLabel(virSecurityManagerPtr mgr,
                                     virDomainDefPtr def,
                                     virStorageSourcePtr src,
-                                    virSecurityDomainImageLabelFlags flags ATTRIBUTE_UNUSED)
+                                    virSecurityDomainImageLabelFlags flags G_GNUC_UNUSED)
 {
     return virSecuritySELinuxRestoreImageLabelInt(mgr, def, src, false);
 }
@@ -1822,7 +1844,9 @@ virSecuritySELinuxSetImageLabelInternal(virSecurityManagerPtr mgr,
     virSecurityLabelDefPtr secdef;
     virSecurityDeviceLabelDefPtr disk_seclabel;
     virSecurityDeviceLabelDefPtr parent_seclabel = NULL;
+    char *use_label = NULL;
     bool remember;
+    bool is_toplevel = parent == src || parent->externalDataStore == src;
     int ret;
 
     if (!src->path || !virStorageSourceIsLocalStorage(src))
@@ -1844,51 +1868,38 @@ virSecuritySELinuxSetImageLabelInternal(virSecurityManagerPtr mgr,
      * but the top layer, or read only image, or disk explicitly
      * marked as shared.
      */
-    remember = src == parent && !src->readonly && !src->shared;
+    remember = is_toplevel && !src->readonly && !src->shared;
 
     disk_seclabel = virStorageSourceGetSecurityLabelDef(src,
                                                         SECURITY_SELINUX_NAME);
-    if (parent)
-        parent_seclabel = virStorageSourceGetSecurityLabelDef(parent,
-                                                              SECURITY_SELINUX_NAME);
+    parent_seclabel = virStorageSourceGetSecurityLabelDef(parent,
+                                                          SECURITY_SELINUX_NAME);
 
     if (disk_seclabel && (!disk_seclabel->relabel || disk_seclabel->label)) {
         if (!disk_seclabel->relabel)
             return 0;
 
-        ret = virSecuritySELinuxSetFilecon(mgr, src->path,
-                                           disk_seclabel->label, remember);
+        use_label = disk_seclabel->label;
     } else if (parent_seclabel && (!parent_seclabel->relabel || parent_seclabel->label)) {
         if (!parent_seclabel->relabel)
             return 0;
 
-        ret = virSecuritySELinuxSetFilecon(mgr, src->path,
-                                           parent_seclabel->label, remember);
-    } else if (!parent || parent == src) {
+        use_label = parent_seclabel->label;
+    } else if (is_toplevel) {
         if (src->shared) {
-            ret = virSecuritySELinuxSetFilecon(mgr,
-                                               src->path,
-                                               data->file_context,
-                                               remember);
+            use_label = data->file_context;
         } else if (src->readonly) {
-            ret = virSecuritySELinuxSetFilecon(mgr,
-                                               src->path,
-                                               data->content_context,
-                                               remember);
+            use_label = data->content_context;
         } else if (secdef->imagelabel) {
-            ret = virSecuritySELinuxSetFilecon(mgr,
-                                               src->path,
-                                               secdef->imagelabel,
-                                               remember);
+            use_label = secdef->imagelabel;
         } else {
-            ret = 0;
+            return 0;
         }
     } else {
-        ret = virSecuritySELinuxSetFilecon(mgr,
-                                           src->path,
-                                           data->content_context,
-                                           remember);
+        use_label = data->content_context;
     }
+
+    ret = virSecuritySELinuxSetFilecon(mgr, src->path, use_label, remember);
 
     if (ret == 1 && !disk_seclabel) {
         /* If we failed to set a label, but virt_use_nfs let us
@@ -1910,15 +1921,24 @@ virSecuritySELinuxSetImageLabelInternal(virSecurityManagerPtr mgr,
 
 
 static int
-virSecuritySELinuxSetImageLabel(virSecurityManagerPtr mgr,
-                                virDomainDefPtr def,
-                                virStorageSourcePtr src,
-                                virSecurityDomainImageLabelFlags flags)
+virSecuritySELinuxSetImageLabelRelative(virSecurityManagerPtr mgr,
+                                        virDomainDefPtr def,
+                                        virStorageSourcePtr src,
+                                        virStorageSourcePtr parent,
+                                        virSecurityDomainImageLabelFlags flags)
 {
     virStorageSourcePtr n;
 
     for (n = src; virStorageSourceIsBacking(n); n = n->backingStore) {
-        if (virSecuritySELinuxSetImageLabelInternal(mgr, def, n, src) < 0)
+        if (virSecuritySELinuxSetImageLabelInternal(mgr, def, n, parent) < 0)
+            return -1;
+
+        if (n->externalDataStore &&
+            virSecuritySELinuxSetImageLabelRelative(mgr,
+                                                    def,
+                                                    n->externalDataStore,
+                                                    parent,
+                                                    flags) < 0)
             return -1;
 
         if (!(flags & VIR_SECURITY_DOMAIN_IMAGE_LABEL_BACKING_CHAIN))
@@ -1929,6 +1949,15 @@ virSecuritySELinuxSetImageLabel(virSecurityManagerPtr mgr,
 }
 
 
+static int
+virSecuritySELinuxSetImageLabel(virSecurityManagerPtr mgr,
+                                virDomainDefPtr def,
+                                virStorageSourcePtr src,
+                                virSecurityDomainImageLabelFlags flags)
+{
+    return virSecuritySELinuxSetImageLabelRelative(mgr, def, src, src, flags);
+}
+
 struct virSecuritySELinuxMoveImageMetadataData {
     virSecurityManagerPtr mgr;
     const char *src;
@@ -1937,7 +1966,7 @@ struct virSecuritySELinuxMoveImageMetadataData {
 
 
 static int
-virSecuritySELinuxMoveImageMetadataHelper(pid_t pid ATTRIBUTE_UNUSED,
+virSecuritySELinuxMoveImageMetadataHelper(pid_t pid G_GNUC_UNUSED,
                                           void *opaque)
 {
     struct virSecuritySELinuxMoveImageMetadataData *data = opaque;
@@ -1945,7 +1974,7 @@ virSecuritySELinuxMoveImageMetadataHelper(pid_t pid ATTRIBUTE_UNUSED,
     virSecurityManagerMetadataLockStatePtr state;
     int ret;
 
-    if (!(state = virSecurityManagerMetadataLock(data->mgr, paths, ARRAY_CARDINALITY(paths))))
+    if (!(state = virSecurityManagerMetadataLock(data->mgr, paths, G_N_ELEMENTS(paths))))
         return -1;
 
     ret = virSecurityMoveRememberedLabel(SECURITY_SELINUX_NAME, data->src, data->dst);
@@ -2000,14 +2029,14 @@ virSecuritySELinuxSetHostdevLabelHelper(const char *file, void *opaque)
 }
 
 static int
-virSecuritySELinuxSetPCILabel(virPCIDevicePtr dev ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetPCILabel(virPCIDevicePtr dev G_GNUC_UNUSED,
                               const char *file, void *opaque)
 {
     return virSecuritySELinuxSetHostdevLabelHelper(file, opaque);
 }
 
 static int
-virSecuritySELinuxSetUSBLabel(virUSBDevicePtr dev ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetUSBLabel(virUSBDevicePtr dev G_GNUC_UNUSED,
                               const char *file, void *opaque)
 {
     return virSecuritySELinuxSetHostdevLabelHelper(file, opaque);
@@ -2038,7 +2067,7 @@ virSecuritySELinuxSetSCSILabel(virSCSIDevicePtr dev,
 }
 
 static int
-virSecuritySELinuxSetHostLabel(virSCSIVHostDevicePtr dev ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetHostLabel(virSCSIVHostDevicePtr dev G_GNUC_UNUSED,
                                const char *file, void *opaque)
 {
     return virSecuritySELinuxSetHostdevLabelHelper(file, opaque);
@@ -2243,7 +2272,7 @@ virSecuritySELinuxSetHostdevLabel(virSecurityManagerPtr mgr,
 }
 
 static int
-virSecuritySELinuxRestorePCILabel(virPCIDevicePtr dev ATTRIBUTE_UNUSED,
+virSecuritySELinuxRestorePCILabel(virPCIDevicePtr dev G_GNUC_UNUSED,
                                   const char *file,
                                   void *opaque)
 {
@@ -2253,7 +2282,7 @@ virSecuritySELinuxRestorePCILabel(virPCIDevicePtr dev ATTRIBUTE_UNUSED,
 }
 
 static int
-virSecuritySELinuxRestoreUSBLabel(virUSBDevicePtr dev ATTRIBUTE_UNUSED,
+virSecuritySELinuxRestoreUSBLabel(virUSBDevicePtr dev G_GNUC_UNUSED,
                                   const char *file,
                                   void *opaque)
 {
@@ -2280,7 +2309,7 @@ virSecuritySELinuxRestoreSCSILabel(virSCSIDevicePtr dev,
 }
 
 static int
-virSecuritySELinuxRestoreHostLabel(virSCSIVHostDevicePtr dev ATTRIBUTE_UNUSED,
+virSecuritySELinuxRestoreHostLabel(virSCSIVHostDevicePtr dev G_GNUC_UNUSED,
                                    const char *file,
                                    void *opaque)
 {
@@ -2643,7 +2672,7 @@ struct _virSecuritySELinuxChardevCallbackData {
 
 static int
 virSecuritySELinuxRestoreSecurityChardevCallback(virDomainDefPtr def,
-                                                 virDomainChrDefPtr dev ATTRIBUTE_UNUSED,
+                                                 virDomainChrDefPtr dev G_GNUC_UNUSED,
                                                  void *opaque)
 {
     struct _virSecuritySELinuxChardevCallbackData *data = opaque;
@@ -2845,7 +2874,7 @@ virSecuritySELinuxRestoreSavedStateLabel(virSecurityManagerPtr mgr,
 
 
 static int
-virSecuritySELinuxVerify(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxVerify(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                          virDomainDefPtr def)
 {
     virSecurityLabelDefPtr secdef;
@@ -2874,7 +2903,7 @@ virSecuritySELinuxVerify(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 }
 
 static int
-virSecuritySELinuxSetProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetProcessLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                   virDomainDefPtr def)
 {
     /* TODO: verify DOI */
@@ -2907,7 +2936,7 @@ virSecuritySELinuxSetProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 }
 
 static int
-virSecuritySELinuxSetChildProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetChildProcessLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                        virDomainDefPtr def,
                                        virCommandPtr cmd)
 {
@@ -2935,7 +2964,7 @@ virSecuritySELinuxSetChildProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSE
 }
 
 static int
-virSecuritySELinuxSetDaemonSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetDaemonSocketLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                        virDomainDefPtr def)
 {
     /* TODO: verify DOI */
@@ -2985,7 +3014,7 @@ virSecuritySELinuxSetDaemonSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSE
 }
 
 static int
-virSecuritySELinuxSetSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetSocketLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                  virDomainDefPtr vm)
 {
     virSecurityLabelDefPtr secdef;
@@ -3023,7 +3052,7 @@ virSecuritySELinuxSetSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 }
 
 static int
-virSecuritySELinuxClearSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxClearSocketLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                    virDomainDefPtr def)
 {
     /* TODO: verify DOI */
@@ -3056,7 +3085,7 @@ virSecuritySELinuxClearSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 
 static int
 virSecuritySELinuxSetSecurityChardevCallback(virDomainDefPtr def,
-                                             virDomainChrDefPtr dev ATTRIBUTE_UNUSED,
+                                             virDomainChrDefPtr dev G_GNUC_UNUSED,
                                              void *opaque)
 {
     struct _virSecuritySELinuxChardevCallbackData *data = opaque;
@@ -3104,7 +3133,8 @@ static int
 virSecuritySELinuxSetAllLabel(virSecurityManagerPtr mgr,
                               virDomainDefPtr def,
                               const char *stdin_path,
-                              bool chardevStdioLogd)
+                              bool chardevStdioLogd,
+                              bool migrated G_GNUC_UNUSED)
 {
     size_t i;
     virSecuritySELinuxDataPtr data = virSecurityManagerGetPrivateData(mgr);
@@ -3206,7 +3236,7 @@ virSecuritySELinuxSetAllLabel(virSecurityManagerPtr mgr,
 }
 
 static int
-virSecuritySELinuxSetImageFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+virSecuritySELinuxSetImageFDLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
                                   virDomainDefPtr def,
                                   int fd)
 {
@@ -3350,7 +3380,7 @@ static int
 virSecuritySELinuxDomainSetPathLabel(virSecurityManagerPtr mgr,
                                      virDomainDefPtr def,
                                      const char *path,
-                                     bool allowSubtree ATTRIBUTE_UNUSED)
+                                     bool allowSubtree G_GNUC_UNUSED)
 {
     virSecurityLabelDefPtr seclabel;
 

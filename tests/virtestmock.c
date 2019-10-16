@@ -76,12 +76,12 @@ printFile(const char *file,
     }
 
     if (!(fp = real_fopen(output, "a"))) {
-        fprintf(stderr, "Unable to open %s: %s\n", output, strerror(errno));
+        fprintf(stderr, "Unable to open %s: %s\n", output, g_strerror(errno));
         abort();
     }
 
     if (flock(fileno(fp), LOCK_EX) < 0) {
-        fprintf(stderr, "Unable to lock %s: %s\n", output, strerror(errno));
+        fprintf(stderr, "Unable to lock %s: %s\n", output, g_strerror(errno));
         fclose(fp);
         abort();
     }
@@ -198,7 +198,7 @@ int access(const char *path, int mode)
 
 #include "virmockstathelpers.c"
 
-static int virMockStatRedirect(const char *path ATTRIBUTE_UNUSED, char **newpath ATTRIBUTE_UNUSED)
+static int virMockStatRedirect(const char *path G_GNUC_UNUSED, char **newpath G_GNUC_UNUSED)
 {
     return 0;
 }

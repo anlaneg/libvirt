@@ -837,9 +837,8 @@ qemuBuildRBDSecinfoURI(virBufferPtr buf,
 
     switch ((qemuDomainSecretInfoType) secinfo->type) {
     case VIR_DOMAIN_SECRET_INFO_TYPE_PLAIN:
-        if (!(base64secret = virStringEncodeBase64(secinfo->s.plain.secret,
-                                                   secinfo->s.plain.secretlen)))
-            return -1;
+        base64secret = g_base64_encode(secinfo->s.plain.secret,
+                                       secinfo->s.plain.secretlen);
         virBufferEscape(buf, '\\', ":", ":id=%s", secinfo->s.plain.username);
         virBufferEscape(buf, '\\', ":",
                         ":key=%s:auth_supported=cephx\\;none",
@@ -3235,7 +3234,7 @@ qemuBuildControllersCommandLine(virCommandPtr cmd,
         VIR_DOMAIN_CONTROLLER_TYPE_VIRTIO_SERIAL,
     };
 
-    for (i = 0; i < ARRAY_CARDINALITY(contOrder); i++) {
+    for (i = 0; i < G_N_ELEMENTS(contOrder); i++) {
         if (qemuBuildControllersByTypeCommandLine(cmd, def, qemuCaps, contOrder[i]) < 0)
             return -1;
     }
@@ -7255,7 +7254,7 @@ qemuBuildMachineCommandLine(virCommandPtr cmd,
                  * early instead of erroring out */
                 break;
             }
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
 
         case VIR_GIC_VERSION_3:
         case VIR_GIC_VERSION_HOST:
@@ -7816,9 +7815,9 @@ qemuBuildMemoryDeviceCommandLine(virCommandPtr cmd,
 
 
 static int
-qemuBuildGraphicsSDLCommandLine(virQEMUDriverConfigPtr cfg ATTRIBUTE_UNUSED,
+qemuBuildGraphicsSDLCommandLine(virQEMUDriverConfigPtr cfg G_GNUC_UNUSED,
                                 virCommandPtr cmd,
-                                virQEMUCapsPtr qemuCaps ATTRIBUTE_UNUSED,
+                                virQEMUCapsPtr qemuCaps G_GNUC_UNUSED,
                                 virDomainGraphicsDefPtr graphics)
 {
     VIR_AUTOCLEAN(virBuffer) opt = VIR_BUFFER_INITIALIZER;
@@ -8244,7 +8243,7 @@ qemuBuildGraphicsSPICECommandLine(virQEMUDriverConfigPtr cfg,
 
 
 static int
-qemuBuildGraphicsEGLHeadlessCommandLine(virQEMUDriverConfigPtr cfg ATTRIBUTE_UNUSED,
+qemuBuildGraphicsEGLHeadlessCommandLine(virQEMUDriverConfigPtr cfg G_GNUC_UNUSED,
                                         virCommandPtr cmd,
                                         virQEMUCapsPtr qemuCaps,
                                         virDomainGraphicsDefPtr graphics)
@@ -9054,7 +9053,7 @@ qemuBuildShmemCommandLine(virLogManagerPtr logManager,
         virCommandAddArg(cmd, "-object");
         virCommandAddArgBuffer(cmd, &buf);
 
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case VIR_DOMAIN_SHMEM_MODEL_IVSHMEM_DOORBELL:
         devstr = qemuBuildShmemDevStr(def, shmem, qemuCaps);
         break;
@@ -10181,7 +10180,7 @@ qemuBuildCommandLineValidate(virQEMUDriverPtr driver,
 static int
 qemuBuildSeccompSandboxCommandLine(virCommandPtr cmd,
                                    virQEMUDriverConfigPtr cfg,
-                                   virQEMUCapsPtr qemuCaps ATTRIBUTE_UNUSED)
+                                   virQEMUCapsPtr qemuCaps G_GNUC_UNUSED)
 {
     if (cfg->seccompSandbox == 0) {
         if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_SECCOMP_SANDBOX))

@@ -46,10 +46,7 @@ int virAlloc(void *ptrptr,
              size_t size)
 {
 	//申请size大小的内存，并返回其对应的指针
-    *(void **)ptrptr = calloc(1, size);
-    if (*(void **)ptrptr == NULL)
-        abort();
-
+    *(void **)ptrptr = g_malloc0(size);
     return 0;
 }
 
@@ -70,10 +67,7 @@ int virAllocN(void *ptrptr,
               size_t size,
               size_t count)
 {
-    *(void**)ptrptr = calloc(count, size);
-    if (*(void**)ptrptr == NULL)
-        abort();
-
+    *(void**)ptrptr = g_malloc0_n(count, size);
     return 0;
 }
 
@@ -95,16 +89,7 @@ int virReallocN(void *ptrptr,
                 size_t size,
                 size_t count)
 {
-    void *tmp;
-
-    if (xalloc_oversized(count, size))
-        abort();
-
-    tmp = realloc(*(void**)ptrptr, size * count);
-    if (!tmp && ((size * count) != 0))
-        abort();
-
-    *(void**)ptrptr = tmp;
+    *(void **)ptrptr = g_realloc_n(*(void**)ptrptr, size, count);
     return 0;
 }
 
@@ -344,10 +329,7 @@ int virAllocVar(void *ptrptr,
         abort();
 
     alloc_size = struct_size + (element_size * count);
-    *(void **)ptrptr = calloc(1, alloc_size);
-    if (*(void **)ptrptr == NULL)
-    	/*申请内存失败*/
-        abort();
+    *(void **)ptrptr = g_malloc0(alloc_size);
     return 0;
 }
 
@@ -364,7 +346,7 @@ void virFree(void *ptrptr)
 {
     int save_errno = errno;
 
-    free(*(void**)ptrptr);
+    g_free(*(void**)ptrptr);
     *(void**)ptrptr = NULL;
     errno = save_errno;
 }
@@ -397,7 +379,7 @@ void virDispose(void *ptrptr,
     if (*(void**)ptrptr && count > 0)
         memset(*(void **)ptrptr, 0, count * element_size);
 
-    free(*(void**)ptrptr);
+    g_free(*(void**)ptrptr);
     *(void**)ptrptr = NULL;
 
     if (countptr)

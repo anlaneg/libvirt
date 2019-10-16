@@ -39,7 +39,6 @@
 #include "virtime.h"
 #include "virobject.h"
 #include "virstring.h"
-#include "base64.h"
 #include "virenum.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
@@ -265,7 +264,7 @@ qemuAgentIOProcessEvent(qemuAgentPtr mon,
     }
 
 /*
-    for (i = 0; i < ARRAY_CARDINALITY(eventHandlers); i++) {
+    for (i = 0; i < G_N_ELEMENTS(eventHandlers); i++) {
         if (STREQ(eventHandlers[i].type, type)) {
             virJSONValuePtr data = virJSONValueObjectGet(obj, "data");
             VIR_DEBUG("handle %s handler=%p data=%p", type,
@@ -1160,7 +1159,7 @@ qemuAgentCommand(qemuAgentPtr mon,
     return ret;
 }
 
-static virJSONValuePtr ATTRIBUTE_SENTINEL
+static virJSONValuePtr G_GNUC_NULL_TERMINATED
 qemuAgentMakeCommand(const char *cmdname,
                      ...)
 {
@@ -2518,9 +2517,8 @@ qemuAgentSetUserPassword(qemuAgentPtr mon,
     virJSONValuePtr reply = NULL;
     char *password64 = NULL;
 
-    if (!(password64 = virStringEncodeBase64((unsigned char *)password,
-                                             strlen(password))))
-        goto cleanup;
+    password64 = g_base64_encode((unsigned char *)password,
+                                 strlen(password));
 
     if (!(cmd = qemuAgentMakeCommand("guest-set-user-password",
                                      "b:crypted", crypted,

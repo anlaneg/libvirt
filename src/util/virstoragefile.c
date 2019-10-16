@@ -180,9 +180,7 @@ struct FileTypeInfo {
 
 static int cowGetBackingStore(char **, int *,
                               const char *, size_t);
-static int qcow1GetBackingStore(char **, int *,
-                                const char *, size_t);
-static int qcow2GetBackingStore(char **, int *,
+static int qcowXGetBackingStore(char **, int *,
                                 const char *, size_t);
 static int qcow2GetFeatures(virBitmapPtr *features, int format,
                             char *buf, ssize_t len);
@@ -204,6 +202,7 @@ qedGetBackingStore(char **, int *, const char *, size_t);
 
 #define QCOW2_HDR_EXTENSION_END 0
 #define QCOW2_HDR_EXTENSION_BACKING_FORMAT 0xE2792ACA
+#define QCOW2_HDR_EXTENSION_DATA_FILE 0x44415441
 
 #define QCOW2v3_HDR_FEATURES_INCOMPATIBLE (QCOW2_HDR_TOTAL_SIZE)
 #define QCOW2v3_HDR_FEATURES_COMPATIBLE (QCOW2v3_HDR_FEATURES_INCOMPATIBLE+8)
@@ -366,14 +365,14 @@ static struct FileTypeInfo const fileTypeInfo[] = {
         LV_BIG_ENDIAN, 4, 4, {1},
         QCOWX_HDR_IMAGE_SIZE, 8, 1,
         qcow1EncryptionInfo,
-        qcow1GetBackingStore, NULL
+        qcowXGetBackingStore, NULL
     },
     [VIR_STORAGE_FILE_QCOW2] = {
         0, "QFI", NULL,
         LV_BIG_ENDIAN, 4, 4, {2, 3},
         QCOWX_HDR_IMAGE_SIZE, 8, 1,
         qcow2EncryptionInfo,
-        qcow2GetBackingStore,
+        qcowXGetBackingStore,
         qcow2GetFeatures
     },
     [VIR_STORAGE_FILE_QED] = {
@@ -388,7 +387,7 @@ static struct FileTypeInfo const fileTypeInfo[] = {
         4+4+4, 8, 512, NULL, vmdk4GetBackingStore, NULL
     },
 };
-verify(ARRAY_CARDINALITY(fileTypeInfo) == VIR_STORAGE_FILE_LAST);
+verify(G_N_ELEMENTS(fileTypeInfo) == VIR_STORAGE_FILE_LAST);
 
 
 /* qcow2 compatible features in the order they appear on-disk */
@@ -402,7 +401,7 @@ enum qcow2CompatibleFeature {
 static const int qcow2CompatibleFeatureArray[] = {
     VIR_STORAGE_FILE_FEATURE_LAZY_REFCOUNTS,
 };
-verify(ARRAY_CARDINALITY(qcow2CompatibleFeatureArray) ==
+verify(G_N_ELEMENTS(qcow2CompatibleFeatureArray) ==
        QCOW2_COMPATIBLE_FEATURE_LAST);
 
 static int
@@ -429,100 +428,26 @@ cowGetBackingStore(char **res,
 
 
 static int
-qcow2GetBackingStoreFormat(int *format,
-                           const char *buf,
-                           size_t buf_size,
-                           size_t extension_start,
-                           size_t extension_end)
+qcow2GetExtensions(const char *buf,
+                   size_t buf_size,
+                   int *backingFormat,
+                   char **externalDataStoreRaw)
 {
-    size_t offset = extension_start;
+    size_t offset;
+    size_t extension_start;
+    size_t extension_end;
+    int version = virReadBufInt32BE(buf + QCOWX_HDR_VERSION);
 
-    /*
-     * The extensions take format of
-     *
-     * int32: magic
-     * int32: length
-     * byte[length]: payload
-     *
-     * Unknown extensions can be ignored by skipping
-     * over "length" bytes in the data stream.
-     */
-    while (offset < (buf_size-8) &&
-           offset < (extension_end-8)) {
-        unsigned int magic = virReadBufInt32BE(buf + offset);
-        unsigned int len = virReadBufInt32BE(buf + offset + 4);
-
-        offset += 8;
-
-        if ((offset + len) < offset)
-            break;
-
-        if ((offset + len) > buf_size)
-            break;
-
-        switch (magic) {
-        case QCOW2_HDR_EXTENSION_END:
-            goto done;
-
-        case QCOW2_HDR_EXTENSION_BACKING_FORMAT:
-            if (buf[offset+len] != '\0')
-                break;
-            *format = virStorageFileFormatTypeFromString(buf+offset);
-            if (*format <= VIR_STORAGE_FILE_NONE)
-                return -1;
-        }
-
-        offset += len;
+    if (version < 2) {
+        /* QCow1 doesn't have the extensions capability
+         * used to store backing format */
+        return 0;
     }
 
- done:
-
-    return 0;
-}
-
-
-static int
-qcowXGetBackingStore(char **res,
-                     int *format,
-                     const char *buf,
-                     size_t buf_size,
-                     bool isQCow2)
-{
-    unsigned long long offset;
-    unsigned int size;
-    unsigned long long start;
-    int version;
-
-    *res = NULL;
-    if (format)
-        *format = VIR_STORAGE_FILE_AUTO;
-
-    if (buf_size < QCOWX_HDR_BACKING_FILE_OFFSET+8+4)
-        return BACKING_STORE_INVALID;
-    offset = virReadBufInt64BE(buf + QCOWX_HDR_BACKING_FILE_OFFSET);
-    if (offset > buf_size)
-        return BACKING_STORE_INVALID;
-
-    if (offset == 0) {
-        if (format)
-            *format = VIR_STORAGE_FILE_NONE;
-        return BACKING_STORE_OK;
-    }
-
-    size = virReadBufInt32BE(buf + QCOWX_HDR_BACKING_FILE_SIZE);
-    if (size == 0) {
-        if (format)
-            *format = VIR_STORAGE_FILE_NONE;
-        return BACKING_STORE_OK;
-    }
-    if (size > 1023)
-        return BACKING_STORE_INVALID;
-    if (offset + size > buf_size || offset + size < offset)
-        return BACKING_STORE_INVALID;
-    if (VIR_ALLOC_N(*res, size + 1) < 0)
-        return BACKING_STORE_ERROR;
-    memcpy(*res, buf + offset, size);
-    (*res)[size] = '\0';
+    if (version == 2)
+        extension_start = QCOW2_HDR_TOTAL_SIZE;
+    else
+        extension_start = virReadBufInt32BE(buf + QCOW2v3_HDR_SIZE);
 
     /*
      * Traditionally QCow2 files had a layout of
@@ -551,45 +476,119 @@ qcowXGetBackingStore(char **res,
      * for qcow2 v3 images, the length of the header
      * is stored at QCOW2v3_HDR_SIZE
      */
-    if (isQCow2 && format) {
-        version = virReadBufInt32BE(buf + QCOWX_HDR_VERSION);
-        if (version == 2)
-            start = QCOW2_HDR_TOTAL_SIZE;
-        else
-            start = virReadBufInt32BE(buf + QCOW2v3_HDR_SIZE);
-        if (qcow2GetBackingStoreFormat(format, buf, buf_size,
-                                       start, offset) < 0)
-            return BACKING_STORE_INVALID;
+    extension_end = virReadBufInt64BE(buf + QCOWX_HDR_BACKING_FILE_OFFSET);
+    if (extension_end > buf_size)
+        return -1;
+
+    /*
+     * The extensions take format of
+     *
+     * int32: magic
+     * int32: length
+     * byte[length]: payload
+     *
+     * Unknown extensions can be ignored by skipping
+     * over "length" bytes in the data stream.
+     */
+    offset = extension_start;
+    while (offset < (buf_size-8) &&
+           offset < (extension_end-8)) {
+        unsigned int magic = virReadBufInt32BE(buf + offset);
+        unsigned int len = virReadBufInt32BE(buf + offset + 4);
+
+        offset += 8;
+
+        if ((offset + len) < offset)
+            break;
+
+        if ((offset + len) > buf_size)
+            break;
+
+        switch (magic) {
+        case QCOW2_HDR_EXTENSION_BACKING_FORMAT: {
+            VIR_AUTOFREE(char *) tmp = NULL;
+            if (!backingFormat)
+                break;
+
+            if (VIR_ALLOC_N(tmp, len + 1) < 0)
+                return -1;
+            memcpy(tmp, buf + offset, len);
+            tmp[len] = '\0';
+
+            *backingFormat = virStorageFileFormatTypeFromString(tmp);
+            if (*backingFormat <= VIR_STORAGE_FILE_NONE)
+                return -1;
+            break;
+        }
+
+        case QCOW2_HDR_EXTENSION_DATA_FILE: {
+            if (!externalDataStoreRaw)
+                break;
+
+            if (VIR_ALLOC_N(*externalDataStoreRaw, len + 1) < 0)
+                return -1;
+            memcpy(*externalDataStoreRaw, buf + offset, len);
+            (*externalDataStoreRaw)[len] = '\0';
+            VIR_DEBUG("parsed externalDataStoreRaw='%s'",
+                      *externalDataStoreRaw);
+            break;
+        }
+
+        case QCOW2_HDR_EXTENSION_END:
+            goto done;
+        }
+
+        offset += len;
     }
 
-    return BACKING_STORE_OK;
+ done:
+
+    return 0;
 }
 
 
 static int
-qcow1GetBackingStore(char **res,
+qcowXGetBackingStore(char **res,
                      int *format,
                      const char *buf,
                      size_t buf_size)
 {
-    int ret;
+    unsigned long long offset;
+    unsigned int size;
 
-    /* QCow1 doesn't have the extensions capability
-     * used to store backing format */
+    *res = NULL;
     *format = VIR_STORAGE_FILE_AUTO;
-    ret = qcowXGetBackingStore(res, NULL, buf, buf_size, false);
-    if (ret == 0 && *buf == '\0')
-        *format = VIR_STORAGE_FILE_NONE;
-    return ret;
-}
 
-static int
-qcow2GetBackingStore(char **res,
-                     int *format,
-                     const char *buf,
-                     size_t buf_size)
-{
-    return qcowXGetBackingStore(res, format, buf, buf_size, true);
+    if (buf_size < QCOWX_HDR_BACKING_FILE_OFFSET+8+4)
+        return BACKING_STORE_INVALID;
+
+    offset = virReadBufInt64BE(buf + QCOWX_HDR_BACKING_FILE_OFFSET);
+    if (offset > buf_size)
+        return BACKING_STORE_INVALID;
+
+    if (offset == 0) {
+        *format = VIR_STORAGE_FILE_NONE;
+        return BACKING_STORE_OK;
+    }
+
+    size = virReadBufInt32BE(buf + QCOWX_HDR_BACKING_FILE_SIZE);
+    if (size == 0) {
+        *format = VIR_STORAGE_FILE_NONE;
+        return BACKING_STORE_OK;
+    }
+    if (size > 1023)
+        return BACKING_STORE_INVALID;
+    if (offset + size > buf_size || offset + size < offset)
+        return BACKING_STORE_INVALID;
+    if (VIR_ALLOC_N(*res, size + 1) < 0)
+        return BACKING_STORE_ERROR;
+    memcpy(*res, buf + offset, size);
+    (*res)[size] = '\0';
+
+    if (qcow2GetExtensions(buf, buf_size, format, NULL) < 0)
+        return BACKING_STORE_INVALID;
+
+    return BACKING_STORE_OK;
 }
 
 
@@ -970,7 +969,7 @@ virStorageFileGetEncryptionPayloadOffset(const struct FileEncryptionInfo *info,
  * Note that this function may be called repeatedly on @meta, so it must
  * clean up any existing allocated memory which would be overwritten.
  */
-int
+static int
 virStorageFileGetMetadataInternal(virStorageSourcePtr meta,
                                   char *buf,
                                   size_t len,
@@ -1061,6 +1060,12 @@ virStorageFileGetMetadataInternal(virStorageSourcePtr meta,
     if (fileTypeInfo[meta->format].getFeatures != NULL &&
         fileTypeInfo[meta->format].getFeatures(&meta->features, meta->format, buf, len) < 0)
         return -1;
+
+    VIR_FREE(meta->externalDataStoreRaw);
+    if (meta->format == VIR_STORAGE_FILE_QCOW2 &&
+        qcow2GetExtensions(buf, len, NULL, &meta->externalDataStoreRaw) < 0) {
+        return -1;
+    }
 
     VIR_FREE(meta->compat);
     if (meta->format == VIR_STORAGE_FILE_QCOW2 && meta->features &&
@@ -1409,7 +1414,7 @@ int virStorageFileGetLVMKey(const char *path,
 }
 #else
 int virStorageFileGetLVMKey(const char *path,
-                            char **key ATTRIBUTE_UNUSED)
+                            char **key G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, _("Unable to get LVM key for %s"), path);
     return -1;
@@ -1434,7 +1439,7 @@ int virStorageFileGetLVMKey(const char *path,
 int
 virStorageFileGetSCSIKey(const char *path,
                          char **key,
-                         bool ignoreError ATTRIBUTE_UNUSED)
+                         bool ignoreError G_GNUC_UNUSED)
 {
     int status;
     VIR_AUTOPTR(virCommand) cmd = NULL;
@@ -1469,7 +1474,7 @@ virStorageFileGetSCSIKey(const char *path,
 }
 #else
 int virStorageFileGetSCSIKey(const char *path,
-                             char **key ATTRIBUTE_UNUSED,
+                             char **key G_GNUC_UNUSED,
                              bool ignoreError)
 {
     if (!ignoreError)
@@ -1546,8 +1551,8 @@ virStorageFileGetNPIVKey(const char *path,
     return 0;
 }
 #else
-int virStorageFileGetNPIVKey(const char *path ATTRIBUTE_UNUSED,
-                             char **key ATTRIBUTE_UNUSED)
+int virStorageFileGetNPIVKey(const char *path G_GNUC_UNUSED,
+                             char **key G_GNUC_UNUSED)
 {
     return -1;
 }
@@ -2278,6 +2283,7 @@ virStorageSourceCopy(const virStorageSource *src,
         VIR_STRDUP(def->volume, src->volume) < 0 ||
         VIR_STRDUP(def->relPath, src->relPath) < 0 ||
         VIR_STRDUP(def->backingStoreRaw, src->backingStoreRaw) < 0 ||
+        VIR_STRDUP(def->externalDataStoreRaw, src->externalDataStoreRaw) < 0 ||
         VIR_STRDUP(def->snapshot, src->snapshot) < 0 ||
         VIR_STRDUP(def->configFile, src->configFile) < 0 ||
         VIR_STRDUP(def->nodeformat, src->nodeformat) < 0 ||
@@ -2331,6 +2337,12 @@ virStorageSourceCopy(const virStorageSource *src,
     if (backingChain && src->backingStore) {
         if (!(def->backingStore = virStorageSourceCopy(src->backingStore,
                                                        true)))
+            return NULL;
+    }
+
+    if (src->externalDataStore) {
+        if (!(def->externalDataStore = virStorageSourceCopy(src->externalDataStore,
+                                                            true)))
             return NULL;
     }
 
@@ -2553,6 +2565,10 @@ virStorageSourceClear(virStorageSourcePtr def)
     virStorageSourceSeclabelsClear(def);
     virStoragePermsFree(def->perms);
     VIR_FREE(def->timestamps);
+    VIR_FREE(def->externalDataStoreRaw);
+
+    virObjectUnref(def->externalDataStore);
+    def->externalDataStore = NULL;
 
     virStorageNetHostDefFree(def->nhosts, def->hosts);
     virStorageAuthDefFree(def->auth);
@@ -2619,7 +2635,7 @@ virStorageSourceNewFromBackingRelative(virStorageSourcePtr parent,
         return NULL;
 
     /* store relative name */
-    if (VIR_STRDUP(def->relPath, parent->backingStoreRaw) < 0)
+    if (VIR_STRDUP(def->relPath, rel) < 0)
         return NULL;
 
     if (!(dirname = mdir_name(parent->path))) {
@@ -3202,7 +3218,7 @@ virStorageSourceParseBackingJSONSocketAddress(virStorageNetHostDefPtr host,
 static int
 virStorageSourceParseBackingJSONGluster(virStorageSourcePtr src,
                                         virJSONValuePtr json,
-                                        int opaque ATTRIBUTE_UNUSED)
+                                        int opaque G_GNUC_UNUSED)
 {
     const char *uri = virJSONValueObjectGetString(json, "filename");
     const char *volume = virJSONValueObjectGetString(json, "volume");
@@ -3256,7 +3272,7 @@ virStorageSourceParseBackingJSONGluster(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONiSCSI(virStorageSourcePtr src,
                                       virJSONValuePtr json,
-                                      int opaque ATTRIBUTE_UNUSED)
+                                      int opaque G_GNUC_UNUSED)
 {
     const char *transport = virJSONValueObjectGetString(json, "transport");
     const char *portal = virJSONValueObjectGetString(json, "portal");
@@ -3327,7 +3343,7 @@ virStorageSourceParseBackingJSONiSCSI(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONNbd(virStorageSourcePtr src,
                                     virJSONValuePtr json,
-                                    int opaque ATTRIBUTE_UNUSED)
+                                    int opaque G_GNUC_UNUSED)
 {
     const char *path = virJSONValueObjectGetString(json, "path");
     const char *host = virJSONValueObjectGetString(json, "host");
@@ -3377,7 +3393,7 @@ virStorageSourceParseBackingJSONNbd(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONSheepdog(virStorageSourcePtr src,
                                          virJSONValuePtr json,
-                                         int opaque ATTRIBUTE_UNUSED)
+                                         int opaque G_GNUC_UNUSED)
 {
     const char *filename;
     const char *vdi = virJSONValueObjectGetString(json, "vdi");
@@ -3421,7 +3437,7 @@ virStorageSourceParseBackingJSONSheepdog(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONSSH(virStorageSourcePtr src,
                                     virJSONValuePtr json,
-                                    int opaque ATTRIBUTE_UNUSED)
+                                    int opaque G_GNUC_UNUSED)
 {
     const char *path = virJSONValueObjectGetString(json, "path");
     const char *host = virJSONValueObjectGetString(json, "host");
@@ -3464,7 +3480,7 @@ virStorageSourceParseBackingJSONSSH(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONRBD(virStorageSourcePtr src,
                                     virJSONValuePtr json,
-                                    int opaque ATTRIBUTE_UNUSED)
+                                    int opaque G_GNUC_UNUSED)
 {
     const char *filename;
     const char *pool = virJSONValueObjectGetString(json, "pool");
@@ -3519,7 +3535,7 @@ virStorageSourceParseBackingJSONRBD(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONRaw(virStorageSourcePtr src,
                                     virJSONValuePtr json,
-                                    int opaque ATTRIBUTE_UNUSED)
+                                    int opaque G_GNUC_UNUSED)
 {
     /* There are no interesting attributes in raw driver.
      * Treat it as pass-through.
@@ -3531,7 +3547,7 @@ virStorageSourceParseBackingJSONRaw(virStorageSourcePtr src,
 static int
 virStorageSourceParseBackingJSONVxHS(virStorageSourcePtr src,
                                      virJSONValuePtr json,
-                                     int opaque ATTRIBUTE_UNUSED)
+                                     int opaque G_GNUC_UNUSED)
 {
     const char *vdisk_id = virJSONValueObjectGetString(json, "vdisk-id");
     virJSONValuePtr server = virJSONValueObjectGetObject(json, "server");
@@ -3624,7 +3640,7 @@ virStorageSourceParseBackingJSONInternal(virStorageSourcePtr src,
         return -1;
     }
 
-    for (i = 0; i < ARRAY_CARDINALITY(jsonParsers); i++) {
+    for (i = 0; i < G_N_ELEMENTS(jsonParsers); i++) {
         if (STREQ(drvname, jsonParsers[i].drvname))
             return jsonParsers[i].func(src, file, jsonParsers[i].opaque);
     }
@@ -3710,38 +3726,38 @@ virStorageSourceNewFromBackingAbsolute(const char *path,
 
 
 /**
- * virStorageSourceNewFromBacking:
+ * virStorageSourceNewFromChild:
  * @parent: storage source parent
- * @backing: returned backing store definition
+ * @child: returned child/backing store definition
+ * @parentRaw: raw child string (backingStoreRaw)
  *
  * Creates a storage source which describes the backing image of @parent and
- * fills it into @backing depending on the 'backingStoreRaw' property of @parent
+ * fills it into @backing depending on the passed parentRaw (backingStoreRaw)
  * and other data. Note that for local storage this function accesses the file
- * to update the actual type of the backing store.
+ * to update the actual type of the child store.
  *
- * Returns 0 on success, 1 if we could parse all location data but the backinig
+ * Returns 0 on success, 1 if we could parse all location data but the child
  * store specification contained other data unrepresentable by libvirt (e.g.
  * inline authentication).
  * In both cases @src is filled. On error -1 is returned @src is NULL and an
  * error is reported.
  */
-int
-virStorageSourceNewFromBacking(virStorageSourcePtr parent,
-                               virStorageSourcePtr *backing)
+static int
+virStorageSourceNewFromChild(virStorageSourcePtr parent,
+                             const char *parentRaw,
+                             virStorageSourcePtr *child)
 {
     struct stat st;
     VIR_AUTOUNREF(virStorageSourcePtr) def = NULL;
     int rc = 0;
 
-    *backing = NULL;
+    *child = NULL;
 
-    if (virStorageIsRelative(parent->backingStoreRaw)) {
-        if (!(def = virStorageSourceNewFromBackingRelative(parent,
-                                                           parent->backingStoreRaw)))
+    if (virStorageIsRelative(parentRaw)) {
+        if (!(def = virStorageSourceNewFromBackingRelative(parent, parentRaw)))
             return -1;
     } else {
-        if ((rc = virStorageSourceNewFromBackingAbsolute(parent->backingStoreRaw,
-                                                         &def)) < 0)
+        if ((rc = virStorageSourceNewFromBackingAbsolute(parentRaw, &def)) < 0)
             return -1;
     }
 
@@ -3761,10 +3777,43 @@ virStorageSourceNewFromBacking(virStorageSourcePtr parent,
     if (virStorageSourceInitChainElement(def, parent, true) < 0)
         return -1;
 
-    def->readonly = true;
     def->detected = true;
 
-    VIR_STEAL_PTR(*backing, def);
+    VIR_STEAL_PTR(*child, def);
+    return rc;
+}
+
+
+int
+virStorageSourceNewFromBacking(virStorageSourcePtr parent,
+                               virStorageSourcePtr *backing)
+{
+    int rc;
+
+    if ((rc = virStorageSourceNewFromChild(parent,
+                                           parent->backingStoreRaw,
+                                           backing)) < 0)
+        return rc;
+
+    (*backing)->readonly = true;
+    return rc;
+}
+
+
+static int
+virStorageSourceNewFromExternalData(virStorageSourcePtr parent,
+                                    virStorageSourcePtr *externalDataStore)
+{
+    int rc;
+
+    if ((rc = virStorageSourceNewFromChild(parent,
+                                           parent->externalDataStoreRaw,
+                                           externalDataStore)) < 0)
+        return rc;
+
+    /* qcow2 data_file can only be raw */
+    (*externalDataStore)->format = VIR_STORAGE_FILE_RAW;
+    (*externalDataStore)->readonly = parent->readonly;
     return rc;
 }
 
@@ -4977,6 +5026,23 @@ virStorageFileGetMetadataRecurse(virStorageSourcePtr src,
     }
 
     VIR_STEAL_PTR(src->backingStore, backingStore);
+
+    if (src->externalDataStoreRaw) {
+        VIR_AUTOUNREF(virStorageSourcePtr) externalDataStore = NULL;
+
+        if ((rv = virStorageSourceNewFromExternalData(src,
+                                                      &externalDataStore)) < 0)
+            goto cleanup;
+
+        if (rv == 1) {
+            /* the file would not be usable for VM usage */
+            ret = 0;
+            goto cleanup;
+        }
+
+        VIR_STEAL_PTR(src->externalDataStore, externalDataStore);
+    }
+
     ret = 0;
 
  cleanup:

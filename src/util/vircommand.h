@@ -33,16 +33,16 @@ typedef virCommand *virCommandPtr;
  * call any function that is not async-signal-safe.  */
 typedef int (*virExecHook)(void *data);
 
-pid_t virFork(void) ATTRIBUTE_RETURN_CHECK;
+pid_t virFork(void) G_GNUC_WARN_UNUSED_RESULT;
 
-int virRun(const char *const*argv, int *status) ATTRIBUTE_RETURN_CHECK;
+int virRun(const char *const*argv, int *status) G_GNUC_WARN_UNUSED_RESULT;
 
 virCommandPtr virCommandNew(const char *binary) ATTRIBUTE_NONNULL(1);
 
 virCommandPtr virCommandNewArgs(const char *const*args) ATTRIBUTE_NONNULL(1);
 
 virCommandPtr virCommandNewArgList(const char *binary, ...)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
+    ATTRIBUTE_NONNULL(1) G_GNUC_NULL_TERMINATED;
 
 virCommandPtr virCommandNewVAList(const char *binary, va_list list)
     ATTRIBUTE_NONNULL(1);
@@ -58,7 +58,7 @@ typedef enum {
 
 void virCommandPassFD(virCommandPtr cmd,
                       int fd,
-                      unsigned int flags) ATTRIBUTE_NOINLINE;
+                      unsigned int flags) G_GNUC_NO_INLINE;
 
 int virCommandPassFDGetFDIndex(virCommandPtr cmd,
                                int fd);
@@ -98,7 +98,7 @@ void virCommandNonblockingFDs(virCommandPtr cmd);
 void virCommandRawStatus(virCommandPtr cmd);
 
 void virCommandAddEnvFormat(virCommandPtr cmd, const char *format, ...)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_FMT_PRINTF(2, 3);
+    ATTRIBUTE_NONNULL(2) G_GNUC_PRINTF(2, 3);
 
 void virCommandAddEnvPair(virCommandPtr cmd,
                           const char *name,
@@ -125,7 +125,7 @@ void virCommandAddArgBuffer(virCommandPtr cmd,
 
 void virCommandAddArgFormat(virCommandPtr cmd,
                             const char *format, ...)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_FMT_PRINTF(2, 3);
+    ATTRIBUTE_NONNULL(2) G_GNUC_PRINTF(2, 3);
 
 void virCommandAddArgPair(virCommandPtr cmd,
                           const char *name,
@@ -137,7 +137,7 @@ void virCommandAddArgSet(virCommandPtr cmd,
 
 void virCommandAddArgList(virCommandPtr cmd,
                           ... /* const char *arg, ..., NULL */)
-    ATTRIBUTE_SENTINEL;
+    G_GNUC_NULL_TERMINATED;
 
 void virCommandSetWorkingDirectory(virCommandPtr cmd,
                                    const char *pwd) ATTRIBUTE_NONNULL(2);
@@ -172,26 +172,26 @@ void virCommandSetPreExecHook(virCommandPtr cmd,
 void virCommandWriteArgLog(virCommandPtr cmd,
                            int logfd);
 
-char *virCommandToString(virCommandPtr cmd, bool linebreaks) ATTRIBUTE_RETURN_CHECK;
+char *virCommandToString(virCommandPtr cmd, bool linebreaks) G_GNUC_WARN_UNUSED_RESULT;
 
-int virCommandExec(virCommandPtr cmd, gid_t *groups, int ngroups) ATTRIBUTE_RETURN_CHECK;
+int virCommandExec(virCommandPtr cmd, gid_t *groups, int ngroups) G_GNUC_WARN_UNUSED_RESULT;
 
 int virCommandRun(virCommandPtr cmd,
-                  int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+                  int *exitstatus) G_GNUC_WARN_UNUSED_RESULT;
 
 int virCommandRunAsync(virCommandPtr cmd,
-                       pid_t *pid) ATTRIBUTE_RETURN_CHECK;
+                       pid_t *pid) G_GNUC_WARN_UNUSED_RESULT;
 
 int virCommandWait(virCommandPtr cmd,
-                   int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+                   int *exitstatus) G_GNUC_WARN_UNUSED_RESULT;
 
 void virCommandRequireHandshake(virCommandPtr cmd);
 
 int virCommandHandshakeWait(virCommandPtr cmd)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 int virCommandHandshakeNotify(virCommandPtr cmd)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 void virCommandAbort(virCommandPtr cmd);
 

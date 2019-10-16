@@ -661,7 +661,7 @@ virNWFilterSnoopReqUnlock(virNWFilterSnoopReqPtr req)
  * virNWFilterSnoopReqRelease - hash table free function to kill a request
  */
 static void
-virNWFilterSnoopReqRelease(void *req0, const void *name ATTRIBUTE_UNUSED)
+virNWFilterSnoopReqRelease(void *req0, const void *name G_GNUC_UNUSED)
 {
     virNWFilterSnoopReqPtr req = req0;
 
@@ -1273,7 +1273,7 @@ virNWFilterSnoopRatePenalty(virNWFilterSnoopPcapConfPtr pc,
         unsigned long long now;
 
         if (virTimeMillisNowRaw(&now) < 0) {
-            usleep(PCAP_FLOOD_TIMEOUT_MS); /* 1 ms */
+            g_usleep(PCAP_FLOOD_TIMEOUT_MS); /* 1 ms */
             pc->penaltyTimeoutAbs = 0;
         } else {
             /* don't listen to the fd for 1 ms */
@@ -1382,7 +1382,7 @@ virNWFilterDHCPSnoopThread(void *req0)
     virNWFilterSnoopReqLock(req);
 
     if (req->binding->portdevname && req->threadkey) {
-        for (i = 0; i < ARRAY_CARDINALITY(pcapConf); i++) {
+        for (i = 0; i < G_N_ELEMENTS(pcapConf); i++) {
             pcapConf[i].handle =
                 virNWFilterSnoopDHCPOpen(req->binding->portdevname,
                                          &req->binding->mac,
@@ -1419,7 +1419,7 @@ virNWFilterDHCPSnoopThread(void *req0)
 
     while (!error) {
         if (virNWFilterSnoopAdjustPoll(pcapConf,
-                                       ARRAY_CARDINALITY(pcapConf),
+                                       G_N_ELEMENTS(pcapConf),
                                        fds, &pollTo) < 0) {
             break;
         }
@@ -1428,7 +1428,7 @@ virNWFilterDHCPSnoopThread(void *req0)
         if (pollTo < 0 || pollTo > SNOOP_POLL_MAX_TIMEOUT_MS)
             pollTo = SNOOP_POLL_MAX_TIMEOUT_MS;
 
-        n = poll(fds, ARRAY_CARDINALITY(fds), pollTo);
+        n = poll(fds, G_N_ELEMENTS(fds), pollTo);
 
         if (n < 0) {
             if (errno != EAGAIN && errno != EINTR)
@@ -1445,7 +1445,7 @@ virNWFilterDHCPSnoopThread(void *req0)
             req->jobCompletionStatus != 0)
             goto exit;
 
-        for (i = 0; n > 0 && i < ARRAY_CARDINALITY(fds); i++) {
+        for (i = 0; n > 0 && i < G_N_ELEMENTS(fds); i++) {
             if (!fds[i].revents)
                 continue;
 
@@ -1567,7 +1567,7 @@ virNWFilterDHCPSnoopThread(void *req0)
 
     VIR_FREE(threadkey);
 
-    for (i = 0; i < ARRAY_CARDINALITY(pcapConf); i++) {
+    for (i = 0; i < G_N_ELEMENTS(pcapConf); i++) {
         if (pcapConf[i].handle)
             pcap_close(pcapConf[i].handle);
     }
@@ -1826,8 +1826,8 @@ virNWFilterSnoopLeaseFileSave(virNWFilterSnoopIPLeasePtr ipl)
  */
 static int
 virNWFilterSnoopPruneIter(const void *payload,
-                          const void *name ATTRIBUTE_UNUSED,
-                          const void *data ATTRIBUTE_UNUSED)
+                          const void *name G_GNUC_UNUSED,
+                          const void *data G_GNUC_UNUSED)
 {
     virNWFilterSnoopReqPtr req = (virNWFilterSnoopReqPtr)payload;
     bool del_req;
@@ -1856,7 +1856,7 @@ virNWFilterSnoopPruneIter(const void *payload,
  */
 static int
 virNWFilterSnoopSaveIter(void *payload,
-                         const void *name ATTRIBUTE_UNUSED,
+                         const void *name G_GNUC_UNUSED,
                          void *data)
 {
     virNWFilterSnoopReqPtr req = payload;
@@ -2010,7 +2010,7 @@ virNWFilterSnoopJoinThreads(void)
     while (virAtomicIntGet(&virNWFilterSnoopState.nThreads) != 0) {
         VIR_WARN("Waiting for snooping threads to terminate: %u",
                  virAtomicIntGet(&virNWFilterSnoopState.nThreads));
-        usleep(1000 * 1000);
+        g_usleep(1000 * 1000);
     }
 }
 
@@ -2023,8 +2023,8 @@ virNWFilterSnoopJoinThreads(void)
  */
 static int
 virNWFilterSnoopRemAllReqIter(const void *payload,
-                              const void *name ATTRIBUTE_UNUSED,
-                              const void *data ATTRIBUTE_UNUSED)
+                              const void *name G_GNUC_UNUSED,
+                              const void *data G_GNUC_UNUSED)
 {
     virNWFilterSnoopReqPtr req = (virNWFilterSnoopReqPtr)payload;
 
@@ -2200,7 +2200,7 @@ virNWFilterDHCPSnoopInit(void)
 }
 
 void
-virNWFilterDHCPSnoopEnd(const char *ifname ATTRIBUTE_UNUSED)
+virNWFilterDHCPSnoopEnd(const char *ifname G_GNUC_UNUSED)
 {
     return;
 }
@@ -2212,9 +2212,9 @@ virNWFilterDHCPSnoopShutdown(void)
 }
 
 int
-virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver ATTRIBUTE_UNUSED,
-                        virNWFilterBindingDefPtr binding ATTRIBUTE_UNUSED,
-                        virNWFilterDriverStatePtr driver ATTRIBUTE_UNUSED)
+virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver G_GNUC_UNUSED,
+                        virNWFilterBindingDefPtr binding G_GNUC_UNUSED,
+                        virNWFilterDriverStatePtr driver G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR,
                    _("libvirt was not compiled with libpcap and \""

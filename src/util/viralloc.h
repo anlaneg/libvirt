@@ -24,6 +24,15 @@
 
 #include "internal.h"
 
+/**
+ * DEPRECATION WARNING
+ *
+ * APIs in this file should only be used when modifying existing code.
+ * Consider converting existing code to use the new APIs when touching
+ * it. All new code must use the GLib memory allocation APIs and/or
+ * GLib array data types. See the hacking file for more guidance.
+ */
+
 /* Return 1 if an array of N objects, each of size S, cannot exist due
    to size arithmetic overflow.  S must be positive and N must be
    nonnegative.  This is a macro, not an inline function, so that it
@@ -45,26 +54,26 @@
 
 /* Don't call these directly - use the macros below */
 int virAlloc(void *ptrptr, size_t size)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
 int virAllocN(void *ptrptr, size_t size, size_t count)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
 int virReallocN(void *ptrptr, size_t size, size_t count)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
 int virExpandN(void *ptrptr, size_t size, size_t *count, size_t add)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 int virResizeN(void *ptrptr, size_t size, size_t *alloc, size_t count, size_t desired)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 void virShrinkN(void *ptrptr, size_t size, size_t *count, size_t toremove)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 int virInsertElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
                        size_t add, void *newelem,
                        bool clearOriginal, bool inPlace)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
 int virDeleteElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
                        size_t toremove, bool inPlace)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
 int virAllocVar(void *ptrptr, size_t struct_size, size_t element_size, size_t count)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
+    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
 void virFree(void *ptrptr) ATTRIBUTE_NONNULL(1);
 
 void virDispose(void *ptrptr, size_t count, size_t element_size, size_t *countptr)
@@ -485,8 +494,11 @@ void virDisposeString(char **strptr)
  * VIR_AUTOFREE:
  * @type: type of the variable to be freed automatically
  *
+ * DEPRECATED: use g_autofree for new code. See HACKING
+ * for further guidance.
+ *
  * Macro to automatically free the memory allocated to
  * the variable declared with it by calling virFree
  * when the variable goes out of scope.
  */
-#define VIR_AUTOFREE(type) __attribute__((cleanup(virFree))) type
+#define VIR_AUTOFREE(type) g_autofree type

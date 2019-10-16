@@ -26,7 +26,7 @@ testHashInit(int size)
     /* entries are added in reverse order so that they will be linked in
      * collision list in the same order as in the uuids array
      */
-    for (i = ARRAY_CARDINALITY(uuids) - 1; i >= 0; i--) {
+    for (i = G_N_ELEMENTS(uuids) - 1; i >= 0; i--) {
         ssize_t oldsize = virHashTableSize(hash);
         if (virHashAddEntry(hash, uuids[i], (void *) uuids[i]) < 0) {
             virHashFree(hash);
@@ -39,7 +39,7 @@ testHashInit(int size)
         }
     }
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids); i++) {
         if (!virHashLookup(hash, uuids[i])) {
             VIR_TEST_VERBOSE("\nentry \"%s\" could not be found", uuids[i]);
             virHashFree(hash);
@@ -51,9 +51,9 @@ testHashInit(int size)
 }
 
 static int
-testHashCheckForEachCount(void *payload ATTRIBUTE_UNUSED,
-                          const void *name ATTRIBUTE_UNUSED,
-                          void *data ATTRIBUTE_UNUSED)
+testHashCheckForEachCount(void *payload G_GNUC_UNUSED,
+                          const void *name G_GNUC_UNUSED,
+                          void *data G_GNUC_UNUSED)
 {
     size_t *count = data;
     *count += 1;
@@ -98,7 +98,7 @@ testHashGrow(const void *data)
     if (!(hash = testHashInit(info->count)))
         return -1;
 
-    if (testHashCheckCount(hash, ARRAY_CARDINALITY(uuids)) < 0)
+    if (testHashCheckCount(hash, G_N_ELEMENTS(uuids)) < 0)
         goto cleanup;
 
     ret = 0;
@@ -110,9 +110,9 @@ testHashGrow(const void *data)
 
 
 static int
-testHashUpdate(const void *data ATTRIBUTE_UNUSED)
+testHashUpdate(const void *data G_GNUC_UNUSED)
 {
-    int count = ARRAY_CARDINALITY(uuids) + ARRAY_CARDINALITY(uuids_new);
+    int count = G_N_ELEMENTS(uuids) + G_N_ELEMENTS(uuids_new);
     virHashTablePtr hash;
     size_t i;
     int ret = -1;
@@ -120,7 +120,7 @@ testHashUpdate(const void *data ATTRIBUTE_UNUSED)
     if (!(hash = testHashInit(0)))
         return -1;
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids_subset); i++) {
         if (virHashUpdateEntry(hash, uuids_subset[i], (void *) 1) < 0) {
             VIR_TEST_VERBOSE("\nentry \"%s\" could not be updated",
                     uuids_subset[i]);
@@ -128,7 +128,7 @@ testHashUpdate(const void *data ATTRIBUTE_UNUSED)
         }
     }
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_new); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids_new); i++) {
         if (virHashUpdateEntry(hash, uuids_new[i], (void *) 1) < 0) {
             VIR_TEST_VERBOSE("\nnew entry \"%s\" could not be updated",
                     uuids_new[i]);
@@ -148,9 +148,9 @@ testHashUpdate(const void *data ATTRIBUTE_UNUSED)
 
 
 static int
-testHashRemove(const void *data ATTRIBUTE_UNUSED)
+testHashRemove(const void *data G_GNUC_UNUSED)
 {
-    int count = ARRAY_CARDINALITY(uuids) - ARRAY_CARDINALITY(uuids_subset);
+    int count = G_N_ELEMENTS(uuids) - G_N_ELEMENTS(uuids_subset);
     virHashTablePtr hash;
     size_t i;
     int ret = -1;
@@ -158,7 +158,7 @@ testHashRemove(const void *data ATTRIBUTE_UNUSED)
     if (!(hash = testHashInit(0)))
         return -1;
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids_subset); i++) {
         if (virHashRemoveEntry(hash, uuids_subset[i]) < 0) {
             VIR_TEST_VERBOSE("\nentry \"%s\" could not be removed",
                     uuids_subset[i]);
@@ -178,17 +178,17 @@ testHashRemove(const void *data ATTRIBUTE_UNUSED)
 
 
 const int testHashCountRemoveForEachSome =
-    ARRAY_CARDINALITY(uuids) - ARRAY_CARDINALITY(uuids_subset);
+    G_N_ELEMENTS(uuids) - G_N_ELEMENTS(uuids_subset);
 
 static int
-testHashRemoveForEachSome(void *payload ATTRIBUTE_UNUSED,
+testHashRemoveForEachSome(void *payload G_GNUC_UNUSED,
                           const void *name,
                           void *data)
 {
     virHashTablePtr hash = data;
     size_t i;
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids_subset); i++) {
         if (STREQ(uuids_subset[i], name)) {
             if (virHashRemoveEntry(hash, name) < 0) {
                 VIR_TEST_VERBOSE("\nentry \"%s\" could not be removed",
@@ -204,7 +204,7 @@ testHashRemoveForEachSome(void *payload ATTRIBUTE_UNUSED,
 const int testHashCountRemoveForEachAll = 0;
 
 static int
-testHashRemoveForEachAll(void *payload ATTRIBUTE_UNUSED,
+testHashRemoveForEachAll(void *payload G_GNUC_UNUSED,
                          const void *name,
                          void *data)
 {
@@ -242,9 +242,9 @@ testHashRemoveForEach(const void *data)
 
 
 static int
-testHashSteal(const void *data ATTRIBUTE_UNUSED)
+testHashSteal(const void *data G_GNUC_UNUSED)
 {
-    int count = ARRAY_CARDINALITY(uuids) - ARRAY_CARDINALITY(uuids_subset);
+    int count = G_N_ELEMENTS(uuids) - G_N_ELEMENTS(uuids_subset);
     virHashTablePtr hash;
     size_t i;
     int ret = -1;
@@ -252,7 +252,7 @@ testHashSteal(const void *data ATTRIBUTE_UNUSED)
     if (!(hash = testHashInit(0)))
         return -1;
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids_subset); i++) {
         if (!virHashSteal(hash, uuids_subset[i])) {
             VIR_TEST_VERBOSE("\nentry \"%s\" could not be stolen",
                     uuids_subset[i]);
@@ -272,7 +272,7 @@ testHashSteal(const void *data ATTRIBUTE_UNUSED)
 
 
 static int
-testHashRemoveSetIter(const void *payload ATTRIBUTE_UNUSED,
+testHashRemoveSetIter(const void *payload G_GNUC_UNUSED,
                       const void *name,
                       const void *data)
 {
@@ -280,7 +280,7 @@ testHashRemoveSetIter(const void *payload ATTRIBUTE_UNUSED,
     bool rem = false;
     size_t i;
 
-    for (i = 0; i < ARRAY_CARDINALITY(uuids_subset); i++) {
+    for (i = 0; i < G_N_ELEMENTS(uuids_subset); i++) {
         if (STREQ(uuids_subset[i], name)) {
             rem = true;
             break;
@@ -296,7 +296,7 @@ testHashRemoveSetIter(const void *payload ATTRIBUTE_UNUSED,
 }
 
 static int
-testHashRemoveSet(const void *data ATTRIBUTE_UNUSED)
+testHashRemoveSet(const void *data G_GNUC_UNUSED)
 {
     virHashTablePtr hash;
     int count = 0;
@@ -318,7 +318,7 @@ testHashRemoveSet(const void *data ATTRIBUTE_UNUSED)
         goto cleanup;
     }
 
-    if (testHashCheckCount(hash, ARRAY_CARDINALITY(uuids) - count) < 0)
+    if (testHashCheckCount(hash, G_N_ELEMENTS(uuids) - count) < 0)
         goto cleanup;
 
     ret = 0;
@@ -329,18 +329,18 @@ testHashRemoveSet(const void *data ATTRIBUTE_UNUSED)
 }
 
 
-const int testSearchIndex = ARRAY_CARDINALITY(uuids_subset) / 2;
+const int testSearchIndex = G_N_ELEMENTS(uuids_subset) / 2;
 
 static int
-testHashSearchIter(const void *payload ATTRIBUTE_UNUSED,
+testHashSearchIter(const void *payload G_GNUC_UNUSED,
                    const void *name,
-                   const void *data ATTRIBUTE_UNUSED)
+                   const void *data G_GNUC_UNUSED)
 {
     return STREQ(uuids_subset[testSearchIndex], name);
 }
 
 static int
-testHashSearch(const void *data ATTRIBUTE_UNUSED)
+testHashSearch(const void *data G_GNUC_UNUSED)
 {
     virHashTablePtr hash;
     void *entry;
@@ -357,7 +357,7 @@ testHashSearch(const void *data ATTRIBUTE_UNUSED)
         goto cleanup;
     }
 
-    if (testHashCheckCount(hash, ARRAY_CARDINALITY(uuids)) < 0)
+    if (testHashCheckCount(hash, G_N_ELEMENTS(uuids)) < 0)
         goto cleanup;
 
     ret = 0;
@@ -383,7 +383,7 @@ testHashGetItemsCompValue(const virHashKeyValuePair *a,
 }
 
 static int
-testHashGetItems(const void *data ATTRIBUTE_UNUSED)
+testHashGetItems(const void *data G_GNUC_UNUSED)
 {
     virHashTablePtr hash;
     virHashKeyValuePairPtr array = NULL;
@@ -450,7 +450,7 @@ testHashEqualCompValue(const void *value1, const void *value2)
 }
 
 static int
-testHashEqual(const void *data ATTRIBUTE_UNUSED)
+testHashEqual(const void *data G_GNUC_UNUSED)
 {
     virHashTablePtr hash1, hash2 = NULL;
     int ret = -1;

@@ -102,6 +102,8 @@ struct _libxlDriverConfig {
     size_t nfirmwares;
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(libxlDriverConfig, virObjectUnref);
+
 
 struct _libxlDriverPrivate {
     virMutex lock;
@@ -210,7 +212,7 @@ libxlCreateXMLConf(void);
 #ifdef LIBXL_HAVE_DEVICE_CHANNEL
 # define LIBXL_ATTR_UNUSED
 #else
-# define LIBXL_ATTR_UNUSED ATTRIBUTE_UNUSED
+# define LIBXL_ATTR_UNUSED G_GNUC_UNUSED
 #endif
 int
 libxlBuildDomainConfig(virPortAllocatorRangePtr graphicsports,

@@ -30,6 +30,9 @@ typedef virSCSIVHostDevice *virSCSIVHostDevicePtr;
 typedef struct _virSCSIVHostDeviceList virSCSIVHostDeviceList;
 typedef virSCSIVHostDeviceList *virSCSIVHostDeviceListPtr;
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSCSIVHostDeviceList, virObjectUnref);
+
+
 typedef int (*virSCSIVHostDeviceFileActor)(virSCSIVHostDevicePtr dev,
                                            const char *name, void *opaque);
 
@@ -58,6 +61,6 @@ void virSCSIVHostDeviceGetUsedBy(virSCSIVHostDevicePtr dev,
                                  const char **drv_name,
                                  const char **dom_name);
 void virSCSIVHostDeviceFree(virSCSIVHostDevicePtr dev);
-int virSCSIVHostOpenVhostSCSI(int *vhostfd) ATTRIBUTE_NOINLINE;
+int virSCSIVHostOpenVhostSCSI(int *vhostfd) G_GNUC_NO_INLINE;
 
 VIR_DEFINE_AUTOPTR_FUNC(virSCSIVHostDevice, virSCSIVHostDeviceFree);

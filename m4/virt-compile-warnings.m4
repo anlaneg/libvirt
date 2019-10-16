@@ -67,6 +67,8 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     # > to handle the code effectively.
     # Source: https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
     dontwarn="$dontwarn -Wdisabled-optimization"
+    # Various valid glib APIs/macros trigger this warning
+    dontwarn="$dontwarn -Wbad-function-cast"
 
     # Broken in 6.0 and later
     #     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=69602
@@ -102,6 +104,20 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
       dontwarn="$dontwarn -Wdouble-promotion"
     fi
 
+    # Clang complains about unused static inline functions
+    # which are common with G_DEFINE_AUTOPTR_CLEANUP_FUNC
+    AC_CACHE_CHECK([whether clang gives bogus warnings for -Wunused-function],
+      [lv_cv_clang_unused_function_broken], [
+        save_CFLAGS="$CFLAGS"
+        CFLAGS="-Wunused-function -Werror"
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+           static inline void foo(void) {}
+        ]], [[
+          return 0]])],
+        [lv_cv_clang_unused_function_broken=no],
+        [lv_cv_clang_unused_function_broken=yes])
+        CFLAGS="$save_CFLAGS"])
+
     # We might fundamentally need some of these disabled forever, but
     # ideally we'd turn many of them on
     dontwarn="$dontwarn -Wfloat-equal"
@@ -116,6 +132,13 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
 
     # Remove the ones we don't want, blacklisted earlier
     gl_MANYWARN_COMPLEMENT([wantwarn], [$maybewarn], [$dontwarn])
+
+    # -Wunused-functin is implied by -Wall we must turn it
+    # off explicitly.
+    if test "$lv_cv_clang_unused_function_broken" = "yes";
+    then
+      wantwarn="$wantwarn -Wno-unused-function"
+    fi
 
     # GNULIB uses '-W' (aka -Wextra) which includes a bunch of stuff.
     # Unfortunately, this means you can't simply use '-Wsign-compare'

@@ -150,7 +150,7 @@ static void virLXCControllerFree(virLXCControllerPtr ctrl);
 static int virLXCControllerEventSendInit(virLXCControllerPtr ctrl,
                                          pid_t initpid);
 
-static void virLXCControllerQuitTimer(int timer ATTRIBUTE_UNUSED, void *opaque)
+static void virLXCControllerQuitTimer(int timer G_GNUC_UNUSED, void *opaque)
 {
     virLXCControllerPtr ctrl = opaque;
 
@@ -574,7 +574,7 @@ static int virLXCControllerAppendNBDPids(virLXCControllerPtr ctrl,
     while (!virFileExists(pidpath)) {
         /* wait for 100ms before checking again, but don't do it for ever */
         if (errno == ENOENT && loops < 10) {
-            usleep(100 * 1000);
+            g_usleep(100 * 1000);
             loops++;
         } else {
             virReportSystemError(errno,
@@ -1027,7 +1027,7 @@ static virMutex lock = VIR_MUTEX_INITIALIZER;
 
 
 static void virLXCControllerSignalChildIO(virNetDaemonPtr dmn,
-                                          siginfo_t *info ATTRIBUTE_UNUSED,
+                                          siginfo_t *info G_GNUC_UNUSED,
                                           void *opaque)
 {
     virLXCControllerPtr ctrl = opaque;
@@ -1521,7 +1521,7 @@ static int virLXCControllerPopulateDevices(virLXCControllerPtr ctrl)
         goto cleanup;
 
     /* Populate /dev/ with a few important bits */
-    for (i = 0; i < ARRAY_CARDINALITY(devs); i++) {
+    for (i = 0; i < G_N_ELEMENTS(devs); i++) {
         if (virAsprintf(&path, "/%s/%s.dev/%s",
                         LXC_STATE_DIR, ctrl->def->name, devs[i].path) < 0)
             goto cleanup;

@@ -273,8 +273,8 @@ daemonUnixSocketPaths(struct daemonConfig *config,
 }
 
 
-static void daemonErrorHandler(void *opaque ATTRIBUTE_UNUSED,
-                               virErrorPtr err ATTRIBUTE_UNUSED)
+static void daemonErrorHandler(void *opaque G_GNUC_UNUSED,
+                               virErrorPtr err G_GNUC_UNUSED)
 {
     /* Don't do anything, since logging infrastructure already
      * took care of reporting the error */
@@ -419,7 +419,7 @@ daemonSetupNetworking(virNetServerPtr srv,
         return -1;
 #endif /* ! WITH_IP */
 
-    if (virSystemdGetActivation(actmap, ARRAY_CARDINALITY(actmap), &act) < 0)
+    if (virSystemdGetActivation(actmap, G_N_ELEMENTS(actmap), &act) < 0)
         return -1;
 
 #ifdef WITH_IP
@@ -698,13 +698,13 @@ daemonVersion(const char *argv0)
 
 
 static void daemonShutdownHandler(virNetDaemonPtr dmn,
-                                  siginfo_t *sig ATTRIBUTE_UNUSED,
-                                  void *opaque ATTRIBUTE_UNUSED)
+                                  siginfo_t *sig G_GNUC_UNUSED,
+                                  void *opaque G_GNUC_UNUSED)
 {
     virNetDaemonQuit(dmn);
 }
 
-static void daemonReloadHandlerThread(void *opague ATTRIBUTE_UNUSED)
+static void daemonReloadHandlerThread(void *opague G_GNUC_UNUSED)
 {
     VIR_INFO("Reloading configuration on SIGHUP");
     virHookCall(VIR_HOOK_DRIVER_DAEMON, "-",
@@ -713,9 +713,9 @@ static void daemonReloadHandlerThread(void *opague ATTRIBUTE_UNUSED)
         VIR_WARN("Error while reloading drivers");
 }
 
-static void daemonReloadHandler(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
-                                siginfo_t *sig ATTRIBUTE_UNUSED,
-                                void *opaque ATTRIBUTE_UNUSED)
+static void daemonReloadHandler(virNetDaemonPtr dmn G_GNUC_UNUSED,
+                                siginfo_t *sig G_GNUC_UNUSED,
+                                void *opaque G_GNUC_UNUSED)
 {
     virThread thr;
 
@@ -787,7 +787,7 @@ static void daemonStop(virNetDaemonPtr dmn)
 
 
 static DBusHandlerResult
-handleSessionMessageFunc(DBusConnection *connection ATTRIBUTE_UNUSED,
+handleSessionMessageFunc(DBusConnection *connection G_GNUC_UNUSED,
                          DBusMessage *message,
                          void *opaque)
 {
@@ -805,7 +805,7 @@ handleSessionMessageFunc(DBusConnection *connection ATTRIBUTE_UNUSED,
 
 
 static DBusHandlerResult
-handleSystemMessageFunc(DBusConnection *connection ATTRIBUTE_UNUSED,
+handleSystemMessageFunc(DBusConnection *connection G_GNUC_UNUSED,
                         DBusMessage *message,
                         void *opaque)
 {
@@ -826,7 +826,7 @@ handleSystemMessageFunc(DBusConnection *connection ATTRIBUTE_UNUSED,
 static void daemonRunStateInit(void *opaque)
 {
     virNetDaemonPtr dmn = opaque;
-    virIdentityPtr sysident = virIdentityGetSystem();
+    g_autoptr(virIdentity) sysident = virIdentityGetSystem();
 #ifdef MODULE_NAME
     bool mandatory = true;
 #else /* ! MODULE_NAME */
@@ -879,7 +879,6 @@ static void daemonRunStateInit(void *opaque)
  cleanup:
     daemonInhibitCallback(false, dmn);
     virObjectUnref(dmn);
-    virObjectUnref(sysident);
     virIdentitySetCurrent(NULL);
 }
 
@@ -956,7 +955,7 @@ daemonUsage(const char *argv0, bool privileged)
     fprintf(stderr, "\n");
 
     fprintf(stderr, "%s\n", _("Options:"));
-    for (i = 0; i < ARRAY_CARDINALITY(opthelp); i++)
+    for (i = 0; i < G_N_ELEMENTS(opthelp); i++)
         fprintf(stderr, "  %-22s %s\n", opthelp[i].opts,
                 _(opthelp[i].help));
     fprintf(stderr, "\n");

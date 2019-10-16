@@ -325,9 +325,9 @@ virNetDevBridgePortSetUnicastFlood(const char *brname,
 
 #else
 int
-virNetDevBridgePortGetLearning(const char *brname ATTRIBUTE_UNUSED,
-                               const char *ifname ATTRIBUTE_UNUSED,
-                               bool *enable ATTRIBUTE_UNUSED)
+virNetDevBridgePortGetLearning(const char *brname G_GNUC_UNUSED,
+                               const char *ifname G_GNUC_UNUSED,
+                               bool *enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to get bridge port learning on this platform"));
@@ -336,9 +336,9 @@ virNetDevBridgePortGetLearning(const char *brname ATTRIBUTE_UNUSED,
 
 
 int
-virNetDevBridgePortSetLearning(const char *brname ATTRIBUTE_UNUSED,
-                               const char *ifname ATTRIBUTE_UNUSED,
-                               bool enable ATTRIBUTE_UNUSED)
+virNetDevBridgePortSetLearning(const char *brname G_GNUC_UNUSED,
+                               const char *ifname G_GNUC_UNUSED,
+                               bool enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to set bridge port learning on this platform"));
@@ -347,9 +347,9 @@ virNetDevBridgePortSetLearning(const char *brname ATTRIBUTE_UNUSED,
 
 
 int
-virNetDevBridgePortGetUnicastFlood(const char *brname ATTRIBUTE_UNUSED,
-                                   const char *ifname ATTRIBUTE_UNUSED,
-                                   bool *enable ATTRIBUTE_UNUSED)
+virNetDevBridgePortGetUnicastFlood(const char *brname G_GNUC_UNUSED,
+                                   const char *ifname G_GNUC_UNUSED,
+                                   bool *enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to get bridge port unicast_flood on this platform"));
@@ -358,9 +358,9 @@ virNetDevBridgePortGetUnicastFlood(const char *brname ATTRIBUTE_UNUSED,
 
 
 int
-virNetDevBridgePortSetUnicastFlood(const char *brname ATTRIBUTE_UNUSED,
-                                   const char *ifname ATTRIBUTE_UNUSED,
-                                   bool enable ATTRIBUTE_UNUSED)
+virNetDevBridgePortSetUnicastFlood(const char *brname G_GNUC_UNUSED,
+                                   const char *ifname G_GNUC_UNUSED,
+                                   bool enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to set bridge port unicast_flood on this platform"));
@@ -534,7 +534,7 @@ virNetDevBridgeDelete(const char *brname)
     return 0;
 }
 #else
-int virNetDevBridgeDelete(const char *brname ATTRIBUTE_UNUSED)
+int virNetDevBridgeDelete(const char *brname G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to delete bridge %s"), brname);
@@ -788,7 +788,7 @@ int virNetDevBridgeSetSTPDelay(const char *brname,
     return 0;
 }
 int virNetDevBridgeGetSTPDelay(const char *brname,
-                               int *delay ATTRIBUTE_UNUSED)
+                               int *delay G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to get STP delay on %s on this platform"),
@@ -796,8 +796,8 @@ int virNetDevBridgeGetSTPDelay(const char *brname,
     return -1;
 }
 
-int virNetDevBridgeSetSTP(const char *brname ATTRIBUTE_UNUSED,
-                          bool enable ATTRIBUTE_UNUSED)
+int virNetDevBridgeSetSTP(const char *brname G_GNUC_UNUSED,
+                          bool enable G_GNUC_UNUSED)
 
 {
     /* FreeBSD doesn't allow to set STP per bridge,
@@ -805,7 +805,7 @@ int virNetDevBridgeSetSTP(const char *brname ATTRIBUTE_UNUSED,
     return 0;
 }
 int virNetDevBridgeGetSTP(const char *brname,
-                          bool *enable ATTRIBUTE_UNUSED)
+                          bool *enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to get STP on %s on this platform"),
@@ -814,7 +814,7 @@ int virNetDevBridgeGetSTP(const char *brname,
 }
 #else
 int virNetDevBridgeSetSTPDelay(const char *brname,
-                               int delay ATTRIBUTE_UNUSED)
+                               int delay G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to set STP delay on %s on this platform"),
@@ -822,7 +822,7 @@ int virNetDevBridgeSetSTPDelay(const char *brname,
     return -1;
 }
 int virNetDevBridgeGetSTPDelay(const char *brname,
-                               int *delay ATTRIBUTE_UNUSED)
+                               int *delay G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to get STP delay on %s on this platform"),
@@ -831,7 +831,7 @@ int virNetDevBridgeGetSTPDelay(const char *brname,
 }
 
 int virNetDevBridgeSetSTP(const char *brname,
-                          bool enable ATTRIBUTE_UNUSED)
+                          bool enable G_GNUC_UNUSED)
 
 {
     virReportSystemError(ENOSYS,
@@ -840,7 +840,7 @@ int virNetDevBridgeSetSTP(const char *brname,
     return -1;
 }
 int virNetDevBridgeGetSTP(const char *brname,
-                          bool *enable ATTRIBUTE_UNUSED)
+                          bool *enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to get STP on %s on this platform"),
@@ -897,8 +897,8 @@ virNetDevBridgeSetVlanFiltering(const char *brname,
 
 #else
 int
-virNetDevBridgeGetVlanFiltering(const char *brname ATTRIBUTE_UNUSED,
-                                bool *enable ATTRIBUTE_UNUSED)
+virNetDevBridgeGetVlanFiltering(const char *brname G_GNUC_UNUSED,
+                                bool *enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to get bridge vlan_filtering on this platform"));
@@ -907,8 +907,8 @@ virNetDevBridgeGetVlanFiltering(const char *brname ATTRIBUTE_UNUSED,
 
 
 int
-virNetDevBridgeSetVlanFiltering(const char *brname ATTRIBUTE_UNUSED,
-                                bool enable ATTRIBUTE_UNUSED)
+virNetDevBridgeSetVlanFiltering(const char *brname G_GNUC_UNUSED,
+                                bool enable G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to set bridge vlan_filtering on this platform"));
@@ -1041,10 +1041,10 @@ virNetDevBridgeFDBAddDel(const virMacAddr *mac, const char *ifname,
 
 #else
 static int
-virNetDevBridgeFDBAddDel(const virMacAddr *mac ATTRIBUTE_UNUSED,
-                         const char *ifname ATTRIBUTE_UNUSED,
-                         unsigned int fdbFlags ATTRIBUTE_UNUSED,
-                         bool isAdd ATTRIBUTE_UNUSED)
+virNetDevBridgeFDBAddDel(const virMacAddr *mac G_GNUC_UNUSED,
+                         const char *ifname G_GNUC_UNUSED,
+                         unsigned int fdbFlags G_GNUC_UNUSED,
+                         bool isAdd G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to add/delete fdb entries on this platform"));

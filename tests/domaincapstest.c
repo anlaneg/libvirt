@@ -27,7 +27,7 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 #if WITH_QEMU || WITH_BHYVE
-static int ATTRIBUTE_SENTINEL
+static int G_GNUC_NULL_TERMINATED
 fillStringValues(virDomainCapsStringValuesPtr values, ...)
 {
     int ret = 0;
@@ -459,6 +459,14 @@ mymain(void)
     DO_TEST_QEMU("4.2.0", "caps_4.2.0",
                  "/usr/bin/qemu-system-x86_64", NULL,
                  "x86_64", VIR_DOMAIN_VIRT_KVM);
+
+    DO_TEST_QEMU("4.2.0", "caps_4.2.0",
+                 "/usr/bin/qemu-system-ppc64", NULL,
+                 "ppc64", VIR_DOMAIN_VIRT_KVM);
+
+    DO_TEST_QEMU("4.2.0", "caps_4.2.0",
+                 "/usr/bin/qemu-system-aarch64", NULL,
+                 "aarch64", VIR_DOMAIN_VIRT_KVM);
 
     virObjectUnref(cfg);
 

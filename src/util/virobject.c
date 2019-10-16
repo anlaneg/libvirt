@@ -608,7 +608,7 @@ void virObjectFreeCallback(void *opaque)
  */
 void
 virObjectFreeHashData(void *opaque,
-                      const void *name ATTRIBUTE_UNUSED)
+                      const void *name G_GNUC_UNUSED)
 {
     virObjectUnref(opaque);
 }

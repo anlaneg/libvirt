@@ -357,7 +357,7 @@ virQEMUQAPISchemaTraverse(const char *baseName,
     if (!(metatype = virJSONValueObjectGetString(cur, "meta-type")))
         return -2;
 
-    for (i = 0; i < ARRAY_CARDINALITY(traverseMetaType); i++) {
+    for (i = 0; i < G_N_ELEMENTS(traverseMetaType); i++) {
         if (STREQ(metatype, traverseMetaType[i].metatype))
             return traverseMetaType[i].func(cur, ctxt);
     }
@@ -471,7 +471,7 @@ virQEMUQAPISchemaPathExists(const char *query,
 }
 
 static int
-virQEMUQAPISchemaEntryProcess(size_t pos ATTRIBUTE_UNUSED,
+virQEMUQAPISchemaEntryProcess(size_t pos G_GNUC_UNUSED,
                               virJSONValuePtr item,
                               void *opaque)
 {

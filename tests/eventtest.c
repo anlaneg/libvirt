@@ -81,7 +81,7 @@ testEventResultCallback(const void *opaque)
 }
 
 static void
-ATTRIBUTE_FMT_PRINTF(3, 4)
+G_GNUC_PRINTF(3, 4)
 testEventReport(const char *name, bool failed, const char *msg, ...)
 {
     va_list vargs;
@@ -158,7 +158,7 @@ static pthread_cond_t eventThreadJobCond = PTHREAD_COND_INITIALIZER;
 static int eventThreadJobDone;
 
 
-ATTRIBUTE_NORETURN static void *eventThreadLoop(void *data ATTRIBUTE_UNUSED) {
+G_GNUC_NORETURN static void *eventThreadLoop(void *data G_GNUC_UNUSED) {
     while (1) {
         pthread_mutex_lock(&eventThreadMutex);
         while (!eventThreadRunOnce)
@@ -382,7 +382,7 @@ mymain(void)
     startJob();
     pthread_mutex_unlock(&eventThreadMutex);
     sched_yield();
-    usleep(100 * 1000);
+    g_usleep(100 * 1000);
     pthread_mutex_lock(&eventThreadMutex);
     virEventPollRemoveHandle(handles[1].watch);
     if (finishJob("Interrupted during poll", -1, -1) != EXIT_SUCCESS)
@@ -448,7 +448,7 @@ mymain(void)
     startJob();
     pthread_mutex_unlock(&eventThreadMutex);
     sched_yield();
-    usleep(100 * 1000);
+    g_usleep(100 * 1000);
     pthread_mutex_lock(&eventThreadMutex);
     virEventPollRemoveTimeout(timers[1].timer);
     if (finishJob("Interrupted during poll", -1, -1) != EXIT_SUCCESS)

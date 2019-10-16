@@ -1286,7 +1286,7 @@ virCapsPtr virQEMUDriverCreateCapabilities(virQEMUDriverPtr driver)
             VIR_STRDUP(sm->doi, doi) < 0)
             return NULL;
 
-        for (j = 0; j < ARRAY_CARDINALITY(virtTypes); j++) {
+        for (j = 0; j < G_N_ELEMENTS(virtTypes); j++) {
             lbl = qemuSecurityGetBaseLabel(sec_managers[i], virtTypes[j]);
             type = virDomainVirtTypeToString(virtTypes[j]);
             if (lbl &&
@@ -1352,7 +1352,7 @@ struct virQEMUDriverSearchDomcapsData {
 
 static int
 virQEMUDriverSearchDomcaps(const void *payload,
-                           const void *name ATTRIBUTE_UNUSED,
+                           const void *name G_GNUC_UNUSED,
                            const void *opaque)
 {
     virDomainCapsPtr domCaps = (virDomainCapsPtr) payload;
@@ -1557,7 +1557,7 @@ qemuSharedDeviceEntryDomainExists(qemuSharedDeviceEntryPtr entry,
 }
 
 void
-qemuSharedDeviceEntryFree(void *payload, const void *name ATTRIBUTE_UNUSED)
+qemuSharedDeviceEntryFree(void *payload, const void *name G_GNUC_UNUSED)
 {
     qemuSharedDeviceEntryPtr entry = payload;
     size_t i;

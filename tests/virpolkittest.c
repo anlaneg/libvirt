@@ -96,7 +96,7 @@ VIR_MOCK_WRAP_RET_ARGS(dbus_connection_send_with_reply_and_block,
             is_authorized = 0;
             is_challenge = 0;
             retdetails = retdetailscancelled;
-            retdetailslen = ARRAY_CARDINALITY(retdetailscancelled) / 2;
+            retdetailslen = G_N_ELEMENTS(retdetailscancelled) / 2;
         } else if (STREQ(actionid, "org.libvirt.test.details")) {
             size_t i;
             is_authorized = 0;
@@ -143,7 +143,7 @@ VIR_MOCK_WRAP_RET_ARGS(dbus_connection_send_with_reply_and_block,
 
 
 
-static int testPolkitAuthSuccess(const void *opaque ATTRIBUTE_UNUSED)
+static int testPolkitAuthSuccess(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
 
@@ -162,7 +162,7 @@ static int testPolkitAuthSuccess(const void *opaque ATTRIBUTE_UNUSED)
 }
 
 
-static int testPolkitAuthDenied(const void *opaque ATTRIBUTE_UNUSED)
+static int testPolkitAuthDenied(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
     int rv;
@@ -196,7 +196,7 @@ static int testPolkitAuthDenied(const void *opaque ATTRIBUTE_UNUSED)
 }
 
 
-static int testPolkitAuthChallenge(const void *opaque ATTRIBUTE_UNUSED)
+static int testPolkitAuthChallenge(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
     int rv;
@@ -231,7 +231,7 @@ static int testPolkitAuthChallenge(const void *opaque ATTRIBUTE_UNUSED)
 }
 
 
-static int testPolkitAuthCancelled(const void *opaque ATTRIBUTE_UNUSED)
+static int testPolkitAuthCancelled(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
     int rv;
@@ -265,7 +265,7 @@ static int testPolkitAuthCancelled(const void *opaque ATTRIBUTE_UNUSED)
 }
 
 
-static int testPolkitAuthDetailsSuccess(const void *opaque ATTRIBUTE_UNUSED)
+static int testPolkitAuthDetailsSuccess(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
     const char *details[] = {
@@ -288,7 +288,7 @@ static int testPolkitAuthDetailsSuccess(const void *opaque ATTRIBUTE_UNUSED)
 }
 
 
-static int testPolkitAuthDetailsDenied(const void *opaque ATTRIBUTE_UNUSED)
+static int testPolkitAuthDetailsDenied(const void *opaque G_GNUC_UNUSED)
 {
     int ret = -1;
     int rv;

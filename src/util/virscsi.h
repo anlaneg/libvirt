@@ -30,11 +30,14 @@ typedef virSCSIDevice *virSCSIDevicePtr;
 typedef struct _virSCSIDeviceList virSCSIDeviceList;
 typedef virSCSIDeviceList *virSCSIDeviceListPtr;
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSCSIDeviceList, virObjectUnref);
+
+
 char *virSCSIDeviceGetSgName(const char *sysfs_prefix,
                              const char *adapter,
                              unsigned int bus,
                              unsigned int target,
-                             unsigned long long unit) ATTRIBUTE_NOINLINE;
+                             unsigned long long unit) G_GNUC_NO_INLINE;
 char *virSCSIDeviceGetDevName(const char *sysfs_prefix,
                               const char *adapter,
                               unsigned int bus,

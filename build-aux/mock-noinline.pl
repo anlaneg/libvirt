@@ -40,13 +40,13 @@ sub scan_annotations {
     while (<FH>) {
         if (/^\s*(\w+)\(/ || /^(?:\w+\*?\s+)+(?:\*\s*)?(\w+)\(/) {
             my $name = $1;
-            if ($name !~ /ATTRIBUTE/) {
+            if ($name !~ /(?:G_GNUC|ATTRIBUTE)/) {
                 $func = $name;
             }
         } elsif (/^\s*$/) {
             $func = undef;
         }
-        if (/ATTRIBUTE_NOINLINE/) {
+        if (/G_GNUC_NO_INLINE/) {
             if (defined $func) {
                 $noninlined{$func} = 1;
             }

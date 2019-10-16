@@ -21,7 +21,6 @@
 #include <config.h>
 
 #include <libxl.h>
-#include <regex.h>
 
 #include "internal.h"
 #include "virlog.h"
@@ -135,11 +134,11 @@ libxlCapsNodeData(virCPUDefPtr cpu, libxl_hwcap hwcap,
     if (!(cpudata = virCPUDataNew(cpu->arch)))
         goto error;
 
-    ncaps = ARRAY_CARDINALITY(cpuid);
+    ncaps = G_N_ELEMENTS(cpuid);
     if (libxlCapsAddCPUID(cpudata, cpuid, ncaps) < 0)
         goto error;
 
-    ncaps = ARRAY_CARDINALITY(cpuid_ver1);
+    ncaps = G_N_ELEMENTS(cpuid_ver1);
     if (version > LIBXL_HWCAP_V0 &&
         libxlCapsAddCPUID(cpudata, cpuid_ver1, ncaps) < 0)
         goto error;
@@ -374,10 +373,10 @@ static int
 libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
 {
     const libxl_version_info *ver_info;
-    int err;
-    regex_t regex;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GMatchInfo) info = NULL;
     char *str, *token;
-    regmatch_t subs[4];
     char *saveptr = NULL;
     size_t i;
 
@@ -398,12 +397,10 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
         return -1;
     }
 
-    err = regcomp(&regex, XEN_CAP_REGEX, REG_EXTENDED);
-    if (err != 0) {
-        char error[100];
-        regerror(err, &regex, error, sizeof(error));
+    regex = g_regex_new(XEN_CAP_REGEX, G_REGEX_EXTENDED, 0, &err);
+    if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to compile regex %s"), error);
+                       _("Failed to compile regex %s"), err->message);
         return -1;
     }
 
@@ -436,31 +433,31 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
          nr_guest_archs < sizeof(guest_archs) / sizeof(guest_archs[0])
                  && (token = strtok_r(str, " ", &saveptr)) != NULL;
          str = NULL) {
-        if (regexec(&regex, token, sizeof(subs) / sizeof(subs[0]),
-                    subs, 0) == 0) {
-            int hvm = STRPREFIX(&token[subs[1].rm_so], "hvm");
+        if (g_regex_match(regex, token, 0, &info)) {
+            g_autofree char *modestr = g_match_info_fetch(info, 1);
+            g_autofree char *archstr = g_match_info_fetch(info, 2);
+            g_autofree char *suffixstr = g_match_info_fetch(info, 3);
+            int hvm = STRPREFIX(modestr, "hvm");
             virArch arch;
             int pae = 0, nonpae = 0, ia64_be = 0;
 
-            if (STRPREFIX(&token[subs[2].rm_so], "x86_32")) {
+            if (STRPREFIX(archstr, "x86_32")) {
                 arch = VIR_ARCH_I686;
-                if (subs[3].rm_so != -1 &&
-                    STRPREFIX(&token[subs[3].rm_so], "p"))
+                if (suffixstr != NULL && STRPREFIX(suffixstr, "p"))
                     pae = 1;
                 else
                     nonpae = 1;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "x86_64")) {
+            } else if (STRPREFIX(archstr, "x86_64")) {
                 arch = VIR_ARCH_X86_64;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "ia64")) {
+            } else if (STRPREFIX(archstr, "ia64")) {
                 arch = VIR_ARCH_ITANIUM;
-                if (subs[3].rm_so != -1 &&
-                    STRPREFIX(&token[subs[3].rm_so], "be"))
+                if (suffixstr != NULL && STRPREFIX(suffixstr, "be"))
                     ia64_be = 1;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "powerpc64")) {
+            } else if (STRPREFIX(archstr, "powerpc64")) {
                 arch = VIR_ARCH_PPC64;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "armv7l")) {
+            } else if (STRPREFIX(archstr, "armv7l")) {
                 arch = VIR_ARCH_ARMV7L;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "aarch64")) {
+            } else if (STRPREFIX(archstr, "aarch64")) {
                 arch = VIR_ARCH_AARCH64;
             } else {
                 continue;
@@ -474,7 +471,7 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
             }
 
             /* Too many arch flavours - highly unlikely ! */
-            if (i >= ARRAY_CARDINALITY(guest_archs))
+            if (i >= G_N_ELEMENTS(guest_archs))
                 continue;
             /* Didn't find a match, so create a new one */
             if (i == nr_guest_archs)
@@ -503,7 +500,7 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
 #ifdef HAVE_XEN_PVH
             if (hvm && i == nr_guest_archs-1) {
                 /* Ensure we have not exhausted the guest_archs array */
-                if (nr_guest_archs >= ARRAY_CARDINALITY(guest_archs))
+                if (nr_guest_archs >= G_N_ELEMENTS(guest_archs))
                     continue;
                 i = nr_guest_archs;
                 nr_guest_archs++;
@@ -515,7 +512,6 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
 #endif
         }
     }
-    regfree(&regex);
 
     for (i = 0; i < nr_guest_archs; ++i) {
         virCapsGuestPtr guest;

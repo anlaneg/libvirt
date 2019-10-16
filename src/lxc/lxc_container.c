@@ -116,7 +116,7 @@ static int lxcContainerMountFSBlock(virDomainFSDefPtr fs,
  * in a child pid namespace if container reboot support exists.
  * Otherwise, it will either succeed or return -EPERM.
  */
-ATTRIBUTE_NORETURN static int
+G_GNUC_NORETURN static int
 lxcContainerRebootChild(void *argv)
 {
     int *cmd = argv;
@@ -823,7 +823,7 @@ bool lxcIsBasicMountLocation(const char *path)
 {
     size_t i;
 
-    for (i = 0; i < ARRAY_CARDINALITY(lxcBasicMounts); i++) {
+    for (i = 0; i < G_N_ELEMENTS(lxcBasicMounts); i++) {
         if (STREQ(path, lxcBasicMounts[i].dst))
             return true;
     }
@@ -900,7 +900,7 @@ static int lxcContainerMountBasicFS(bool userns_enabled,
 
     VIR_DEBUG("Mounting basic filesystems");
 
-    for (i = 0; i < ARRAY_CARDINALITY(lxcBasicMounts); i++) {
+    for (i = 0; i < G_N_ELEMENTS(lxcBasicMounts); i++) {
         bool bindOverReadonly;
         virLXCBasicMountInfo const *mnt = &lxcBasicMounts[i];
 
@@ -1035,8 +1035,8 @@ static int lxcContainerMountProcFuse(virDomainDefPtr def,
     return ret;
 }
 #else
-static int lxcContainerMountProcFuse(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                                     const char *stateDir ATTRIBUTE_UNUSED)
+static int lxcContainerMountProcFuse(virDomainDefPtr def G_GNUC_UNUSED,
+                                     const char *stateDir G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -1126,7 +1126,7 @@ static int lxcContainerSetupDevices(char **ttyPaths, size_t nttyPaths)
         { "/proc/self/fd", "/dev/fd" },
     };
 
-    for (i = 0; i < ARRAY_CARDINALITY(links); i++) {
+    for (i = 0; i < G_N_ELEMENTS(links); i++) {
         if (symlink(links[i].src, links[i].dst) < 0) {
             virReportSystemError(errno,
                                  _("Failed to symlink device %s to %s"),
@@ -1305,7 +1305,7 @@ lxcContainerMountDetectFilesystem(const char *src, char **type)
 }
 #else /* ! WITH_BLKID */
 static int
-lxcContainerMountDetectFilesystem(const char *src ATTRIBUTE_UNUSED,
+lxcContainerMountDetectFilesystem(const char *src G_GNUC_UNUSED,
                                   char **type)
 {
     /* No libblkid, so just return success with no detected type */
@@ -2044,7 +2044,7 @@ static int lxcContainerDropCapabilities(virDomainDefPtr def,
             default: /* User specified capabilities to drop */
                 toDrop = (state == VIR_TRISTATE_SWITCH_OFF);
             }
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
 
         case VIR_DOMAIN_CAPABILITIES_POLICY_ALLOW:
             if (policy == VIR_DOMAIN_CAPABILITIES_POLICY_ALLOW)
@@ -2083,8 +2083,8 @@ static int lxcContainerDropCapabilities(virDomainDefPtr def,
     return 0;
 }
 #else
-static int lxcContainerDropCapabilities(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                                        bool keepReboot ATTRIBUTE_UNUSED)
+static int lxcContainerDropCapabilities(virDomainDefPtr def G_GNUC_UNUSED,
+                                        bool keepReboot G_GNUC_UNUSED)
 {
     VIR_WARN("libcap-ng support not compiled in, unable to clear capabilities");
     return 0;

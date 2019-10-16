@@ -833,11 +833,11 @@ virPCIDeviceTrySecondaryBusReset(virPCIDevicePtr dev,
     virPCIDeviceWrite16(parent, parentfd, PCI_BRIDGE_CONTROL,
                         ctl | PCI_BRIDGE_CTL_RESET);
 
-    usleep(200 * 1000); /* sleep 200ms */
+    g_usleep(200 * 1000); /* sleep 200ms */
 
     virPCIDeviceWrite16(parent, parentfd, PCI_BRIDGE_CONTROL, ctl);
 
-    usleep(200 * 1000); /* sleep 200ms */
+    g_usleep(200 * 1000); /* sleep 200ms */
 
     if (virPCIDeviceWrite(dev, cfgfd, 0, config_space, PCI_CONF_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -881,12 +881,12 @@ virPCIDeviceTryPowerManagementReset(virPCIDevicePtr dev, int cfgfd)
     virPCIDeviceWrite32(dev, cfgfd, dev->pci_pm_cap_pos + PCI_PM_CTRL,
                         ctl | PCI_PM_CTRL_STATE_D3hot);
 
-    usleep(10 * 1000); /* sleep 10ms */
+    g_usleep(10 * 1000); /* sleep 10ms */
 
     virPCIDeviceWrite32(dev, cfgfd, dev->pci_pm_cap_pos + PCI_PM_CTRL,
                         ctl | PCI_PM_CTRL_STATE_D0);
 
-    usleep(10 * 1000); /* sleep 10ms */
+    g_usleep(10 * 1000); /* sleep 10ms */
 
     if (virPCIDeviceWrite(dev, cfgfd, 0, &config_space[0], PCI_CONF_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -2663,7 +2663,7 @@ virPCIGetMdevTypes(const char *sysfspath,
 static const char *unsupported = N_("not supported on non-linux platforms");
 
 virPCIDeviceAddressPtr
-virPCIGetDeviceAddressFromSysfsLink(const char *device_link ATTRIBUTE_UNUSED)
+virPCIGetDeviceAddressFromSysfsLink(const char *device_link G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return NULL;
@@ -2671,34 +2671,34 @@ virPCIGetDeviceAddressFromSysfsLink(const char *device_link ATTRIBUTE_UNUSED)
 
 
 int
-virPCIGetPhysicalFunction(const char *vf_sysfs_path ATTRIBUTE_UNUSED,
-                          virPCIDeviceAddressPtr *pf ATTRIBUTE_UNUSED)
+virPCIGetPhysicalFunction(const char *vf_sysfs_path G_GNUC_UNUSED,
+                          virPCIDeviceAddressPtr *pf G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virPCIGetVirtualFunctions(const char *sysfs_path ATTRIBUTE_UNUSED,
-                          virPCIDeviceAddressPtr **virtual_functions ATTRIBUTE_UNUSED,
-                          size_t *num_virtual_functions ATTRIBUTE_UNUSED,
-                          unsigned int *max_virtual_functions ATTRIBUTE_UNUSED)
+virPCIGetVirtualFunctions(const char *sysfs_path G_GNUC_UNUSED,
+                          virPCIDeviceAddressPtr **virtual_functions G_GNUC_UNUSED,
+                          size_t *num_virtual_functions G_GNUC_UNUSED,
+                          unsigned int *max_virtual_functions G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virPCIIsVirtualFunction(const char *vf_sysfs_device_link ATTRIBUTE_UNUSED)
+virPCIIsVirtualFunction(const char *vf_sysfs_device_link G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link ATTRIBUTE_UNUSED,
-                              const char *vf_sysfs_device_link ATTRIBUTE_UNUSED,
-                              int *vf_index ATTRIBUTE_UNUSED)
+virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link G_GNUC_UNUSED,
+                              const char *vf_sysfs_device_link G_GNUC_UNUSED,
+                              int *vf_index G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -2706,36 +2706,36 @@ virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link ATTRIBUTE_UNUSED,
 }
 
 int
-virPCIGetSysfsFile(char *virPCIDeviceName ATTRIBUTE_UNUSED,
-                   char **pci_sysfs_device_link ATTRIBUTE_UNUSED)
+virPCIGetSysfsFile(char *virPCIDeviceName G_GNUC_UNUSED,
+                   char **pci_sysfs_device_link G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virPCIDeviceAddressGetSysfsFile(virPCIDeviceAddressPtr dev ATTRIBUTE_UNUSED,
-                                char **pci_sysfs_device_link ATTRIBUTE_UNUSED)
+virPCIDeviceAddressGetSysfsFile(virPCIDeviceAddressPtr dev G_GNUC_UNUSED,
+                                char **pci_sysfs_device_link G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virPCIGetNetName(const char *device_link_sysfs_path ATTRIBUTE_UNUSED,
-                 size_t idx ATTRIBUTE_UNUSED,
-                 char *physPortID ATTRIBUTE_UNUSED,
-                 char **netname ATTRIBUTE_UNUSED)
+virPCIGetNetName(const char *device_link_sysfs_path G_GNUC_UNUSED,
+                 size_t idx G_GNUC_UNUSED,
+                 char *physPortID G_GNUC_UNUSED,
+                 char **netname G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path ATTRIBUTE_UNUSED,
-                             int pfNetDevIdx ATTRIBUTE_UNUSED,
-                             char **pfname ATTRIBUTE_UNUSED,
-                             int *vf_index ATTRIBUTE_UNUSED)
+virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path G_GNUC_UNUSED,
+                             int pfNetDevIdx G_GNUC_UNUSED,
+                             char **pfname G_GNUC_UNUSED,
+                             int *vf_index G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -2743,8 +2743,8 @@ virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path ATTRIBUTE_UNUSED,
 
 
 ssize_t
-virPCIGetMdevTypes(const char *sysfspath ATTRIBUTE_UNUSED,
-                   virMediatedDeviceTypePtr **types ATTRIBUTE_UNUSED)
+virPCIGetMdevTypes(const char *sysfspath G_GNUC_UNUSED,
+                   virMediatedDeviceTypePtr **types G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;

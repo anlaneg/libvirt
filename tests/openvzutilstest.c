@@ -14,8 +14,8 @@
 # define VIR_FROM_THIS VIR_FROM_OPENVZ
 
 static int
-testLocateConfFile(int vpsid ATTRIBUTE_UNUSED, char **conffile,
-                   const char *ext ATTRIBUTE_UNUSED)
+testLocateConfFile(int vpsid G_GNUC_UNUSED, char **conffile,
+                   const char *ext G_GNUC_UNUSED)
 {
     return virAsprintf(conffile, "%s/openvzutilstest.conf", abs_srcdir);
 }
@@ -33,7 +33,7 @@ static struct testConfigParam configParams[] = {
 };
 
 static int
-testReadConfigParam(const void *data ATTRIBUTE_UNUSED)
+testReadConfigParam(const void *data G_GNUC_UNUSED)
 {
     int result = -1;
     size_t i;
@@ -43,7 +43,7 @@ testReadConfigParam(const void *data ATTRIBUTE_UNUSED)
     if (virAsprintf(&conf, "%s/openvzutilstest.conf", abs_srcdir) < 0)
         return -1;
 
-    for (i = 0; i < ARRAY_CARDINALITY(configParams); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(configParams); ++i) {
         if (openvzReadConfigParam(conf, configParams[i].param,
                                   &value) != configParams[i].ret) {
             goto cleanup;
@@ -68,7 +68,7 @@ testReadConfigParam(const void *data ATTRIBUTE_UNUSED)
 }
 
 static int
-testReadNetworkConf(const void *data ATTRIBUTE_UNUSED)
+testReadNetworkConf(const void *data G_GNUC_UNUSED)
 {
     int result = -1;
     virDomainDefPtr def = NULL;

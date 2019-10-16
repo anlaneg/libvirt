@@ -617,7 +617,7 @@ qemuDomainCheckpointLoad(virDomainObjPtr vm,
 
 static int
 qemuDomainNetsRestart(virDomainObjPtr vm,
-                      void *data ATTRIBUTE_UNUSED)
+                      void *data G_GNUC_UNUSED)
 {
     size_t i;
     virDomainDefPtr def = vm->def;
@@ -1232,8 +1232,8 @@ qemuConnectURIProbe(char **uri)
 
 //qemu对应的连接函数(校验uri,设置qemu_driver)
 static virDrvOpenStatus qemuConnectOpen(virConnectPtr conn,
-                                        virConnectAuthPtr auth ATTRIBUTE_UNUSED,
-                                        virConfPtr conf ATTRIBUTE_UNUSED,
+                                        virConnectAuthPtr auth G_GNUC_UNUSED,
+                                        virConfPtr conf G_GNUC_UNUSED,
                                         unsigned int flags)
 {
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
@@ -1307,19 +1307,19 @@ static const char *qemuConnectGetType(virConnectPtr conn) {
 }
 
 
-static int qemuConnectIsSecure(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int qemuConnectIsSecure(virConnectPtr conn G_GNUC_UNUSED)
 {
     /* Trivially secure, since always inside the daemon */
     return 1;
 }
 
-static int qemuConnectIsEncrypted(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int qemuConnectIsEncrypted(virConnectPtr conn G_GNUC_UNUSED)
 {
     /* Not encrypted, but remote driver takes care of that */
     return 0;
 }
 
-static int qemuConnectIsAlive(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int qemuConnectIsAlive(virConnectPtr conn G_GNUC_UNUSED)
 {
     return 1;
 }
@@ -1350,7 +1350,7 @@ qemuConnectGetSysinfo(virConnectPtr conn, unsigned int flags)
 }
 
 static int
-qemuConnectGetMaxVcpus(virConnectPtr conn ATTRIBUTE_UNUSED, const char *type)
+qemuConnectGetMaxVcpus(virConnectPtr conn G_GNUC_UNUSED, const char *type)
 {
     if (virConnectGetMaxVcpusEnsureACL(conn) < 0)
         return -1;
@@ -2243,7 +2243,7 @@ qemuDomainReset(virDomainPtr dom, unsigned int flags)
 /* Count how many snapshots in a set are external snapshots.  */
 static int
 qemuDomainSnapshotCountExternal(void *payload,
-                                const void *name ATTRIBUTE_UNUSED,
+                                const void *name G_GNUC_UNUSED,
                                 void *data)
 {
     virDomainMomentObjPtr snap = payload;
@@ -4332,7 +4332,7 @@ processGuestPanicEvent(virQEMUDriverPtr driver,
     case VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_DESTROY:
         if (doCoreDumpToAutoDumpPath(driver, vm, flags) < 0)
             goto endjob;
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
 
     case VIR_DOMAIN_LIFECYCLE_ACTION_DESTROY:
         qemuProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_CRASHED,
@@ -4349,7 +4349,7 @@ processGuestPanicEvent(virQEMUDriverPtr driver,
     case VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_RESTART:
         if (doCoreDumpToAutoDumpPath(driver, vm, flags) < 0)
             goto endjob;
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
 
     case VIR_DOMAIN_LIFECYCLE_ACTION_RESTART:
         qemuDomainSetFakeReboot(driver, vm, true);
@@ -7836,6 +7836,7 @@ qemuDomainUndefineFlags(virDomainPtr dom,
     int nsnapshots;
     int ncheckpoints;
     virQEMUDriverConfigPtr cfg = NULL;
+    g_autofree char *nvram_path = NULL;
 
     virCheckFlags(VIR_DOMAIN_UNDEFINE_MANAGED_SAVE |
                   VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA |
@@ -7913,14 +7914,21 @@ qemuDomainUndefineFlags(virDomainPtr dom,
         }
     }
 
-    if (vm->def->os.loader &&
-        vm->def->os.loader->nvram &&
-        virFileExists(vm->def->os.loader->nvram)) {
+    if (vm->def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_EFI) {
+        if (qemuDomainNVRAMPathFormat(cfg, vm->def, &nvram_path) < 0)
+            goto endjob;
+    } else {
+        if (vm->def->os.loader &&
+            VIR_STRDUP(nvram_path, vm->def->os.loader->nvram) < 0)
+            goto endjob;
+    }
+
+    if (nvram_path && virFileExists(nvram_path)) {
         if ((flags & VIR_DOMAIN_UNDEFINE_NVRAM)) {
-            if (unlink(vm->def->os.loader->nvram) < 0) {
+            if (unlink(nvram_path) < 0) {
                 virReportSystemError(errno,
                                      _("failed to remove nvram: %s"),
-                                     vm->def->os.loader->nvram);
+                                     nvram_path);
                 goto endjob;
             }
         } else if (!(flags & VIR_DOMAIN_UNDEFINE_KEEP_NVRAM)) {
@@ -12616,7 +12624,7 @@ qemuDomainMigratePrepareTunnel(virConnectPtr dconn,
                                virStreamPtr st,
                                unsigned long flags,
                                const char *dname,
-                               unsigned long resource ATTRIBUTE_UNUSED,
+                               unsigned long resource G_GNUC_UNUSED,
                                const char *dom_xml)
 {
     virQEMUDriverPtr driver = dconn->privateData;
@@ -12667,13 +12675,13 @@ qemuDomainMigratePrepareTunnel(virConnectPtr dconn,
  */
 static int ATTRIBUTE_NONNULL(5)
 qemuDomainMigratePrepare2(virConnectPtr dconn,
-                          char **cookie ATTRIBUTE_UNUSED,
-                          int *cookielen ATTRIBUTE_UNUSED,
+                          char **cookie G_GNUC_UNUSED,
+                          int *cookielen G_GNUC_UNUSED,
                           const char *uri_in,
                           char **uri_out,
                           unsigned long flags,
                           const char *dname,
-                          unsigned long resource ATTRIBUTE_UNUSED,
+                          unsigned long resource G_GNUC_UNUSED,
                           const char *dom_xml)
 {
     virQEMUDriverPtr driver = dconn->privateData;
@@ -12790,9 +12798,9 @@ qemuDomainMigratePerform(virDomainPtr dom,
 static virDomainPtr
 qemuDomainMigrateFinish2(virConnectPtr dconn,
                          const char *dname,
-                         const char *cookie ATTRIBUTE_UNUSED,
-                         int cookielen ATTRIBUTE_UNUSED,
-                         const char *uri ATTRIBUTE_UNUSED,
+                         const char *cookie G_GNUC_UNUSED,
+                         int cookielen G_GNUC_UNUSED,
+                         const char *uri G_GNUC_UNUSED,
                          unsigned long flags,
                          int retcode)
 {
@@ -12839,7 +12847,7 @@ qemuDomainMigrateBegin3(virDomainPtr domain,
                         int *cookieoutlen,
                         unsigned long flags,
                         const char *dname,
-                        unsigned long resource ATTRIBUTE_UNUSED)
+                        unsigned long resource G_GNUC_UNUSED)
 {
     virDomainObjPtr vm;
 
@@ -12919,7 +12927,7 @@ qemuDomainMigratePrepare3(virConnectPtr dconn,
                           char **uri_out,
                           unsigned long flags,
                           const char *dname,
-                          unsigned long resource ATTRIBUTE_UNUSED,
+                          unsigned long resource G_GNUC_UNUSED,
                           const char *dom_xml)
 {
     virQEMUDriverPtr driver = dconn->privateData;
@@ -13064,7 +13072,7 @@ qemuDomainMigratePrepareTunnel3(virConnectPtr dconn,
                                 int *cookieoutlen,
                                 unsigned long flags,
                                 const char *dname,
-                                unsigned long resource ATTRIBUTE_UNUSED,
+                                unsigned long resource G_GNUC_UNUSED,
                                 const char *dom_xml)
 {
     virQEMUDriverPtr driver = dconn->privateData;
@@ -13300,8 +13308,8 @@ qemuDomainMigrateFinish3(virConnectPtr dconn,
                          int cookieinlen,
                          char **cookieout,
                          int *cookieoutlen,
-                         const char *dconnuri ATTRIBUTE_UNUSED,
-                         const char *uri ATTRIBUTE_UNUSED,
+                         const char *dconnuri G_GNUC_UNUSED,
+                         const char *uri G_GNUC_UNUSED,
                          unsigned long flags,
                          int cancelled)
 {
@@ -13756,7 +13764,7 @@ qemuConnectCompareHypervisorCPU(virConnectPtr conn,
 
 
 static char *
-qemuConnectBaselineCPU(virConnectPtr conn ATTRIBUTE_UNUSED,
+qemuConnectBaselineCPU(virConnectPtr conn G_GNUC_UNUSED,
                        const char **xmlCPUs,
                        unsigned int ncpus,
                        unsigned int flags)
@@ -14706,7 +14714,7 @@ qemuDomainMigrateStartPostCopy(virDomainPtr dom,
  * is sent but failed, and number of frozen filesystems on success. If -2 is
  * returned, FSThaw should be called revert the quiesced status. */
 static int
-qemuDomainSnapshotFSFreeze(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
+qemuDomainSnapshotFSFreeze(virQEMUDriverPtr driver G_GNUC_UNUSED,
                            virDomainObjPtr vm,
                            const char **mountpoints,
                            unsigned int nmountpoints)
@@ -14726,7 +14734,7 @@ qemuDomainSnapshotFSFreeze(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
 
 /* Return -1 on error, otherwise number of thawed filesystems. */
 static int
-qemuDomainSnapshotFSThaw(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
+qemuDomainSnapshotFSThaw(virQEMUDriverPtr driver G_GNUC_UNUSED,
                          virDomainObjPtr vm,
                          bool report)
 {
@@ -17093,7 +17101,7 @@ struct _virQEMUMomentReparent {
 
 static int
 qemuDomainMomentReparentChildren(void *payload,
-                                 const void *name ATTRIBUTE_UNUSED,
+                                 const void *name G_GNUC_UNUSED,
                                  void *data)
 {
     virDomainMomentObjPtr moment = payload;
@@ -20613,10 +20621,10 @@ qemuConnectGetDomainCapabilities(virConnectPtr conn,
 
 
 static int
-qemuDomainGetStatsState(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
+qemuDomainGetStatsState(virQEMUDriverPtr driver G_GNUC_UNUSED,
                         virDomainObjPtr dom,
                         virTypedParamListPtr params,
-                        unsigned int privflags ATTRIBUTE_UNUSED)
+                        unsigned int privflags G_GNUC_UNUSED)
 {
     if (virTypedParamListAddInt(params, dom->state.state, "state.state") < 0)
         return -1;
@@ -20844,7 +20852,7 @@ static int
 qemuDomainGetStatsCpu(virQEMUDriverPtr driver,
                       virDomainObjPtr dom,
                       virTypedParamListPtr params,
-                      unsigned int privflags ATTRIBUTE_UNUSED)
+                      unsigned int privflags G_GNUC_UNUSED)
 {
     if (qemuDomainGetStatsCpuCgroup(dom, params) < 0)
         return -1;
@@ -21000,10 +21008,10 @@ qemuDomainGetStatsVcpu(virQEMUDriverPtr driver,
         return -1;
 
 static int
-qemuDomainGetStatsInterface(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
+qemuDomainGetStatsInterface(virQEMUDriverPtr driver G_GNUC_UNUSED,
                             virDomainObjPtr dom,
                             virTypedParamListPtr params,
-                            unsigned int privflags ATTRIBUTE_UNUSED)
+                            unsigned int privflags G_GNUC_UNUSED)
 {
     size_t i;
     struct _virDomainInterfaceStats tmp;
@@ -21426,7 +21434,7 @@ static int
 qemuDomainGetStatsIOThread(virQEMUDriverPtr driver,
                            virDomainObjPtr dom,
                            virTypedParamListPtr params,
-                           unsigned int privflags ATTRIBUTE_UNUSED)
+                           unsigned int privflags G_GNUC_UNUSED)
 {
     qemuDomainObjPrivatePtr priv = dom->privateData;
     size_t i;
@@ -21492,10 +21500,10 @@ qemuDomainGetStatsPerfOneEvent(virPerfPtr perf,
 }
 
 static int
-qemuDomainGetStatsPerf(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
+qemuDomainGetStatsPerf(virQEMUDriverPtr driver G_GNUC_UNUSED,
                        virDomainObjPtr dom,
                        virTypedParamListPtr params,
-                       unsigned int privflags ATTRIBUTE_UNUSED)
+                       unsigned int privflags G_GNUC_UNUSED)
 {
     size_t i;
     qemuDomainObjPrivatePtr priv = dom->privateData;

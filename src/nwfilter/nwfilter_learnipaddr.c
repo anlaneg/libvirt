@@ -307,7 +307,7 @@ virNWFilterHasLearnReq(int ifindex)
 
 
 static void
-freeLearnReqEntry(void *payload, const void *name ATTRIBUTE_UNUSED)
+freeLearnReqEntry(void *payload, const void *name G_GNUC_UNUSED)
 {
     virNWFilterIPAddrLearnReqFree(payload);
 }
@@ -479,7 +479,7 @@ learnIPAddressThread(void *arg)
     pcap_freecode(&fp);
 
     while (req->status == 0 && vmaddr == 0) {
-        int n = poll(fds, ARRAY_CARDINALITY(fds), PKT_TIMEOUT_MS);
+        int n = poll(fds, G_N_ELEMENTS(fds), PKT_TIMEOUT_MS);
 
         if (threadsTerminate || req->terminate) {
             req->status = ECANCELED;
@@ -764,11 +764,11 @@ virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver,
 #else
 
 int
-virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver ATTRIBUTE_UNUSED,
-                          virNWFilterBindingDefPtr binding ATTRIBUTE_UNUSED,
-                          int ifindex ATTRIBUTE_UNUSED,
-                          virNWFilterDriverStatePtr driver ATTRIBUTE_UNUSED,
-                          int howDetect ATTRIBUTE_UNUSED)
+virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver G_GNUC_UNUSED,
+                          virNWFilterBindingDefPtr binding G_GNUC_UNUSED,
+                          int ifindex G_GNUC_UNUSED,
+                          virNWFilterDriverStatePtr driver G_GNUC_UNUSED,
+                          int howDetect G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                    _("IP parameter must be given since libvirt "
@@ -812,7 +812,7 @@ virNWFilterLearnThreadsTerminate(bool allowNewThreads)
     threadsTerminate = true;
 
     while (virHashSize(pendingLearnReq) != 0)
-        usleep((PKT_TIMEOUT_MS * 1000) / 3);
+        g_usleep((PKT_TIMEOUT_MS * 1000) / 3);
 
     if (allowNewThreads)
         threadsTerminate = false;

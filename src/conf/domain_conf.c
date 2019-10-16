@@ -4073,8 +4073,8 @@ virDomainDeviceSetData(virDomainDeviceDefPtr device,
 
 
 static int
-virDomainDefHasDeviceAddressIterator(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                                     virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
+virDomainDefHasDeviceAddressIterator(virDomainDefPtr def G_GNUC_UNUSED,
+                                     virDomainDeviceDefPtr dev G_GNUC_UNUSED,
                                      virDomainDeviceInfoPtr info,
                                      void *opaque)
 {
@@ -5191,8 +5191,8 @@ virDomainVsockDefPostParse(virDomainVsockDefPtr vsock)
 static int
 virDomainDeviceDefPostParseCommon(virDomainDeviceDefPtr dev,
                                   const virDomainDef *def,
-                                  virCapsPtr caps ATTRIBUTE_UNUSED,
-                                  unsigned int parseFlags ATTRIBUTE_UNUSED,
+                                  virCapsPtr caps G_GNUC_UNUSED,
+                                  unsigned int parseFlags G_GNUC_UNUSED,
                                   virDomainXMLOptionPtr xmlopt)
 {
     int ret = -1;
@@ -5509,7 +5509,7 @@ struct virDomainDefPostParseDeviceIteratorData {
 static int
 virDomainDefPostParseDeviceIterator(virDomainDefPtr def,
                                     virDomainDeviceDefPtr dev,
-                                    virDomainDeviceInfoPtr info ATTRIBUTE_UNUSED,
+                                    virDomainDeviceInfoPtr info G_GNUC_UNUSED,
                                     void *opaque)
 {
     struct virDomainDefPostParseDeviceIteratorData *data = opaque;
@@ -5579,8 +5579,8 @@ virDomainDefPostParseCPU(virDomainDefPtr def)
 
 
 static int
-virDomainDefCollectBootOrder(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                             virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
+virDomainDefCollectBootOrder(virDomainDefPtr def G_GNUC_UNUSED,
+                             virDomainDeviceDefPtr dev G_GNUC_UNUSED,
                              virDomainDeviceInfoPtr info,
                              void *data)
 {
@@ -6612,7 +6612,7 @@ virDomainDeviceDefValidate(const virDomainDeviceDef *dev,
 static int
 virDomainDefValidateDeviceIterator(virDomainDefPtr def,
                                    virDomainDeviceDefPtr dev,
-                                   virDomainDeviceInfoPtr info ATTRIBUTE_UNUSED,
+                                   virDomainDeviceInfoPtr info G_GNUC_UNUSED,
                                    void *opaque)
 {
     struct virDomainDefPostParseDeviceIteratorData *data = opaque;
@@ -7461,7 +7461,7 @@ virDomainDeviceAliasIsUserAlias(const char *aliasStr)
  * @param node XML nodeset to parse for device address definition
  */
 static int
-virDomainDeviceInfoParseXML(virDomainXMLOptionPtr xmlopt ATTRIBUTE_UNUSED,
+virDomainDeviceInfoParseXML(virDomainXMLOptionPtr xmlopt G_GNUC_UNUSED,
                             xmlNodePtr node,
                             virDomainDeviceInfoPtr info,
                             unsigned int flags)
@@ -8506,7 +8506,7 @@ virDomainNetDefCoalesceFormatXML(virBufferPtr buf,
 
 
 static int
-virDomainHostdevDefParseXMLCaps(xmlNodePtr node ATTRIBUTE_UNUSED,
+virDomainHostdevDefParseXMLCaps(xmlNodePtr node G_GNUC_UNUSED,
                                 xmlXPathContextPtr ctxt,
                                 const char *type,
                                 virDomainHostdevDefPtr def)
@@ -17488,7 +17488,7 @@ virDomainChrEquals(virDomainChrDefPtr src,
         if (src->targetType != tgt->targetType)
             return false;
 
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
 
     case VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE:
     case VIR_DOMAIN_CHR_DEVICE_TYPE_PARALLEL:
@@ -17523,7 +17523,7 @@ virDomainChrFind(virDomainDefPtr def,
 
 /* Return the address within vmdef to be modified when working with a
  * chrdefptr of the given type.  */
-static int ATTRIBUTE_RETURN_CHECK
+static int G_GNUC_WARN_UNUSED_RESULT
 virDomainChrGetDomainPtrsInternal(virDomainDefPtr vmdef,
                                   virDomainChrDeviceType type,
                                   virDomainChrDefPtr ***arrPtr,
@@ -20293,7 +20293,7 @@ virDomainDefParseXML(xmlDocPtr xml,
                 def->apic_eoi = eoi;
                 VIR_FREE(tmp);
             }
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
         case VIR_DOMAIN_FEATURE_ACPI:
         case VIR_DOMAIN_FEATURE_PAE:
         case VIR_DOMAIN_FEATURE_VIRIDIAN:
@@ -29076,8 +29076,8 @@ struct _virDomainCompatibleDeviceData {
 };
 
 static int
-virDomainDeviceInfoCheckBootIndex(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                                  virDomainDeviceDefPtr device ATTRIBUTE_UNUSED,
+virDomainDeviceInfoCheckBootIndex(virDomainDefPtr def G_GNUC_UNUSED,
+                                  virDomainDeviceDefPtr device G_GNUC_UNUSED,
                                   virDomainDeviceInfoPtr info,
                                   void *opaque)
 {
@@ -29821,7 +29821,7 @@ virDomainNetSetModelString(virDomainNetDefPtr net,
     if (!model)
         return 0;
 
-    for (i = 0; i < ARRAY_CARDINALITY(virDomainNetModelTypeList); i++) {
+    for (i = 0; i < G_N_ELEMENTS(virDomainNetModelTypeList); i++) {
         if (STRCASEEQ(virDomainNetModelTypeList[i], model)) {
             net->model = i;
             return 0;
@@ -30126,7 +30126,7 @@ typedef struct {
 } virDomainDefFindDeviceCallbackData;
 
 static int
-virDomainDefFindDeviceCallback(virDomainDefPtr def ATTRIBUTE_UNUSED,
+virDomainDefFindDeviceCallback(virDomainDefPtr def G_GNUC_UNUSED,
                                virDomainDeviceDefPtr dev,
                                virDomainDeviceInfoPtr info,
                                void *opaque)
@@ -31046,7 +31046,7 @@ virDomainNetNotifyActualDevice(virConnectPtr conn,
 
 int
 virDomainNetReleaseActualDevice(virConnectPtr conn,
-                                virDomainDefPtr dom ATTRIBUTE_UNUSED,
+                                virDomainDefPtr dom G_GNUC_UNUSED,
                                 virDomainNetDefPtr iface)
 {
     virNetworkPtr net = NULL;
@@ -31217,7 +31217,7 @@ virDomainNetResolveActualType(virDomainNetDefPtr iface)
         /* intentionally fall through to the direct case for
          * VIR_NETWORK_FORWARD_BRIDGE with no bridge device defined
          */
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
 
     case VIR_NETWORK_FORWARD_PRIVATE:
     case VIR_NETWORK_FORWARD_VEPA:
@@ -31483,7 +31483,7 @@ virDomainDiskTranslateSourcePool(virDomainDiskDefPtr def)
        case VIR_STORAGE_SOURCE_POOL_MODE_DEFAULT:
        case VIR_STORAGE_SOURCE_POOL_MODE_LAST:
            def->src->srcpool->mode = VIR_STORAGE_SOURCE_POOL_MODE_HOST;
-           ATTRIBUTE_FALLTHROUGH;
+           G_GNUC_FALLTHROUGH;
        case VIR_STORAGE_SOURCE_POOL_MODE_HOST:
            def->src->srcpool->actualtype = VIR_STORAGE_TYPE_BLOCK;
            if (!(def->src->path = virStorageVolGetPath(vol)))

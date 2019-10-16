@@ -86,7 +86,7 @@ qemuMigrationJobStart(virQEMUDriverPtr driver,
                       virDomainObjPtr vm,
                       qemuDomainAsyncJob job,
                       unsigned long apiFlags)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 static void
 qemuMigrationJobSetPhase(virQEMUDriverPtr driver,
@@ -582,7 +582,7 @@ qemuMigrationSrcNBDCopyCancelled(virDomainObjPtr vm,
                 qemuMigrationNBDReportMirrorError(job, disk->dst);
                 failed = true;
             }
-            ATTRIBUTE_FALLTHROUGH;
+            G_GNUC_FALLTHROUGH;
         case VIR_DOMAIN_BLOCK_JOB_CANCELED:
         case VIR_DOMAIN_BLOCK_JOB_COMPLETED:
             diskPriv->migrating = false;
@@ -656,7 +656,7 @@ qemuMigrationSrcNBDCopyCancelOne(virQEMUDriverPtr driver,
             qemuMigrationNBDReportMirrorError(job, disk->dst);
             goto cleanup;
         }
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case VIR_DOMAIN_BLOCK_JOB_COMPLETED:
         ret = 1;
         goto cleanup;
@@ -1774,7 +1774,7 @@ qemuMigrationSrcGraphicsRelocate(virQEMUDriverPtr driver,
 
 
 static int
-qemuMigrationDstOPDRelocate(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
+qemuMigrationDstOPDRelocate(virQEMUDriverPtr driver G_GNUC_UNUSED,
                             virDomainObjPtr vm,
                             qemuMigrationCookiePtr cookie)
 {
@@ -3149,7 +3149,7 @@ static void qemuMigrationSrcIOFunc(void *arg)
         fds[0].events = fds[1].events = POLLIN;
         fds[0].revents = fds[1].revents = 0;
 
-        ret = poll(fds, ARRAY_CARDINALITY(fds), timeout);
+        ret = poll(fds, G_N_ELEMENTS(fds), timeout);
 
         if (ret < 0) {
             if (errno == EAGAIN || errno == EINTR)
@@ -4395,7 +4395,7 @@ static int virConnectCredType[] = {
 
 static virConnectAuth virConnectAuthConfig = {
     .credtype = virConnectCredType,
-    .ncredtype = ARRAY_CARDINALITY(virConnectCredType),
+    .ncredtype = G_N_ELEMENTS(virConnectCredType),
 };
 
 
@@ -5492,7 +5492,7 @@ qemuMigrationJobFinish(virQEMUDriverPtr driver, virDomainObjPtr vm)
 
 static void
 qemuMigrationDstErrorFree(void *data,
-                       const void *name ATTRIBUTE_UNUSED)
+                       const void *name G_GNUC_UNUSED)
 {
     virErrorPtr err = data;
     virFreeError(err);

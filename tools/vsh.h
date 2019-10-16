@@ -253,11 +253,11 @@ struct _vshCmdGrp {
 };
 
 void vshError(vshControl *ctl, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(2, 3);
+    G_GNUC_PRINTF(2, 3);
 void vshOpenLogFile(vshControl *ctl);
 void vshOutputLogFile(vshControl *ctl, int log_level, const char *format,
                       va_list ap)
-    ATTRIBUTE_FMT_PRINTF(3, 0);
+    G_GNUC_PRINTF(3, 0);
 void vshCloseLogFile(vshControl *ctl);
 
 const char *vshCmddefGetInfo(const vshCmdDef *cmd, const char *info);
@@ -268,39 +268,39 @@ bool vshCmdGrpHelp(vshControl *ctl, const vshCmdGrp *grp);
 
 int vshCommandOptInt(vshControl *ctl, const vshCmd *cmd,
                      const char *name, int *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptUInt(vshControl *ctl, const vshCmd *cmd,
                       const char *name, unsigned int *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptUIntWrap(vshControl *ctl, const vshCmd *cmd,
                           const char *name, unsigned int *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptUL(vshControl *ctl, const vshCmd *cmd,
                     const char *name, unsigned long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptULWrap(vshControl *ctl, const vshCmd *cmd,
                         const char *name, unsigned long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptStringQuiet(vshControl *ctl, const vshCmd *cmd,
                              const char *name, const char **value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptStringReq(vshControl *ctl, const vshCmd *cmd,
                            const char *name, const char **value)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptLongLong(vshControl *ctl, const vshCmd *cmd,
                           const char *name, long long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptULongLong(vshControl *ctl, const vshCmd *cmd,
                            const char *name, unsigned long long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptULongLongWrap(vshControl *ctl, const vshCmd *cmd,
                                const char *name, unsigned long long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptScaledInt(vshControl *ctl, const vshCmd *cmd,
                            const char *name, unsigned long long *value,
                            int scale, unsigned long long max)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshBlockJobOptionBandwidth(vshControl *ctl,
                                const vshCmd *cmd,
                                bool bytes,
@@ -315,14 +315,14 @@ bool vshCommandArgvParse(vshControl *ctl, int nargs, char **argv);
 int vshCommandOptTimeoutToMs(vshControl *ctl, const vshCmd *cmd, int *timeout);
 
 void vshPrint(vshControl *ctl, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(2, 3);
+    G_GNUC_PRINTF(2, 3);
 void vshPrintExtra(vshControl *ctl, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(2, 3);
+    G_GNUC_PRINTF(2, 3);
 bool vshInit(vshControl *ctl, const vshCmdGrp *groups, const vshCmdDef *set);
 bool vshInitReload(vshControl *ctl);
 void vshDeinit(vshControl *ctl);
 void vshDebug(vshControl *ctl, int level, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(3, 4);
+    G_GNUC_PRINTF(3, 4);
 
 /* User visible sort, so we want locale-specific case comparison.  */
 #define vshStrcasecmp(S1, S2) strcasecmp(S1, S2)

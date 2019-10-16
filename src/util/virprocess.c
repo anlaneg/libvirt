@@ -99,7 +99,7 @@ static inline int setns(int fd, int nstype)
 #  endif
 # endif
 #else /* !__linux__ */
-static inline int setns(int fd ATTRIBUTE_UNUSED, int nstype ATTRIBUTE_UNUSED)
+static inline int setns(int fd G_GNUC_UNUSED, int nstype G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Namespaces are not supported on this platform."));
@@ -177,7 +177,7 @@ virProcessAbort(pid_t pid)
     } else if (ret == 0) {
         VIR_DEBUG("trying SIGTERM to child process %d", pid);
         kill(pid, SIGTERM);
-        usleep(10 * 1000);
+        g_usleep(10 * 1000);
         while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
                errno == EINTR);
         if (ret == pid) {
@@ -399,7 +399,7 @@ virProcessKillPainfullyDelay(pid_t pid, bool force, unsigned int extradelay)
             goto cleanup; /* process is dead */
         }
 
-        usleep(200 * 1000);
+        g_usleep(200 * 1000);
     }
 
     virReportSystemError(EBUSY,
@@ -557,8 +557,8 @@ virProcessGetAffinity(pid_t pid)
 
 #else /* HAVE_SCHED_GETAFFINITY */
 
-int virProcessSetAffinity(pid_t pid ATTRIBUTE_UNUSED,
-                          virBitmapPtr map ATTRIBUTE_UNUSED)
+int virProcessSetAffinity(pid_t pid G_GNUC_UNUSED,
+                          virBitmapPtr map G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Process CPU affinity is not supported on this platform"));
@@ -566,7 +566,7 @@ int virProcessSetAffinity(pid_t pid ATTRIBUTE_UNUSED,
 }
 
 virBitmapPtr
-virProcessGetAffinity(pid_t pid ATTRIBUTE_UNUSED)
+virProcessGetAffinity(pid_t pid G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Process CPU affinity is not supported on this platform"));
@@ -628,7 +628,7 @@ int virProcessGetNamespaces(pid_t pid,
     *nfdlist = 0;
     *fdlist = NULL;
 
-    for (i = 0; i < ARRAY_CARDINALITY(ns); i++) {
+    for (i = 0; i < G_N_ELEMENTS(ns); i++) {
         int fd;
         VIR_AUTOFREE(char *) nsfile = NULL;
 
@@ -699,10 +699,10 @@ virProcessPrLimit(pid_t pid,
 }
 #elif HAVE_SETRLIMIT
 static int
-virProcessPrLimit(pid_t pid ATTRIBUTE_UNUSED,
-                  int resource ATTRIBUTE_UNUSED,
-                  const struct rlimit *new_limit ATTRIBUTE_UNUSED,
-                  struct rlimit *old_limit ATTRIBUTE_UNUSED)
+virProcessPrLimit(pid_t pid G_GNUC_UNUSED,
+                  int resource G_GNUC_UNUSED,
+                  const struct rlimit *new_limit G_GNUC_UNUSED,
+                  struct rlimit *old_limit G_GNUC_UNUSED)
 {
     errno = ENOSYS;
     return -1;
@@ -751,7 +751,7 @@ virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes)
 }
 #else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
 int
-virProcessSetMaxMemLock(pid_t pid ATTRIBUTE_UNUSED, unsigned long long bytes)
+virProcessSetMaxMemLock(pid_t pid G_GNUC_UNUSED, unsigned long long bytes)
 {
     if (bytes == 0)
         return 0;
@@ -802,7 +802,7 @@ virProcessGetMaxMemLock(pid_t pid,
 }
 #else /* ! (HAVE_GETRLIMIT && defined(RLIMIT_MEMLOCK)) */
 int
-virProcessGetMaxMemLock(pid_t pid ATTRIBUTE_UNUSED,
+virProcessGetMaxMemLock(pid_t pid G_GNUC_UNUSED,
                         unsigned long long *bytes)
 {
     if (!bytes)
@@ -843,7 +843,7 @@ virProcessSetMaxProcesses(pid_t pid, unsigned int procs)
 }
 #else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NPROC)) */
 int
-virProcessSetMaxProcesses(pid_t pid ATTRIBUTE_UNUSED, unsigned int procs)
+virProcessSetMaxProcesses(pid_t pid G_GNUC_UNUSED, unsigned int procs)
 {
     if (procs == 0)
         return 0;
@@ -891,7 +891,7 @@ virProcessSetMaxFiles(pid_t pid, unsigned int files)
 }
 #else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)) */
 int
-virProcessSetMaxFiles(pid_t pid ATTRIBUTE_UNUSED, unsigned int files)
+virProcessSetMaxFiles(pid_t pid G_GNUC_UNUSED, unsigned int files)
 {
     if (files == 0)
         return 0;
@@ -928,7 +928,7 @@ virProcessSetMaxCoreSize(pid_t pid, unsigned long long bytes)
 }
 #else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_CORE)) */
 int
-virProcessSetMaxCoreSize(pid_t pid ATTRIBUTE_UNUSED,
+virProcessSetMaxCoreSize(pid_t pid G_GNUC_UNUSED,
                          unsigned long long bytes)
 {
     if (bytes == 0)
@@ -1046,7 +1046,7 @@ struct _virProcessNamespaceHelperData {
     void *opaque;
 };
 
-static int virProcessNamespaceHelper(pid_t pid ATTRIBUTE_UNUSED,
+static int virProcessNamespaceHelper(pid_t pid G_GNUC_UNUSED,
                                      void *opaque)
 {
     virProcessNamespaceHelperData *data = opaque;
@@ -1214,8 +1214,8 @@ virProcessSetupPrivateMountNS(void)
 #endif /* !defined(HAVE_SYS_MOUNT_H) || !defined(HAVE_UNSHARE) */
 
 #if defined(__linux__)
-ATTRIBUTE_NORETURN static int
-virProcessDummyChild(void *argv ATTRIBUTE_UNUSED)
+G_GNUC_NORETURN static int
+virProcessDummyChild(void *argv G_GNUC_UNUSED)
 {
     _exit(0);
 }
@@ -1263,7 +1263,7 @@ virProcessNamespaceAvailable(unsigned int ns)
     cpid = clone(virProcessDummyChild, childStack, flags, NULL);
 
     if (cpid < 0) {
-        char ebuf[1024] ATTRIBUTE_UNUSED;
+        char ebuf[1024] G_GNUC_UNUSED;
         VIR_DEBUG("clone call returned %s, container support is not enabled",
                   virStrerror(errno, ebuf, sizeof(ebuf)));
         return -1;
@@ -1278,7 +1278,7 @@ virProcessNamespaceAvailable(unsigned int ns)
 #else /* !defined(__linux__) */
 
 int
-virProcessNamespaceAvailable(unsigned int ns ATTRIBUTE_UNUSED)
+virProcessNamespaceAvailable(unsigned int ns G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Namespaces are not supported on this platform."));
@@ -1422,9 +1422,9 @@ virProcessSetScheduler(pid_t pid,
 #else /* ! HAVE_SCHED_SETSCHEDULER */
 
 int
-virProcessSetScheduler(pid_t pid ATTRIBUTE_UNUSED,
+virProcessSetScheduler(pid_t pid G_GNUC_UNUSED,
                        virProcessSchedPolicy policy,
-                       int priority ATTRIBUTE_UNUSED)
+                       int priority G_GNUC_UNUSED)
 {
     if (!policy)
         return 0;

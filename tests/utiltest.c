@@ -39,12 +39,12 @@ static const char* diskNamesInvalid[] = {
 };
 
 static int
-testIndexToDiskName(const void *data ATTRIBUTE_UNUSED)
+testIndexToDiskName(const void *data G_GNUC_UNUSED)
 {
     size_t i;
     char *diskName = NULL;
 
-    for (i = 0; i < ARRAY_CARDINALITY(diskNames); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(diskNames); ++i) {
         VIR_FREE(diskName);
 
         diskName = virIndexToDiskName(i, "sd");
@@ -65,7 +65,7 @@ testIndexToDiskName(const void *data ATTRIBUTE_UNUSED)
 
 
 static int
-testDiskNameToIndex(const void *data ATTRIBUTE_UNUSED)
+testDiskNameToIndex(const void *data G_GNUC_UNUSED)
 {
     size_t i;
     int idx;
@@ -95,14 +95,14 @@ testDiskNameToIndex(const void *data ATTRIBUTE_UNUSED)
 
 
 static int
-testDiskNameParse(const void *data ATTRIBUTE_UNUSED)
+testDiskNameParse(const void *data G_GNUC_UNUSED)
 {
     size_t i;
     int idx;
     int partition;
     struct testDiskName *disk = NULL;
 
-    for (i = 0; i < ARRAY_CARDINALITY(diskNamesPart); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(diskNamesPart); ++i) {
         disk = &diskNamesPart[i];
         if (virDiskNameParse(disk->name, &idx, &partition))
             return -1;
@@ -120,7 +120,7 @@ testDiskNameParse(const void *data ATTRIBUTE_UNUSED)
         }
     }
 
-    for (i = 0; i < ARRAY_CARDINALITY(diskNamesInvalid); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(diskNamesInvalid); ++i) {
         if (!virDiskNameParse(diskNamesInvalid[i], &idx, &partition)) {
             VIR_TEST_DEBUG("Should Fail [%s]", diskNamesInvalid[i]);
             return -1;
@@ -155,13 +155,13 @@ static struct testVersionString versions[] = {
 };
 
 static int
-testParseVersionString(const void *data ATTRIBUTE_UNUSED)
+testParseVersionString(const void *data G_GNUC_UNUSED)
 {
     int result;
     size_t i;
     unsigned long version;
 
-    for (i = 0; i < ARRAY_CARDINALITY(versions); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(versions); ++i) {
         result = virParseVersionString(versions[i].string, &version,
                                        versions[i].allowMissing);
 
@@ -205,12 +205,12 @@ static struct testRoundData roundData[] = {
 };
 
 static int
-testRoundValueToPowerOfTwo(const void *data ATTRIBUTE_UNUSED)
+testRoundValueToPowerOfTwo(const void *data G_GNUC_UNUSED)
 {
     unsigned int result;
     size_t i;
 
-    for (i = 0; i < ARRAY_CARDINALITY(roundData); i++) {
+    for (i = 0; i < G_N_ELEMENTS(roundData); i++) {
         result = VIR_ROUND_UP_POWER_OF_TWO(roundData[i].input);
         if (roundData[i].output != result) {
             VIR_TEST_DEBUG("\nInput number [%u]", roundData[i].input);
@@ -234,7 +234,7 @@ testRoundValueToPowerOfTwo(const void *data ATTRIBUTE_UNUSED)
     }
 
 static int
-testOverflowCheckMacro(const void *data ATTRIBUTE_UNUSED)
+testOverflowCheckMacro(const void *data G_GNUC_UNUSED)
 {
     long long tmp;
     uint8_t luchar;

@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <glib.h>
 
 #if STATIC_ANALYSIS
 # undef NDEBUG /* Don't let a prior NDEBUG definition cause trouble.  */
@@ -90,67 +91,17 @@
     ((a) ? !(b) || STRNEQ((a), (b)) : !!(b))
 
 #define NUL_TERMINATE(buf) do { (buf)[sizeof(buf)-1] = '\0'; } while (0)
-#define ARRAY_CARDINALITY(Array) (sizeof(Array) / sizeof(*(Array)))
 
 /**
- * ATTRIBUTE_UNUSED:
- *
- * Macro to flag consciously unused parameters to functions
- */
-#ifndef ATTRIBUTE_UNUSED
-# define ATTRIBUTE_UNUSED __attribute__((__unused__))
-#endif
-
-/**
- * ATTRIBUTE_NORETURN:
- *
- * Macro to indicate that a function won't return to the caller
- */
-#ifndef ATTRIBUTE_NORETURN
-# define ATTRIBUTE_NORETURN __attribute__((__noreturn__))
-#endif
-
-/**
- * ATTRIBUTE_SENTINEL:
- *
- * Macro to check for NULL-terminated varargs lists
- */
-#ifndef ATTRIBUTE_SENTINEL
-# define ATTRIBUTE_SENTINEL __attribute__((__sentinel__))
-#endif
-
-/**
- * ATTRIBUTE_NOINLINE:
+ * G_GNUC_NO_INLINE:
  *
  * Force compiler not to inline a method. Should be used if
  * the method need to be overridable by test mocks.
- */
-#ifndef ATTRIBUTE_NOINLINE
-# define ATTRIBUTE_NOINLINE __attribute__((__noinline__))
-#endif
-
-/**
- * ATTRIBUTE_FMT_PRINTF
  *
- * Macro used to check printf like functions, if compiling
- * with gcc.
- *
- * We use gnulib which guarantees we always have GNU style
- * printf format specifiers even on broken Win32 platforms
- * hence we have to force 'gnu_printf' for new GCC
+ * TODO: Remove after upgrading to GLib >= 2.58
  */
-#ifndef ATTRIBUTE_FMT_PRINTF
-# ifndef __clang__
-#  define ATTRIBUTE_FMT_PRINTF(fmtpos, argpos) \
-       __attribute__((__format__ (__gnu_printf__, fmtpos, argpos)))
-# else
-#  define ATTRIBUTE_FMT_PRINTF(fmtpos, argpos) \
-       __attribute__((__format__ (__printf__, fmtpos, argpos)))
-# endif
-#endif
-
-#ifndef ATTRIBUTE_RETURN_CHECK
-# define ATTRIBUTE_RETURN_CHECK __attribute__((__warn_unused_result__))
+#ifndef G_GNUC_NO_INLINE
+# define G_GNUC_NO_INLINE __attribute__((__noinline__))
 #endif
 
 /**
@@ -183,11 +134,19 @@
 # endif
 #endif
 
-#ifndef ATTRIBUTE_FALLTHROUGH
+/**
+ *
+ * G_GNUC_FALLTHROUGH
+ *
+ * silence the compiler warning when falling through a switch case
+ *
+ * TODO: Remove after upgrading to GLib >= 2.60
+ */
+#ifndef G_GNUC_FALLTHROUGH
 # if __GNUC_PREREQ (7, 0)
-#  define ATTRIBUTE_FALLTHROUGH __attribute__((fallthrough))
+#  define G_GNUC_FALLTHROUGH __attribute__((fallthrough))
 # else
-#  define ATTRIBUTE_FALLTHROUGH do {} while(0)
+#  define G_GNUC_FALLTHROUGH do {} while(0)
 # endif
 #endif
 

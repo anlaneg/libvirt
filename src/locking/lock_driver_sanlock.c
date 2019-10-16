@@ -376,7 +376,7 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
 #else
             /* fall back to polling */
             VIR_DEBUG("Sleeping for %dms", LOCKSPACE_SLEEP);
-            usleep(LOCKSPACE_SLEEP * 1000);
+            g_usleep(LOCKSPACE_SLEEP * 1000);
 #endif
             VIR_DEBUG("Retrying to add lockspace (left %d)", retries);
             goto retry;
@@ -624,7 +624,7 @@ virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
                              virLockManagerPtr lock,
                              const char *name,
                              size_t nparams,
-                             virLockManagerParamPtr params ATTRIBUTE_UNUSED,
+                             virLockManagerParamPtr params G_GNUC_UNUSED,
                              bool shared)
 {
     virLockManagerSanlockPrivatePtr priv = lock->privateData;
@@ -920,10 +920,10 @@ virLockManagerSanlockRegisterKillscript(int sock,
 }
 #else
 static int
-virLockManagerSanlockRegisterKillscript(int sock ATTRIBUTE_UNUSED,
-                                        const char *vmuri ATTRIBUTE_UNUSED,
-                                        const char *uuidstr ATTRIBUTE_UNUSED,
-                                        virDomainLockFailureAction action ATTRIBUTE_UNUSED)
+virLockManagerSanlockRegisterKillscript(int sock G_GNUC_UNUSED,
+                                        const char *vmuri G_GNUC_UNUSED,
+                                        const char *uuidstr G_GNUC_UNUSED,
+                                        virDomainLockFailureAction action G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                    _("sanlock is too old to support lock failure action"));
