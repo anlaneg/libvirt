@@ -170,7 +170,7 @@ parserCommand(const char *profile_name, const char cmd)
         const char * const argv[] = {
             "/sbin/apparmor_parser", flag, profile, NULL
         };
-        VIR_AUTOPTR(virCommand) command = virCommandNewArgs(argv);
+        g_autoptr(virCommand) command = virCommandNewArgs(argv);
 
         virCommandRawStatus(command);
         if ((ret = virCommandRun(command, &status)) != 0 ||
@@ -358,7 +358,7 @@ create_profile(const char *profile, const char *profile_name,
         if (!(tmp = virStringReplace(pcontent, template_end, replace_files)))
             goto clean_all;
         VIR_FREE(pcontent);
-        VIR_STEAL_PTR(pcontent, tmp);
+        pcontent = g_steal_pointer(&tmp);
     }
 
     /* write the file */
@@ -778,7 +778,7 @@ vah_add_path(virBufferPtr buf, const char *path, const char *perms, bool recursi
          if ((pathtmp = mdir_name(pathdir)) == NULL)
              goto cleanup;
          VIR_FREE(pathdir);
-         VIR_STEAL_PTR(pathdir, pathtmp);
+         pathdir = g_steal_pointer(&pathtmp);
      }
 
     if (strlen(pathdir) == 1) {

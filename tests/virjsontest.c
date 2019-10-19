@@ -20,11 +20,11 @@ static int
 testJSONFromFile(const void *data)
 {
     const struct testInfo *info = data;
-    VIR_AUTOPTR(virJSONValue) injson = NULL;
-    VIR_AUTOFREE(char *) infile = NULL;
-    VIR_AUTOFREE(char *) indata = NULL;
-    VIR_AUTOFREE(char *) outfile = NULL;
-    VIR_AUTOFREE(char *) actual = NULL;
+    g_autoptr(virJSONValue) injson = NULL;
+    g_autofree char *infile = NULL;
+    g_autofree char *indata = NULL;
+    g_autofree char *outfile = NULL;
+    g_autofree char *actual = NULL;
 
     if (virAsprintf(&infile, "%s/virjsondata/parse-%s-in.json",
                     abs_srcdir, info->name) < 0 ||
@@ -66,9 +66,9 @@ static int
 testJSONFromString(const void *data)
 {
     const struct testInfo *info = data;
-    VIR_AUTOPTR(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) json = NULL;
     const char *expectstr = info->expect ? info->expect : info->doc;
-    VIR_AUTOFREE(char *) formatted = NULL;
+    g_autofree char *formatted = NULL;
 
     json = virJSONValueFromString(info->doc);
 
@@ -107,12 +107,12 @@ static int
 testJSONAddRemove(const void *data)
 {
     const struct testInfo *info = data;
-    VIR_AUTOPTR(virJSONValue) json = NULL;
-    VIR_AUTOPTR(virJSONValue) name = NULL;
-    VIR_AUTOFREE(char *) infile = NULL;
-    VIR_AUTOFREE(char *) indata = NULL;
-    VIR_AUTOFREE(char *) outfile = NULL;
-    VIR_AUTOFREE(char *) actual = NULL;
+    g_autoptr(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) name = NULL;
+    g_autofree char *infile = NULL;
+    g_autofree char *indata = NULL;
+    g_autofree char *outfile = NULL;
+    g_autofree char *actual = NULL;
 
     if (virAsprintf(&infile, "%s/virjsondata/add-remove-%s-in.json",
                     abs_srcdir, info->name) < 0 ||
@@ -178,9 +178,9 @@ static int
 testJSONLookup(const void *data)
 {
     const struct testInfo *info = data;
-    VIR_AUTOPTR(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) json = NULL;
     virJSONValuePtr value = NULL;
-    VIR_AUTOFREE(char *) result = NULL;
+    g_autofree char *result = NULL;
     int rc;
     int number;
     const char *str;
@@ -279,10 +279,10 @@ static int
 testJSONCopy(const void *data)
 {
     const struct testInfo *info = data;
-    VIR_AUTOPTR(virJSONValue) json = NULL;
-    VIR_AUTOPTR(virJSONValue) jsonCopy = NULL;
-    VIR_AUTOFREE(char *) result = NULL;
-    VIR_AUTOFREE(char *) resultCopy = NULL;
+    g_autoptr(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) jsonCopy = NULL;
+    g_autofree char *result = NULL;
+    g_autofree char *resultCopy = NULL;
 
     json = virJSONValueFromString(info->doc);
     if (!json) {
@@ -343,12 +343,12 @@ static int
 testJSONDeflatten(const void *data)
 {
     const struct testInfo *info = data;
-    VIR_AUTOPTR(virJSONValue) injson = NULL;
-    VIR_AUTOPTR(virJSONValue) deflattened = NULL;
-    VIR_AUTOFREE(char *) infile = NULL;
-    VIR_AUTOFREE(char *) indata = NULL;
-    VIR_AUTOFREE(char *) outfile = NULL;
-    VIR_AUTOFREE(char *) actual = NULL;
+    g_autoptr(virJSONValue) injson = NULL;
+    g_autoptr(virJSONValue) deflattened = NULL;
+    g_autofree char *infile = NULL;
+    g_autofree char *indata = NULL;
+    g_autofree char *outfile = NULL;
+    g_autofree char *actual = NULL;
 
     if (virAsprintf(&infile, "%s/virjsondata/deflatten-%s-in.json",
                     abs_srcdir, info->name) < 0 ||
@@ -387,11 +387,11 @@ testJSONDeflatten(const void *data)
 static int
 testJSONEscapeObj(const void *data G_GNUC_UNUSED)
 {
-    VIR_AUTOPTR(virJSONValue) json = NULL;
-    VIR_AUTOPTR(virJSONValue) nestjson = NULL;
-    VIR_AUTOPTR(virJSONValue) parsejson = NULL;
-    VIR_AUTOFREE(char *) neststr = NULL;
-    VIR_AUTOFREE(char *) result = NULL;
+    g_autoptr(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) nestjson = NULL;
+    g_autoptr(virJSONValue) parsejson = NULL;
+    g_autofree char *neststr = NULL;
+    g_autofree char *result = NULL;
     const char *parsednestedstr;
 
     if (virJSONValueObjectCreate(&nestjson,
@@ -439,10 +439,10 @@ testJSONEscapeObj(const void *data G_GNUC_UNUSED)
 static int
 testJSONObjectFormatSteal(const void *opaque G_GNUC_UNUSED)
 {
-    VIR_AUTOPTR(virJSONValue) a1 = NULL;
-    VIR_AUTOPTR(virJSONValue) a2 = NULL;
-    VIR_AUTOPTR(virJSONValue) t1 = NULL;
-    VIR_AUTOPTR(virJSONValue) t2 = NULL;
+    g_autoptr(virJSONValue) a1 = NULL;
+    g_autoptr(virJSONValue) a2 = NULL;
+    g_autoptr(virJSONValue) t1 = NULL;
+    g_autoptr(virJSONValue) t2 = NULL;
 
     if (!(a1 = virJSONValueNewString("test")) ||
         !(a2 = virJSONValueNewString("test"))) {

@@ -193,8 +193,8 @@ vzDestroyDriverConnection(void)
     vzConnPtr privconn_list;
 
     virMutexLock(&vz_driver_lock);
-    VIR_STEAL_PTR(driver, vz_driver);
-    VIR_STEAL_PTR(privconn_list, vz_conn_list);
+    driver = g_steal_pointer(&vz_driver);
+    privconn_list = g_steal_pointer(&vz_conn_list);
     virMutexUnlock(&vz_driver_lock);
 
     while (privconn_list) {
@@ -2595,7 +2595,7 @@ vzDomainSnapshotCreateXML(virDomainPtr domain,
     virDomainSnapshotObjListPtr snapshots = NULL;
     virDomainMomentObjPtr current;
     bool job = false;
-    VIR_AUTOUNREF(virDomainSnapshotDefPtr) def = NULL;
+    g_autoptr(virDomainSnapshotDef) def = NULL;
 
     virCheckFlags(VIR_DOMAIN_SNAPSHOT_CREATE_VALIDATE, NULL);
 
@@ -3189,7 +3189,7 @@ vzDomainMigratePerformP2P(virDomainObjPtr dom,
                                 VIR_MIGRATE_PARAM_DEST_XML, dom_xml) < 0)
         goto done;
 
-    VIR_STEAL_PTR(cookiein, cookieout);
+    cookiein = g_steal_pointer(&cookieout);
     cookieinlen = cookieoutlen;
     cookieoutlen = 0;
     virObjectUnlock(dom);
@@ -3206,17 +3206,17 @@ vzDomainMigratePerformP2P(virDomainObjPtr dom,
      */
     if (uri && virTypedParamsReplaceString(&params, &nparams,
                                            VIR_MIGRATE_PARAM_URI, uri) < 0) {
-        orig_err = virSaveLastError();
+        virErrorPreserveLast(&orig_err);
         goto finish;
     }
 
     VIR_FREE(cookiein);
-    VIR_STEAL_PTR(cookiein, cookieout);
+    cookiein = g_steal_pointer(&cookieout);
     cookieinlen = cookieoutlen;
     cookieoutlen = 0;
     if (vzDomainMigratePerformStep(dom, driver, params, nparams, cookiein,
                                    cookieinlen, flags) < 0) {
-        orig_err = virSaveLastError();
+        virErrorPreserveLast(&orig_err);
         goto finish;
     }
 
@@ -3242,10 +3242,7 @@ vzDomainMigratePerformP2P(virDomainObjPtr dom,
     /* confirm step is NOOP thus no need to call it */
 
  done:
-    if (orig_err) {
-        virSetError(orig_err);
-        virFreeError(orig_err);
-    }
+    virErrorRestore(&orig_err);
     VIR_FREE(dom_xml);
     VIR_FREE(uri);
     VIR_FREE(cookiein);

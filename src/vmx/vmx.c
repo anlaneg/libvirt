@@ -1275,7 +1275,7 @@ virVMXParseConfig(virVMXContext *ctx,
                   const char *vmx)
 {
     bool success = false;
-    VIR_AUTOPTR(virConf) conf = NULL;
+    g_autoptr(virConf) conf = NULL;
     char *encoding = NULL;
     char *utf8;
     virDomainDefPtr def = NULL;
@@ -1486,7 +1486,7 @@ virVMXParseConfig(virVMXContext *ctx,
         cpu->cores = coresPerSocket;
         cpu->threads = 1;
 
-        VIR_STEAL_PTR(def->cpu, cpu);
+        def->cpu = g_steal_pointer(&cpu);
     }
 
     /* vmx:sched.cpu.affinity -> def:cpumask */

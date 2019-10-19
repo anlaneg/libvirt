@@ -620,7 +620,7 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
         obj->persistent = !(flags & VIR_NETWORK_OBJ_LIST_ADD_LIVE);
     }
 
-    VIR_STEAL_PTR(ret, obj);
+    ret = g_steal_pointer(&obj);
 
  cleanup:
     virNetworkObjEndAPI(&obj);
@@ -1640,7 +1640,7 @@ virNetworkObjAddPort(virNetworkObjPtr net,
                      const char *stateDir)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    VIR_AUTOFREE(char *) dir = NULL;
+    g_autofree char *dir = NULL;
 
     virUUIDFormat(portdef->uuid, uuidstr);
 
@@ -1693,7 +1693,7 @@ virNetworkObjDeletePort(virNetworkObjPtr net,
                         const char *stateDir)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    VIR_AUTOFREE(char *) dir = NULL;
+    g_autofree char *dir = NULL;
     virNetworkPortDefPtr portdef;
 
     virUUIDFormat(uuid, uuidstr);
@@ -1722,7 +1722,7 @@ int
 virNetworkObjDeleteAllPorts(virNetworkObjPtr net,
                             const char *stateDir)
 {
-    VIR_AUTOFREE(char *) dir = NULL;
+    g_autofree char *dir = NULL;
     DIR *dh = NULL;
     struct dirent *de;
     int rc;
@@ -1881,13 +1881,13 @@ static int
 virNetworkObjLoadAllPorts(virNetworkObjPtr net,
                           const char *stateDir)
 {
-    VIR_AUTOFREE(char *) dir = NULL;
+    g_autofree char *dir = NULL;
     DIR *dh = NULL;
     struct dirent *de;
     int ret = -1;
     int rc;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    VIR_AUTOPTR(virNetworkPortDef) portdef = NULL;
+    g_autoptr(virNetworkPortDef) portdef = NULL;
 
     if (!(dir = virNetworkObjGetPortStatusDir(net, stateDir)))
         goto cleanup;

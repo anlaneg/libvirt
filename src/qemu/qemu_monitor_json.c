@@ -302,7 +302,7 @@ qemuMonitorJSONCommandWithFd(qemuMonitorPtr mon,
 {
     int ret = -1;
     qemuMonitorMessage msg;
-    VIR_AUTOCLEAN(virBuffer) cmdbuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) cmdbuf = VIR_BUFFER_INITIALIZER;
     char *id = NULL;
 
     *reply = NULL;
@@ -1940,7 +1940,7 @@ qemuMonitorJSONExtractCPUInfo(virJSONValuePtr data,
             qemuMonitorJSONExtractCPUS390Info(entry, cpus + i);
     }
 
-    VIR_STEAL_PTR(*entries, cpus);
+    *entries = g_steal_pointer(&cpus);
     *nentries = ncpus;
     ret = 0;
 
@@ -2527,7 +2527,7 @@ static qemuBlockStatsPtr
 qemuMonitorJSONBlockStatsCollectData(virJSONValuePtr dev,
                                      int *nstats)
 {
-    VIR_AUTOFREE(qemuBlockStatsPtr) bstats = NULL;
+    g_autofree qemuBlockStatsPtr bstats = NULL;
     virJSONValuePtr parent;
     virJSONValuePtr parentstats;
     virJSONValuePtr stats;
@@ -2568,7 +2568,7 @@ qemuMonitorJSONBlockStatsCollectData(virJSONValuePtr dev,
             bstats->wr_highest_offset_valid = true;
     }
 
-    VIR_RETURN_PTR(bstats);
+    return g_steal_pointer(&bstats);
 }
 
 
@@ -2601,11 +2601,11 @@ qemuMonitorJSONGetOneBlockStatsInfo(virJSONValuePtr dev,
                                     virHashTablePtr hash,
                                     bool backingChain)
 {
-    VIR_AUTOFREE(qemuBlockStatsPtr) bstats = NULL;
+    g_autofree qemuBlockStatsPtr bstats = NULL;
     int nstats = 0;
     const char *qdevname = NULL;
     const char *nodename = NULL;
-    VIR_AUTOFREE(char *) devicename = NULL;
+    g_autofree char *devicename = NULL;
     virJSONValuePtr backing;
 
     if (dev_name &&
@@ -2679,7 +2679,7 @@ qemuMonitorJSONGetAllBlockStatsInfo(qemuMonitorPtr mon,
     int nstats = 0;
     int rc;
     size_t i;
-    VIR_AUTOPTR(virJSONValue) devices = NULL;
+    g_autoptr(virJSONValue) devices = NULL;
 
     if (!(devices = qemuMonitorJSONQueryBlockstats(mon)))
         return -1;
@@ -4347,8 +4347,8 @@ qemuMonitorJSONDriveMirror(qemuMonitorPtr mon,
                            bool shallow,
                            bool reuse)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
 
     cmd = qemuMonitorJSONMakeCommand("drive-mirror",
                                      "s:device", device,
@@ -4381,8 +4381,8 @@ qemuMonitorJSONBlockdevMirror(qemuMonitorPtr mon,
                               unsigned long long buf_size,
                               bool shallow)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
     virTristateBool autofinalize = VIR_TRISTATE_BOOL_ABSENT;
     virTristateBool autodismiss = VIR_TRISTATE_BOOL_ABSENT;
 
@@ -5023,8 +5023,8 @@ int
 qemuMonitorJSONJobDismiss(qemuMonitorPtr mon,
                           const char *jobname)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
 
     if (!(cmd = qemuMonitorJSONMakeCommand("job-dismiss",
                                            "s:id", jobname,
@@ -5046,8 +5046,8 @@ qemuMonitorJSONJobCancel(qemuMonitorPtr mon,
                          const char *jobname,
                          bool quiet)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
 
     if (!(cmd = qemuMonitorJSONMakeCommand("job-cancel",
                                            "s:id", jobname,
@@ -5073,8 +5073,8 @@ int
 qemuMonitorJSONJobComplete(qemuMonitorPtr mon,
                            const char *jobname)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
 
     if (!(cmd = qemuMonitorJSONMakeCommand("job-complete",
                                            "s:id", jobname,
@@ -5791,7 +5791,7 @@ qemuMonitorJSONParseCPUModel(const char *cpu_name,
             goto cleanup;
     }
 
-    VIR_STEAL_PTR(*model_info, machine_model);
+    *model_info = g_steal_pointer(&machine_model);
     ret = 0;
 
  cleanup:
@@ -5808,9 +5808,9 @@ qemuMonitorJSONGetCPUModelExpansion(qemuMonitorPtr mon,
                                     bool fail_no_props,
                                     qemuMonitorCPUModelInfoPtr *model_info)
 {
-    VIR_AUTOPTR(virJSONValue) model = NULL;
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) model = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
     virJSONValuePtr data;
     virJSONValuePtr cpu_model;
     virJSONValuePtr cpu_props = NULL;
@@ -5883,10 +5883,10 @@ qemuMonitorJSONGetCPUModelBaseline(qemuMonitorPtr mon,
                                    virCPUDefPtr cpu_b,
                                    qemuMonitorCPUModelInfoPtr *baseline)
 {
-    VIR_AUTOPTR(virJSONValue) model_a = NULL;
-    VIR_AUTOPTR(virJSONValue) model_b = NULL;
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) model_a = NULL;
+    g_autoptr(virJSONValue) model_b = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
     virJSONValuePtr data;
     virJSONValuePtr cpu_model;
     virJSONValuePtr cpu_props = NULL;
@@ -5925,10 +5925,10 @@ qemuMonitorJSONGetCPUModelComparison(qemuMonitorPtr mon,
                                      virCPUDefPtr cpu_b,
                                      char **result)
 {
-    VIR_AUTOPTR(virJSONValue) model_a = NULL;
-    VIR_AUTOPTR(virJSONValue) model_b = NULL;
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) model_a = NULL;
+    g_autoptr(virJSONValue) model_b = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
     const char *data_result;
     virJSONValuePtr data;
 
@@ -6468,8 +6468,8 @@ qemuMonitorJSONGetStringListProperty(qemuMonitorPtr mon,
                                      const char *property,
                                      char ***strList)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
     VIR_AUTOSTRINGLIST list = NULL;
     virJSONValuePtr data;
     size_t n;
@@ -6508,7 +6508,7 @@ qemuMonitorJSONGetStringListProperty(qemuMonitorPtr mon,
             return -1;
     }
 
-    VIR_STEAL_PTR(*strList, list);
+    *strList = g_steal_pointer(&list);
     return n;
 }
 
@@ -6959,7 +6959,7 @@ qemuMonitorJSONGetSEVCapabilities(qemuMonitorPtr mon,
     const char *cert_chain = NULL;
     unsigned int cbitpos;
     unsigned int reduced_phys_bits;
-    VIR_AUTOPTR(virSEVCapability) capability = NULL;
+    g_autoptr(virSEVCapability) capability = NULL;
 
     *capabilities = NULL;
 
@@ -7021,7 +7021,7 @@ qemuMonitorJSONGetSEVCapabilities(qemuMonitorPtr mon,
 
     capability->cbitpos = cbitpos;
     capability->reduced_phys_bits = reduced_phys_bits;
-    VIR_STEAL_PTR(*capabilities, capability);
+    *capabilities = g_steal_pointer(&capability);
     ret = 1;
  cleanup:
     virJSONValueFree(cmd);
@@ -7750,8 +7750,8 @@ static int
 qemuMonitorJSONGetCPUProperties(qemuMonitorPtr mon,
                                 char ***props)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
 
     *props = NULL;
 
@@ -7867,9 +7867,9 @@ qemuMonitorJSONGetGuestCPU(qemuMonitorPtr mon,
         qemuMonitorJSONGetCPUDataDisabled(mon, translate, opaque, cpuDisabled) < 0)
         goto cleanup;
 
-    VIR_STEAL_PTR(*enabled, cpuEnabled);
+    *enabled = g_steal_pointer(&cpuEnabled);
     if (disabled)
-        VIR_STEAL_PTR(*disabled, cpuDisabled);
+        *disabled = g_steal_pointer(&cpuDisabled);
 
     ret = 0;
 
@@ -8571,7 +8571,7 @@ qemuMonitorJSONGetHotpluggableCPUs(qemuMonitorPtr mon,
 
     qsort(info, ninfo, sizeof(*info), qemuMonitorQueryHotpluggableCpusEntrySort);
 
-    VIR_STEAL_PTR(*entries, info);
+    *entries = g_steal_pointer(&info);
     *nentries = ninfo;
     ret = 0;
 
@@ -8699,8 +8699,8 @@ qemuMonitorJSONBlockdevCreate(qemuMonitorPtr mon,
                               const char *jobname,
                               virJSONValuePtr props)
 {
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
 
     cmd = qemuMonitorJSONMakeCommand("blockdev-create",
                                      "s:job-id", jobname,
@@ -9292,7 +9292,7 @@ qemuMonitorJSONGetJobInfoOne(virJSONValuePtr data)
     const char *status = virJSONValueObjectGetString(data, "status");
     const char *errmsg = virJSONValueObjectGetString(data, "error");
     int tmp;
-    VIR_AUTOPTR(qemuMonitorJobInfo) job = NULL;
+    g_autoptr(qemuMonitorJobInfo) job = NULL;
     qemuMonitorJobInfoPtr ret = NULL;
 
     if (VIR_ALLOC(job) < 0)
@@ -9312,7 +9312,7 @@ qemuMonitorJSONGetJobInfoOne(virJSONValuePtr data)
         VIR_STRDUP(job->error, errmsg) < 0)
         return NULL;
 
-    VIR_STEAL_PTR(ret, job);
+    ret = g_steal_pointer(&job);
     return ret;
 }
 
@@ -9323,8 +9323,8 @@ qemuMonitorJSONGetJobInfo(qemuMonitorPtr mon,
                           size_t *njobs)
 {
     virJSONValuePtr data;
-    VIR_AUTOPTR(virJSONValue) cmd = NULL;
-    VIR_AUTOPTR(virJSONValue) reply = NULL;
+    g_autoptr(virJSONValue) cmd = NULL;
+    g_autoptr(virJSONValue) reply = NULL;
     size_t i;
 
     if (!(cmd = qemuMonitorJSONMakeCommand("query-jobs", NULL)))

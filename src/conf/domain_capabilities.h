@@ -22,7 +22,6 @@
 
 #include "internal.h"
 #include "domain_conf.h"
-#include "virautoclean.h"
 #include "virenum.h"
 
 typedef const char * (*virDomainCapsValToStr)(int value);
@@ -236,4 +235,4 @@ int virDomainCapsDeviceDefValidate(virDomainCapsPtr const caps,
 void
 virSEVCapabilitiesFree(virSEVCapability *capabilities);
 
-VIR_DEFINE_AUTOPTR_FUNC(virSEVCapability, virSEVCapabilitiesFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSEVCapability, virSEVCapabilitiesFree);

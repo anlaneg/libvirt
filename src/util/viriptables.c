@@ -304,6 +304,42 @@ iptablesRemoveUdpInput(virFirewallPtr fw,
 }
 
 /**
+ * iptablesAddTcpOutput:
+ * @ctx: pointer to the IP table context
+ * @iface: the interface name
+ * @port: the TCP port to add
+ *
+ * Add an output to the IP table allowing access to the given @port from
+ * the given @iface interface for TCP packets
+ */
+void
+iptablesAddTcpOutput(virFirewallPtr fw,
+                     virFirewallLayer layer,
+                     const char *iface,
+                     int port)
+{
+    iptablesOutput(fw, layer, true, iface, port, ADD, 1);
+}
+
+/**
+ * iptablesRemoveTcpOutput:
+ * @ctx: pointer to the IP table context
+ * @iface: the interface name
+ * @port: the UDP port to remove
+ *
+ * Removes an output from the IP table, hence forbidding access to the given
+ * @port from the given @iface interface for TCP packets
+ */
+void
+iptablesRemoveTcpOutput(virFirewallPtr fw,
+                        virFirewallLayer layer,
+                        const char *iface,
+                        int port)
+{
+    iptablesOutput(fw, layer, deletePrivate, iface, port, REMOVE, 1);
+}
+
+/**
  * iptablesAddUdpOutput:
  * @ctx: pointer to the IP table context
  * @iface: the interface name
@@ -344,7 +380,7 @@ static char *iptablesFormatNetwork(virSocketAddr *netaddr,
                                    unsigned int prefix)
 {
     virSocketAddr network;
-    VIR_AUTOFREE(char *) netstr = NULL;
+    g_autofree char *netstr = NULL;
     char *ret;
 
     if (!(VIR_SOCKET_ADDR_IS_FAMILY(netaddr, AF_INET) ||
@@ -383,7 +419,7 @@ iptablesForwardAllowOut(virFirewallPtr fw,
                         const char *physdev,
                         int action)
 {
-    VIR_AUTOFREE(char *) networkstr = NULL;
+    g_autofree char *networkstr = NULL;
     virFirewallLayer layer = VIR_SOCKET_ADDR_FAMILY(netaddr) == AF_INET ?
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
 
@@ -474,7 +510,7 @@ iptablesForwardAllowRelatedIn(virFirewallPtr fw,
 {
     virFirewallLayer layer = VIR_SOCKET_ADDR_FAMILY(netaddr) == AF_INET ?
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
-    VIR_AUTOFREE(char *) networkstr = NULL;
+    g_autofree char *networkstr = NULL;
 
     if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
         return -1;
@@ -565,7 +601,7 @@ iptablesForwardAllowIn(virFirewallPtr fw,
 {
     virFirewallLayer layer = VIR_SOCKET_ADDR_FAMILY(netaddr) == AF_INET ?
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
-    VIR_AUTOFREE(char *) networkstr = NULL;
+    g_autofree char *networkstr = NULL;
 
     if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
         return -1;
@@ -813,11 +849,11 @@ iptablesForwardMasquerade(virFirewallPtr fw,
                           const char *protocol,
                           int action)
 {
-    VIR_AUTOFREE(char *) networkstr = NULL;
-    VIR_AUTOFREE(char *) addrStartStr = NULL;
-    VIR_AUTOFREE(char *) addrEndStr = NULL;
-    VIR_AUTOFREE(char *) portRangeStr = NULL;
-    VIR_AUTOFREE(char *) natRangeStr = NULL;
+    g_autofree char *networkstr = NULL;
+    g_autofree char *addrStartStr = NULL;
+    g_autofree char *addrEndStr = NULL;
+    g_autofree char *portRangeStr = NULL;
+    g_autofree char *natRangeStr = NULL;
     virFirewallRulePtr rule;
 
     if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
@@ -974,7 +1010,7 @@ iptablesForwardDontMasquerade(virFirewallPtr fw,
                               const char *destaddr,
                               int action)
 {
-    VIR_AUTOFREE(char *) networkstr = NULL;
+    g_autofree char *networkstr = NULL;
 
     if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
         return -1;

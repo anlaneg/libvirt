@@ -1468,7 +1468,7 @@ phypGetBackingDevice(virConnectPtr conn, const char *managed_system,
         if (VIR_STRDUP(backing_device, char_ptr) < 0)
             goto cleanup;
     } else {
-        VIR_STEAL_PTR(backing_device, ret);
+        backing_device = g_steal_pointer(&ret);
     }
 
     char_ptr = strchr(backing_device, '\n');
@@ -1965,8 +1965,8 @@ phypStorageVolCreateXML(virStoragePoolPtr pool,
     virStorageVolPtr vol = NULL;
     virStorageVolPtr dup_vol = NULL;
     char *key = NULL;
-    VIR_AUTOPTR(virStorageVolDef) voldef = NULL;
-    VIR_AUTOPTR(virStoragePoolDef) spdef = NULL;
+    g_autoptr(virStorageVolDef) voldef = NULL;
+    g_autoptr(virStoragePoolDef) spdef = NULL;
 
     if (VIR_ALLOC(spdef) < 0)
         return NULL;

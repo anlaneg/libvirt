@@ -123,8 +123,8 @@ qemuMonitorTestAddErrorResponse(qemuMonitorTestPtr test,
                                 const char *usermsg)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
-    VIR_AUTOFREE(char *) escapemsg = NULL;
-    VIR_AUTOFREE(char *) jsonmsg = NULL;
+    g_autofree char *escapemsg = NULL;
+    g_autofree char *jsonmsg = NULL;
     char *tmp;
 
     if (!usermsg)
@@ -159,7 +159,7 @@ static int
 qemuMonitorTestAddUnexpectedErrorResponse(qemuMonitorTestPtr test,
                                           const char *command)
 {
-    VIR_AUTOFREE(char *) msg = NULL;
+    g_autofree char *msg = NULL;
 
     if (virAsprintf(&msg, "unexpected command: '%s'", command) < 0)
         return -1;
@@ -173,7 +173,7 @@ qemuMonitorTestAddInvalidCommandResponse(qemuMonitorTestPtr test,
                                          const char *expectedcommand,
                                          const char *actualcommand)
 {
-    VIR_AUTOFREE(char *) msg = NULL;
+    g_autofree char *msg = NULL;
 
     if (virAsprintf(&msg, "expected command '%s' got '%s'",
                     expectedcommand, actualcommand) < 0)
@@ -187,8 +187,8 @@ int G_GNUC_PRINTF(2, 3)
 qemuMonitorReportError(qemuMonitorTestPtr test, const char *errmsg, ...)
 {
     va_list msgargs;
-    VIR_AUTOFREE(char *) msg = NULL;
-    VIR_AUTOFREE(char *) jsonmsg = NULL;
+    g_autofree char *msg = NULL;
+    g_autofree char *jsonmsg = NULL;
     int ret = -1;
 
     va_start(msgargs, errmsg);
@@ -511,10 +511,10 @@ qemuMonitorTestProcessCommandDefaultValidate(qemuMonitorTestPtr test,
                                              const char *cmdname,
                                              virJSONValuePtr args)
 {
-    VIR_AUTOCLEAN(virBuffer) debug = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) debug = VIR_BUFFER_INITIALIZER;
     virJSONValuePtr schemaroot;
-    VIR_AUTOPTR(virJSONValue) emptyargs = NULL;
-    VIR_AUTOFREE(char *) schemapath = NULL;
+    g_autoptr(virJSONValue) emptyargs = NULL;
+    g_autofree char *schemapath = NULL;
 
     if (!test->qapischema)
         return 0;
@@ -568,7 +568,7 @@ qemuMonitorTestProcessCommandDefault(qemuMonitorTestPtr test,
                                      const char *cmdstr)
 {
     struct qemuMonitorTestHandlerData *data = item->opaque;
-    VIR_AUTOPTR(virJSONValue) val = NULL;
+    g_autoptr(virJSONValue) val = NULL;
     virJSONValuePtr cmdargs = NULL;
     const char *cmdname;
     int rc;
@@ -622,9 +622,9 @@ qemuMonitorTestProcessCommandVerbatim(qemuMonitorTestPtr test,
                                       const char *cmdstr)
 {
     struct qemuMonitorTestHandlerData *data = item->opaque;
-    VIR_AUTOFREE(char *) reformatted = NULL;
-    VIR_AUTOFREE(char *) errmsg = NULL;
-    VIR_AUTOPTR(virJSONValue) json = NULL;
+    g_autofree char *reformatted = NULL;
+    g_autofree char *errmsg = NULL;
+    g_autoptr(virJSONValue) json = NULL;
     virJSONValuePtr cmdargs;
     const char *cmdname;
     int ret = -1;

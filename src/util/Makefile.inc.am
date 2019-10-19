@@ -3,6 +3,8 @@
 # These files are not related to driver APIs. Simply generic
 # helper APIs for various purposes
 UTIL_SOURCES = \
+	util/glibcompat.c \
+	util/glibcompat.h \
 	util/viralloc.c \
 	util/viralloc.h \
 	util/virarch.c \
@@ -17,7 +19,6 @@ UTIL_SOURCES = \
 	util/virauth.h \
 	util/virauthconfig.c \
 	util/virauthconfig.h \
-	util/virautoclean.h \
 	util/virbitmap.c \
 	util/virbitmap.h \
 	util/virbuffer.c \

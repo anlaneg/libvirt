@@ -28,7 +28,6 @@
 #include <libxml/relaxng.h>
 
 #include "virbuffer.h"
-#include "virautoclean.h"
 
 xmlXPathContextPtr virXMLXPathContextNew(xmlDocPtr xml)
     G_GNUC_WARN_UNUSED_RESULT;
@@ -233,7 +232,7 @@ typedef virXPathContextNodeSave *virXPathContextNodeSavePtr;
 void
 virXPathContextNodeRestore(virXPathContextNodeSavePtr save);
 
-VIR_DEFINE_AUTOCLEAN_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
 
 /**
  * VIR_XPATH_NODE_AUTORESTORE:
@@ -243,12 +242,12 @@ VIR_DEFINE_AUTOCLEAN_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
  * node pointer is reset to the original value when this macro was used.
  */
 #define VIR_XPATH_NODE_AUTORESTORE(_ctxt) \
-    VIR_AUTOCLEAN(virXPathContextNodeSave) _ctxt ## CtxtSave = { .ctxt = _ctxt,\
-                                                                 .node = _ctxt->node}; \
+    g_auto(virXPathContextNodeSave) _ctxt ## CtxtSave = { .ctxt = _ctxt,\
+                                                          .node = _ctxt->node}; \
     ignore_value(&_ctxt ## CtxtSave)
 
-VIR_DEFINE_AUTOPTR_FUNC(xmlDoc, xmlFreeDoc);
-VIR_DEFINE_AUTOPTR_FUNC(xmlXPathContext, xmlXPathFreeContext);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlDoc, xmlFreeDoc);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlXPathContext, xmlXPathFreeContext);
 
 typedef int (*virXMLNamespaceParse)(xmlXPathContextPtr ctxt, void **nsdata);
 typedef void (*virXMLNamespaceFree)(void *nsdata);

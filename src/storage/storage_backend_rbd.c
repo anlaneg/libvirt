@@ -85,7 +85,7 @@ virStoragePoolDefRBDNamespaceParse(xmlXPathContextPtr ctxt,
     int nnodes;
     size_t i;
     int ret = -1;
-    VIR_AUTOFREE(xmlNodePtr *)nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     nnodes = virXPathNodeSet("./rbd:config_opts/rbd:option", ctxt, &nodes);
     if (nnodes < 0)
@@ -129,7 +129,7 @@ virStoragePoolDefRBDNamespaceParse(xmlXPathContextPtr ctxt,
         cmdopts->noptions++;
     }
 
-    VIR_STEAL_PTR(*data, cmdopts);
+    *data = g_steal_pointer(&cmdopts);
     ret = 0;
 
  cleanup:
@@ -198,7 +198,7 @@ virStorageBackendRBDOpenRADOSConn(virStorageBackendRBDStatePtr ptr,
     const char *osd_op_timeout = "30";
     const char *rbd_default_format = "2";
     virConnectPtr conn = NULL;
-    VIR_AUTOFREE(char *) mon_buff = NULL;
+    g_autofree char *mon_buff = NULL;
 
     if (authdef) {
         VIR_DEBUG("Using cephx authorization, username: %s", authdef->username);
@@ -617,7 +617,7 @@ virStorageBackendRBDGetVolNames(virStorageBackendRBDStatePtr ptr)
     nnames = nimages;
 
     for (i = 0; i < nimages; i++)
-        VIR_STEAL_PTR(names[i], images[i].name);
+        names[i] = g_steal_pointer(&images[i].name);
 
     return names;
 
@@ -637,7 +637,7 @@ virStorageBackendRBDGetVolNames(virStorageBackendRBDStatePtr ptr)
     size_t nnames = 0;
     int rc;
     size_t max_size = 1024;
-    VIR_AUTOFREE(char *) namebuf = NULL;
+    g_autofree char *namebuf = NULL;
     const char *name;
 
     while (true) {
@@ -655,7 +655,7 @@ virStorageBackendRBDGetVolNames(virStorageBackendRBDStatePtr ptr)
     }
 
     for (name = namebuf; name < namebuf + max_size;) {
-        VIR_AUTOFREE(char *) namedup = NULL;
+        g_autofree char *namedup = NULL;
 
         if (STREQ(name, ""))
             break;
@@ -720,12 +720,12 @@ virStorageBackendRBDRefreshPool(virStoragePoolObjPtr pool)
         goto cleanup;
 
     for (i = 0; names[i] != NULL; i++) {
-        VIR_AUTOPTR(virStorageVolDef) vol = NULL;
+        g_autoptr(virStorageVolDef) vol = NULL;
 
         if (VIR_ALLOC(vol) < 0)
             goto cleanup;
 
-        VIR_STEAL_PTR(vol->name, names[i]);
+        vol->name = g_steal_pointer(&names[i]);
 
         r = volStorageBackendRBDRefreshVolInfo(vol, pool, ptr);
 
@@ -772,7 +772,7 @@ virStorageBackendRBDCleanupSnapshots(rados_ioctx_t ioctx,
     int snap_count, protected;
     size_t i;
     rbd_image_t image = NULL;
-    VIR_AUTOFREE(rbd_snap_info_t *) snaps = NULL;
+    g_autofree rbd_snap_info_t *snaps = NULL;
 
     if ((r = rbd_open(ioctx, vol->name, &image, NULL)) < 0) {
        virReportSystemError(-r, _("failed to open the RBD image '%s'"),
@@ -1042,7 +1042,7 @@ virStorageBackendRBDSnapshotFindNoDiff(rbd_image_t image,
     size_t i;
     int diff;
     rbd_image_info_t info;
-    VIR_AUTOFREE(rbd_snap_info_t *) snaps = NULL;
+    g_autofree rbd_snap_info_t *snaps = NULL;
 
     if ((r = rbd_stat(image, &info, sizeof(info))) < 0) {
         virReportSystemError(-r, _("failed to stat the RBD image %s"),
@@ -1189,7 +1189,7 @@ virStorageBackendRBDCloneImage(rados_ioctx_t io,
     uint64_t stripe_unit;
     virBuffer snapname = VIR_BUFFER_INITIALIZER;
     rbd_image_t image = NULL;
-    VIR_AUTOFREE(char *) snapname_buff = NULL;
+    g_autofree char *snapname_buff = NULL;
 
     if ((r = rbd_open(io, origvol, &image, NULL)) < 0) {
         virReportSystemError(-r, _("failed to open the RBD image %s"),
@@ -1362,7 +1362,7 @@ virStorageBackendRBDVolWipeZero(rbd_image_t image,
     int r = -1;
     unsigned long long offset = 0;
     unsigned long long length;
-    VIR_AUTOFREE(char *) writebuf = NULL;
+    g_autofree char *writebuf = NULL;
 
     if (VIR_ALLOC_N(writebuf, info->obj_size * stripe_count) < 0)
         return -1;

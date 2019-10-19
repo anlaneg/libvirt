@@ -186,7 +186,7 @@ qemuFirmwareOSInterfaceFree(qemuFirmwareOSInterface *interfaces)
 }
 
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuFirmwareOSInterface, qemuFirmwareOSInterfaceFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuFirmwareOSInterface, qemuFirmwareOSInterfaceFree);
 
 
 static void
@@ -251,7 +251,7 @@ qemuFirmwareTargetFree(qemuFirmwareTargetPtr target)
 }
 
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuFirmwareTarget, qemuFirmwareTargetFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuFirmwareTarget, qemuFirmwareTargetFree);
 
 
 static void
@@ -261,7 +261,7 @@ qemuFirmwareFeatureFree(qemuFirmwareFeature *features)
 }
 
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuFirmwareFeature, qemuFirmwareFeatureFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuFirmwareFeature, qemuFirmwareFeatureFree);
 
 
 void
@@ -289,8 +289,8 @@ qemuFirmwareInterfaceParse(const char *path,
                            qemuFirmwarePtr fw)
 {
     virJSONValuePtr interfacesJSON;
-    VIR_AUTOPTR(qemuFirmwareOSInterface) interfaces = NULL;
-    VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autoptr(qemuFirmwareOSInterface) interfaces = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     size_t ninterfaces;
     size_t i;
 
@@ -325,7 +325,7 @@ qemuFirmwareInterfaceParse(const char *path,
     VIR_DEBUG("firmware description path '%s' supported interfaces: %s",
               path, NULLSTR_MINUS(virBufferCurrentContent(&buf)));
 
-    VIR_STEAL_PTR(fw->interfaces, interfaces);
+    fw->interfaces = g_steal_pointer(&interfaces);
     fw->ninterfaces = ninterfaces;
     return 0;
 }
@@ -509,7 +509,7 @@ qemuFirmwareTargetParse(const char *path,
     for (i = 0; i < ntargets; i++) {
         virJSONValuePtr item = virJSONValueArrayGet(targetsJSON, i);
         virJSONValuePtr machines;
-        VIR_AUTOPTR(qemuFirmwareTarget) t = NULL;
+        g_autoptr(qemuFirmwareTarget) t = NULL;
         const char *architectureStr = NULL;
         size_t nmachines;
         size_t j;
@@ -545,7 +545,7 @@ qemuFirmwareTargetParse(const char *path,
 
         for (j = 0; j < nmachines; j++) {
             virJSONValuePtr machine = virJSONValueArrayGet(machines, j);
-            VIR_AUTOFREE(char *) machineStr = NULL;
+            g_autofree char *machineStr = NULL;
 
             if (VIR_STRDUP(machineStr, virJSONValueGetString(machine)) < 0)
                 goto cleanup;
@@ -553,10 +553,10 @@ qemuFirmwareTargetParse(const char *path,
             VIR_APPEND_ELEMENT_INPLACE(t->machines, t->nmachines, machineStr);
         }
 
-        VIR_STEAL_PTR(targets[i], t);
+        targets[i] = g_steal_pointer(&t);
     }
 
-    VIR_STEAL_PTR(fw->targets, targets);
+    fw->targets = g_steal_pointer(&targets);
     fw->ntargets = ntargets;
     ntargets = 0;
     ret = 0;
@@ -575,7 +575,7 @@ qemuFirmwareFeatureParse(const char *path,
                          qemuFirmwarePtr fw)
 {
     virJSONValuePtr featuresJSON;
-    VIR_AUTOPTR(qemuFirmwareFeature) features = NULL;
+    g_autoptr(qemuFirmwareFeature) features = NULL;
     size_t nfeatures;
     size_t i;
 
@@ -606,7 +606,7 @@ qemuFirmwareFeatureParse(const char *path,
         features[i] = tmp;
     }
 
-    VIR_STEAL_PTR(fw->features, features);
+    fw->features = g_steal_pointer(&features);
     fw->nfeatures = nfeatures;
     return 0;
 }
@@ -618,9 +618,9 @@ qemuFirmwareFeatureParse(const char *path,
 qemuFirmwarePtr
 qemuFirmwareParse(const char *path)
 {
-    VIR_AUTOFREE(char *) cont = NULL;
-    VIR_AUTOPTR(virJSONValue) doc = NULL;
-    VIR_AUTOPTR(qemuFirmware) fw = NULL;
+    g_autofree char *cont = NULL;
+    g_autoptr(virJSONValue) doc = NULL;
+    g_autoptr(qemuFirmware) fw = NULL;
     qemuFirmwarePtr ret = NULL;
 
     if (virFileReadAll(path, DOCUMENT_SIZE, &cont) < 0)
@@ -648,7 +648,7 @@ qemuFirmwareParse(const char *path)
     if (qemuFirmwareFeatureParse(path, doc, fw) < 0)
         return NULL;
 
-    VIR_STEAL_PTR(ret, fw);
+    ret = g_steal_pointer(&fw);
     return ret;
 }
 
@@ -657,7 +657,7 @@ static int
 qemuFirmwareInterfaceFormat(virJSONValuePtr doc,
                             qemuFirmwarePtr fw)
 {
-    VIR_AUTOPTR(virJSONValue) interfacesJSON = NULL;
+    g_autoptr(virJSONValue) interfacesJSON = NULL;
     size_t i;
 
     if (!(interfacesJSON = virJSONValueNewArray()))
@@ -682,7 +682,7 @@ qemuFirmwareInterfaceFormat(virJSONValuePtr doc,
 static virJSONValuePtr
 qemuFirmwareFlashFileFormat(qemuFirmwareFlashFile flash)
 {
-    VIR_AUTOPTR(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) json = NULL;
     virJSONValuePtr ret;
 
     if (!(json = virJSONValueNewObject()))
@@ -698,7 +698,7 @@ qemuFirmwareFlashFileFormat(qemuFirmwareFlashFile flash)
                                        flash.format) < 0)
         return NULL;
 
-    VIR_STEAL_PTR(ret, json);
+    ret = g_steal_pointer(&json);
     return ret;
 }
 
@@ -707,8 +707,8 @@ static int
 qemuFirmwareMappingFlashFormat(virJSONValuePtr mapping,
                                qemuFirmwareMappingFlashPtr flash)
 {
-    VIR_AUTOPTR(virJSONValue) executable = NULL;
-    VIR_AUTOPTR(virJSONValue) nvram_template = NULL;
+    g_autoptr(virJSONValue) executable = NULL;
+    g_autoptr(virJSONValue) nvram_template = NULL;
 
     if (!(executable = qemuFirmwareFlashFileFormat(flash->executable)))
         return -1;
@@ -764,7 +764,7 @@ static int
 qemuFirmwareMappingFormat(virJSONValuePtr doc,
                           qemuFirmwarePtr fw)
 {
-    VIR_AUTOPTR(virJSONValue) mapping = NULL;
+    g_autoptr(virJSONValue) mapping = NULL;
 
     if (!(mapping = virJSONValueNewObject()))
         return -1;
@@ -805,7 +805,7 @@ static int
 qemuFirmwareTargetFormat(virJSONValuePtr doc,
                          qemuFirmwarePtr fw)
 {
-    VIR_AUTOPTR(virJSONValue) targetsJSON = NULL;
+    g_autoptr(virJSONValue) targetsJSON = NULL;
     size_t i;
 
     if (!(targetsJSON = virJSONValueNewArray()))
@@ -813,8 +813,8 @@ qemuFirmwareTargetFormat(virJSONValuePtr doc,
 
     for (i = 0; i < fw->ntargets; i++) {
         qemuFirmwareTargetPtr t = fw->targets[i];
-        VIR_AUTOPTR(virJSONValue) target = NULL;
-        VIR_AUTOPTR(virJSONValue) machines = NULL;
+        g_autoptr(virJSONValue) target = NULL;
+        g_autoptr(virJSONValue) machines = NULL;
         size_t j;
 
         if (!(target = virJSONValueNewObject()))
@@ -857,7 +857,7 @@ static int
 qemuFirmwareFeatureFormat(virJSONValuePtr doc,
                           qemuFirmwarePtr fw)
 {
-    VIR_AUTOPTR(virJSONValue) featuresJSON = NULL;
+    g_autoptr(virJSONValue) featuresJSON = NULL;
     size_t i;
 
     if (!(featuresJSON = virJSONValueNewArray()))
@@ -882,7 +882,7 @@ qemuFirmwareFeatureFormat(virJSONValuePtr doc,
 char *
 qemuFirmwareFormat(qemuFirmwarePtr fw)
 {
-    VIR_AUTOPTR(virJSONValue) doc = NULL;
+    g_autoptr(virJSONValue) doc = NULL;
 
     if (!fw)
         return NULL;
@@ -1028,7 +1028,7 @@ qemuFirmwareEnableFeatures(virQEMUDriverPtr driver,
                            virDomainDefPtr def,
                            const qemuFirmware *fw)
 {
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = virQEMUDriverGetConfig(driver);
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     const qemuFirmwareMappingFlash *flash = &fw->mapping.data.flash;
     const qemuFirmwareMappingKernel *kernel = &fw->mapping.data.kernel;
     const qemuFirmwareMappingMemory *memory = &fw->mapping.data.memory;
@@ -1203,9 +1203,9 @@ qemuFirmwareFetchParsedConfigs(bool privileged,
             goto error;
     }
 
-    VIR_STEAL_PTR(*firmwaresRet, firmwares);
+    *firmwaresRet = g_steal_pointer(&firmwares);
     if (pathsRet)
-        VIR_STEAL_PTR(*pathsRet, paths);
+        *pathsRet = g_steal_pointer(&paths);
     return npaths;
 
  error:
@@ -1391,7 +1391,7 @@ qemuFirmwareGetSupported(const char *machine,
         }
 
         if (fws && fwpath) {
-            VIR_AUTOPTR(virFirmware) tmp = NULL;
+            g_autoptr(virFirmware) tmp = NULL;
 
             /* Append only unique pairs. */
             for (j = 0; j < *nfws; j++) {

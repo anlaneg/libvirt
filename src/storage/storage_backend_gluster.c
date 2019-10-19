@@ -127,7 +127,7 @@ virStorageBackendGlusterOpen(virStoragePoolObjPtr pool)
     if (glfs_set_volfile_server(ret->vol, "tcp",
                                 ret->uri->server, ret->uri->port) < 0 ||
         glfs_init(ret->vol) < 0) {
-        VIR_AUTOFREE(char *) uri = NULL;
+        g_autofree char *uri = NULL;
         uri = virURIFormat(ret->uri);
         virReportSystemError(errno, _("failed to connect to %s"), NULLSTR(uri));
         goto error;
@@ -186,7 +186,7 @@ virStorageBackendGlusterSetMetadata(virStorageBackendGlusterStatePtr state,
                                     const char *name)
 {
     char *tmp;
-    VIR_AUTOFREE(char *) path = NULL;
+    g_autofree char *path = NULL;
 
     VIR_FREE(vol->key);
     VIR_FREE(vol->target.path);
@@ -238,9 +238,9 @@ virStorageBackendGlusterRefreshVol(virStorageBackendGlusterStatePtr state,
     glfs_fd_t *fd = NULL;
     ssize_t len;
     int backingFormat;
-    VIR_AUTOPTR(virStorageVolDef) vol = NULL;
-    VIR_AUTOUNREF(virStorageSourcePtr) meta = NULL;
-    VIR_AUTOFREE(char *) header = NULL;
+    g_autoptr(virStorageVolDef) vol = NULL;
+    g_autoptr(virStorageSource) meta = NULL;
+    g_autofree char *header = NULL;
 
     *volptr = NULL;
 
@@ -271,7 +271,7 @@ virStorageBackendGlusterRefreshVol(virStorageBackendGlusterStatePtr state,
     if (S_ISDIR(st->st_mode)) {
         vol->type = VIR_STORAGE_VOL_NETDIR;
         vol->target.format = VIR_STORAGE_FILE_DIR;
-        VIR_STEAL_PTR(*volptr, vol);
+        *volptr = g_steal_pointer(&vol);
         ret = 0;
         goto cleanup;
     }
@@ -320,7 +320,7 @@ virStorageBackendGlusterRefreshVol(virStorageBackendGlusterStatePtr state,
     vol->target.compat = meta->compat;
     meta->compat = NULL;
 
-    VIR_STEAL_PTR(*volptr, vol);
+    *volptr = g_steal_pointer(&vol);
     ret = 0;
  cleanup:
     if (fd)
@@ -478,7 +478,7 @@ virStorageBackendGlusterFindPoolSources(const char *srcSpec,
     char *ret = NULL;
     int rc;
     size_t i;
-    VIR_AUTOPTR(virStoragePoolSource) source = NULL;
+    g_autoptr(virStoragePoolSource) source = NULL;
 
     virCheckFlags(0, NULL);
 

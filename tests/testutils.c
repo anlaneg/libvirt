@@ -688,8 +688,8 @@ int
 virTestCompareToULL(unsigned long long expect,
                     unsigned long long actual)
 {
-    VIR_AUTOFREE(char *) expectStr = NULL;
-    VIR_AUTOFREE(char *) actualStr = NULL;
+    g_autofree char *expectStr = NULL;
+    g_autofree char *actualStr = NULL;
 
     if (virAsprintf(&expectStr, "%llu", expect) < 0)
         return -1;
@@ -740,13 +740,11 @@ virtTestLogOutput(virLogSourcePtr source G_GNUC_UNUSED,
                   const char *funcname G_GNUC_UNUSED,
                   const char *timestamp,
                   virLogMetadataPtr metadata G_GNUC_UNUSED,
-                  unsigned int flags,
                   const char *rawstr G_GNUC_UNUSED,
                   const char *str,
                   void *data)
 {
     struct virtTestLogData *log = data;
-    virCheckFlags(VIR_LOG_STACK_TRACE,);
     virBufferAsprintf(&log->buf, "%s: %s", timestamp, str);
 }
 

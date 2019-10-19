@@ -22,7 +22,6 @@
 #pragma once
 
 #include "internal.h"
-#include "virautoclean.h"
 
 #include <sys/types.h>
 
@@ -157,4 +156,4 @@ void virBitmapSubtract(virBitmapPtr a, virBitmapPtr b)
 
 void virBitmapShrink(virBitmapPtr map, size_t b);
 
-VIR_DEFINE_AUTOPTR_FUNC(virBitmap, virBitmapFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virBitmap, virBitmapFree);

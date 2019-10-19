@@ -116,7 +116,7 @@ qemuVhostUserGPUFeatureFree(qemuVhostUserGPUFeature *features)
 }
 
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuVhostUserGPUFeature, qemuVhostUserGPUFeatureFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuVhostUserGPUFeature, qemuVhostUserGPUFeatureFree);
 
 
 void
@@ -182,9 +182,9 @@ qemuVhostUserBinaryParse(const char *path,
 qemuVhostUserPtr
 qemuVhostUserParse(const char *path)
 {
-    VIR_AUTOFREE(char *) cont = NULL;
-    VIR_AUTOPTR(virJSONValue) doc = NULL;
-    VIR_AUTOPTR(qemuVhostUser) vu = NULL;
+    g_autofree char *cont = NULL;
+    g_autoptr(virJSONValue) doc = NULL;
+    g_autoptr(qemuVhostUser) vu = NULL;
     qemuVhostUserPtr ret = NULL;
 
     if (virFileReadAll(path, DOCUMENT_SIZE, &cont) < 0)
@@ -206,7 +206,7 @@ qemuVhostUserParse(const char *path)
     if (qemuVhostUserBinaryParse(path, doc, vu) < 0)
         return NULL;
 
-    VIR_STEAL_PTR(ret, vu);
+    ret = g_steal_pointer(&vu);
     return ret;
 }
 
@@ -214,7 +214,7 @@ qemuVhostUserParse(const char *path)
 char *
 qemuVhostUserFormat(qemuVhostUserPtr vu)
 {
-    VIR_AUTOPTR(virJSONValue) doc = NULL;
+    g_autoptr(virJSONValue) doc = NULL;
 
     if (!vu)
         return NULL;
@@ -264,9 +264,9 @@ qemuVhostUserFetchParsedConfigs(bool privileged,
             goto error;
     }
 
-    VIR_STEAL_PTR(*vhostuserRet, vus);
+    *vhostuserRet = g_steal_pointer(&vus);
     if (pathsRet)
-        VIR_STEAL_PTR(*pathsRet, paths);
+        *pathsRet = g_steal_pointer(&paths);
     return npaths;
 
  error:
@@ -285,7 +285,7 @@ qemuVhostUserGPUFillCapabilities(qemuVhostUserPtr vu,
     virJSONValuePtr featuresJSON;
     size_t nfeatures;
     size_t i;
-    VIR_AUTOPTR(qemuVhostUserGPUFeature) features = NULL;
+    g_autoptr(qemuVhostUserGPUFeature) features = NULL;
 
     if (!(featuresJSON = virJSONValueObjectGetArray(doc, "features"))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -313,7 +313,7 @@ qemuVhostUserGPUFillCapabilities(qemuVhostUserPtr vu,
         features[i] = tmp;
     }
 
-    VIR_STEAL_PTR(gpu->features, features);
+    gpu->features = g_steal_pointer(&features);
     gpu->nfeatures = nfeatures;
 
     return 0;
@@ -350,9 +350,9 @@ qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
         goto end;
 
     for (i = 0; i < nvus; i++) {
-        VIR_AUTOPTR(virJSONValue) doc = NULL;
-        VIR_AUTOFREE(char *) output = NULL;
-        VIR_AUTOPTR(virCommand) cmd = NULL;
+        g_autoptr(virJSONValue) doc = NULL;
+        g_autofree char *output = NULL;
+        g_autoptr(virCommand) cmd = NULL;
 
         vu = vus[i];
         if (vu->type != QEMU_VHOST_USER_TYPE_GPU)

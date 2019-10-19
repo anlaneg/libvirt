@@ -371,20 +371,6 @@ virObjectUnref(void *anyobj)
 
 
 /**
- * virObjectAutoUnref:
- *
- * Helper used by VIR_AUTOUNREF
- */
-void
-virObjectAutoUnref(void *objptr)
-{
-    virObjectPtr *obj = objptr;
-    virObjectUnref(*obj);
-    *obj = NULL;
-}
-
-
-/**
  * virObjectRef:
  * @anyobj: any instance of virObjectPtr
  *

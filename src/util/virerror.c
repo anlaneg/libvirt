@@ -1481,8 +1481,8 @@ virLastErrorPrefixMessage(const char *fmt, ...)
 {
     int save_errno = errno;
     virErrorPtr err = virGetLastError();
-    VIR_AUTOFREE(char *) fmtmsg = NULL;
-    VIR_AUTOFREE(char *) newmsg = NULL;
+    g_autofree char *fmtmsg = NULL;
+    g_autofree char *newmsg = NULL;
     va_list args;
 
     if (!err)
@@ -1497,7 +1497,7 @@ virLastErrorPrefixMessage(const char *fmt, ...)
         goto cleanup;
 
     VIR_FREE(err->message);
-    VIR_STEAL_PTR(err->message, newmsg);
+    err->message = g_steal_pointer(&newmsg);
 
  cleanup:
     va_end(args);

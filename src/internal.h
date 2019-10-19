@@ -64,6 +64,7 @@
 #include "libvirt/virterror.h"
 
 #include "c-strcase.h"
+#include "glibcompat.h"
 
 /* Merely casting to (void) is not sufficient since the
  * introduction of the "warn_unused_result" attribute
@@ -211,33 +212,6 @@
         (a) = (a) ^ (b); \
         (b) = (a) ^ (b); \
         (a) = (a) ^ (b); \
-    } while (0)
-
-/**
- * VIR_STEAL_PTR:
- *
- * Steals pointer passed as second argument into the first argument. Second
- * argument must not have side effects.
- */
-#define VIR_STEAL_PTR(a, b) \
-    do { \
-        (a) = (b); \
-        (b) = NULL; \
-    } while (0)
-
-/**
- * VIR_RETURN_PTR:
- * @ret: pointer to return
- *
- * Returns value of @ret while clearing @ret. This ensures that pointers
- * freed by using VIR_AUTOPTR can be easily passed back to the caller without
- * any temporary variable. @ptr is evaluated more than once.
- */
-#define VIR_RETURN_PTR(ptr) \
-    do { \
-        typeof(ptr) virTemporaryReturnPointer = (ptr); \
-        (ptr) = NULL; \
-        return virTemporaryReturnPointer; \
     } while (0)
 
 /**

@@ -64,7 +64,7 @@ typedef struct nl_handle virNetlinkHandle;
 typedef struct nl_sock virNetlinkHandle;
 # endif
 
-VIR_DEFINE_AUTOPTR_FUNC(virNetlinkHandle, virNetlinkFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetlinkHandle, virNetlinkFree);
 
 typedef struct _virNetlinkEventSrvPrivate virNetlinkEventSrvPrivate;
 typedef virNetlinkEventSrvPrivate *virNetlinkEventSrvPrivatePtr;
@@ -296,8 +296,8 @@ int virNetlinkCommand(struct nl_msg *nl_msg,
             .nl_groups = 0,
     };
     struct pollfd fds[1];
-    VIR_AUTOFREE(struct nlmsghdr *) temp_resp = NULL;
-    VIR_AUTOPTR(virNetlinkHandle) nlhandle = NULL;
+    g_autofree struct nlmsghdr *temp_resp = NULL;
+    g_autoptr(virNetlinkHandle) nlhandle = NULL;
     int len = 0;
 
     memset(fds, 0, sizeof(fds));
@@ -317,7 +317,7 @@ int virNetlinkCommand(struct nl_msg *nl_msg,
         return -1;
     }
 
-    VIR_STEAL_PTR(*resp, temp_resp);
+    *resp = g_steal_pointer(&temp_resp);
     *respbuflen = len;
     return 0;
 }
@@ -338,14 +338,14 @@ virNetlinkDumpCommand(struct nl_msg *nl_msg,
             .nl_pid    = dst_pid,
             .nl_groups = 0,
     };
-    VIR_AUTOPTR(virNetlinkHandle) nlhandle = NULL;
+    g_autoptr(virNetlinkHandle) nlhandle = NULL;
 
     if (!(nlhandle = virNetlinkSendRequest(nl_msg, src_pid, nladdr,
                                            protocol, groups)))
         return -1;
 
     while (!end) {
-        VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+        g_autofree struct nlmsghdr *resp = NULL;
 
         len = nl_recv(nlhandle, &nladdr, (unsigned char **)&resp, NULL);
         VIR_WARNINGS_NO_CAST_ALIGN
@@ -396,8 +396,8 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
         .ifi_index  = ifindex
     };
     unsigned int recvbuflen;
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
 
     if (ifname && ifindex <= 0 && virNetDevGetIndex(ifname, &ifindex) < 0)
         return -1;
@@ -466,7 +466,7 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
         goto malformed_resp;
     }
 
-    VIR_STEAL_PTR(*nlData, resp);
+    *nlData = g_steal_pointer(&resp);
     return 0;
 
  malformed_resp:
@@ -507,8 +507,8 @@ virNetlinkNewLink(const char *ifname/*要创建的link名称*/,
     struct nlattr *infodata = NULL;
     unsigned int buflen;
     struct ifinfomsg ifinfo = { .ifi_family = AF_UNSPEC };
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
 
     *error = 0;
 
@@ -613,8 +613,8 @@ virNetlinkDelLink(const char *ifname, virNetlinkDelLinkFallback fallback)
     struct nlmsgerr *err;
     struct ifinfomsg ifinfo = { .ifi_family = AF_UNSPEC };
     unsigned int recvbuflen;
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
 
     nl_msg = nlmsg_alloc_simple(RTM_DELLINK,
                                 NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL);
@@ -697,8 +697,8 @@ virNetlinkGetNeighbor(void **nlData, uint32_t src_pid, uint32_t dst_pid)
         .ndm_family = AF_UNSPEC,
     };
     unsigned int recvbuflen;
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
 
     nl_msg = nlmsg_alloc_simple(RTM_GETNEIGH, NLM_F_DUMP | NLM_F_REQUEST);
     if (!nl_msg) {
@@ -737,7 +737,7 @@ virNetlinkGetNeighbor(void **nlData, uint32_t src_pid, uint32_t dst_pid)
         goto malformed_resp;
     }
 
-    VIR_STEAL_PTR(*nlData, resp);
+    *nlData = g_steal_pointer(&resp);
     return recvbuflen;
 
  malformed_resp:
@@ -848,7 +848,7 @@ virNetlinkEventCallback(int watch,
     size_t i;
     int length;
     bool handled = false;
-    VIR_AUTOFREE(struct nlmsghdr *) msg = NULL;
+    g_autofree struct nlmsghdr *msg = NULL;
 
     length = nl_recv(srv->netlinknh, &peer,
                      (unsigned char **)&msg, &creds);

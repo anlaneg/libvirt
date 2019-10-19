@@ -438,7 +438,7 @@ void
 virBufferEscapeString(virBufferPtr buf, const char *format, const char *str)
 {
     int len;
-    VIR_AUTOFREE(char *) escaped = NULL;
+    g_autofree char *escaped = NULL;
     char *out;
     const char *cur;
     const char forbidden_characters[] = {
@@ -594,7 +594,7 @@ virBufferEscape(virBufferPtr buf, char escape, const char *toescape,
                 const char *format, const char *str)
 {
     int len;
-    VIR_AUTOFREE(char *) escaped = NULL;
+    g_autofree char *escaped = NULL;
     char *out;
     const char *cur;
 
@@ -691,7 +691,7 @@ void
 virBufferEscapeShell(virBufferPtr buf, const char *str)
 {
     int len;
-    VIR_AUTOFREE(char *) escaped = NULL;
+    g_autofree char *escaped = NULL;
     char *out;
     const char *cur;
 

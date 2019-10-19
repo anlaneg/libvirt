@@ -24,7 +24,6 @@
 #include "internal.h"
 #include "virutil.h"
 #include "virenum.h"
-#include "virautoclean.h"
 
 /**
  * VIR_TYPED_PARAM_MULTIPLE:
@@ -140,7 +139,7 @@ struct _virTypedParamList {
 };
 
 void virTypedParamListFree(virTypedParamListPtr list);
-VIR_DEFINE_AUTOPTR_FUNC(virTypedParamList, virTypedParamListFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virTypedParamList, virTypedParamListFree);
 
 size_t virTypedParamListStealParams(virTypedParamListPtr list,
                                     virTypedParameterPtr *params);

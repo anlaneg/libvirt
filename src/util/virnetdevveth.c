@@ -42,7 +42,7 @@ virMutex virNetDevVethCreateMutex = VIR_MUTEX_INITIALIZER;
 static int virNetDevVethExists(int devNum)
 {
     int ret;
-    VIR_AUTOFREE(char *) path = NULL;
+    g_autofree char *path = NULL;
 
     if (virAsprintf(&path, SYSFS_NET_DIR "vnet%d/", devNum) < 0)
         return -1;
@@ -118,9 +118,9 @@ int virNetDevVethCreate(char** veth1, char** veth2)
 #define MAX_VETH_RETRIES 10
 
     for (i = 0; i < MAX_VETH_RETRIES; i++) {
-        VIR_AUTOFREE(char *) veth1auto = NULL;
-        VIR_AUTOFREE(char *) veth2auto = NULL;
-        VIR_AUTOPTR(virCommand) cmd = NULL;
+        g_autofree char *veth1auto = NULL;
+        g_autofree char *veth2auto = NULL;
+        g_autoptr(virCommand) cmd = NULL;
 
         int status;
         if (!*veth1) {
@@ -199,7 +199,7 @@ int virNetDevVethDelete(const char *veth)
 {
 	//通过ip link delete删除veth接口
     int status;
-    VIR_AUTOPTR(virCommand) cmd = virCommandNewArgList("ip", "link",
+    g_autoptr(virCommand) cmd = virCommandNewArgList("ip", "link",
                                                        "del", veth, NULL);
 
     if (virCommandRun(cmd, &status) < 0)

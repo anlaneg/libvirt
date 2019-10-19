@@ -124,7 +124,7 @@ vshAdmCatchDisconnect(virAdmConnectPtr conn G_GNUC_UNUSED,
     if (reason == VIR_CONNECT_CLOSE_REASON_CLIENT)
         return;
 
-    error = virSaveLastError();
+    virErrorPreserveLast(&error);
     uri = virAdmConnectGetURI(conn);
 
     switch ((virConnectCloseReason) reason) {
@@ -146,10 +146,7 @@ vshAdmCatchDisconnect(virAdmConnectPtr conn G_GNUC_UNUSED,
     vshError(ctl, _(str), NULLSTR(uri));
     VIR_FREE(uri);
 
-    if (error) {
-        virSetError(error);
-        virFreeError(error);
-    }
+    virErrorRestore(&error);
 }
 
 static int
@@ -396,7 +393,7 @@ cmdSrvList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
         goto cleanup;
 
     for (i = 0; i < nsrvs; i++) {
-        VIR_AUTOFREE(char *) idStr = NULL;
+        g_autofree char *idStr = NULL;
         if (virAsprintf(&idStr, "%zu", i) < 0)
             goto cleanup;
 
@@ -650,8 +647,8 @@ cmdSrvClientsList(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
 
     for (i = 0; i < nclts; i++) {
-        VIR_AUTOFREE(char *) timestr = NULL;
-        VIR_AUTOFREE(char *) idStr = NULL;
+        g_autofree char *timestr = NULL;
+        g_autofree char *idStr = NULL;
         virAdmClientPtr client = clts[i];
         id = virAdmClientGetID(client);
         transport = virAdmClientGetTransport(client);

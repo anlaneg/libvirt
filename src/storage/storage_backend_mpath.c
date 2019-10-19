@@ -46,7 +46,7 @@ virStorageBackendMpathNewVol(virStoragePoolObjPtr pool,
                              const char *dev)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    VIR_AUTOPTR(virStorageVolDef) vol = NULL;
+    g_autoptr(virStorageVolDef) vol = NULL;
 
     if (VIR_ALLOC(vol) < 0)
         return -1;
@@ -156,7 +156,7 @@ virStorageBackendCreateVols(virStoragePoolObjPtr pool,
     int is_mpath = 0;
     uint32_t minor = -1;
     uint32_t next;
-    VIR_AUTOFREE(char *) map_device = NULL;
+    g_autofree char *map_device = NULL;
 
     do {
         is_mpath = virStorageBackendIsMultipath(names->name);

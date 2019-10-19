@@ -84,9 +84,9 @@ qemuCheckpointWriteMetadata(virDomainObjPtr vm,
 {
     unsigned int flags = VIR_DOMAIN_CHECKPOINT_FORMAT_SECURE;
     virDomainCheckpointDefPtr def = virDomainCheckpointObjGetDef(checkpoint);
-    VIR_AUTOFREE(char *) newxml = NULL;
-    VIR_AUTOFREE(char *) chkDir = NULL;
-    VIR_AUTOFREE(char *) chkFile = NULL;
+    g_autofree char *newxml = NULL;
+    g_autofree char *chkDir = NULL;
+    g_autofree char *chkFile = NULL;
 
     newxml = virDomainCheckpointDefFormat(def, caps, xmlopt, flags);
     if (newxml == NULL)
@@ -118,8 +118,8 @@ qemuCheckpointDiscard(virQEMUDriverPtr driver,
     virDomainMomentObjPtr moment;
     virDomainCheckpointDefPtr parentdef = NULL;
     size_t i, j;
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = virQEMUDriverGetConfig(driver);
-    VIR_AUTOFREE(char *) chkFile = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    g_autofree char *chkFile = NULL;
 
     if (!metadata_only && !virDomainObjIsActive(vm)) {
         virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
@@ -159,7 +159,7 @@ qemuCheckpointDiscard(virQEMUDriverPtr driver,
                 parentdef = virDomainCheckpointObjGetDef(moment);
                 for (j = 0; j < parentdef->ndisks; j++) {
                     virDomainCheckpointDiskDef *disk2;
-                    VIR_AUTOPTR(virJSONValue) arr = NULL;
+                    g_autoptr(virJSONValue) arr = NULL;
 
                     disk2 = &parentdef->disks[j];
                     if (STRNEQ(disk->name, disk2->name) ||
@@ -354,11 +354,11 @@ qemuCheckpointCreateXML(virDomainPtr domain,
     bool redefine = flags & VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE;
     unsigned int parse_flags = 0;
     virDomainMomentObjPtr other = NULL;
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = NULL;
-    VIR_AUTOUNREF(virCapsPtr) caps = NULL;
-    VIR_AUTOPTR(virJSONValue) actions = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = NULL;
+    g_autoptr(virCaps) caps = NULL;
+    g_autoptr(virJSONValue) actions = NULL;
     int ret;
-    VIR_AUTOUNREF(virDomainCheckpointDefPtr) def = NULL;
+    g_autoptr(virDomainCheckpointDef) def = NULL;
 
     virCheckFlags(VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE, NULL);
 
@@ -532,7 +532,7 @@ qemuCheckpointDelete(virDomainObjPtr vm,
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
     virQEMUDriverPtr driver = priv->driver;
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = virQEMUDriverGetConfig(driver);
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     int ret = -1;
     virDomainMomentObjPtr chk = NULL;
     virQEMUMomentRemove rem;

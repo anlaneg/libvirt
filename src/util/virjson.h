@@ -25,7 +25,6 @@
 #include "internal.h"
 #include "virbitmap.h"
 #include "virbuffer.h"
-#include "virautoclean.h"
 
 #include <stdarg.h>
 
@@ -163,4 +162,4 @@ char *virJSONStringReformat(const char *jsonstr, bool pretty);
 
 virJSONValuePtr virJSONValueObjectDeflatten(virJSONValuePtr json);
 
-VIR_DEFINE_AUTOPTR_FUNC(virJSONValue, virJSONValueFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virJSONValue, virJSONValueFree);

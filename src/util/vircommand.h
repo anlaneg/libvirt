@@ -23,7 +23,6 @@
 
 #include "internal.h"
 #include "virbuffer.h"
-#include "virautoclean.h"
 
 typedef struct _virCommand virCommand;
 typedef virCommand *virCommandPtr;
@@ -219,4 +218,4 @@ int virCommandRunNul(virCommandPtr cmd,
                      virCommandRunNulFunc func,
                      void *data);
 
-VIR_DEFINE_AUTOPTR_FUNC(virCommand, virCommandFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virCommand, virCommandFree);

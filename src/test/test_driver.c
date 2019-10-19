@@ -202,7 +202,7 @@ testDomainDefNamespaceParse(xmlXPathContextPtr ctxt,
     int tmp, n;
     size_t i;
     unsigned int tmpuint;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     if (VIR_ALLOC(nsdata) < 0)
         return -1;
@@ -753,7 +753,7 @@ testParseXMLDocFromFile(xmlNodePtr node, const char *file, const char *type)
     xmlNodePtr ret = NULL;
     xmlDocPtr doc = NULL;
     char *absFile = NULL;
-    VIR_AUTOFREE(char *) relFile = NULL;
+    g_autofree char *relFile = NULL;
 
     if ((relFile = virXMLPropString(node, "file"))) {
         absFile = testBuildFilename(file, relFile);
@@ -787,7 +787,7 @@ testParseNodeInfo(virNodeInfoPtr nodeInfo, xmlXPathContextPtr ctxt)
 {
     long l;
     int ret;
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
 
     ret = virXPathLong("string(/node/cpu/nodes[1])", ctxt, &l);
     if (ret == 0) {
@@ -935,7 +935,7 @@ testParseDomains(testDriverPtr privconn,
     int num, ret = -1;
     size_t i;
     virDomainObjPtr obj = NULL;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     num = virXPathNodeSet("/node/domain", ctxt, &nodes);
     if (num < 0)
@@ -997,7 +997,7 @@ testParseNetworks(testDriverPtr privconn,
     int num;
     size_t i;
     virNetworkObjPtr obj;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     num = virXPathNodeSet("/node/network", ctxt, &nodes);
     if (num < 0)
@@ -1034,7 +1034,7 @@ testParseInterfaces(testDriverPtr privconn,
     int num;
     size_t i;
     virInterfaceObjPtr obj;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     num = virXPathNodeSet("/node/interface", ctxt, &nodes);
     if (num < 0)
@@ -1073,9 +1073,9 @@ testOpenVolumesForPool(const char *file,
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(obj);
     size_t i;
     int num;
-    VIR_AUTOFREE(char *) vol_xpath = NULL;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
-    VIR_AUTOPTR(virStorageVolDef) volDef = NULL;
+    g_autofree char *vol_xpath = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
+    g_autoptr(virStorageVolDef) volDef = NULL;
 
     /* Find storage volumes */
     if (virAsprintf(&vol_xpath, "/node/pool[%d]/volume", objidx) < 0)
@@ -1123,7 +1123,7 @@ testParseStorage(testDriverPtr privconn,
     int num;
     size_t i;
     virStoragePoolObjPtr obj;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     num = virXPathNodeSet("/node/pool", ctxt, &nodes);
     if (num < 0)
@@ -1172,7 +1172,7 @@ testParseNodedevs(testDriverPtr privconn,
     int num;
     size_t i;
     virNodeDeviceObjPtr obj;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     num = virXPathNodeSet("/node/device", ctxt, &nodes);
     if (num < 0)
@@ -1207,7 +1207,7 @@ testParseAuthUsers(testDriverPtr privconn,
 {
     int num;
     size_t i;
-    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     num = virXPathNodeSet("/node/auth/user", ctxt, &nodes);
     if (num < 0)
@@ -1218,7 +1218,7 @@ testParseAuthUsers(testDriverPtr privconn,
         return -1;
 
     for (i = 0; i < num; i++) {
-        VIR_AUTOFREE(char *) username = NULL;
+        g_autofree char *username = NULL;
 
         ctxt->node = nodes[i];
         username = virXPathString("string(.)", ctxt);
@@ -1229,7 +1229,7 @@ testParseAuthUsers(testDriverPtr privconn,
         }
         /* This field is optional. */
         privconn->auths[i].password = virXMLPropString(nodes[i], "password");
-        VIR_STEAL_PTR(privconn->auths[i].username, username);
+        privconn->auths[i].username = g_steal_pointer(&username);
     }
 
     return 0;
@@ -1382,8 +1382,8 @@ testConnectAuthenticate(virConnectPtr conn,
     testDriverPtr privconn = conn->privateData;
     int ret = -1;
     ssize_t i;
-    VIR_AUTOFREE(char *) username = NULL;
-    VIR_AUTOFREE(char *) password = NULL;
+    g_autofree char *username = NULL;
+    g_autofree char *password = NULL;
 
     virObjectLock(privconn);
     if (privconn->numAuths == 0) {
@@ -2182,7 +2182,7 @@ testDomainSaveImageWrite(testDriverPtr driver,
 {
     int len;
     int fd = -1;
-    VIR_AUTOFREE(char *) xml = NULL;
+    g_autofree char *xml = NULL;
 
     xml = virDomainDefFormat(def, driver->caps, VIR_DOMAIN_DEF_FORMAT_SECURE);
 
@@ -2260,7 +2260,7 @@ testDomainSaveImageOpen(testDriverPtr driver,
     int fd = -1;
     int len;
     virDomainDefPtr def = NULL;
-    VIR_AUTOFREE(char *) xml = NULL;
+    g_autofree char *xml = NULL;
 
     if ((fd = open(path, O_RDONLY)) < 0) {
         virReportSystemError(errno, _("cannot read domain image '%s'"), path);
@@ -2304,7 +2304,7 @@ testDomainSaveImageOpen(testDriverPtr driver,
                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
         goto error;
 
-    VIR_STEAL_PTR(*ret_def, def);
+    *ret_def = g_steal_pointer(&def);
     return fd;
 
  error:
@@ -3095,7 +3095,7 @@ testDomainRenameCallback(virDomainObjPtr privdom,
     virObjectEventPtr event_new = NULL;
     virObjectEventPtr event_old = NULL;
     int ret = -1;
-    VIR_AUTOFREE(char *) new_dom_name = NULL;
+    g_autofree char *new_dom_name = NULL;
 
     virCheckFlags(0, -1);
 
@@ -3114,7 +3114,7 @@ testDomainRenameCallback(virDomainObjPtr privdom,
 
     /* Switch name in domain definition. */
     VIR_FREE(privdom->def->name);
-    VIR_STEAL_PTR(privdom->def->name, new_dom_name);
+    privdom->def->name = g_steal_pointer(&new_dom_name);
 
     event_new = virDomainEventLifecycleNewFromObj(privdom,
                                                   VIR_DOMAIN_EVENT_DEFINED,
@@ -3412,7 +3412,7 @@ testDomainGetNumaParameters(virDomainPtr dom,
     virDomainObjPtr vm = NULL;
     virDomainDefPtr def = NULL;
     virDomainNumatuneMemMode mode = VIR_DOMAIN_NUMATUNE_MEM_STRICT;
-    VIR_AUTOFREE(char *) nodeset = NULL;
+    g_autofree char *nodeset = NULL;
     int ret = -1;
 
     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
@@ -3529,18 +3529,18 @@ testDomainSetInterfaceParameters(virDomainPtr dom,
         VIR_FREE(bandwidth->out);
 
     if (!net->bandwidth) {
-        VIR_STEAL_PTR(net->bandwidth, bandwidth);
+        net->bandwidth = g_steal_pointer(&bandwidth);
     } else {
         if (bandwidth->in) {
             VIR_FREE(net->bandwidth->in);
-            VIR_STEAL_PTR(net->bandwidth->in, bandwidth->in);
+            net->bandwidth->in = g_steal_pointer(&bandwidth->in);
         } else if (inboundSpecified) {
             /* if we got here it means user requested @inbound to be cleared */
             VIR_FREE(net->bandwidth->in);
         }
         if (bandwidth->out) {
             VIR_FREE(net->bandwidth->out);
-            VIR_STEAL_PTR(net->bandwidth->out, bandwidth->out);
+            net->bandwidth->out = g_steal_pointer(&bandwidth->out);
         } else if (outboundSpecified) {
             /* if we got here it means user requested @outbound to be cleared */
             VIR_FREE(net->bandwidth->out);
@@ -4754,7 +4754,7 @@ testDomainGetFSInfo(virDomainPtr dom,
 
             info_ret[0]->ndevAlias = info_ret[1]->ndevAlias = 1;
 
-            VIR_STEAL_PTR(*info, info_ret);
+            *info = g_steal_pointer(&info_ret);
 
             ret = 2;
             goto cleanup;
@@ -4869,7 +4869,7 @@ testDomainGetPerfEvents(virDomainPtr dom,
             goto cleanup;
     }
 
-    VIR_STEAL_PTR(*params, par);
+    *params = g_steal_pointer(&par);
     *nparams = npar;
     npar = 0;
 
@@ -5130,7 +5130,7 @@ testDomainInterfaceAddresses(virDomainPtr dom,
         VIR_APPEND_ELEMENT_INPLACE(ifaces_ret, ifaces_count, iface);
     }
 
-    VIR_STEAL_PTR(*ifaces, ifaces_ret);
+    *ifaces = g_steal_pointer(&ifaces_ret);
     ret = ifaces_count;
 
  cleanup:
@@ -6347,7 +6347,7 @@ testConnectFindStoragePoolSources(virConnectPtr conn G_GNUC_UNUSED,
 {
     int pool_type;
     char *ret = NULL;
-    VIR_AUTOPTR(virStoragePoolSource) source = NULL;
+    g_autoptr(virStoragePoolSource) source = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -6428,7 +6428,7 @@ testStoragePoolCreateXML(virConnectPtr conn,
     virStoragePoolDefPtr def;
     virStoragePoolPtr pool = NULL;
     virObjectEventPtr event = NULL;
-    VIR_AUTOPTR(virStoragePoolDef) newDef = NULL;
+    g_autoptr(virStoragePoolDef) newDef = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -6491,7 +6491,7 @@ testStoragePoolDefineXML(virConnectPtr conn,
     virStoragePoolDefPtr def;
     virStoragePoolPtr pool = NULL;
     virObjectEventPtr event = NULL;
-    VIR_AUTOPTR(virStoragePoolDef) newDef = NULL;
+    g_autoptr(virStoragePoolDef) newDef = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -6994,7 +6994,7 @@ testStorageVolCreateXML(virStoragePoolPtr pool,
     virStoragePoolObjPtr obj;
     virStoragePoolDefPtr def;
     virStorageVolPtr ret = NULL;
-    VIR_AUTOPTR(virStorageVolDef) privvol = NULL;
+    g_autoptr(virStorageVolDef) privvol = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -7054,7 +7054,7 @@ testStorageVolCreateXMLFrom(virStoragePoolPtr pool,
     virStoragePoolDefPtr def;
     virStorageVolDefPtr origvol = NULL;
     virStorageVolPtr ret = NULL;
-    VIR_AUTOPTR(virStorageVolDef) privvol = NULL;
+    g_autoptr(virStorageVolDef) privvol = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -7435,7 +7435,7 @@ testNodeDeviceMockCreateVport(testDriverPtr driver,
     virNodeDeviceObjPtr obj = NULL, objcopy = NULL;
     virNodeDeviceDefPtr objdef;
     virObjectEventPtr event = NULL;
-    VIR_AUTOFREE(char *) xml = NULL;
+    g_autofree char *xml = NULL;
 
     /* In the real code, we'd call virVHBAManageVport which would take the
      * wwnn/wwpn from the input XML in order to call the "vport_create"
@@ -7514,8 +7514,8 @@ testNodeDeviceCreateXML(virConnectPtr conn,
     virNodeDevicePtr dev = NULL, ret = NULL;
     virNodeDeviceObjPtr obj = NULL;
     virNodeDeviceDefPtr objdef;
-    VIR_AUTOFREE(char *) wwnn = NULL;
-    VIR_AUTOFREE(char *) wwpn = NULL;
+    g_autofree char *wwnn = NULL;
+    g_autofree char *wwpn = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -7550,7 +7550,7 @@ testNodeDeviceCreateXML(virConnectPtr conn,
     if (VIR_STRDUP(dev->parentName, def->parent) < 0)
         goto cleanup;
 
-    VIR_STEAL_PTR(ret, dev);
+    ret = g_steal_pointer(&dev);
 
  cleanup:
     virNodeDeviceObjEndAPI(&obj);
@@ -7568,8 +7568,8 @@ testNodeDeviceDestroy(virNodeDevicePtr dev)
     virNodeDeviceObjPtr parentobj = NULL;
     virNodeDeviceDefPtr def;
     virObjectEventPtr event = NULL;
-    VIR_AUTOFREE(char *) wwnn = NULL;
-    VIR_AUTOFREE(char *) wwpn = NULL;
+    g_autofree char *wwnn = NULL;
+    g_autofree char *wwpn = NULL;
 
     if (!(obj = testNodeDeviceObjFindByName(driver, dev->name)))
         return -1;
@@ -8558,7 +8558,7 @@ testDomainSnapshotCreateXML(virDomainPtr domain,
     bool update_current = true;
     bool redefine = flags & VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE;
     unsigned int parse_flags = VIR_DOMAIN_SNAPSHOT_PARSE_DISKS;
-    VIR_AUTOUNREF(virDomainSnapshotDefPtr) def = NULL;
+    g_autoptr(virDomainSnapshotDef) def = NULL;
 
     /*
      * DISK_ONLY: Not implemented yet
@@ -9042,7 +9042,7 @@ testDomainCheckpointCreateXML(virDomainPtr domain,
     bool update_current = true;
     bool redefine = flags & VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE;
     unsigned int parse_flags = 0;
-    VIR_AUTOUNREF(virDomainCheckpointDefPtr) def = NULL;
+    g_autoptr(virDomainCheckpointDef) def = NULL;
 
     virCheckFlags(VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE |
                   VIR_DOMAIN_CHECKPOINT_CREATE_QUIESCE, NULL);

@@ -1421,6 +1421,10 @@ struct _virDomainVideoAccelDef {
     char *rendernode;
 };
 
+struct _virDomainVideoResolutionDef {
+    unsigned int x;
+    unsigned int y;
+};
 
 struct _virDomainVideoDriverDef {
    virDomainVideoVGAConf vgaconf;
@@ -1438,6 +1442,7 @@ struct _virDomainVideoDef {
     unsigned int heads;
     bool primary;
     virDomainVideoAccelDefPtr accel;
+    virDomainVideoResolutionDefPtr res;
     virDomainVideoDriverDefPtr driver;
     virDomainDeviceInfo info;
     virDomainVirtioOptionsPtr virtio;
@@ -2913,7 +2918,7 @@ bool virDomainDefHasDeviceAddress(virDomainDefPtr def,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 void virDomainDefFree(virDomainDefPtr vm);
-VIR_DEFINE_AUTOPTR_FUNC(virDomainDef, virDomainDefFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainDef, virDomainDefFree);
 
 virDomainChrSourceDefPtr
 virDomainChrSourceDefNew(virDomainXMLOptionPtr xmlopt);

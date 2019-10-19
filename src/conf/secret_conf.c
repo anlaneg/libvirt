@@ -131,10 +131,10 @@ virSecretDefParseUsage(xmlXPathContextPtr ctxt,
 static virSecretDefPtr
 secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 {
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
-    VIR_AUTOPTR(virSecretDef) def = NULL;
-    VIR_AUTOFREE(char *) prop = NULL;
-    VIR_AUTOFREE(char *) uuidstr = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    g_autoptr(virSecretDef) def = NULL;
+    g_autofree char *prop = NULL;
+    g_autofree char *uuidstr = NULL;
 
     if (!virXMLNodeNameEqual(root, "secret")) {
         virReportError(VIR_ERR_XML_ERROR,
@@ -193,7 +193,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
         && virSecretDefParseUsage(ctxt, def) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(def);
+    return g_steal_pointer(&def);
 }
 
 static virSecretDefPtr

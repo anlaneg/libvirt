@@ -1580,7 +1580,7 @@ static int
 virQEMUCapsSEVInfoCopy(virSEVCapabilityPtr *dst,
                        virSEVCapabilityPtr src)
 {
-    VIR_AUTOPTR(virSEVCapability) tmp = NULL;
+    g_autoptr(virSEVCapability) tmp = NULL;
 
     if (VIR_ALLOC(tmp) < 0 ||
         VIR_STRDUP(tmp->pdh, src->pdh) < 0 ||
@@ -1590,7 +1590,7 @@ virQEMUCapsSEVInfoCopy(virSEVCapabilityPtr *dst,
     tmp->cbitpos = src->cbitpos;
     tmp->reduced_phys_bits = src->reduced_phys_bits;
 
-    VIR_STEAL_PTR(*dst, tmp);
+    *dst = g_steal_pointer(&tmp);
     return 0;
 }
 
@@ -2415,7 +2415,7 @@ virQEMUCapsProbeQMPMachineProps(virQEMUCapsPtr qemuCaps,
     for (i = 0; i < G_N_ELEMENTS(virQEMUCapsMachineProps); i++) {
         virQEMUCapsObjectTypeProps props = virQEMUCapsMachineProps[i];
         const char *canon = virQEMUCapsGetCanonicalMachine(qemuCaps, props.type);
-        VIR_AUTOFREE(char *) type = NULL;
+        g_autofree char *type = NULL;
 
         if (!virQEMUCapsIsMachineSupported(qemuCaps, canon))
             continue;
@@ -2666,7 +2666,7 @@ virQEMUCapsGetCPUFeatures(virQEMUCapsPtr qemuCaps,
             goto cleanup;
     }
 
-    VIR_STEAL_PTR(*features, list);
+    *features = g_steal_pointer(&list);
     if (migratable && !modelInfo->migratability)
         ret = 1;
     else
@@ -3105,7 +3105,7 @@ virQEMUCapsGetCPUModelX86Data(virQEMUCapsPtr qemuCaps,
     if (virCPUx86DataSetSignature(data, sigFamily, sigModel, sigStepping) < 0)
         goto cleanup;
 
-    VIR_STEAL_PTR(ret, data);
+    ret = g_steal_pointer(&data);
 
  cleanup:
     virCPUDataFree(data);
@@ -3576,7 +3576,7 @@ virQEMUCapsCachePrivFree(void *privData)
 static int
 virQEMUCapsParseSEVInfo(virQEMUCapsPtr qemuCaps, xmlXPathContextPtr ctxt)
 {
-    VIR_AUTOPTR(virSEVCapability) sev = NULL;
+    g_autoptr(virSEVCapability) sev = NULL;
 
     if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_SEV_GUEST))
         return 0;
@@ -3620,7 +3620,7 @@ virQEMUCapsParseSEVInfo(virQEMUCapsPtr qemuCaps, xmlXPathContextPtr ctxt)
         return -1;
     }
 
-    VIR_STEAL_PTR(qemuCaps->sevCapabilities, sev);
+    qemuCaps->sevCapabilities = g_steal_pointer(&sev);
     return 0;
 }
 
@@ -4151,7 +4151,7 @@ virQEMUCapsKVMSupportsNesting(void)
 {
     static char const * const kmod[] = {"kvm_intel", "kvm_amd",
                                         "kvm_hv", "kvm"};
-    VIR_AUTOFREE(char *) value = NULL;
+    g_autofree char *value = NULL;
     int rc;
     size_t i;
 
@@ -4541,7 +4541,7 @@ virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
                           qemuMonitorPtr mon)
 {
     int major, minor, micro;
-    VIR_AUTOFREE(char *) package = NULL;
+    g_autofree char *package = NULL;
 
     /* @mon is supposed to be locked by callee */
 
@@ -4561,7 +4561,7 @@ virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
     }
 
     qemuCaps->version = major * 1000000 + minor * 1000 + micro;
-    VIR_STEAL_PTR(qemuCaps->package, package);
+    qemuCaps->package = g_steal_pointer(&package);
     qemuCaps->usedQMP = true;
 
     if (virQEMUCapsInitQMPArch(qemuCaps, mon) < 0)
@@ -5112,7 +5112,7 @@ virQEMUCapsCacheLookupDefault(virFileCachePtr cache,
     if (retMachine)
         *retMachine = machine;
 
-    VIR_STEAL_PTR(ret, qemuCaps);
+    ret = g_steal_pointer(&qemuCaps);
 
  cleanup:
     virObjectUnref(qemuCaps);
@@ -5583,7 +5583,7 @@ virQEMUCapsFillDomainFeatureSEVCaps(virQEMUCapsPtr qemuCaps,
                                     virDomainCapsPtr domCaps)
 {
     virSEVCapability *cap = qemuCaps->sevCapabilities;
-    VIR_AUTOPTR(virSEVCapability) sev = NULL;
+    g_autoptr(virSEVCapability) sev = NULL;
 
     if (!cap)
         return 0;
@@ -5599,7 +5599,7 @@ virQEMUCapsFillDomainFeatureSEVCaps(virQEMUCapsPtr qemuCaps,
 
     sev->cbitpos = cap->cbitpos;
     sev->reduced_phys_bits = cap->reduced_phys_bits;
-    VIR_STEAL_PTR(domCaps->sev, sev);
+    domCaps->sev = g_steal_pointer(&sev);
 
     return 0;
 }

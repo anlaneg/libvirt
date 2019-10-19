@@ -22,7 +22,6 @@
 
 #include "domain_conf.h"
 #include "qemu_conf.h"
-#include "virautoclean.h"
 #include "virarch.h"
 
 typedef struct _qemuVhostUser qemuVhostUser;
@@ -31,7 +30,7 @@ typedef qemuVhostUser *qemuVhostUserPtr;
 void
 qemuVhostUserFree(qemuVhostUserPtr fw);
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuVhostUser, qemuVhostUserFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuVhostUser, qemuVhostUserFree);
 
 qemuVhostUserPtr
 qemuVhostUserParse(const char *path);

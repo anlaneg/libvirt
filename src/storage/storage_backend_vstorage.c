@@ -7,6 +7,7 @@
 #include "virlog.h"
 #include "virstring.h"
 #include <mntent.h>
+#include <paths.h>
 #include <pwd.h>
 #include <grp.h>
 #include "storage_util.h"
@@ -38,10 +39,10 @@ static int
 virStorageBackendVzPoolStart(virStoragePoolObjPtr pool)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    VIR_AUTOFREE(char *) grp_name = NULL;
-    VIR_AUTOFREE(char *) usr_name = NULL;
-    VIR_AUTOFREE(char *) mode = NULL;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autofree char *grp_name = NULL;
+    g_autofree char *usr_name = NULL;
+    g_autofree char *mode = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     int ret;
 
     /* Check the permissions */
@@ -88,7 +89,7 @@ virStorageBackendVzIsMounted(virStoragePoolObjPtr pool)
     FILE *mtab;
     struct mntent ent;
     char buf[1024];
-    VIR_AUTOFREE(char *) cluster = NULL;
+    g_autofree char *cluster = NULL;
 
     if (virAsprintf(&cluster, "vstorage://%s", def->source.name) < 0)
         return -1;
@@ -122,7 +123,7 @@ virStorageBackendVzPoolStop(virStoragePoolObjPtr pool)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
     int rc;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     /* Short-circuit if already unmounted */
     if ((rc = virStorageBackendVzIsMounted(pool)) != 1)

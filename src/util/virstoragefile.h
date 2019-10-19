@@ -29,7 +29,6 @@
 #include "virstorageencryption.h"
 #include "virutil.h"
 #include "virsecret.h"
-#include "virautoclean.h"
 #include "virenum.h"
 
 /* Minimum header size required to probe all known formats with
@@ -552,4 +551,4 @@ void virStorageFileReportBrokenChain(int errcode,
                                      virStorageSourcePtr src,
                                      virStorageSourcePtr parent);
 
-VIR_DEFINE_AUTOPTR_FUNC(virStorageAuthDef, virStorageAuthDefFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virStorageAuthDef, virStorageAuthDefFree);

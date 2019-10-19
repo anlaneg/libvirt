@@ -103,7 +103,7 @@ qemuBlockJobDataPtr
 qemuBlockJobDataNew(qemuBlockJobType type,
                     const char *name)
 {
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
 
     if (qemuBlockJobDataInitialize() < 0)
         return NULL;
@@ -118,7 +118,7 @@ qemuBlockJobDataNew(qemuBlockJobType type,
     job->newstate = -1;
     job->type = type;
 
-    VIR_RETURN_PTR(job);
+    return g_steal_pointer(&job);
 }
 
 
@@ -206,7 +206,7 @@ qemuBlockJobDiskNew(virDomainObjPtr vm,
                     qemuBlockJobType type,
                     const char *jobname)
 {
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
 
     if (!(job = qemuBlockJobDataNew(type, jobname)))
         return NULL;
@@ -214,7 +214,7 @@ qemuBlockJobDiskNew(virDomainObjPtr vm,
     if (qemuBlockJobRegister(job, vm, disk, true) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(job);
+    return g_steal_pointer(&job);
 }
 
 
@@ -224,8 +224,8 @@ qemuBlockJobDiskNewPull(virDomainObjPtr vm,
                         virStorageSourcePtr base)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
-    VIR_AUTOFREE(char *) jobname = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
+    g_autofree char *jobname = NULL;
 
     if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV)) {
         if (virAsprintf(&jobname, "pull-%s-%s", disk->dst, disk->src->nodeformat) < 0)
@@ -243,7 +243,7 @@ qemuBlockJobDiskNewPull(virDomainObjPtr vm,
     if (qemuBlockJobRegister(job, vm, disk, true) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(job);
+    return g_steal_pointer(&job);
 }
 
 
@@ -255,8 +255,8 @@ qemuBlockJobDiskNewCommit(virDomainObjPtr vm,
                           virStorageSourcePtr base)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
-    VIR_AUTOFREE(char *) jobname = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
+    g_autofree char *jobname = NULL;
     qemuBlockJobType jobtype = QEMU_BLOCKJOB_TYPE_COMMIT;
 
     if (topparent == NULL)
@@ -280,7 +280,7 @@ qemuBlockJobDiskNewCommit(virDomainObjPtr vm,
     if (qemuBlockJobRegister(job, vm, disk, true) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(job);
+    return g_steal_pointer(&job);
 }
 
 
@@ -290,8 +290,8 @@ qemuBlockJobNewCreate(virDomainObjPtr vm,
                       virStorageSourcePtr chain,
                       bool storage)
 {
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
-    VIR_AUTOFREE(char *) jobname = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
+    g_autofree char *jobname = NULL;
     const char *nodename = src->nodeformat;
 
     if (storage)
@@ -311,7 +311,7 @@ qemuBlockJobNewCreate(virDomainObjPtr vm,
     if (qemuBlockJobRegister(job, vm, NULL, true) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(job);
+    return g_steal_pointer(&job);
 }
 
 
@@ -323,8 +323,8 @@ qemuBlockJobDiskNewCopy(virDomainObjPtr vm,
                         bool reuse)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
-    VIR_AUTOFREE(char *) jobname = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
+    g_autofree char *jobname = NULL;
 
     if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV)) {
         if (virAsprintf(&jobname, "copy-%s-%s", disk->dst, disk->src->nodeformat) < 0)
@@ -345,7 +345,7 @@ qemuBlockJobDiskNewCopy(virDomainObjPtr vm,
     if (qemuBlockJobRegister(job, vm, disk, true) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(job);
+    return g_steal_pointer(&job);
 }
 
 
@@ -595,7 +595,7 @@ qemuBlockJobRewriteConfigDiskSource(virDomainObjPtr vm,
                                     virStorageSourcePtr newsrc)
 {
     virDomainDiskDefPtr persistDisk = NULL;
-    VIR_AUTOUNREF(virStorageSourcePtr) copy = NULL;
+    g_autoptr(virStorageSource) copy = NULL;
     virStorageSourcePtr n;
 
     if (!vm->newDef)
@@ -627,7 +627,7 @@ qemuBlockJobRewriteConfigDiskSource(virDomainObjPtr vm,
     }
 
     virObjectUnref(persistDisk->src);
-    VIR_STEAL_PTR(persistDisk->src, copy);
+    persistDisk->src = g_steal_pointer(&copy);
 }
 
 
@@ -797,7 +797,7 @@ qemuBlockJobEventProcessConcludedRemoveChain(virQEMUDriverPtr driver,
                                              qemuDomainAsyncJob asyncJob,
                                              virStorageSourcePtr chain)
 {
-    VIR_AUTOPTR(qemuBlockStorageSourceChainData) data = NULL;
+    g_autoptr(qemuBlockStorageSourceChainData) data = NULL;
 
     if (!(data = qemuBlockStorageSourceChainDetachPrepareBlockdev(chain)))
         return;
@@ -1148,13 +1148,13 @@ qemuBlockJobProcessEventConcludedCopyPivot(virQEMUDriverPtr driver,
      * inherit the rest of the chain */
     if (job->data.copy.shallownew &&
         !virStorageSourceIsBacking(job->disk->mirror->backingStore))
-        VIR_STEAL_PTR(job->disk->mirror->backingStore, job->disk->src->backingStore);
+        job->disk->mirror->backingStore = g_steal_pointer(&job->disk->src->backingStore);
 
     qemuBlockJobRewriteConfigDiskSource(vm, job->disk, job->disk->mirror);
 
     qemuBlockJobEventProcessConcludedRemoveChain(driver, vm, asyncJob, job->disk->src);
     virObjectUnref(job->disk->src);
-    VIR_STEAL_PTR(job->disk->src, job->disk->mirror);
+    job->disk->src = g_steal_pointer(&job->disk->mirror);
 }
 
 
@@ -1212,7 +1212,7 @@ qemuBlockJobProcessEventConcludedCreate(virQEMUDriverPtr driver,
                                         qemuBlockJobDataPtr job,
                                         qemuDomainAsyncJob asyncJob)
 {
-    VIR_AUTOPTR(qemuBlockStorageSourceAttachData) backend = NULL;
+    g_autoptr(qemuBlockStorageSourceAttachData) backend = NULL;
 
     /* if there is a synchronous client waiting for this job that means that
      * it will handle further hotplug of the created volume and also that

@@ -1485,6 +1485,11 @@ virSecurityManagerTransactionStart;
 virSecurityManagerVerify;
 
 
+# util/glibcompat.h
+vir_g_strdup_printf;
+vir_g_strdup_vprintf;
+
+
 # util/viralloc.h
 virAlloc;
 virAllocN;
@@ -2187,6 +2192,7 @@ iptablesAddForwardRejectIn;
 iptablesAddForwardRejectOut;
 iptablesAddOutputFixUdpChecksum;
 iptablesAddTcpInput;
+iptablesAddTcpOutput;
 iptablesAddUdpInput;
 iptablesAddUdpOutput;
 iptablesRemoveDontMasquerade;
@@ -2199,6 +2205,7 @@ iptablesRemoveForwardRejectIn;
 iptablesRemoveForwardRejectOut;
 iptablesRemoveOutputFixUdpChecksum;
 iptablesRemoveTcpInput;
+iptablesRemoveTcpOutput;
 iptablesRemoveUdpInput;
 iptablesRemoveUdpOutput;
 iptablesSetDeletePrivate;
@@ -2636,7 +2643,6 @@ virClassForObjectRWLockable;
 virClassIsDerivedFrom;
 virClassName;
 virClassNew;
-virObjectAutoUnref;
 virObjectFreeCallback;
 virObjectFreeHashData;
 virObjectIsClass;

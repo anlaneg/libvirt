@@ -1149,12 +1149,11 @@ qemuSetupCgroupVcpuBW(virCgroupPtr cgroup,
 
  error:
     if (period) {
-        virErrorPtr saved = virSaveLastError();
+        virErrorPtr saved;
+
+        virErrorPreserveLast(&saved);
         ignore_value(virCgroupSetCpuCfsPeriod(cgroup, old_period));
-        if (saved) {
-            virSetError(saved);
-            virFreeError(saved);
-        }
+        virErrorRestore(&saved);
     }
 
     return -1;
@@ -1335,7 +1334,7 @@ qemuCgroupEmulatorAllNodesAllow(virCgroupPtr cgroup,
         virCgroupSetCpusetMems(data->emulatorCgroup, all_nodes_str) < 0)
         goto cleanup;
 
-    VIR_STEAL_PTR(*retData, data);
+    *retData = g_steal_pointer(&data);
     ret = 0;
 
  cleanup:
@@ -1362,10 +1361,9 @@ qemuCgroupEmulatorAllNodesRestore(qemuCgroupEmulatorAllNodesDataPtr data)
     if (!data)
         return;
 
-    err = virSaveLastError();
+    virErrorPreserveLast(&err);
     virCgroupSetCpusetMems(data->emulatorCgroup, data->emulatorMemMask);
-    virSetError(err);
-    virFreeError(err);
+    virErrorRestore(&err);
 
     qemuCgroupEmulatorAllNodesDataFree(data);
 }

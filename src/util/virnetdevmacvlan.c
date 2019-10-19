@@ -289,7 +289,7 @@ bool
 virNetDevMacVLanIsMacvtap(const char *ifname)
 {
     int ifindex;
-    VIR_AUTOFREE(char *) tapname = NULL;
+    g_autofree char *tapname = NULL;
 
     if (virNetDevGetIndex(ifname, &ifindex) < 0)
         return false;
@@ -388,7 +388,7 @@ virNetDevMacVLanTapOpen(const char *ifname,
     int ret = -1;
     int ifindex;
     size_t i = 0;
-    VIR_AUTOFREE(char *) tapname = NULL;
+    g_autofree char *tapname = NULL;
 
     if (virNetDevGetIndex(ifname, &ifindex) < 0)
         return -1;
@@ -1117,9 +1117,9 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
     }
 
     if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
-        VIR_AUTOPTR(virMacAddr) MAC = NULL;
-        VIR_AUTOPTR(virMacAddr) adminMAC = NULL;
-        VIR_AUTOPTR(virNetDevVlan) vlan = NULL;
+        g_autoptr(virMacAddr) MAC = NULL;
+        g_autoptr(virMacAddr) adminMAC = NULL;
+        g_autoptr(virNetDevVlan) vlan = NULL;
 
         if ((virNetDevReadNetConfig(linkdev, -1, stateDir,
                                     &adminMAC, &vlan, &MAC) == 0) &&

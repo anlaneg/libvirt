@@ -66,7 +66,7 @@ virshDomainNameCompleter(vshControl *ctl,
             goto cleanup;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
 
  cleanup:
     for (i = 0; i < ndomains; i++)
@@ -82,10 +82,10 @@ virshDomainInterfaceCompleter(vshControl *ctl,
                               unsigned int flags)
 {
     virshControlPtr priv = ctl->privData;
-    VIR_AUTOPTR(xmlDoc) xmldoc = NULL;
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
+    g_autoptr(xmlDoc) xmldoc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     int ninterfaces;
-    VIR_AUTOFREE(xmlNodePtr *) interfaces = NULL;
+    g_autofree xmlNodePtr *interfaces = NULL;
     size_t i;
     unsigned int domainXMLFlags = 0;
     char **ret = NULL;
@@ -122,7 +122,7 @@ virshDomainInterfaceCompleter(vshControl *ctl,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }
 
@@ -133,9 +133,9 @@ virshDomainDiskTargetCompleter(vshControl *ctl,
                                unsigned int flags)
 {
     virshControlPtr priv = ctl->privData;
-    VIR_AUTOPTR(xmlDoc) xmldoc = NULL;
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
-    VIR_AUTOFREE(xmlNodePtr *) disks = NULL;
+    g_autoptr(xmlDoc) xmldoc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    g_autofree xmlNodePtr *disks = NULL;
     int ndisks;
     size_t i;
     VIR_AUTOSTRINGLIST tmp = NULL;
@@ -162,7 +162,7 @@ virshDomainDiskTargetCompleter(vshControl *ctl,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }
 
@@ -186,7 +186,7 @@ virshDomainEventNameCompleter(vshControl *ctl G_GNUC_UNUSED,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }
 
@@ -199,14 +199,14 @@ virshDomainInterfaceStateCompleter(vshControl *ctl,
     virshControlPtr priv = ctl->privData;
     const char *iface = NULL;
     char **ret = NULL;
-    VIR_AUTOPTR(xmlDoc) xml = NULL;
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     virMacAddr macaddr;
     char macstr[VIR_MAC_STRING_BUFLEN] = "";
     int ninterfaces;
-    VIR_AUTOFREE(xmlNodePtr *) interfaces = NULL;
-    VIR_AUTOFREE(char *) xpath = NULL;
-    VIR_AUTOFREE(char *) state = NULL;
+    g_autofree xmlNodePtr *interfaces = NULL;
+    g_autofree char *xpath = NULL;
+    g_autofree char *state = NULL;
     VIR_AUTOSTRINGLIST tmp = NULL;
 
     virCheckFlags(0, NULL);
@@ -249,7 +249,7 @@ virshDomainInterfaceStateCompleter(vshControl *ctl,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }
 
@@ -260,10 +260,10 @@ virshDomainDeviceAliasCompleter(vshControl *ctl,
                                 unsigned int flags)
 {
     virshControlPtr priv = ctl->privData;
-    VIR_AUTOPTR(xmlDoc) xmldoc = NULL;
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
+    g_autoptr(xmlDoc) xmldoc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     int naliases;
-    VIR_AUTOFREE(xmlNodePtr *) aliases = NULL;
+    g_autofree xmlNodePtr *aliases = NULL;
     size_t i;
     unsigned int domainXMLFlags = 0;
     char **ret = NULL;
@@ -292,7 +292,7 @@ virshDomainDeviceAliasCompleter(vshControl *ctl,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }
 

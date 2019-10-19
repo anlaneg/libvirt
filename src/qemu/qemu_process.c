@@ -936,7 +936,7 @@ qemuProcessHandleBlockJob(qemuMonitorPtr mon G_GNUC_UNUSED,
     virQEMUDriverPtr driver = opaque;
     struct qemuProcessEvent *processEvent = NULL;
     virDomainDiskDefPtr disk;
-    VIR_AUTOUNREF(qemuBlockJobDataPtr) job = NULL;
+    g_autoptr(qemuBlockJobData) job = NULL;
     char *data = NULL;
 
     virObjectLock(vm);
@@ -1852,7 +1852,7 @@ qemuProcessHandleRdmaGidStatusChanged(qemuMonitorPtr mon G_GNUC_UNUSED,
 
     processEvent->eventType = QEMU_PROCESS_EVENT_RDMA_GID_STATUS_CHANGED;
     processEvent->vm = virObjectRef(vm);
-    VIR_STEAL_PTR(processEvent->data, info);
+    processEvent->data = g_steal_pointer(&info);
 
     if (virThreadPoolSendJob(driver->workerPool, 0, processEvent) < 0) {
         qemuProcessEventFree(processEvent);
@@ -2517,7 +2517,7 @@ qemuProcessGetAllCpuAffinity(virBitmapPtr *cpumapRet)
 static int
 qemuProcessInitCpuAffinity(virDomainObjPtr vm)
 {
-    VIR_AUTOPTR(virBitmap) cpumapToSet = NULL;
+    g_autoptr(virBitmap) cpumapToSet = NULL;
     virDomainNumatuneMemMode mem_mode;
     qemuDomainObjPrivatePtr priv = vm->privateData;
 
@@ -2644,7 +2644,7 @@ qemuProcessSetupPid(virDomainObjPtr vm,
     virDomainNumatuneMemMode mem_mode;
     virCgroupPtr cgroup = NULL;
     virBitmapPtr use_cpumask = NULL;
-    VIR_AUTOPTR(virBitmap) hostcpumap = NULL;
+    g_autoptr(virBitmap) hostcpumap = NULL;
     char *mem_mask = NULL;
     int ret = -1;
 
@@ -4313,7 +4313,7 @@ qemuProcessUpdateLiveGuestCPU(virDomainObjPtr vm,
          * get the original CPU via migration, restore, or snapshot revert.
          */
         if (!priv->origCPU && !virCPUDefIsEqual(def->cpu, orig, false))
-            VIR_STEAL_PTR(priv->origCPU, orig);
+            priv->origCPU = g_steal_pointer(&orig);
 
         def->cpu->check = VIR_CPU_CHECK_FULL;
     }
@@ -5508,7 +5508,7 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
                 return -1;
 
             if (n > 0) {
-                VIR_AUTOFREE(char *) str = NULL;
+                g_autofree char *str = NULL;
 
                 str = virStringListJoin((const char **)features, ", ");
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -5537,7 +5537,7 @@ static int
 qemuProcessStartUpdateCustomCaps(virDomainObjPtr vm)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = virQEMUDriverGetConfig(priv->driver);
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(priv->driver);
     qemuDomainXmlNsDefPtr nsdef = vm->def->namespaceData;
     char **next;
     int tmp;
@@ -5680,7 +5680,7 @@ qemuProcessInit(virQEMUDriverPtr driver,
         if (qemuDomainSetPrivatePaths(driver, vm) < 0)
             goto stop;
 
-        VIR_STEAL_PTR(priv->origCPU, origCPU);
+        priv->origCPU = g_steal_pointer(&origCPU);
     }
 
     ret = 0;
@@ -6187,7 +6187,7 @@ qemuProcessPrepareDomainNUMAPlacement(virDomainObjPtr vm,
 
     virBitmapIntersect(numadNodeset, hostMemoryNodeset);
 
-    VIR_STEAL_PTR(priv->autoNodeset, numadNodeset);
+    priv->autoNodeset = g_steal_pointer(&numadNodeset);
 
     ret = 0;
 
@@ -7413,7 +7413,7 @@ void qemuProcessStop(virQEMUDriverPtr driver,
 
     /* This method is routinely used in clean up paths. Disable error
      * reporting so we don't squash a legit error. */
-    orig_err = virSaveLastError();
+    virErrorPreserveLast(&orig_err);
 
     if (asyncJob != QEMU_ASYNC_JOB_NONE) {
         if (qemuDomainObjBeginNestedJob(driver, vm, asyncJob) < 0)
@@ -7706,10 +7706,7 @@ void qemuProcessStop(virQEMUDriverPtr driver,
         qemuDomainObjEndJob(driver, vm);
 
  cleanup:
-    if (orig_err) {
-        virSetError(orig_err);
-        virFreeError(orig_err);
-    }
+    virErrorRestore(&orig_err);
     virObjectUnref(conn);
     virObjectUnref(cfg);
 }
@@ -8449,7 +8446,7 @@ qemuProcessQMPFree(qemuProcessQMPPtr proc)
     VIR_FREE(proc->monpath);
     VIR_FREE(proc->monarg);
     VIR_FREE(proc->pidfile);
-    VIR_FREE(proc->stderr);
+    VIR_FREE(proc->stdErr);
     VIR_FREE(proc);
 }
 
@@ -8489,7 +8486,7 @@ qemuProcessQMPNew(const char *binary,
     proc->runGid = runGid;
     proc->forceTCG = forceTCG;
 
-    VIR_STEAL_PTR(ret, proc);
+    ret = g_steal_pointer(&proc);
 
  cleanup:
     qemuProcessQMPFree(proc);
@@ -8602,7 +8599,7 @@ qemuProcessQMPLaunch(qemuProcessQMPPtr proc)
     virCommandSetGID(proc->cmd, proc->runGid);
     virCommandSetUID(proc->cmd, proc->runUid);
 
-    virCommandSetErrorBuffer(proc->cmd, &(proc->stderr));
+    virCommandSetErrorBuffer(proc->cmd, &(proc->stdErr));
 
     if (virCommandRun(proc->cmd, &status) < 0)
         goto cleanup;
@@ -8612,7 +8609,7 @@ qemuProcessQMPLaunch(qemuProcessQMPPtr proc)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Failed to start QEMU binary %s for probing: %s"),
                        proc->binary,
-                       proc->stderr ? proc->stderr : _("unknown error"));
+                       proc->stdErr ? proc->stdErr : _("unknown error"));
         goto cleanup;
     }
 
@@ -8691,7 +8688,7 @@ qemuProcessQMPConnectMonitor(qemuProcessQMPPtr proc)
  *   ** Send QMP Queries to QEMU using monitor (proc->mon) **
  *   qemuProcessQMPFree(proc);
  *
- * Process error output (proc->stderr) remains available in qemuProcessQMP
+ * Process error output (proc->stdErr) remains available in qemuProcessQMP
  * struct until qemuProcessQMPFree is called.
  */
 int

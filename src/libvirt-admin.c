@@ -122,7 +122,7 @@ getSocketPath(virURIPtr uri)
     }
 
     if (!sock_path) {
-        VIR_AUTOFREE(char *) sockbase = NULL;
+        g_autofree char *sockbase = NULL;
         bool legacy = false;
 
         if (!uri->scheme) {
@@ -222,7 +222,7 @@ virAdmConnectOpen(const char *name, unsigned int flags)
     char *sock_path = NULL;
     char *alias = NULL;
     virAdmConnectPtr conn = NULL;
-    VIR_AUTOPTR(virConf) conf = NULL;
+    g_autoptr(virConf) conf = NULL;
     char *uristr = NULL;
 
     if (virAdmInitialize() < 0)

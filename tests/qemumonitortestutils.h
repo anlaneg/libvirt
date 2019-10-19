@@ -23,7 +23,6 @@
 #include "qemu/qemu_conf.h"
 #include "qemu/qemu_monitor.h"
 #include "qemu/qemu_agent.h"
-#include "virautoclean.h"
 
 typedef struct _qemuMonitorTest qemuMonitorTest;
 typedef qemuMonitorTest *qemuMonitorTestPtr;
@@ -101,4 +100,4 @@ qemuMonitorPtr qemuMonitorTestGetMonitor(qemuMonitorTestPtr test);
 qemuAgentPtr qemuMonitorTestGetAgent(qemuMonitorTestPtr test);
 virDomainObjPtr qemuMonitorTestGetDomainObj(qemuMonitorTestPtr test);
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuMonitorTest, qemuMonitorTestFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuMonitorTest, qemuMonitorTestFree);

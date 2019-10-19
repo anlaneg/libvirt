@@ -553,8 +553,8 @@ testActivation(bool useNames)
     virSystemdActivationMap map[2];
     int *fds = NULL;
     size_t nfds = 0;
-    VIR_AUTOPTR(virSystemdActivation) act = NULL;
-    VIR_AUTOCLEAN(virBuffer) names = VIR_BUFFER_INITIALIZER;
+    g_autoptr(virSystemdActivation) act = NULL;
+    g_auto(virBuffer) names = VIR_BUFFER_INITIALIZER;
 
     virBufferAddLit(&names, "demo-unix.socket");
 

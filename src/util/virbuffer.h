@@ -23,7 +23,6 @@
 #include <stdarg.h>
 
 #include "internal.h"
-#include "virautoclean.h"
 
 
 /**
@@ -55,7 +54,7 @@ int virBufferCheckErrorInternal(const virBuffer *buf,
                                 size_t linenr)
     ATTRIBUTE_NONNULL(1);
 
-VIR_DEFINE_AUTOCLEAN_FUNC(virBuffer, virBufferFreeAndReset);
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(virBuffer, virBufferFreeAndReset);
 
 /**
  * virBufferCheckError

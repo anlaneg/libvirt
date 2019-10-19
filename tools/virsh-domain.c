@@ -6960,8 +6960,8 @@ virshVcpuPinQuery(vshControl *ctl,
             goto cleanup;
 
         for (i = 0; i < ncpus; i++) {
-            VIR_AUTOFREE(char *) pinInfo = NULL;
-            VIR_AUTOFREE(char *) vcpuStr = NULL;
+            g_autofree char *pinInfo = NULL;
+            g_autofree char *vcpuStr = NULL;
             if (got_vcpu && i != vcpu)
                 continue;
 
@@ -7583,8 +7583,8 @@ cmdIOThreadInfo(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
 
     for (i = 0; i < niothreads; i++) {
-        VIR_AUTOFREE(char *) pinInfo = NULL;
-        VIR_AUTOFREE(char *) iothreadIdStr = NULL;
+        g_autofree char *pinInfo = NULL;
+        g_autofree char *iothreadIdStr = NULL;
 
         if (virAsprintf(&iothreadIdStr, "%u", info[i]->iothread_id) < 0)
             goto cleanup;
@@ -8441,7 +8441,7 @@ cmdDesc(vshControl *ctl, const vshCmd *cmd)
             }
 
             VIR_FREE(desc);
-            VIR_STEAL_PTR(desc, desc_edited);
+            desc = g_steal_pointer(&desc_edited);
         }
 
         if (virDomainSetMetadata(dom, type, desc, NULL, NULL, flags) < 0) {
@@ -8645,7 +8645,7 @@ static const vshCmdOptDef opts_inject_nmi[] = {
 static bool
 cmdInjectNMI(vshControl *ctl, const vshCmd *cmd)
 {
-    VIR_AUTOPTR(virshDomain) dom = NULL;
+    g_autoptr(virshDomain) dom = NULL;
 
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
         return false;
@@ -8832,7 +8832,7 @@ static int getSignalNumber(vshControl *ctl, const char *signame)
 static bool
 cmdSendProcessSignal(vshControl *ctl, const vshCmd *cmd)
 {
-    VIR_AUTOPTR(virshDomain) dom = NULL;
+    g_autoptr(virshDomain) dom = NULL;
     const char *signame;
     long long pid_value;
     int signum;
@@ -9506,9 +9506,9 @@ static const vshCmdOptDef opts_qemu_monitor_command[] = {
 static bool
 cmdQemuMonitorCommand(vshControl *ctl, const vshCmd *cmd)
 {
-    VIR_AUTOPTR(virshDomain) dom = NULL;
-    VIR_AUTOFREE(char *) monitor_cmd = NULL;
-    VIR_AUTOFREE(char *) result = NULL;
+    g_autoptr(virshDomain) dom = NULL;
+    g_autofree char *monitor_cmd = NULL;
+    g_autofree char *result = NULL;
     unsigned int flags = 0;
     const vshCmdOpt *opt = NULL;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
@@ -14000,7 +14000,7 @@ cmdDomFSInfo(vshControl *ctl, const vshCmd *cmd)
 
         for (i = 0; i < ninfos; i++) {
             virBuffer targetsBuff = VIR_BUFFER_INITIALIZER;
-            VIR_AUTOFREE(char *) targets = NULL;
+            g_autofree char *targets = NULL;
 
             for (j = 0; j < info[i]->ndevAlias; j++)
                 virBufferAsprintf(&targetsBuff, "%s,", info[i]->devAlias[j]);

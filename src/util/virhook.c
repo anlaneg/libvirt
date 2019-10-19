@@ -132,7 +132,7 @@ static int virHooksFound = -1;
 static int
 virHookCheck(int no, const char *driver)
 {
-    VIR_AUTOFREE(char *) path = NULL;
+    g_autofree char *path = NULL;
 
     if (driver == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -253,8 +253,8 @@ virHookCall(int driver/*要调用的hook点名称*/,
             char **output)
 {
     int ret;
-    VIR_AUTOFREE(char *) path = NULL;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autofree char *path = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     const char *drvstr;
     const char *opstr;
     const char *subopstr;

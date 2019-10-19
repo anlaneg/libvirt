@@ -501,8 +501,8 @@ virQEMUQAPISchemaEntryProcess(size_t pos G_GNUC_UNUSED,
 virHashTablePtr
 virQEMUQAPISchemaConvert(virJSONValuePtr schemareply)
 {
-    VIR_AUTOPTR(virHashTable) schema = NULL;
-    VIR_AUTOPTR(virJSONValue) schemajson = schemareply;
+    g_autoptr(virHashTable) schema = NULL;
+    g_autoptr(virJSONValue) schemajson = schemareply;
 
     if (!(schema = virHashCreate(512, virJSONValueHashFree)))
         return NULL;
@@ -512,5 +512,5 @@ virQEMUQAPISchemaConvert(virJSONValuePtr schemareply)
                                       schema) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(schema);
+    return g_steal_pointer(&schema);
 }

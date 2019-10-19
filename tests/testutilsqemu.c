@@ -965,7 +965,7 @@ testQemuInfoSetArgs(struct testQemuInfo *info,
     int gic = GIC_NONE;
     char *capsarch = NULL;
     char *capsver = NULL;
-    VIR_AUTOFREE(char *) capsfile = NULL;
+    g_autofree char *capsfile = NULL;
     int flag;
     int ret = -1;
 
@@ -1073,7 +1073,7 @@ testQemuInfoSetArgs(struct testQemuInfo *info,
         fprintf(stderr, "No qemuCaps generated\n");
         goto cleanup;
     }
-    VIR_STEAL_PTR(info->qemuCaps, qemuCaps);
+    info->qemuCaps = g_steal_pointer(&qemuCaps);
 
     if (gic != GIC_NONE && testQemuCapsSetGIC(info->qemuCaps, gic) < 0)
         goto cleanup;

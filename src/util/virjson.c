@@ -502,7 +502,7 @@ virJSONValueNewNumber(const char *data)
 virJSONValuePtr
 virJSONValueNewNumberInt(int data)
 {
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
     if (virAsprintf(&str, "%i", data) < 0)
         return NULL;
     return virJSONValueNewNumber(str);
@@ -512,7 +512,7 @@ virJSONValueNewNumberInt(int data)
 virJSONValuePtr
 virJSONValueNewNumberUint(unsigned int data)
 {
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
     if (virAsprintf(&str, "%u", data) < 0)
         return NULL;
     return virJSONValueNewNumber(str);
@@ -522,7 +522,7 @@ virJSONValueNewNumberUint(unsigned int data)
 virJSONValuePtr
 virJSONValueNewNumberLong(long long data)
 {
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
     if (virAsprintf(&str, "%lld", data) < 0)
         return NULL;
     return virJSONValueNewNumber(str);
@@ -532,7 +532,7 @@ virJSONValueNewNumberLong(long long data)
 virJSONValuePtr
 virJSONValueNewNumberUlong(unsigned long long data)
 {
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
     if (virAsprintf(&str, "%llu", data) < 0)
         return NULL;
     return virJSONValueNewNumber(str);
@@ -542,7 +542,7 @@ virJSONValueNewNumberUlong(unsigned long long data)
 virJSONValuePtr
 virJSONValueNewNumberDouble(double data)
 {
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
     if (virDoubleToStr(&str, data) < 0)
         return NULL;
     return virJSONValueNewNumber(str);
@@ -880,7 +880,7 @@ virJSONValueObjectSteal(virJSONValuePtr object,
 
     for (i = 0; i < object->data.object.npairs; i++) {
         if (STREQ(object->data.object.pairs[i].key, key)) {
-            VIR_STEAL_PTR(obj, object->data.object.pairs[i].value);
+            obj = g_steal_pointer(&object->data.object.pairs[i].value);
             VIR_FREE(object->data.object.pairs[i].key);
             VIR_DELETE_ELEMENT(object->data.object.pairs, i,
                                object->data.object.npairs);
@@ -1215,7 +1215,7 @@ virJSONValueGetArrayAsBitmap(const virJSONValue *val,
 {
     virJSONValuePtr elem;
     size_t i;
-    VIR_AUTOFREE(unsigned long long *) elems = NULL;
+    g_autofree unsigned long long *elems = NULL;
     unsigned long long maxelem = 0;
 
     *bitmap = NULL;
@@ -2025,7 +2025,7 @@ char *
 virJSONValueToString(virJSONValuePtr object,
                      bool pretty)
 {
-    VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (virJSONValueToBuffer(object, &buf, pretty) < 0)
         return NULL;
@@ -2050,7 +2050,7 @@ char *
 virJSONStringReformat(const char *jsonstr,
                       bool pretty)
 {
-    VIR_AUTOPTR(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) json = NULL;
 
     if (!(json = virJSONValueFromString(jsonstr)))
         return NULL;
@@ -2144,7 +2144,7 @@ virJSONValueObjectDeflattenWorker(const char *key,
 virJSONValuePtr
 virJSONValueObjectDeflatten(virJSONValuePtr json)
 {
-    VIR_AUTOPTR(virJSONValue) deflattened = NULL;
+    g_autoptr(virJSONValue) deflattened = NULL;
     virJSONValuePtr ret = NULL;
 
     if (!(deflattened = virJSONValueNewObject()))
@@ -2155,7 +2155,7 @@ virJSONValueObjectDeflatten(virJSONValuePtr json)
                                           deflattened) < 0)
         return NULL;
 
-    VIR_STEAL_PTR(ret, deflattened);
+    ret = g_steal_pointer(&deflattened);
 
     return ret;
 }

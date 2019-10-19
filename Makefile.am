@@ -45,10 +45,10 @@ EXTRA_DIST = \
   run.in \
   README.md \
   AUTHORS.in \
-  build-aux/augeas-gentest.pl \
+  scripts/augeas-gentest.py \
   build-aux/check-spacing.pl \
   build-aux/header-ifdef.pl \
-  build-aux/minimize-po.pl \
+  scripts/minimize-po.py \
   build-aux/mock-noinline.pl \
   build-aux/prohibit-duplicate-header.pl \
   build-aux/syntax-check.mk \

@@ -22,7 +22,6 @@
 
 #include "domain_conf.h"
 #include "qemu_conf.h"
-#include "virautoclean.h"
 #include "virarch.h"
 #include "virfirmware.h"
 
@@ -32,7 +31,7 @@ typedef qemuFirmware *qemuFirmwarePtr;
 void
 qemuFirmwareFree(qemuFirmwarePtr fw);
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuFirmware, qemuFirmwareFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuFirmware, qemuFirmwareFree);
 
 qemuFirmwarePtr
 qemuFirmwareParse(const char *path);

@@ -57,8 +57,8 @@ test_node_info_parser(const void *opaque)
 {
     const struct testNodeInfoParserData *data = opaque;
     collie_test test = data->data;
-    VIR_AUTOFREE(char *) output = NULL;
-    VIR_AUTOPTR(virStoragePoolDef) pool = NULL;
+    g_autofree char *output = NULL;
+    g_autoptr(virStoragePoolDef) pool = NULL;
 
     if (!(pool = virStoragePoolDefParseFile(data->poolxml)))
         return -1;
@@ -85,9 +85,9 @@ test_vdi_list_parser(const void *opaque)
 {
     const struct testVDIListParserData *data = opaque;
     collie_test test = data->data;
-    VIR_AUTOFREE(char *) output = NULL;
-    VIR_AUTOPTR(virStoragePoolDef) pool = NULL;
-    VIR_AUTOPTR(virStorageVolDef) vol = NULL;
+    g_autofree char *output = NULL;
+    g_autoptr(virStoragePoolDef) pool = NULL;
+    g_autoptr(virStorageVolDef) vol = NULL;
 
     if (!(pool = virStoragePoolDefParseFile(data->poolxml)))
         return -1;
@@ -117,8 +117,8 @@ static int
 mymain(void)
 {
     int ret = 0;
-    VIR_AUTOFREE(char *) poolxml = NULL;
-    VIR_AUTOFREE(char *) volxml = NULL;
+    g_autofree char *poolxml = NULL;
+    g_autofree char *volxml = NULL;
 
     collie_test node_info_tests[] = {
         {"", -1, 0, 0},

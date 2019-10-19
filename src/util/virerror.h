@@ -22,7 +22,6 @@
 #pragma once
 
 #include "internal.h"
-#include "virautoclean.h"
 
 #define VIR_ERROR_MAX_LENGTH 1024
 
@@ -209,4 +208,4 @@ void virErrorRestore(virErrorPtr *savederr);
 void virLastErrorPrefixMessage(const char *fmt, ...)
     G_GNUC_PRINTF(1, 2);
 
-VIR_DEFINE_AUTOPTR_FUNC(virError, virFreeError);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virError, virFreeError);

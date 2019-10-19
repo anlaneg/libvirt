@@ -644,7 +644,7 @@ qemuInterfacePrepareSlirp(virQEMUDriverPtr driver,
                           virDomainNetDefPtr net)
 {
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-    VIR_AUTOPTR(qemuSlirp) slirp = NULL;
+    g_autoptr(qemuSlirp) slirp = NULL;
     size_t i;
 
     if (!(slirp = qemuSlirpNewForHelper(cfg->slirpHelperName)))
@@ -662,7 +662,7 @@ qemuInterfacePrepareSlirp(virQEMUDriverPtr driver,
             return NULL;
     }
 
-    VIR_RETURN_PTR(slirp);
+    return g_steal_pointer(&slirp);
 }
 
 

@@ -105,7 +105,7 @@ qemuDriverUnlock(virQEMUDriverPtr driver)
 
 virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
 {
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = NULL;
 
     if (virQEMUConfigInitialize() < 0)
         return NULL;
@@ -182,8 +182,8 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
             virGetGroupID("tss", &cfg->swtpm_group) < 0)
             cfg->swtpm_group = 0; /* fall back to root */
     } else {
-        VIR_AUTOFREE(char *) rundir = NULL;
-        VIR_AUTOFREE(char *) cachedir = NULL;
+        g_autofree char *rundir = NULL;
+        g_autofree char *cachedir = NULL;
 
         cachedir = virGetUserCacheDirectory();
         if (!cachedir)
@@ -303,7 +303,7 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
                              &cfg->nfirmwares) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(cfg);
+    return g_steal_pointer(&cfg);
 }
 
 
@@ -619,8 +619,8 @@ virQEMUDriverConfigLoadProcessEntry(virQEMUDriverConfigPtr cfg,
                                     virConfPtr conf)
 {
     VIR_AUTOSTRINGLIST hugetlbfs = NULL;
-    VIR_AUTOFREE(char *) stdioHandler = NULL;
-    VIR_AUTOFREE(char *) corestr = NULL;
+    g_autofree char *stdioHandler = NULL;
+    g_autofree char *corestr = NULL;
     size_t i;
 
     if (virConfGetValueStringList(conf, "hugetlbfs_mount", true,
@@ -849,8 +849,8 @@ virQEMUDriverConfigLoadSecurityEntry(virQEMUDriverConfigPtr cfg,
 {
     VIR_AUTOSTRINGLIST controllers = NULL;
     VIR_AUTOSTRINGLIST namespaces = NULL;
-    VIR_AUTOFREE(char *) user = NULL;
-    VIR_AUTOFREE(char *) group = NULL;
+    g_autofree char *user = NULL;
+    g_autofree char *group = NULL;
     size_t i, j;
 
     if (virConfGetValueStringList(conf, "security_driver", true, &cfg->securityDriverNames) < 0)
@@ -968,8 +968,8 @@ static int
 virQEMUDriverConfigLoadSWTPMEntry(virQEMUDriverConfigPtr cfg,
                                   virConfPtr conf)
 {
-    VIR_AUTOFREE(char *) swtpm_user = NULL;
-    VIR_AUTOFREE(char *) swtpm_group = NULL;
+    g_autofree char *swtpm_user = NULL;
+    g_autofree char *swtpm_group = NULL;
 
     if (virConfGetValueString(conf, "swtpm_user", &swtpm_user) < 0)
         return -1;
@@ -1001,7 +1001,7 @@ int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
                                 const char *filename/*配置文件名*/,
                                 bool privileged)
 {
-    VIR_AUTOPTR(virConf) conf = NULL;
+    g_autoptr(virConf) conf = NULL;
 
     /* Just check the file is readable before opening it, otherwise
      * libvirt emits an error.
@@ -1249,8 +1249,8 @@ virQEMUDriverCreateXMLConf(virQEMUDriverPtr driver)
 virCapsPtr virQEMUDriverCreateCapabilities(virQEMUDriverPtr driver)
 {
     size_t i, j;
-    VIR_AUTOUNREF(virCapsPtr) caps = NULL;
-    VIR_AUTOFREE(virSecurityManagerPtr) *sec_managers = NULL;
+    g_autoptr(virCaps) caps = NULL;
+    g_autofree virSecurityManagerPtr *sec_managers = NULL;
     /* Security driver data */
     const char *doi, *model, *lbl, *type;
     const int virtTypes[] = {VIR_DOMAIN_VIRT_KVM,
@@ -1298,7 +1298,7 @@ virCapsPtr virQEMUDriverCreateCapabilities(virQEMUDriverPtr driver)
                   "DOI \"%s\"", model, doi);
     }
 
-    VIR_RETURN_PTR(caps);
+    return g_steal_pointer(&caps);
 }
 
 
@@ -1385,9 +1385,9 @@ virQEMUDriverGetDomainCapabilities(virQEMUDriverPtr driver,
                                    virArch arch,
                                    virDomainVirtType virttype)
 {
-    VIR_AUTOUNREF(virDomainCapsPtr) domCaps = NULL;
-    VIR_AUTOUNREF(virCapsPtr) caps = NULL;
-    VIR_AUTOUNREF(virQEMUDriverConfigPtr) cfg = virQEMUDriverGetConfig(driver);
+    g_autoptr(virDomainCaps) domCaps = NULL;
+    g_autoptr(virCaps) caps = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     virHashTablePtr domCapsCache = virQEMUCapsGetDomainCapsCache(qemuCaps);
     struct virQEMUDriverSearchDomcapsData data = {
         .path = virQEMUCapsGetBinary(qemuCaps),
@@ -1402,6 +1402,8 @@ virQEMUDriverGetDomainCapabilities(virQEMUDriverPtr driver,
     domCaps = virHashSearch(domCapsCache,
                             virQEMUDriverSearchDomcaps, &data, NULL);
     if (!domCaps) {
+        g_autofree char *key = NULL;
+
         /* hash miss, build new domcaps */
         if (!(domCaps = virDomainCapsNew(data.path, data.machine,
                                          data.arch, data.virttype)))
@@ -1412,12 +1414,19 @@ virQEMUDriverGetDomainCapabilities(virQEMUDriverPtr driver,
                                       cfg->firmwares, cfg->nfirmwares) < 0)
             return NULL;
 
-        if (virHashAddEntry(domCapsCache, machine, domCaps) < 0)
+        if (virAsprintf(&key, "%d:%d:%s:%s",
+                        data.arch,
+                        data.virttype,
+                        NULLSTR(data.machine),
+                        NULLSTR(data.path)) < 0)
+            return NULL;
+
+        if (virHashAddEntry(domCapsCache, key, domCaps) < 0)
             return NULL;
     }
 
     virObjectRef(domCaps);
-    VIR_RETURN_PTR(domCaps);
+    return g_steal_pointer(&domCaps);
 }
 
 
@@ -1463,8 +1472,8 @@ qemuCheckUnprivSGIO(virHashTablePtr sharedDevices,
                     const char *device_path,
                     int sgio)
 {
-    VIR_AUTOFREE(char *) sysfs_path = NULL;
-    VIR_AUTOFREE(char *) key = NULL;
+    g_autofree char *sysfs_path = NULL;
+    g_autofree char *key = NULL;
     int val;
 
     if (!(sysfs_path = virGetUnprivSGIOSysfsPath(device_path, NULL)))
@@ -1643,7 +1652,7 @@ qemuSharedDiskAddRemoveInternal(virQEMUDriverPtr driver,
                                 const char *name,
                                 bool addDisk)
 {
-    VIR_AUTOFREE(char *) key = NULL;
+    g_autofree char *key = NULL;
     int ret = -1;
 
     if (virStorageSourceIsEmpty(disk->src) ||
@@ -1707,7 +1716,7 @@ qemuGetHostdevPath(virDomainHostdevDefPtr hostdev)
 {
     virDomainHostdevSubsysSCSIPtr scsisrc = &hostdev->source.subsys.u.scsi;
     virDomainHostdevSubsysSCSIHostPtr scsihostsrc = &scsisrc->u.host;
-    VIR_AUTOFREE(char *) dev_name = NULL;
+    g_autofree char *dev_name = NULL;
     char *dev_path = NULL;
 
     if (!(dev_name = virSCSIDeviceGetDevName(NULL,
@@ -1728,8 +1737,8 @@ qemuSharedHostdevAddRemoveInternal(virQEMUDriverPtr driver,
                                    const char *name,
                                    bool addDevice)
 {
-    VIR_AUTOFREE(char *) dev_path = NULL;
-    VIR_AUTOFREE(char *) key = NULL;
+    g_autofree char *dev_path = NULL;
+    g_autofree char *key = NULL;
     int ret = -1;
 
     if (!qemuIsSharedHostdev(hostdev))
@@ -1822,7 +1831,7 @@ qemuSetUnprivSGIO(virDomainDeviceDefPtr dev)
 {
     virDomainDiskDefPtr disk = NULL;
     virDomainHostdevDefPtr hostdev = NULL;
-    VIR_AUTOFREE(char *) sysfs_path = NULL;
+    g_autofree char *sysfs_path = NULL;
     const char *path = NULL;
     int val = -1;
 
@@ -1905,8 +1914,8 @@ char *
 qemuGetDomainHugepagePath(const virDomainDef *def,
                           virHugeTLBFSPtr hugepage)
 {
-    VIR_AUTOFREE(char *) base = qemuGetBaseHugepagePath(hugepage);
-    VIR_AUTOFREE(char *) domPath = virDomainDefGetShortName(def);
+    g_autofree char *base = qemuGetBaseHugepagePath(hugepage);
+    g_autofree char *domPath = virDomainDefGetShortName(def);
     char *ret = NULL;
 
     if (base && domPath)
@@ -1971,8 +1980,8 @@ qemuGetMemoryBackingDomainPath(const virDomainDef *def,
                                virQEMUDriverConfigPtr cfg,
                                char **path)
 {
-    VIR_AUTOFREE(char *) shortName = NULL;
-    VIR_AUTOFREE(char *) base = NULL;
+    g_autofree char *shortName = NULL;
+    g_autofree char *base = NULL;
 
     if (!(shortName = virDomainDefGetShortName(def)) ||
         qemuGetMemoryBackingBasePath(cfg, &base) < 0 ||
@@ -2001,7 +2010,7 @@ qemuGetMemoryBackingPath(const virDomainDef *def,
                          const char *alias,
                          char **memPath)
 {
-    VIR_AUTOFREE(char *) domainPath = NULL;
+    g_autofree char *domainPath = NULL;
 
     if (!alias) {
         /* This should never happen (TM) */

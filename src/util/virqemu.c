@@ -56,7 +56,7 @@ virQEMUBuildCommandLineJSONArrayBitmap(const char *key,
 {
     ssize_t pos = -1;
     ssize_t end;
-    VIR_AUTOPTR(virBitmap) bitmap = NULL;
+    g_autoptr(virBitmap) bitmap = NULL;
 
     if (virJSONValueGetArrayAsBitmap(array, &bitmap) < 0)
         return -1;
@@ -87,7 +87,7 @@ virQEMUBuildCommandLineJSONArrayNumbered(const char *key,
 
     for (i = 0; i < virJSONValueArraySize(array); i++) {
         member = virJSONValueArrayGet((virJSONValuePtr) array, i);
-        VIR_AUTOFREE(char *) prefix = NULL;
+        g_autofree char *prefix = NULL;
 
         if (virAsprintf(&prefix, "%s.%zu", key, i) < 0)
             return 0;
@@ -111,7 +111,7 @@ virQEMUBuildCommandLineJSONIterate(const char *key,
     struct virQEMUCommandLineJSONIteratorData *data = opaque;
 
     if (data->prefix) {
-        VIR_AUTOFREE(char *) tmpkey = NULL;
+        g_autofree char *tmpkey = NULL;
 
         if (virAsprintf(&tmpkey, "%s.%s", data->prefix, key) < 0)
             return -1;

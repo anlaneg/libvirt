@@ -30,8 +30,8 @@
 static char *
 virshPagesizeNodeToString(xmlNodePtr node)
 {
-    VIR_AUTOFREE(char *) pagesize = NULL;
-    VIR_AUTOFREE(char *) unit = NULL;
+    g_autofree char *pagesize = NULL;
+    g_autofree char *unit = NULL;
     unsigned long long byteval = 0;
     const char *suffix = NULL;
     double size = 0;
@@ -54,16 +54,16 @@ virshAllocpagesPagesizeCompleter(vshControl *ctl,
                                  const vshCmd *cmd G_GNUC_UNUSED,
                                  unsigned int flags)
 {
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     virshControlPtr priv = ctl->privData;
     unsigned int npages = 0;
-    VIR_AUTOFREE(xmlNodePtr *) pages = NULL;
-    VIR_AUTOPTR(xmlDoc) doc = NULL;
+    g_autofree xmlNodePtr *pages = NULL;
+    g_autoptr(xmlDoc) doc = NULL;
     size_t i = 0;
     const char *cellnum = NULL;
     bool cellno = vshCommandOptBool(cmd, "cellno");
-    VIR_AUTOFREE(char *) path = NULL;
-    VIR_AUTOFREE(char *) cap_xml = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *cap_xml = NULL;
     char **ret = NULL;
     VIR_AUTOSTRINGLIST tmp = NULL;
 
@@ -100,7 +100,7 @@ virshAllocpagesPagesizeCompleter(vshControl *ctl,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }
 
@@ -110,13 +110,13 @@ virshCellnoCompleter(vshControl *ctl,
                      const vshCmd *cmd G_GNUC_UNUSED,
                      unsigned int flags)
 {
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     virshControlPtr priv = ctl->privData;
     unsigned int ncells = 0;
-    VIR_AUTOFREE(xmlNodePtr *) cells = NULL;
-    VIR_AUTOPTR(xmlDoc) doc = NULL;
+    g_autofree xmlNodePtr *cells = NULL;
+    g_autoptr(xmlDoc) doc = NULL;
     size_t i = 0;
-    VIR_AUTOFREE(char *) cap_xml = NULL;
+    g_autofree char *cap_xml = NULL;
     char **ret = NULL;
     VIR_AUTOSTRINGLIST tmp = NULL;
 
@@ -143,6 +143,6 @@ virshCellnoCompleter(vshControl *ctl,
             return NULL;
     }
 
-    VIR_STEAL_PTR(ret, tmp);
+    ret = g_steal_pointer(&tmp);
     return ret;
 }

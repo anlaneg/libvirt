@@ -109,7 +109,7 @@ virSCSIDeviceGetSgName(const char *sysfs_prefix,
 {
     DIR *dir = NULL;
     struct dirent *entry;
-    VIR_AUTOFREE(char *) path = NULL;
+    g_autofree char *path = NULL;
     char *sg = NULL;
     unsigned int adapter_id;
     const char *prefix = sysfs_prefix ? sysfs_prefix : SYSFS_SCSI_DEVICES;
@@ -148,7 +148,7 @@ virSCSIDeviceGetDevName(const char *sysfs_prefix,
 {
     DIR *dir = NULL;
     struct dirent *entry;
-    VIR_AUTOFREE(char *) path = NULL;
+    g_autofree char *path = NULL;
     char *name = NULL;
     unsigned int adapter_id;
     const char *prefix = sysfs_prefix ? sysfs_prefix : SYSFS_SCSI_DEVICES;
@@ -183,13 +183,13 @@ virSCSIDeviceNew(const char *sysfs_prefix,
                  bool readonly,
                  bool shareable)
 {
-    VIR_AUTOPTR(virSCSIDevice) dev = NULL;
+    g_autoptr(virSCSIDevice) dev = NULL;
     virSCSIDevicePtr ret = NULL;
-    VIR_AUTOFREE(char *) sg = NULL;
-    VIR_AUTOFREE(char *) vendor_path = NULL;
-    VIR_AUTOFREE(char *) model_path = NULL;
-    VIR_AUTOFREE(char *) vendor = NULL;
-    VIR_AUTOFREE(char *) model = NULL;
+    g_autofree char *sg = NULL;
+    g_autofree char *vendor_path = NULL;
+    g_autofree char *model_path = NULL;
+    g_autofree char *vendor = NULL;
+    g_autofree char *model = NULL;
     const char *prefix = sysfs_prefix ? sysfs_prefix : SYSFS_SCSI_DEVICES;
 
     if (VIR_ALLOC(dev) < 0)
@@ -238,7 +238,7 @@ virSCSIDeviceNew(const char *sysfs_prefix,
     if (virAsprintf(&dev->id, "%s:%s", vendor, model) < 0)
         return NULL;
 
-    VIR_STEAL_PTR(ret, dev);
+    ret = g_steal_pointer(&dev);
     return ret;
 }
 
@@ -249,7 +249,7 @@ virSCSIDeviceUsedByInfoFree(virUsedByInfoPtr used_by)
     VIR_FREE(used_by->domname);
     VIR_FREE(used_by);
 }
-VIR_DEFINE_AUTOPTR_FUNC(virUsedByInfo, virSCSIDeviceUsedByInfoFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virUsedByInfo, virSCSIDeviceUsedByInfoFree);
 
 void
 virSCSIDeviceFree(virSCSIDevicePtr dev)
@@ -273,7 +273,7 @@ virSCSIDeviceSetUsedBy(virSCSIDevicePtr dev,
                        const char *drvname,
                        const char *domname)
 {
-    VIR_AUTOPTR(virUsedByInfo) copy = NULL;
+    g_autoptr(virUsedByInfo) copy = NULL;
 
     if (VIR_ALLOC(copy) < 0)
         return -1;
@@ -440,7 +440,7 @@ virSCSIDeviceListDel(virSCSIDeviceListPtr list,
                 virSCSIDeviceUsedByInfoFree(dev->used_by[i]);
                 VIR_DELETE_ELEMENT(dev->used_by, i, dev->n_used_by);
             } else {
-                VIR_AUTOPTR(virSCSIDevice) tmp = NULL;
+                g_autoptr(virSCSIDevice) tmp = NULL;
                 tmp = virSCSIDeviceListSteal(list, dev);
             }
             break;

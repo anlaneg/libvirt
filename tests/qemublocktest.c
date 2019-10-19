@@ -46,16 +46,16 @@ static int
 testBackingXMLjsonXML(const void *args)
 {
     const struct testBackingXMLjsonXMLdata *data = args;
-    VIR_AUTOPTR(xmlDoc) xml = NULL;
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
-    VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
-    VIR_AUTOPTR(virJSONValue) backendprops = NULL;
-    VIR_AUTOPTR(virJSONValue) wrapper = NULL;
-    VIR_AUTOFREE(char *) propsstr = NULL;
-    VIR_AUTOFREE(char *) protocolwrapper = NULL;
-    VIR_AUTOFREE(char *) actualxml = NULL;
-    VIR_AUTOUNREF(virStorageSourcePtr) xmlsrc = NULL;
-    VIR_AUTOUNREF(virStorageSourcePtr) jsonsrc = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autoptr(virJSONValue) backendprops = NULL;
+    g_autoptr(virJSONValue) wrapper = NULL;
+    g_autofree char *propsstr = NULL;
+    g_autofree char *protocolwrapper = NULL;
+    g_autofree char *actualxml = NULL;
+    g_autoptr(virStorageSource) xmlsrc = NULL;
+    g_autoptr(virStorageSource) jsonsrc = NULL;
 
     if (!(xmlsrc = virStorageSourceNew()))
         return -1;
@@ -193,7 +193,7 @@ testQemuDiskXMLToProps(const void *opaque)
     virStorageSourcePtr n;
     virJSONValuePtr formatProps = NULL;
     virJSONValuePtr storageProps = NULL;
-    VIR_AUTOPTR(virJSONValue) storageSrcOnlyProps = NULL;
+    g_autoptr(virJSONValue) storageSrcOnlyProps = NULL;
     char *xmlpath = NULL;
     char *xmlstr = NULL;
     int ret = -1;
@@ -363,10 +363,10 @@ testQemuImageCreateLoadDiskXML(const char *name,
 
 {
     virDomainSnapshotDiskDefPtr diskdef = NULL;
-    VIR_AUTOPTR(xmlDoc) doc = NULL;
-    VIR_AUTOPTR(xmlXPathContext) ctxt = NULL;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     xmlNodePtr node;
-    VIR_AUTOFREE(char *) xmlpath = NULL;
+    g_autofree char *xmlpath = NULL;
     virStorageSourcePtr ret = NULL;
 
     if (virAsprintf(&xmlpath, "%s%s.xml",
@@ -387,7 +387,7 @@ testQemuImageCreateLoadDiskXML(const char *name,
     if (virDomainSnapshotDiskDefParseXML(node, ctxt, diskdef,
                                          VIR_DOMAIN_DEF_PARSE_STATUS,
                                          xmlopt) == 0)
-        VIR_STEAL_PTR(ret, diskdef->src);
+        ret = g_steal_pointer(&diskdef->src);
 
     virDomainSnapshotDiskDefFree(diskdef);
     return ret;
@@ -398,15 +398,15 @@ static int
 testQemuImageCreate(const void *opaque)
 {
     struct testQemuImageCreateData *data = (void *) opaque;
-    VIR_AUTOPTR(virJSONValue) protocolprops = NULL;
-    VIR_AUTOPTR(virJSONValue) formatprops = NULL;
-    VIR_AUTOUNREF(virStorageSourcePtr) src = NULL;
-    VIR_AUTOCLEAN(virBuffer) debug = VIR_BUFFER_INITIALIZER;
-    VIR_AUTOCLEAN(virBuffer) actualbuf = VIR_BUFFER_INITIALIZER;
-    VIR_AUTOFREE(char *) jsonprotocol = NULL;
-    VIR_AUTOFREE(char *) jsonformat = NULL;
-    VIR_AUTOFREE(char *) actual = NULL;
-    VIR_AUTOFREE(char *) jsonpath = NULL;
+    g_autoptr(virJSONValue) protocolprops = NULL;
+    g_autoptr(virJSONValue) formatprops = NULL;
+    g_autoptr(virStorageSource) src = NULL;
+    g_auto(virBuffer) debug = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) actualbuf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *jsonprotocol = NULL;
+    g_autofree char *jsonformat = NULL;
+    g_autofree char *actual = NULL;
+    g_autofree char *jsonpath = NULL;
 
     if (!(src = testQemuImageCreateLoadDiskXML(data->name, data->driver->xmlopt)))
         return -1;
@@ -438,7 +438,7 @@ testQemuImageCreate(const void *opaque)
 
         if (testQEMUSchemaValidate(formatprops, data->schemaroot, data->schema,
                                    &debug) < 0) {
-            VIR_AUTOFREE(char *) debugmsg = virBufferContentAndReset(&debug);
+            g_autofree char *debugmsg = virBufferContentAndReset(&debug);
             VIR_TEST_VERBOSE("blockdev-create format json does not conform to QAPI schema");
             VIR_TEST_DEBUG("json:\n%s\ndoes not match schema. Debug output:\n %s",
                            jsonformat, NULLSTR(debugmsg));
@@ -453,7 +453,7 @@ testQemuImageCreate(const void *opaque)
 
         if (testQEMUSchemaValidate(protocolprops, data->schemaroot, data->schema,
                                    &debug) < 0) {
-            VIR_AUTOFREE(char *) debugmsg = virBufferContentAndReset(&debug);
+            g_autofree char *debugmsg = virBufferContentAndReset(&debug);
             VIR_TEST_VERBOSE("blockdev-create protocol json does not conform to QAPI schema");
             VIR_TEST_DEBUG("json:\n%s\ndoes not match schema. Debug output:\n %s",
                            jsonprotocol, NULLSTR(debugmsg));
@@ -482,9 +482,9 @@ static int
 testQemuDiskXMLToPropsValidateFileSrcOnly(const void *opaque)
 {
     struct testQemuDiskXMLToJSONData *data = (void *) opaque;
-    VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
-    VIR_AUTOFREE(char *) jsonpath = NULL;
-    VIR_AUTOFREE(char *) actual = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *jsonpath = NULL;
+    g_autofree char *actual = NULL;
     size_t i;
 
     if (data->fail)
@@ -495,7 +495,7 @@ testQemuDiskXMLToPropsValidateFileSrcOnly(const void *opaque)
         return -1;
 
     for (i = 0; i < data->npropssrc; i++) {
-        VIR_AUTOFREE(char *) jsonstr = NULL;
+        g_autofree char *jsonstr = NULL;
 
         if (!(jsonstr = virJSONValueToString(data->propssrc[i], true)))
             return -1;
