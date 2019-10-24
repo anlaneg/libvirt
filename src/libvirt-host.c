@@ -1344,6 +1344,7 @@ virConnectSetKeepAlive(virConnectPtr conn,
 
     virCheckConnectReturn(conn, -1);
 
+    //设置keepalive,keepalive count
     if (conn->driver->connectSetKeepAlive) {
         ret = conn->driver->connectSetKeepAlive(conn, interval, count);
         if (ret < 0)

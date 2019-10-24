@@ -1088,7 +1088,7 @@ virDomainObjListExport(virDomainObjListPtr domlist,
     size_t i;
     int ret = -1;
 
-    if (virDomainObjListCollect(domlist, conn, &vms, &nvms, filter, flags) < 0)
+    if (virDomainObjListCollect(domlist, conn, &vms, &nvms/*vm数目*/, filter, flags) < 0)
         return -1;
 
     if (domains) {

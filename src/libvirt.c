@@ -861,7 +861,7 @@ virConnectCheckURIMissingSlash(const char *uristr, virURIPtr uri)
     return 0;
 }
 
-//执行uri $name的打开
+//执行uri $name的打开,匹配相应driver,生成virConnectPtr
 static virConnectPtr
 virConnectOpenInternal(const char *name,
                        virConnectAuthPtr auth,
@@ -911,7 +911,7 @@ virConnectOpenInternal(const char *name,
             goto failed;
 
         if (uristr == NULL) {
-        		//仍然没有拿到默认的URI,采用driver的connectURIProbe函数尝试uri
+        	//仍然没有拿到默认的URI,采用driver的connectURIProbe函数尝试uri
             VIR_DEBUG("Trying to probe for default URI");
             for (i = 0; i < virConnectDriverTabCount && uristr == NULL; i++) {
                 if (virConnectDriverTab[i]->hypervisorDriver->connectURIProbe) {
@@ -966,6 +966,7 @@ virConnectOpenInternal(const char *name,
             goto failed;
         }
 
+        //uristr校验
         if (virConnectCheckURIMissingSlash(uristr,
                                            ret->uri) < 0) {
             goto failed;
@@ -978,6 +979,7 @@ virConnectOpenInternal(const char *name,
     /* Cleansing flags */
     ret->flags = flags & VIR_CONNECT_RO;
 
+    //遍历所有已注册的ConnectDriver
     for (i = 0; i < virConnectDriverTabCount; i++) {
         /* We're going to probe the remote driver next. So we have already
          * probed all other client-side-only driver before, but none of them
@@ -1050,7 +1052,7 @@ virConnectOpenInternal(const char *name,
             goto failed;
         }
 
-        //指定连接对应的dirver
+        //ConnectDriver匹配成功，指定连接对应的dirver
         ret->driver = virConnectDriverTab[i]->hypervisorDriver;
         ret->interfaceDriver = virConnectDriverTab[i]->interfaceDriver;
         ret->networkDriver = virConnectDriverTab[i]->networkDriver;

@@ -135,12 +135,12 @@ virshConnect(vshControl *ctl, const char *uri, bool readonly)
     bool agentCreated = false;
 
     if (ctl->keepalive_interval >= 0) {
-    		//如果指定了interval,则使用指定的数
+    	//如果指定了interval,则使用指定的数
         interval = ctl->keepalive_interval;
         keepalive_forced = true;
     }
     if (ctl->keepalive_count >= 0) {
-    		//如果指定了keepalive count,则使用命令行指定的
+    	//如果指定了keepalive count,则使用命令行指定的
         count = ctl->keepalive_count;
         keepalive_forced = true;
     }
@@ -148,6 +148,7 @@ virshConnect(vshControl *ctl, const char *uri, bool readonly)
     do {
         virErrorPtr err;
 
+        //创建connect
         if ((c = virConnectOpenAuth(uri, virConnectAuthPtrDefault,
                                     readonly ? VIR_CONNECT_RO : 0)))
             break;
@@ -238,6 +239,7 @@ virshReconnect(vshControl *ctl, const char *name, bool readonly, bool force)
             vshError(ctl, "%s", _("failed to connect to the hypervisor"));
         return -1;
     } else {
+    	//连接成功，注册连接关闭时的callback
         if (name) {
             VIR_FREE(ctl->connname);
             ctl->connname = vshStrdup(ctl, name);
@@ -329,6 +331,7 @@ virshConnectionHandler(vshControl *ctl)
 {
     virshControlPtr priv = ctl->privData;
 
+    //执行到目标的连接
     if ((!priv->conn || disconnected) &&
         virshReconnect(ctl, NULL, false, false) < 0)
         return NULL;

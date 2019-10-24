@@ -22691,9 +22691,9 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .connectGetMaxVcpus = qemuConnectGetMaxVcpus, /* 0.2.1 */
     .nodeGetInfo = qemuNodeGetInfo, /* 0.2.0 */
     .connectGetCapabilities = qemuConnectGetCapabilities, /* 0.2.1 */
-	//列出所有domain
     .connectListDomains = qemuConnectListDomains, /* 0.2.0 */
     .connectNumOfDomains = qemuConnectNumOfDomains, /* 0.2.0 */
+	//列出所有满足条件的domain
     .connectListAllDomains = qemuConnectListAllDomains, /* 0.9.13 */
     .domainCreateXML = qemuDomainCreateXML, /* 0.2.0 */
     .domainLookupByID = qemuDomainLookupByID, /* 0.2.0 */

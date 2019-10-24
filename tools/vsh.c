@@ -1332,7 +1332,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             GETTIMEOFDAY(&before);
 
         if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT) ||
-            (hooks && hooks->connHandler && hooks->connHandler(ctl))) {
+            (hooks && hooks->connHandler && hooks->connHandler(ctl)/*重新连接*/)) {
         		//执行对应的命令处理
             ret = cmd->def->handler(ctl, cmd);
         } else {
