@@ -1037,14 +1037,14 @@ virDomainPCIAddressSetExtensionAlloc(virDomainPCIAddressSetPtr addrs,
         if (VIR_ALLOC(addrs->zpciIds) < 0)
             return -1;
 
-        if (!(addrs->zpciIds->uids = virHashCreateFull(10, NULL,
+        if (!(addrs->zpciIds->uids = virHashCreateFull(10, NULL, NULL,
                                                        virZPCIAddrKeyCode,
                                                        virZPCIAddrKeyEqual,
                                                        virZPCIAddrKeyCopy,
                                                        virZPCIAddrKeyFree)))
             goto error;
 
-        if (!(addrs->zpciIds->fids = virHashCreateFull(10, NULL,
+        if (!(addrs->zpciIds->fids = virHashCreateFull(10, NULL, NULL,
                                                        virZPCIAddrKeyCode,
                                                        virZPCIAddrKeyEqual,
                                                        virZPCIAddrKeyCopy,
@@ -1985,8 +1985,6 @@ virDomainUSBAddressPortFormat(unsigned int *port)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
     virDomainUSBAddressPortFormatBuf(&buf, port);
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
     return virBufferContentAndReset(&buf);
 }
 

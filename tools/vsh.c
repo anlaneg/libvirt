@@ -129,29 +129,9 @@ _vshMalloc(vshControl *ctl, size_t size, const char *filename, int line)
 }
 
 void *
-_vshCalloc(vshControl *ctl, size_t nmemb, size_t size, const char *filename,
-           int line)
+vshCalloc(vshControl *ctl G_GNUC_UNUSED, size_t nmemb, size_t size)
 {
-    char *x;
-
-    if (!xalloc_oversized(nmemb, size) &&
-        VIR_ALLOC_N(x, nmemb * size) == 0)
-        return x;
-    vshError(ctl, _("%s: %d: failed to allocate %d bytes"),
-             filename, line, (int) (size*nmemb));
-    exit(EXIT_FAILURE);
-}
-
-char *
-_vshStrdup(vshControl *ctl, const char *s, const char *filename, int line)
-{
-    char *x;
-
-    if (VIR_STRDUP(x, s) >= 0)
-        return x;
-    vshError(ctl, _("%s: %d: failed to allocate %lu bytes"),
-             filename, line, (unsigned long)strlen(s));
-    exit(EXIT_FAILURE);
+    return g_malloc0_n(nmemb, size);
 }
 
 int
@@ -176,7 +156,7 @@ int
 vshStringToArray(const char *str,
                  char ***array)
 {
-    char *str_copied = vshStrdup(NULL, str);
+    char *str_copied = g_strdup(str);
     char *str_tok = NULL;
     char *tmp;
     unsigned int nstr_tokens = 0;
@@ -214,10 +194,10 @@ vshStringToArray(const char *str,
             continue;
         }
         *tmp++ = '\0';
-        arr[nstr_tokens++] = vshStrdup(NULL, str_tok);
+        arr[nstr_tokens++] = g_strdup(str_tok);
         str_tok = tmp;
     }
-    arr[nstr_tokens++] = vshStrdup(NULL, str_tok);
+    arr[nstr_tokens++] = g_strdup(str_tok);
 
     *array = arr;
     VIR_FREE(str_copied);
@@ -507,8 +487,7 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
                    opt->help = "string=value": treat boolean flag as
                    alias of option and its default value */
                 sa_assert(!alias);
-                if (VIR_STRDUP(alias, opt->help) < 0)
-                    goto cleanup;
+                alias = g_strdup(opt->help);
                 name = alias;
                 if ((value = strchr(name, '='))) {
                     *value = '\0';
@@ -518,8 +497,7 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
                                      opt->name);
                         goto cleanup;
                     }
-                    if (VIR_STRDUP(*optstr, value + 1) < 0)
-                        goto cleanup;
+                    *optstr = g_strdup(value + 1);
                 }
                 continue;
             }
@@ -1462,7 +1440,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 /* aliases need to be resolved to the actual commands */
                 if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
                     VIR_FREE(tkdata);
-                    tkdata = vshStrdup(ctl, cmd->alias);
+                    tkdata = g_strdup(cmd->alias);
                     cmd = vshCmddefSearch(tkdata);
                 }
                 if (vshCmddefOptParse(cmd, &opts_need_arg,
@@ -1483,7 +1461,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
 
                 if (optstr) {
                     *optstr = '\0'; /* convert the '=' to '\0' */
-                    optstr = vshStrdup(ctl, optstr + 1);
+                    optstr = g_strdup(optstr + 1);
                 }
                 /* Special case 'help' to ignore all spurious options */
                 if (!(opt = vshCmddefGetOption(ctl, cmd, tkdata + 2,
@@ -1593,7 +1571,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 vshCommandOptFree(first);
                 first = vshMalloc(ctl, sizeof(vshCmdOpt));
                 first->def = help->opts;
-                first->data = vshStrdup(ctl, cmd->name);
+                first->data = g_strdup(cmd->name);
                 first->next = NULL;
 
                 cmd = help;
@@ -1656,7 +1634,9 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
 
 //获取下一个参数
 static vshCommandToken ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-vshCommandArgvGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
+vshCommandArgvGetArg(vshControl *ctl G_GNUC_UNUSED,
+                     vshCommandParser *parser,
+                     char **res,
                      bool report G_GNUC_UNUSED)
 {
     if (parser->arg_pos == parser->arg_end) {
@@ -1666,7 +1646,7 @@ vshCommandArgvGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
     }
 
     //取arg_pos指向的参数（copy一份），arg_pos跳一格，返回参数
-    *res = vshStrdup(ctl, *parser->arg_pos);
+    *res = g_strdup(*parser->arg_pos);
     parser->arg_pos++;
     return VSH_TK_ARG;
 }
@@ -1699,7 +1679,7 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
     int sz = 0;
     char *p = parser->pos;
     //制作p的副本
-    char *q = vshStrdup(ctl, p);
+    char *q = g_strdup(p);
 
     *res = q;
 
@@ -1857,11 +1837,11 @@ vshGetTypedParamValue(vshControl *ctl, virTypedParameterPtr item)
         break;
 
     case VIR_TYPED_PARAM_BOOLEAN:
-        str = vshStrdup(ctl, item->value.b ? _("yes") : _("no"));
+        str = g_strdup(item->value.b ? _("yes") : _("no"));
         break;
 
     case VIR_TYPED_PARAM_STRING:
-        str = vshStrdup(ctl, item->value.s);
+        str = g_strdup(item->value.s);
         break;
 
     default:
@@ -2315,9 +2295,6 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
     virBufferTrim(&buf, "\n", -1);
     virBufferAddChar(&buf, '\n');
 
-    if (virBufferError(&buf))
-        goto error;
-
     str = virBufferContentAndReset(&buf);
     len = strlen(str);
 
@@ -2579,9 +2556,6 @@ vshTreePrintInternal(vshControl *ctl,
     int ret = -1;
     const char *dev = (lookup)(devid, false, opaque);
 
-    if (virBufferError(indent))
-        goto cleanup;
-
     /* Print this device, with indent if not at root */
     vshPrint(ctl, "%s%s%s\n", virBufferCurrentContent(indent),
              root ? "" : "+- ", dev);
@@ -2590,8 +2564,6 @@ vshTreePrintInternal(vshControl *ctl,
     if (!root) {
         virBufferAddChar(indent, devid == lastdev ? ' ' : '|');
         virBufferAddChar(indent, ' ');
-        if (virBufferError(indent))
-            goto cleanup;
     }
 
     /* Determine the index of the last child device */
@@ -2608,8 +2580,6 @@ vshTreePrintInternal(vshControl *ctl,
 
     /* Finally print all children */
     virBufferAddLit(indent, "  ");
-    if (virBufferError(indent))
-        goto cleanup;
     for (i = 0; i < num_devices; i++) {
         const char *parent = (lookup)(i, true, opaque);
 
@@ -2693,7 +2663,7 @@ vshReadlineCommandGenerator(const char *text)
                         virStringListFree(ret);
                         return NULL;
                     }
-                    ret[ret_size] = vshStrdup(NULL, name);
+                    ret[ret_size] = g_strdup(name);
                     ret_size++;
                     /* Terminate the string list properly. */
                     ret[ret_size] = NULL;
@@ -2845,7 +2815,7 @@ vshReadlineParse(const char *text, int state)
     char *ret = NULL;
 
     if (!state) {
-        char *buf = vshStrdup(NULL, rl_line_buffer);
+        char *buf = g_strdup(rl_line_buffer);
 
         vshCommandFree(partial);
         partial = NULL;
@@ -2907,7 +2877,7 @@ vshReadlineParse(const char *text, int state)
     }
 
     if (list) {
-        ret = vshStrdup(NULL, list[list_index]);
+        ret = g_strdup(list[list_index]);
         list_index++;
     }
 
@@ -2937,10 +2907,7 @@ vshReadlineCompletion(const char *text,
                       int start G_GNUC_UNUSED,
                       int end G_GNUC_UNUSED)
 {
-    char **matches = (char **) NULL;
-
-    matches = rl_completion_matches(text, vshReadlineParse);
-    return matches;
+    return rl_completion_matches(text, vshReadlineParse);
 }
 
 
@@ -3065,7 +3032,8 @@ vshReadlineDeinit(vshControl *ctl G_GNUC_UNUSED)
 }
 
 char *
-vshReadline(vshControl *ctl, const char *prompt)
+vshReadline(vshControl *ctl G_GNUC_UNUSED,
+            const char *prompt)
 {
     char line[1024];
     char *r;
@@ -3083,7 +3051,7 @@ vshReadline(vshControl *ctl, const char *prompt)
         r[len-1] = '\0';
 
     //返回读取到的数据
-    return vshStrdup(ctl, r);
+    return g_strdup(r);
 }
 
 #endif /* !WITH_READLINE */
@@ -3123,7 +3091,7 @@ vshInitDebug(vshControl *ctl)
         /* log file not set from cmdline */
         debugEnv = getenv(env);
         if (debugEnv && *debugEnv) {
-            ctl->logfile = vshStrdup(ctl, debugEnv);
+            ctl->logfile = g_strdup(debugEnv);
             vshOpenLogFile(ctl);
         }
         VIR_FREE(env);
@@ -3369,13 +3337,9 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
 
         if (xml) {
             virBufferEscapeString(&xmlbuf, "%s", arg);
-            if (virBufferError(&xmlbuf)) {
-                vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-                return false;
-            }
             str = virBufferContentAndReset(&xmlbuf);
         } else {
-            str = vshStrdup(ctl, arg);
+            str = g_strdup(arg);
         }
 
         if (shell)
@@ -3386,10 +3350,6 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
         VIR_FREE(str);
     }
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-        return false;
-    }
     arg = virBufferContentAndReset(&buf);
     if (arg) {
         if (err)
@@ -3536,14 +3496,10 @@ cmdComplete(vshControl *ctl, const vshCmd *cmd)
         arg = opt->data;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
-
     vshReadlineInit(ctl);
 
-    if (!(rl_line_buffer = virBufferContentAndReset(&buf)) &&
-        VIR_STRDUP(rl_line_buffer, "") < 0)
-        goto cleanup;
+    if (!(rl_line_buffer = virBufferContentAndReset(&buf)))
+        rl_line_buffer = g_strdup("");
 
     /* rl_point is current cursor position in rl_line_buffer.
      * In our case it's at the end of the whole line. */

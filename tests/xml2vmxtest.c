@@ -153,8 +153,7 @@ testFormatVMXFileName(const char *src, void *opaque G_GNUC_UNUSED)
 
     if (STRPREFIX(src, "[")) {
         /* Found potential datastore path */
-        if (VIR_STRDUP(copyOfDatastorePath, src) < 0)
-            goto cleanup;
+        copyOfDatastorePath = g_strdup(src);
 
         /* Expected format: '[<datastore>] <path>' where <path> is optional */
         if ((tmp = STRSKIP(copyOfDatastorePath, "[")) == NULL || *tmp == ']' ||
@@ -175,7 +174,7 @@ testFormatVMXFileName(const char *src, void *opaque G_GNUC_UNUSED)
             goto cleanup;
     } else if (STRPREFIX(src, "/")) {
         /* Found absolute path */
-        ignore_value(VIR_STRDUP(absolutePath, src));
+        absolutePath = g_strdup(src);
     } else {
         /* Found relative path, this is not supported */
         goto cleanup;

@@ -29,11 +29,11 @@
         file from zanata.</p>
       </li>
 
-      <li><p>Post patches using <code>git send-email</code>, with git
-        rename detection enabled.  You need a one-time setup of:</p>
-<pre>
-  git config diff.renames true
-</pre>
+      <li><p>The simplest way to send patches is to use the
+        <a href="https://github.com/stefanha/git-publish"><code>git-publish</code></a>
+        tool. All libvirt-related repositories contain a config file that
+        tells git-publish to use the correct mailing list and subject prefix.</p>
+        <p>Alternatively, you may send patches using <code>git send-email</code>.</p>
         <p>Also, for code motion patches, you may find that <code>git
         diff --patience</code> provides an easier-to-read patch.
         However, the usual workflow of libvirt developer is:</p>
@@ -72,8 +72,8 @@
 </pre>
         <p>As a rule, patches should be sent to the mailing list only: all
         developers are subscribed to libvir-list and read it regularly, so
-        please don't CC individual developers unless they've explicitly
-        asked you to.</p>
+        <strong>please don't CC individual developers</strong> unless
+        they've explicitly asked you to.</p>
         <p>Avoid using mail clients for sending patches, as most of them
         will mangle the messages in some way, making them unusable for our
         purposes.  Gmail and other Web-based mail clients are particularly
@@ -81,9 +81,11 @@
         <p>If everything went well, your patch should show up on the
         <a href="https://www.redhat.com/archives/libvir-list/">libvir-list
         archives</a> in a matter of minutes; if you still can't find it on
-        there after an hour or so, you should double-check your setup.  Note
-        that your very first post to the mailing list will be subject to
-        moderation, and it's not uncommon for that to take around a day.</p>
+        there after an hour or so, you should double-check your setup.
+        <strong>Note that, if you are not already a subscriber, your very
+        first post to the mailing list will be
+        subject to moderation</strong>, and it's not uncommon for that to
+        take around a day.</p>
         <p>Please follow this as close as you can, especially the rebase and
         <code>git send-email</code> part, as it makes life easier for other
         developers to review your patch set.</p>
@@ -139,14 +141,7 @@
       </li>
 
       <li><p>Run the automated tests on your code before submitting any changes.
-          In particular, configure with compile warnings set to
-          -Werror.  This is done automatically for a git checkout; from a
-          tarball, use:</p>
-<pre>
-  ./configure --enable-werror
-</pre>
-        <p>
-          and run the tests:
+          That is:
         </p>
 <pre>
   make check
@@ -184,12 +179,13 @@
 
         <p>
           When debugging failures during development, it is possible
-          to focus in on just the failing subtests by using TESTS and
-          VIR_TEST_RANGE:
+          to focus in on just the failing subtests by using
+          VIR_TEST_RANGE. I.e. to run all tests from 3 to 20 with the
+          exception of tests 6 and 16, use:
         </p>
 
 <pre>
-  make check VIR_TEST_DEBUG=1 VIR_TEST_RANGE=3-5 TESTS=qemuxml2argvtest
+  VIR_TEST_DEBUG=1 VIR_TEST_RANGE=3-5,7-20,^16 ./run tests/qemuxml2argvtest
 </pre>
 
         <p>
@@ -989,6 +985,25 @@ BAD:
       it points to, or it is aliased to another pointer that is.
     </p>
 
+    <h2><a id="attribute_annotations">Attribute annotations</a></h2>
+    <p>
+      Use the following annotations to help the compiler and/or static
+      analysis tools understand the code better:
+    </p>
+
+    <table class="top_table">
+        <tr><th>Macro</th><th>Meaning</th></tr>
+        <tr><td><code>ATTRIBUTE_NONNULL</code></td><td>passing NULL for this parameter is not allowed</td></tr>
+        <tr><td><code>ATTRIBUTE_PACKED</code></td><td>force a structure to be packed</td></tr>
+        <tr><td><code>G_GNUC_FALLTHROUGH</code></td><td>allow code reuse by multiple switch cases</td></tr>
+        <tr><td><code>G_GNUC_NO_INLINE</code></td><td>the function is mocked in the test suite</td></tr>
+        <tr><td><code>G_GNUC_NORETURN</code></td><td>the function never returns</td></tr>
+        <tr><td><code>G_GNUC_NULL_TERMINATED</code></td><td>last parameter must be NULL</td></tr>
+        <tr><td><code>G_GNUC_PRINTF</code></td><td>validate that the formatting string matches parameters</td></tr>
+        <tr><td><code>G_GNUC_UNUSED</code></td><td>parameter is unused in this implementation of the function</td></tr>
+        <tr><td><code>G_GNUC_WARN_UNUSED_RESULT</code></td><td>the return value must be checked</td></tr>
+    </table>
+
     <h2><a id="glib">Adoption of GLib APIs</a></h2>
 
     <p>
@@ -1036,6 +1051,39 @@ BAD:
       <dt><code>virStrerror</code></dt>
       <dd>The GLib <code>g_strerror()</code> function should be used instead,
         which has a simpler calling convention as an added benefit.</dd>
+
+    <table class="top_table">
+        <tr><th>deprecated version</th><th>GLib version</th><th>Notes</th></tr>
+        <tr><td><code>VIR_ALLOC(var)</code></td><td><code>g_new0(var_t, 1)</code></td>
+            <td>the type needs to be passed explicitly</td></tr>
+        <tr><td><code>VIR_ALLOC_N</code></td><td><code>g_new0(var_t, n)</code></td><td></td></tr>
+        <tr><td><code>VIR_REALLOC_N</code></td><td><code>g_renew(var_t, ptr, n)</code></td>
+            <td>the newly added memory is not zeroed</td></tr>
+        <tr><td><code>VIR_EXPAND_N</code></td><td><code>g_renew(var_t, ptr, n)</code></td>
+            <td>zero the new memory manually or use an array type</td></tr>
+        <tr><td><code>VIR_SHRINK_N</code></td><td>g_renew(var_t, ptr, n)</td>
+            <td></td></tr>
+        <tr><td><code>VIR_APPEND_ELEMENT</code></td><td><code>g_array_append_val</code></td>
+            <td><code>g_ptr_array_add</code> or <code>g_byte_array_append</code></td></tr>
+        <tr><td><code>VIR_INSERT_ELEMENT</code></td><td><code>g_array_insert_val</code></td>
+            <td><code>g_ptr_array_insert</code></td></tr>
+        <tr><td><code>VIR_DELETE_ELEMENT</code></td><td><code>g_array_remove_index</code></td>
+            <td><code>g_ptr_array_remove_index</code> or <code>g_byte_array_remove_index</code></td></tr>
+        <tr><td><code>VIR_FREE</code></td><td><code>g_free</code></td>
+            <td><code>g_free</code> does not zero the pointer</td></tr>
+    </table>
+
+    <p>String allocation macros and functions:</p>
+    <table class="top_table">
+        <tr><th>deprecated version</th><th>GLib version</th><th>Notes</th></tr>
+        <tr><td><code>VIR_STRDUP</code></td><td><code>g_strdup</code></td><td></td></tr>
+        <tr><td><code>VIR_STRNDUP</code></td><td><code>g_strndup</code></td><td></td></tr>
+        <tr><td><code>virAsprintf</code></td><td><code>g_strdup_printf</code></td><td></td></tr>
+        <tr><td><code>virVasprintf</code></td><td><code>g_strdup_vprint</code></td>
+            <td>use <code>g_vasprintf</code> if you really need to know the returned length</td></tr>
+        <tr><td><code>virStrerror</code></td><td><code>g_strerror</code></td>
+            <td>the error strings are cached globally so no need to free it</td></tr>
+    </table>
     </dl>
 
     <p>
@@ -1058,7 +1106,7 @@ BAD:
         new code. Existing code should be converted to the
         new macros where relevant. It is permissible to use
         <code>g_autoptr</code>, <code>g_auto</code> on an object whose cleanup function
-        is declared with the libvirt macros and vice-verca.
+        is declared with the libvirt macros and vice-versa.
       </dd>
 
       <dt><code>VIR_AUTOUNREF</code></dt>
@@ -1077,6 +1125,14 @@ BAD:
         <tr><td><code>VIR_STEAL_PTR</code></td><td><code>g_steal_pointer</code></td>
             <td><code>a = f(&amp;b)</code> instead of <code>f(a, b)</code></td></tr>
         <tr><td><code>VIR_RETURN_PTR</code></td><td><code>return g_steal_pointer</code></td><td></td></tr>
+        <tr><td><code>ARRAY_CARDINALITY</code></td><td><code>G_N_ELEMENTS</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_FALLTHROUGH</code></td><td><code>G_GNUC_FALLTHROUGH</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_FMT_PRINTF</code></td><td><code>G_GNUC_PRINTF</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_NOINLINE</code></td><td><code>G_GNUC_NO_INLINE</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_NORETURN</code></td><td><code>G_GNUC_NORETURN</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_RETURN_CHECK</code></td><td><code>G_GNUC_WARN_UNUSED_RESULT</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_SENTINEL</code></td><td><code>G_GNUC_NULL_TERMINATED</code></td><td></td></tr>
+        <tr><td><code>ATTRIBUTE_UNUSED</code></td><td><code>G_GNUC_UNUSED</code></td><td></td></tr>
     </table>
 
 
@@ -1219,18 +1275,14 @@ BAD:
     </p>
 
 <pre>
-  VIR_STRDUP(char *dst, const char *src);
-  VIR_STRNDUP(char *dst, const char *src, size_t n);
+    dst = g_strdup(src);
+    dst = g_strndup(src, n);
 </pre>
     <p>
-      You should avoid using strdup or strndup directly as they do not report
-      out-of-memory error, and do not allow a NULL source. Use
-      VIR_STRDUP or VIR_STRNDUP macros instead, which return 0 for
-      NULL source, 1 for successful copy, and -1 for allocation
-      failure with the error already reported. In very
-      specific cases, when you don't want to report the out-of-memory error, you
-      can use VIR_STRDUP_QUIET or VIR_STRNDUP_QUIET, but such usage is very rare
-      and usually considered a flaw.
+      You should avoid using strdup or strndup directly as they do not handle
+      out-of-memory errors, and do not allow a NULL source.
+      Use <code>g_strdup</code> and <code>g_strndup</code> from GLib which
+      abort on OOM and handle NULL source by returning NULL.
     </p>
 
     <h2><a id="strbuf">Variable length string buffer</a></h2>
@@ -1238,7 +1290,11 @@ BAD:
     <p>
       If there is a need for complex string concatenations, avoid using
       the usual sequence of malloc/strcpy/strcat/snprintf functions and
-      make use of the virBuffer API described in virbuffer.h
+      make use of either the
+      <a href="https://developer.gnome.org/glib/stable/glib-Strings.html">GString</a>
+      type from GLib or the virBuffer API.
+      If formatting XML or QEMU command line is needed, use the virBuffer
+      API described in virbuffer.h, since it has helper functions for those.
     </p>
 
     <p>Typical usage is as follows:</p>
@@ -1247,12 +1303,14 @@ BAD:
   char *
   somefunction(...)
   {
-     virBuffer buf = VIR_BUFFER_INITIALIZER;
+     g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
      ...
 
      virBufferAddLit(&amp;buf, "&lt;domain&gt;\n");
      virBufferAsprintf(&amp;buf, "  &lt;memory&gt;%d&lt;/memory&gt;\n", memory);
+     if (some_error)
+         return NULL; /* g_auto will free the memory used so far */
      ...
      virBufferAddLit(&amp;buf, "&lt;/domain&gt;\n");
 
@@ -1321,12 +1379,12 @@ BAD:
       Whenever you add a new printf-style function, i.e., one with a format
       string argument and following "..." in its prototype, be sure to use
       gcc's printf attribute directive in the prototype.  For example, here's
-      the one for virAsprintf, in util.h:
+      the one for virCommandAddEnvFormat in vircommand.h:
     </p>
 
 <pre>
-  int virAsprintf(char **strp, const char *fmt, ...)
-      ATTRIBUTE_FORMAT(printf, 2, 3);
+  void virCommandAddEnvFormat(virCommandPtr cmd, const char *format, ...)
+      G_GNUC_PRINTF(2, 3);
 </pre>
 
     <p>
@@ -1336,12 +1394,10 @@ BAD:
     </p>
 
     <p>
-      When printing to a string, consider using virBuffer for
-      incremental allocations, virAsprintf for a one-shot allocation,
-      and snprintf for fixed-width buffers.  Do not use sprintf, even
-      if you can prove the buffer won't overflow, since gnulib does
-      not provide the same portability guarantees for sprintf as it
-      does for snprintf.
+      When printing to a string, consider using GString or virBuffer for
+      incremental allocations, g_strdup_printf for a one-shot allocation,
+      and g_snprintf for fixed-width buffers.  Only use g_sprintf,
+      if you can prove the buffer won't overflow.
     </p>
 
     <h2><a id="errors">Error message format</a></h2>
@@ -1391,11 +1447,16 @@ BAD:
       single label at the end of the function.  It's almost always ok
       to use this style.  In particular, if the cleanup code only
       involves free'ing memory, then having multiple labels is
-      overkill.  VIR_FREE() and every function named XXXFree() in
-      libvirt is required to handle NULL as its arg.  Thus you can
+      overkill.  g_free() and most of the functions named XXXFree() in
+      libvirt is required to handle NULL as its arg. This does not
+      apply to libvirt's public APIs. Thus you can
       safely call free on all the variables even if they were not yet
       allocated (yes they have to have been initialized to NULL).
       This is much simpler and clearer than having multiple labels.
+      Note that most of libvirt's type declarations can be marked with
+      either <code>g_autofree</code> or <code>g_autoptr</code> which uses
+      the compiler's <code>__attribute__((cleanup))</code> that calls
+      the appropriate free function when the variable goes out of scope.
     </p>
 
     <p>
@@ -1472,14 +1533,7 @@ int foo()
       how things work, it's better
       to wait for a more authoritative feedback though. Before committing, please
       also rebuild locally, run 'make check syntax-check', and make sure you
-      don't raise errors. Try to look for warnings too; for example,
-      configure with
-    </p>
-<pre>
-  --enable-compile-warnings=error
-</pre>
-    <p>
-      which adds -Werror to compile flags, so no warnings get missed
+      don't raise errors.
     </p>
 
     <p>
@@ -1498,6 +1552,10 @@ int foo()
       <li>
         fixes for documentation and code comments can be managed
         in the same way, but still make sure they get reviewed if non-trivial.
+      </li>
+      <li>(ir)regular pulls from other repositories or automated updates, such
+        as the .gnulib submodule updates, pulling in new translations or updating
+        the container images for the CI system
       </li>
     </ul>
   </body>

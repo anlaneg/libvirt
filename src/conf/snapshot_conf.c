@@ -113,13 +113,10 @@ virDomainSnapshotDiskDefFree(virDomainSnapshotDiskDefPtr disk)
 virDomainSnapshotDefPtr
 virDomainSnapshotDefNew(void)
 {
-    virDomainSnapshotDefPtr def;
-
     if (virDomainSnapshotInitialize() < 0)
         return NULL;
 
-    def = virObjectNew(virDomainSnapshotDefClass);
-    return def;
+    return virObjectNew(virDomainSnapshotDefClass);
 }
 
 static void
@@ -612,8 +609,7 @@ virDomainSnapshotDefAssignExternalNames(virDomainSnapshotDefPtr def)
             return -1;
         }
 
-        if (VIR_STRDUP(tmppath, origpath) < 0)
-            return -1;
+        tmppath = g_strdup(origpath);
 
         /* drop suffix of the file name */
         if ((tmp = strrchr(tmppath, '.')) && !strchr(tmp, '/'))
@@ -741,8 +737,7 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
         }
         if (STRNEQ(disk->name, def->parent.dom->disks[idx]->dst)) {
             VIR_FREE(disk->name);
-            if (VIR_STRDUP(disk->name, def->parent.dom->disks[idx]->dst) < 0)
-                goto cleanup;
+            disk->name = g_strdup(def->parent.dom->disks[idx]->dst);
         }
     }
 
@@ -760,8 +755,7 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
         disk = &def->disks[ndisks++];
         if (!(disk->src = virStorageSourceNew()))
             goto cleanup;
-        if (VIR_STRDUP(disk->name, def->parent.dom->disks[i]->dst) < 0)
-            goto cleanup;
+        disk->name = g_strdup(def->parent.dom->disks[i]->dst);
         disk->idx = i;
 
         /* Don't snapshot empty drives */
@@ -929,9 +923,6 @@ virDomainSnapshotDefFormatInternal(virBufferPtr buf,
     virBufferAdjustIndent(buf, -2);
     virBufferAddLit(buf, "</domainsnapshot>\n");
 
-    if (virBufferCheckError(buf) < 0)
-        goto error;
-
     return 0;
 
  error:
@@ -989,7 +980,6 @@ virDomainSnapshotRedefinePrep(virDomainObjPtr vm,
                               virDomainSnapshotDefPtr *defptr,
                               virDomainMomentObjPtr *snap,
                               virDomainXMLOptionPtr xmlopt,
-                              bool *update_current,
                               unsigned int flags)
 {
     virDomainSnapshotDefPtr def = *defptr;
@@ -1012,11 +1002,6 @@ virDomainSnapshotRedefinePrep(virDomainObjPtr vm,
         return -1;
     }
     if (other) {
-        if (other == virDomainSnapshotGetCurrent(vm->snapshots)) {
-            *update_current = true;
-            virDomainSnapshotSetCurrent(vm->snapshots, NULL);
-        }
-
         /* Drop and rebuild the parent relationship, but keep all
          * child relations by reusing snap. */
         virDomainMomentDropParent(other);

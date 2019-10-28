@@ -1091,8 +1091,7 @@ virCommandSetPidFile(virCommandPtr cmd, const char *pidfile)
         return;
 
     VIR_FREE(cmd->pidfile);
-    if (VIR_STRDUP_QUIET(cmd->pidfile, pidfile) < 0)
-        cmd->has_error = ENOMEM;
+    cmd->pidfile = g_strdup(pidfile);
 }
 
 
@@ -1224,8 +1223,7 @@ virCommandSetSELinuxLabel(virCommandPtr cmd,
 
 #if defined(WITH_SECDRIVER_SELINUX)
     VIR_FREE(cmd->seLinuxLabel);
-    if (VIR_STRDUP_QUIET(cmd->seLinuxLabel, label) < 0)
-        cmd->has_error = ENOMEM;
+    cmd->seLinuxLabel = g_strdup(label);
 #endif
     return;
 }
@@ -1249,8 +1247,7 @@ virCommandSetAppArmorProfile(virCommandPtr cmd,
 
 #if defined(WITH_SECDRIVER_APPARMOR)
     VIR_FREE(cmd->appArmorProfile);
-    if (VIR_STRDUP_QUIET(cmd->appArmorProfile, profile) < 0)
-        cmd->has_error = ENOMEM;
+    cmd->appArmorProfile = g_strdup(profile);
 #endif
     return;
 }
@@ -1399,10 +1396,7 @@ virCommandAddEnvString(virCommandPtr cmd, const char *str)
     if (!cmd || cmd->has_error)
         return;
 
-    if (VIR_STRDUP_QUIET(env, str) < 0) {
-        cmd->has_error = ENOMEM;
-        return;
-    }
+    env = g_strdup(str);
 
     virCommandAddEnv(cmd, env);
 }
@@ -1425,11 +1419,6 @@ virCommandAddEnvBuffer(virCommandPtr cmd, virBufferPtr buf)
         return;
     }
 
-    if (virBufferError(buf)) {
-        cmd->has_error = ENOMEM;
-        virBufferFreeAndReset(buf);
-        return;
-    }
     if (!virBufferUse(buf)) {
         cmd->has_error = EINVAL;
         return;
@@ -1533,10 +1522,7 @@ virCommandAddArg(virCommandPtr cmd, const char *val)
         return;
     }
 
-    if (VIR_STRDUP_QUIET(arg, val) < 0) {
-        cmd->has_error = ENOMEM;
-        return;
-    }
+    arg = g_strdup(val);
 
     /* Arg plus trailing NULL. */
     if (VIR_RESIZE_N(cmd->args, cmd->maxargs, cmd->nargs, 1 + 1) < 0) {
@@ -1566,20 +1552,15 @@ virCommandAddArgBuffer(virCommandPtr cmd, virBufferPtr buf)
     }
 
     /* Arg plus trailing NULL. */
-    if (virBufferError(buf) ||
-        VIR_RESIZE_N(cmd->args, cmd->maxargs, cmd->nargs, 1 + 1) < 0) {
+    if (VIR_RESIZE_N(cmd->args, cmd->maxargs, cmd->nargs, 1 + 1) < 0) {
         cmd->has_error = ENOMEM;
         virBufferFreeAndReset(buf);
         return;
     }
 
     cmd->args[cmd->nargs] = virBufferContentAndReset(buf);
-    if (!cmd->args[cmd->nargs]) {
-        if (VIR_STRDUP_QUIET(cmd->args[cmd->nargs], "") < 0) {
-            cmd->has_error = ENOMEM;
-            return;
-        }
-    }
+    if (!cmd->args[cmd->nargs])
+        cmd->args[cmd->nargs] = g_strdup("");
     cmd->nargs++;
 }
 
@@ -1673,10 +1654,7 @@ virCommandAddArgSet(virCommandPtr cmd, const char *const*vals)
     while (vals[narg] != NULL) {
         char *arg;
 
-        if (VIR_STRDUP_QUIET(arg, vals[narg++]) < 0) {
-            cmd->has_error = ENOMEM;
-            return;
-        }
+        arg = g_strdup(vals[narg++]);
         cmd->args[cmd->nargs++] = arg;
     }
 }
@@ -1713,11 +1691,7 @@ virCommandAddArgList(virCommandPtr cmd, ...)
         char *arg = va_arg(list, char *);
         if (!arg)
             break;
-        if (VIR_STRDUP_QUIET(arg, arg) < 0) {
-            cmd->has_error = ENOMEM;
-            va_end(list);
-            return;
-        }
+        arg = g_strdup(arg);
         cmd->args[cmd->nargs++] = arg;
     }
     va_end(list);
@@ -1742,8 +1716,7 @@ virCommandSetWorkingDirectory(virCommandPtr cmd, const char *pwd)
         cmd->has_error = -1;
         VIR_DEBUG("cannot set directory twice");
     } else {
-        if (VIR_STRDUP_QUIET(cmd->pwd, pwd) < 0)
-            cmd->has_error = ENOMEM;
+        cmd->pwd = g_strdup(pwd);
     }
 }
 
@@ -1904,8 +1877,7 @@ virCommandSetInputBuffer(virCommandPtr cmd, const char *inbuf)
         return;
     }
 
-    if (VIR_STRDUP_QUIET(cmd->inbuf, inbuf) < 0)
-        cmd->has_error = ENOMEM;
+    cmd->inbuf = g_strdup(inbuf);
 }
 
 
@@ -2188,9 +2160,6 @@ virCommandToString(virCommandPtr cmd, bool linebreaks)
         virBufferEscapeShell(&buf, cmd->args[i]);
         prevopt = (cmd->args[i][0] == '-');
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }

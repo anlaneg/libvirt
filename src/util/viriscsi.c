@@ -60,8 +60,10 @@ virISCSIExtractSession(char **const groups,
     struct virISCSISessionData *data = opaque;
 
     if (!data->session &&
-        STREQ(groups[1], data->devpath))
-        return VIR_STRDUP(data->session, groups[0]);
+        STREQ(groups[1], data->devpath)) {
+        data->session = g_strdup(groups[0]);
+        return 0;
+    }
     return 0;
 }
 
@@ -174,8 +176,7 @@ virStorageBackendIQNFound(const char *initiatoriqn,
             current = next + 1;
         }
 
-        if (VIR_STRDUP(iqn, current) < 0)
-            goto cleanup;
+        iqn = g_strdup(current);
 
         if (STREQ(iqn, initiatoriqn)) {
             *ifacename = g_steal_pointer(&iface);
@@ -371,8 +372,7 @@ virISCSIGetTargets(char **const groups,
     struct virISCSITargetList *list = data;
     g_autofree char *target = NULL;
 
-    if (VIR_STRDUP(target, groups[1]) < 0)
-        return -1;
+    target = g_strdup(groups[1]);
 
     if (VIR_APPEND_ELEMENT(list->targets, list->ntargets, target) < 0)
         return -1;

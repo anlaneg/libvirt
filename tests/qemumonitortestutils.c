@@ -131,8 +131,6 @@ qemuMonitorTestAddErrorResponse(qemuMonitorTestPtr test,
         usermsg = "unexpected command";
 
     virBufferEscape(&buf, '\\', "\"", "%s", usermsg);
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
     escapemsg = virBufferContentAndReset(&buf);
 
     /* replace newline/carriage return with space */
@@ -604,11 +602,8 @@ qemuMonitorTestAddItem(qemuMonitorTestPtr test,
     if (VIR_ALLOC(data) < 0)
         return -1;
 
-    if (VIR_STRDUP(data->command_name, command_name) < 0 ||
-        VIR_STRDUP(data->response, response) < 0) {
-        qemuMonitorTestHandlerDataFree(data);
-        return -1;
-    }
+    data->command_name = g_strdup(command_name);
+    data->response = g_strdup(response);
 
     return qemuMonitorTestAddHandler(test,
                                      qemuMonitorTestProcessCommandDefault,
@@ -692,9 +687,8 @@ qemuMonitorTestAddItemVerbatim(qemuMonitorTestPtr test,
     if (VIR_ALLOC(data) < 0)
         return -1;
 
-    if (VIR_STRDUP(data->response, response) < 0 ||
-        VIR_STRDUP(data->cmderr, cmderr) < 0)
-        goto error;
+    data->response = g_strdup(response);
+    data->cmderr = g_strdup(cmderr);
 
     data->command_name = virJSONStringReformat(command, false);
     if (!data->command_name)
@@ -868,9 +862,8 @@ qemuMonitorTestAddItemParams(qemuMonitorTestPtr test,
     if (VIR_ALLOC(data) < 0)
         goto error;
 
-    if (VIR_STRDUP(data->command_name, cmdname) < 0 ||
-        VIR_STRDUP(data->response, response) < 0)
-        goto error;
+    data->command_name = g_strdup(cmdname);
+    data->response = g_strdup(response);
 
     while ((argname = va_arg(args, char *))) {
         size_t i;
@@ -885,9 +878,8 @@ qemuMonitorTestAddItemParams(qemuMonitorTestPtr test,
         if (VIR_EXPAND_N(data->args, data->nargs, 1))
             goto error;
 
-        if (VIR_STRDUP(data->args[i].argname, argname) < 0 ||
-            VIR_STRDUP(data->args[i].argval, argval) < 0)
-            goto error;
+        data->args[i].argname = g_strdup(argname);
+        data->args[i].argval = g_strdup(argval);
     }
 
     va_end(args);
@@ -984,10 +976,9 @@ qemuMonitorTestAddItemExpect(qemuMonitorTestPtr test,
     if (VIR_ALLOC(data) < 0)
         goto error;
 
-    if (VIR_STRDUP(data->command_name, cmdname) < 0 ||
-        VIR_STRDUP(data->response, response) < 0 ||
-        VIR_STRDUP(data->expectArgs, cmdargs) < 0)
-        goto error;
+    data->command_name = g_strdup(cmdname);
+    data->response = g_strdup(response);
+    data->expectArgs = g_strdup(cmdargs);
 
     if (apostrophe) {
         char *tmp = data->expectArgs;
@@ -1065,8 +1056,7 @@ qemuMonitorCommonTestNew(virDomainXMLOptionPtr xmlopt,
         return NULL;
     }
 
-    if (VIR_STRDUP(tmpdir_template, "/tmp/libvirt_XXXXXX") < 0)
-        goto error;
+    tmpdir_template = g_strdup("/tmp/libvirt_XXXXXX");
 
     if (!(test->tmpdir = mkdtemp(tmpdir_template))) {
         virReportSystemError(errno, "%s",

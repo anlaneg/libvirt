@@ -82,8 +82,8 @@ qemuBlockJobDataDispose(void *obj)
     if (job->type == QEMU_BLOCKJOB_TYPE_CREATE)
         virObjectUnref(job->data.create.src);
 
-    VIR_FREE(job->name);
-    VIR_FREE(job->errmsg);
+    g_free(job->name);
+    g_free(job->errmsg);
 }
 
 
@@ -111,8 +111,7 @@ qemuBlockJobDataNew(qemuBlockJobType type,
     if (!(job = virObjectNew(qemuBlockJobDataClass)))
         return NULL;
 
-    if (VIR_STRDUP(job->name, name) < 0)
-        return NULL;
+    job->name = g_strdup(name);
 
     job->state = QEMU_BLOCKJOB_STATE_NEW;
     job->newstate = -1;
@@ -483,8 +482,7 @@ qemuBlockJobRefreshJobs(virQEMUDriverPtr driver,
                  * execute the finishing steps */
                 job->newstate = job->state;
             } else if (newstate == QEMU_BLOCKJOB_STATE_CONCLUDED) {
-                if (VIR_STRDUP(job->errmsg, jobinfo[i]->error) < 0)
-                    goto cleanup;
+                job->errmsg = g_strdup(jobinfo[i]->error);
 
                 if (job->errmsg)
                     job->newstate = QEMU_BLOCKJOB_STATE_FAILED;
@@ -601,7 +599,7 @@ qemuBlockJobRewriteConfigDiskSource(virDomainObjPtr vm,
     if (!vm->newDef)
         return;
 
-    if (!(persistDisk = virDomainDiskByName(vm->newDef, disk->dst, false)))
+    if (!(persistDisk = virDomainDiskByTarget(vm->newDef, disk->dst)))
         return;
 
     if (!virStorageSourceIsSameLocation(disk->src, persistDisk->src))
@@ -839,7 +837,7 @@ qemuBlockJobGetConfigDisk(virDomainObjPtr vm,
 
     disksrc = disk->src;
 
-    if (!(ret = virDomainDiskByName(vm->newDef, disk->dst, false)))
+    if (!(ret = virDomainDiskByTarget(vm->newDef, disk->dst)))
         return NULL;
 
     cfgsrc = ret->src;
@@ -884,7 +882,7 @@ qemuBlockJobClearConfigChain(virDomainObjPtr vm,
     if (!vm->newDef || !disk)
         return;
 
-    if (!(cfgdisk = virDomainDiskByName(vm->newDef, disk->dst, false)))
+    if (!(cfgdisk = virDomainDiskByTarget(vm->newDef, disk->dst)))
         return;
 
     if (!virStorageSourceIsSameLocation(disk->src, cfgdisk->src))
@@ -1254,75 +1252,40 @@ qemuBlockJobEventProcessConcludedTransition(qemuBlockJobDataPtr job,
                                             virDomainObjPtr vm,
                                             qemuDomainAsyncJob asyncJob)
 {
-    switch ((qemuBlockjobState) job->newstate) {
-    case QEMU_BLOCKJOB_STATE_COMPLETED:
-        switch ((qemuBlockJobType) job->type) {
-        case QEMU_BLOCKJOB_TYPE_PULL:
+    bool success = job->newstate == QEMU_BLOCKJOB_STATE_COMPLETED;
+
+    switch ((qemuBlockJobType) job->type) {
+    case QEMU_BLOCKJOB_TYPE_PULL:
+        if (success)
             qemuBlockJobProcessEventCompletedPull(driver, vm, job, asyncJob);
-            break;
+        break;
 
-        case QEMU_BLOCKJOB_TYPE_COMMIT:
+    case QEMU_BLOCKJOB_TYPE_COMMIT:
+        if (success)
             qemuBlockJobProcessEventCompletedCommit(driver, vm, job, asyncJob);
-            break;
+        break;
 
-        case QEMU_BLOCKJOB_TYPE_ACTIVE_COMMIT:
+    case QEMU_BLOCKJOB_TYPE_ACTIVE_COMMIT:
+        if (success)
             qemuBlockJobProcessEventCompletedActiveCommit(driver, vm, job, asyncJob);
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_CREATE:
-            qemuBlockJobProcessEventConcludedCreate(driver, vm, job, asyncJob);
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_COPY:
-            if (job->state == QEMU_BLOCKJOB_STATE_PIVOTING)
-                qemuBlockJobProcessEventConcludedCopyPivot(driver, vm, job, asyncJob);
-            else
-                qemuBlockJobProcessEventConcludedCopyAbort(driver, vm, job, asyncJob);
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_NONE:
-        case QEMU_BLOCKJOB_TYPE_INTERNAL:
-        case QEMU_BLOCKJOB_TYPE_LAST:
-        default:
-            break;
-        }
-        break;
-
-    case QEMU_BLOCKJOB_STATE_FAILED:
-    case QEMU_BLOCKJOB_STATE_CANCELLED:
-        switch ((qemuBlockJobType) job->type) {
-        case QEMU_BLOCKJOB_TYPE_PULL:
-        case QEMU_BLOCKJOB_TYPE_COMMIT:
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_ACTIVE_COMMIT:
+        else
             qemuBlockJobProcessEventFailedActiveCommit(driver, vm, job);
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_CREATE:
-            qemuBlockJobProcessEventConcludedCreate(driver, vm, job, asyncJob);
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_COPY:
-            qemuBlockJobProcessEventConcludedCopyAbort(driver, vm, job, asyncJob);
-            break;
-
-        case QEMU_BLOCKJOB_TYPE_NONE:
-        case QEMU_BLOCKJOB_TYPE_INTERNAL:
-        case QEMU_BLOCKJOB_TYPE_LAST:
-        default:
-            break;
-        }
         break;
 
-    /* states below are impossible in this handler */
-    case QEMU_BLOCKJOB_STATE_READY:
-    case QEMU_BLOCKJOB_STATE_NEW:
-    case QEMU_BLOCKJOB_STATE_RUNNING:
-    case QEMU_BLOCKJOB_STATE_CONCLUDED:
-    case QEMU_BLOCKJOB_STATE_ABORTING:
-    case QEMU_BLOCKJOB_STATE_PIVOTING:
-    case QEMU_BLOCKJOB_STATE_LAST:
+    case QEMU_BLOCKJOB_TYPE_CREATE:
+        qemuBlockJobProcessEventConcludedCreate(driver, vm, job, asyncJob);
+        break;
+
+    case QEMU_BLOCKJOB_TYPE_COPY:
+        if (job->state == QEMU_BLOCKJOB_STATE_PIVOTING && success)
+            qemuBlockJobProcessEventConcludedCopyPivot(driver, vm, job, asyncJob);
+        else
+            qemuBlockJobProcessEventConcludedCopyAbort(driver, vm, job, asyncJob);
+        break;
+
+    case QEMU_BLOCKJOB_TYPE_NONE:
+    case QEMU_BLOCKJOB_TYPE_INTERNAL:
+    case QEMU_BLOCKJOB_TYPE_LAST:
     default:
         break;
     }
@@ -1357,8 +1320,7 @@ qemuBlockJobEventProcessConcluded(qemuBlockJobDataPtr job,
             if (STRNEQ_NULLABLE(job->name, jobinfo[i]->id))
                 continue;
 
-            if (VIR_STRDUP(job->errmsg, jobinfo[i]->error) < 0)
-                rc = -1;
+            job->errmsg = g_strdup(jobinfo[i]->error);
 
             if (job->errmsg)
                 job->newstate = QEMU_BLOCKJOB_STATE_FAILED;

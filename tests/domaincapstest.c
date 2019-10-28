@@ -36,11 +36,11 @@ fillStringValues(virDomainCapsStringValuesPtr values, ...)
 
     va_start(list, values);
     while ((str = va_arg(list, const char *))) {
-        if (VIR_REALLOC_N(values->values, values->nvalues + 1) < 0 ||
-            VIR_STRDUP(values->values[values->nvalues], str) < 0) {
+        if (VIR_REALLOC_N(values->values, values->nvalues + 1) < 0) {
             ret = -1;
             break;
         }
+        values->values[values->nvalues] = g_strdup(str);
         values->nvalues++;
     }
     va_end(list);
@@ -95,15 +95,11 @@ fillQemuCaps(virDomainCapsPtr domCaps,
 
     if (machine) {
         VIR_FREE(domCaps->machine);
-        if (VIR_STRDUP(domCaps->machine,
-                       virQEMUCapsGetCanonicalMachine(qemuCaps, machine)) < 0)
-            goto cleanup;
+        domCaps->machine = g_strdup(virQEMUCapsGetCanonicalMachine(qemuCaps, machine));
     }
 
-    if (!domCaps->machine &&
-        VIR_STRDUP(domCaps->machine,
-                   virQEMUCapsGetPreferredMachine(qemuCaps)) < 0)
-        goto cleanup;
+    if (!domCaps->machine)
+        domCaps->machine = g_strdup(virQEMUCapsGetPreferredMachine(qemuCaps));
 
     if (virQEMUCapsFillDomainCaps(caps, domCaps, qemuCaps,
                                   false,
@@ -155,9 +151,8 @@ fillXenCaps(virDomainCapsPtr domCaps)
 
     if (VIR_ALLOC(firmwares[0]) < 0 || VIR_ALLOC(firmwares[1]) < 0)
         goto cleanup;
-    if (VIR_STRDUP(firmwares[0]->name, "/usr/lib/xen/boot/hvmloader") < 0 ||
-        VIR_STRDUP(firmwares[1]->name, "/usr/lib/xen/boot/ovmf.bin") < 0)
-        goto cleanup;
+    firmwares[0]->name = g_strdup("/usr/lib/xen/boot/hvmloader");
+    firmwares[1]->name = g_strdup("/usr/lib/xen/boot/ovmf.bin");
 
     if (libxlMakeDomainCapabilities(domCaps, firmwares, 2) < 0)
         goto cleanup;
@@ -222,7 +217,7 @@ test_virDomainCapsFormat(const void *opaque)
     char *domCapsXML = NULL;
     int ret = -1;
 
-    if (virAsprintf(&path, "%s/domaincapsschemadata/%s.xml",
+    if (virAsprintf(&path, "%s/domaincapsdata/%s.xml",
                     abs_srcdir, data->name) < 0)
         goto cleanup;
 
@@ -271,6 +266,94 @@ test_virDomainCapsFormat(const void *opaque)
     return ret;
 }
 
+
+#if WITH_QEMU
+
+static int
+doTestQemuInternal(const char *version,
+                   const char *machine,
+                   const char *arch,
+                   virDomainVirtType type,
+                   void *opaque)
+{
+    g_autofree char *name = NULL;
+    g_autofree char *capsName = NULL;
+    g_autofree char *emulator = NULL;
+
+    name = g_strdup_printf("qemu_%s%s%s%s.%s",
+                           version,
+                           (type == VIR_DOMAIN_VIRT_QEMU ? "-tcg" : ""),
+                           (machine ? "-" : ""), (machine ? machine : ""),
+                           arch);
+    capsName = g_strdup_printf("caps_%s", version);
+    emulator = g_strdup_printf("/usr/bin/qemu-system-%s", arch);
+
+    struct testData data = {
+        .name = name,
+        .emulator = emulator,
+        .machine = machine,
+        .arch = arch,
+        .type = type,
+        .capsType = CAPS_QEMU,
+        .capsName = capsName,
+        .capsOpaque = opaque,
+    };
+
+    if (virTestRun(name, test_virDomainCapsFormat, &data) < 0)
+        return -1;
+
+    return 0;
+}
+
+static int
+doTestQemu(const char *inputDir G_GNUC_UNUSED,
+           const char *prefix G_GNUC_UNUSED,
+           const char *version,
+           const char *arch,
+           const char *suffix G_GNUC_UNUSED,
+           void *opaque)
+{
+    if (STREQ(arch, "x86_64")) {
+        /* For x86_64 we test three combinations:
+         *
+         *   - KVM with default machine
+         *   - KVM with Q35 machine
+         *   - TCG with default machine
+         */
+        if (doTestQemuInternal(version, NULL, arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0 ||
+            doTestQemuInternal(version, "q35", arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0 ||
+            doTestQemuInternal(version, NULL, arch,
+                               VIR_DOMAIN_VIRT_QEMU, opaque) < 0) {
+            return -1;
+        }
+    } else if (STREQ(arch, "aarch64")) {
+        /* For aarch64 we test two combinations:
+         *
+         *   - KVM with default machine
+         *   - KVM with virt machine
+         */
+        if (doTestQemuInternal(version, NULL, arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0 ||
+            doTestQemuInternal(version, "virt", arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0) {
+            return -1;
+        }
+    } else if (STRPREFIX(arch, "riscv")) {
+        /* Unfortunately we have to skip RISC-V at the moment */
+        return 0;
+    } else {
+        if (doTestQemuInternal(version, NULL, arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+#endif
+
 static int
 mymain(void)
 {
@@ -299,31 +382,6 @@ mymain(void)
         }; \
         if (virTestRun(Name, test_virDomainCapsFormat, &data) < 0) \
             ret = -1; \
-    } while (0)
-
-#define DO_TEST_QEMU(Name, CapsName, Emulator, Machine, Arch, Type) \
-    do { \
-        char *name = NULL; \
-        if (virAsprintf(&name, "qemu_%s%s%s.%s", \
-                        Name, \
-                        Machine ? "-" : "", Machine ? Machine : "", \
-                        Arch) < 0) { \
-            ret = -1; \
-            break; \
-        } \
-        struct testData data = { \
-            .name = name, \
-            .emulator = Emulator, \
-            .machine = Machine, \
-            .arch = Arch, \
-            .type = Type, \
-            .capsType = CAPS_QEMU, \
-            .capsName = CapsName, \
-            .capsOpaque = cfg, \
-        }; \
-        if (virTestRun(name, test_virDomainCapsFormat, &data) < 0) \
-            ret = -1; \
-        VIR_FREE(name); \
     } while (0)
 
 #define DO_TEST_LIBXL(Name, Emulator, Machine, Arch, Type) \
@@ -372,101 +430,24 @@ mymain(void)
     virFileWrapperAddPrefix("/home/user/.config/qemu/firmware",
                             abs_srcdir "/qemufirmwaredata/home/user/.config/qemu/firmware");
 
-    DO_TEST_QEMU("1.7.0", "caps_1.7.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
+    if (testQemuCapsIterate(".xml", doTestQemu, cfg) < 0)
+        return EXIT_FAILURE;
 
-    DO_TEST_QEMU("2.6.0", "caps_2.6.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.8.0", "caps_2.8.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.8.0-tcg", "caps_2.8.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_QEMU);
-
-    DO_TEST_QEMU("2.9.0", "caps_2.9.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.9.0", "caps_2.9.0",
-                 "/usr/bin/qemu-system-x86_64", "q35",
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.9.0-tcg", "caps_2.9.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_QEMU);
-
-    DO_TEST_QEMU("2.12.0", "caps_2.12.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.6.0", "caps_2.6.0",
-                 "/usr/bin/qemu-system-aarch64", NULL,
-                 "aarch64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.6.0", "caps_2.6.0",
-                 "/usr/bin/qemu-system-aarch64", "virt",
-                 "aarch64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.12.0", "caps_2.12.0",
-                 "/usr/bin/qemu-system-aarch64", "virt",
-                 "aarch64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.6.0", "caps_2.6.0",
-                 "/usr/bin/qemu-system-ppc64", NULL,
-                 "ppc64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.12.0", "caps_2.12.0",
-                 "/usr/bin/qemu-system-ppc64", NULL,
-                 "ppc64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.7.0", "caps_2.7.0",
-                 "/usr/bin/qemu-system-s390x", NULL,
-                 "s390x", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.8.0", "caps_2.8.0",
-                 "/usr/bin/qemu-system-s390x", NULL,
-                 "s390x", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("2.12.0", "caps_2.12.0",
-                 "/usr/bin/qemu-system-s390x", NULL,
-                 "s390x", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("3.0.0", "caps_3.0.0",
-                 "/usr/bin/qemu-system-s390x", NULL,
-                 "s390x", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("3.1.0", "caps_3.1.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("4.0.0", "caps_4.0.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("4.0.0", "caps_4.0.0",
-                 "/usr/bin/qemu-system-s390x", NULL,
-                 "s390x", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("4.1.0", "caps_4.1.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("4.2.0", "caps_4.2.0",
-                 "/usr/bin/qemu-system-x86_64", NULL,
-                 "x86_64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("4.2.0", "caps_4.2.0",
-                 "/usr/bin/qemu-system-ppc64", NULL,
-                 "ppc64", VIR_DOMAIN_VIRT_KVM);
-
-    DO_TEST_QEMU("4.2.0", "caps_4.2.0",
-                 "/usr/bin/qemu-system-aarch64", NULL,
-                 "aarch64", VIR_DOMAIN_VIRT_KVM);
+    /*
+     * Run "tests/qemucapsprobe /path/to/qemu/binary >foo.replies"
+     * to generate updated or new *.replies data files.
+     *
+     * If you manually edit replies files you can run
+     * "tests/qemucapsfixreplies foo.replies" to fix the replies ids.
+     *
+     * Once a replies file has been generated and tweaked if necessary,
+     * you can drop it into tests/qemucapabilitiesdata/ (with a sensible
+     * name - look at what's already there for inspiration) and test
+     * programs will automatically pick it up.
+     *
+     * To generate the corresponding output files after a new replies
+     * file has been added, run "VIR_TEST_REGENERATE_OUTPUT=1 make check".
+     */
 
     virObjectUnref(cfg);
 

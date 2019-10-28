@@ -73,13 +73,10 @@ virDomainCheckpointDiskDefClear(virDomainCheckpointDiskDefPtr disk)
 virDomainCheckpointDefPtr
 virDomainCheckpointDefNew(void)
 {
-    virDomainCheckpointDefPtr def;
-
     if (virDomainCheckpointInitialize() < 0)
         return NULL;
 
-    def = virObjectNew(virDomainCheckpointDefClass);
-    return def;
+    return virObjectNew(virDomainCheckpointDefClass);
 }
 
 static void
@@ -275,8 +272,7 @@ virDomainCheckpointDefAssignBitmapNames(virDomainCheckpointDefPtr def)
             disk->bitmap)
             continue;
 
-        if (VIR_STRDUP(disk->bitmap, def->parent.name) < 0)
-            return -1;
+        disk->bitmap = g_strdup(def->parent.name);
     }
 
     return 0;
@@ -365,8 +361,7 @@ virDomainCheckpointAlignDisks(virDomainCheckpointDefPtr def)
 
         if (STRNEQ(disk->name, def->parent.dom->disks[idx]->dst)) {
             VIR_FREE(disk->name);
-            if (VIR_STRDUP(disk->name, def->parent.dom->disks[idx]->dst) < 0)
-                goto cleanup;
+            disk->name = g_strdup(def->parent.dom->disks[idx]->dst);
         }
     }
 
@@ -382,8 +377,7 @@ virDomainCheckpointAlignDisks(virDomainCheckpointDefPtr def)
         if (virBitmapIsBitSet(map, i))
             continue;
         disk = &def->disks[ndisks++];
-        if (VIR_STRDUP(disk->name, def->parent.dom->disks[i]->dst) < 0)
-            goto cleanup;
+        disk->name = g_strdup(def->parent.dom->disks[i]->dst);
         disk->idx = i;
 
         /* Don't checkpoint empty or readonly drives */
@@ -502,9 +496,6 @@ virDomainCheckpointDefFormatInternal(virBufferPtr buf,
     virBufferAdjustIndent(buf, -2);
     virBufferAddLit(buf, "</domaincheckpoint>\n");
 
-    if (virBufferCheckError(buf) < 0)
-        goto error;
-
     return 0;
 
  error:
@@ -540,6 +531,7 @@ virDomainCheckpointRedefinePrep(virDomainObjPtr vm,
 {
     virDomainCheckpointDefPtr def = *defptr;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
+    virDomainMomentObjPtr parent = NULL;
     virDomainMomentObjPtr other = NULL;
     virDomainCheckpointDefPtr otherdef = NULL;
 
@@ -558,12 +550,11 @@ virDomainCheckpointRedefinePrep(virDomainObjPtr vm,
     if (virDomainCheckpointAlignDisks(def) < 0)
         return -1;
 
-    if (def->parent.parent_name)
-        other = virDomainCheckpointFindByName(vm->checkpoints,
-                                              def->parent.parent_name);
-    if (other == virDomainCheckpointGetCurrent(vm->checkpoints)) {
-        *update_current = true;
-        virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
+    if (def->parent.parent_name &&
+         (parent = virDomainCheckpointFindByName(vm->checkpoints,
+                                                 def->parent.parent_name))) {
+        if (parent == virDomainCheckpointGetCurrent(vm->checkpoints))
+            *update_current = true;
     }
 
     other = virDomainCheckpointFindByName(vm->checkpoints, def->parent.name);
@@ -572,11 +563,6 @@ virDomainCheckpointRedefinePrep(virDomainObjPtr vm,
         if (!virDomainDefCheckABIStability(otherdef->parent.dom,
                                            def->parent.dom, xmlopt))
             return -1;
-
-        if (other == virDomainCheckpointGetCurrent(vm->checkpoints)) {
-            *update_current = true;
-            virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
-        }
 
         /* Drop and rebuild the parent relationship, but keep all
          * child relations by reusing chk.  */

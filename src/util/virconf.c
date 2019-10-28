@@ -191,10 +191,7 @@ virConfCreate(const char *filename, unsigned int flags)
     if (!ret)
         return NULL;
 
-    if (VIR_STRDUP(ret->filename, filename) < 0) {
-        VIR_FREE(ret);
-        return NULL;
-    }
+    ret->filename = g_strdup(filename);
 
     ret->flags = flags;
     return ret;
@@ -938,8 +935,7 @@ int virConfGetValueString(virConfPtr conf,
     }
 
     VIR_FREE(*value);
-    if (VIR_STRDUP(*value, cval->str) < 0)
-        return -1;
+    *value = g_strdup(cval->str);
 
     return 1;
 }
@@ -997,24 +993,16 @@ int virConfGetValueStringList(virConfPtr conf,
         if (VIR_ALLOC_N(*values, len + 1) < 0)
             return -1;
 
-        for (len = 0, eval = cval->list; eval; len++, eval = eval->next) {
-            if (VIR_STRDUP((*values)[len], eval->str) < 0) {
-                virStringListFree(*values);
-                *values = NULL;
-                return -1;
-            }
-        }
+        for (len = 0, eval = cval->list; eval; len++, eval = eval->next)
+            (*values)[len] = g_strdup(eval->str);
         break;
 
     case VIR_CONF_STRING:
         if (compatString) {
             if (VIR_ALLOC_N(*values, cval->str ? 2 : 1) < 0)
                 return -1;
-            if (cval->str &&
-                VIR_STRDUP((*values)[0], cval->str) < 0) {
-                VIR_FREE(*values);
-                return -1;
-            }
+            if (cval->str)
+                (*values)[0] = g_strdup(cval->str);
             break;
         }
         G_GNUC_FALLTHROUGH;
@@ -1416,11 +1404,7 @@ virConfSetValue(virConfPtr conf,
             return -1;
         }
         cur->comment = NULL;
-        if (VIR_STRDUP(cur->name, setting) < 0) {
-            virConfFreeValue(value);
-            VIR_FREE(cur);
-            return -1;
-        }
+        cur->name = g_strdup(setting);
         cur->value = value;
         if (prev) {
             cur->next = prev->next;
@@ -1494,9 +1478,6 @@ virConfWriteFile(const char *filename, virConfPtr conf)
         cur = cur->next;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
-
     fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         virBufferFreeAndReset(&buf);
@@ -1546,9 +1527,6 @@ virConfWriteMem(char *memory, int *len, virConfPtr conf)
         virConfSaveEntry(&buf, cur);
         cur = cur->next;
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
 
     use = virBufferUse(&buf);
     content = virBufferContentAndReset(&buf);

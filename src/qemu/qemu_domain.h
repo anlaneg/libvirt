@@ -1070,6 +1070,8 @@ int qemuDomainCheckMonitor(virQEMUDriverPtr driver,
 bool qemuDomainSupportsVideoVga(virDomainVideoDefPtr video,
                                 virQEMUCapsPtr qemuCaps);
 
+bool qemuDomainNeedsVFIO(const virDomainDef *def);
+
 int qemuDomainGetHostdevPath(virDomainDefPtr def,
                              virDomainHostdevDefPtr dev,
                              bool teardown,
@@ -1167,12 +1169,9 @@ qemuDomainCheckCCWS390AddressSupport(const virDomainDef *def,
                                      virQEMUCapsPtr qemuCaps,
                                      const char *devicename);
 
-int
+void
 qemuDomainPrepareDiskSourceData(virDomainDiskDefPtr disk,
-                                virStorageSourcePtr src,
-                                virQEMUDriverConfigPtr cfg,
-                                virQEMUCapsPtr qemuCaps)
-    G_GNUC_WARN_UNUSED_RESULT;
+                                virStorageSourcePtr src);
 
 
 int

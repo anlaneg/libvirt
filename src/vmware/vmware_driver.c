@@ -447,8 +447,7 @@ vmwareDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fla
         goto cleanup;
 
     pDomain = vm->privateData;
-    if (VIR_STRDUP(pDomain->vmxPath, vmxPath) < 0)
-        goto cleanup;
+    pDomain->vmxPath = g_strdup(vmxPath);
 
     vmwareDomainConfigDisplay(pDomain, vmdef);
 
@@ -708,8 +707,7 @@ vmwareDomainCreateXML(virConnectPtr conn, const char *xml,
         goto cleanup;
 
     pDomain = vm->privateData;
-    if (VIR_STRDUP(pDomain->vmxPath, vmxPath) < 0)
-        goto cleanup;
+    pDomain->vmxPath = g_strdup(vmxPath);
 
     vmwareDomainConfigDisplay(pDomain, vmdef);
     vmdef = NULL;
@@ -844,7 +842,7 @@ vmwareDomainGetOSType(virDomainPtr dom)
     if (!(vm = vmwareDomObjFromDomain(driver, dom->uuid)))
         return NULL;
 
-    ignore_value(VIR_STRDUP(ret, virDomainOSTypeToString(vm->def->os.type)));
+    ret = g_strdup(virDomainOSTypeToString(vm->def->os.type));
 
     virDomainObjEndAPI(&vm);
     return ret;

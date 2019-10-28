@@ -92,7 +92,7 @@ virXPathString(const char *xpath,
         xmlXPathFreeObject(obj);
         return NULL;
     }
-    ignore_value(VIR_STRDUP(ret, (char *) obj->stringval));
+    ret = g_strdup((char *)obj->stringval);
     xmlXPathFreeObject(obj);
     return ret;
 }
@@ -1000,7 +1000,7 @@ virXMLNodeToString(xmlDocPtr doc,
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(ret, (const char *)xmlBufferContent(xmlbuf)));
+    ret = g_strdup((const char *)xmlBufferContent(xmlbuf));
 
  cleanup:
     xmlBufferFree(xmlbuf);
@@ -1265,8 +1265,7 @@ virXMLValidatorInit(const char *schemafile)
     if (VIR_ALLOC(validator) < 0)
         return NULL;
 
-    if (VIR_STRDUP(validator->schemafile, schemafile) < 0)
-        goto error;
+    validator->schemafile = g_strdup(schemafile);
 
     if (!(validator->rngParser =
           xmlRelaxNGNewParserCtxt(validator->schemafile))) {
@@ -1377,25 +1376,16 @@ virXMLValidatorFree(virXMLValidatorPtr validator)
  * formatted.
  *
  * Both passed buffers are always consumed and freed.
- *
- * Returns 0 on success, -1 on error.
  */
-int
+void
 virXMLFormatElement(virBufferPtr buf,
                     const char *name,
                     virBufferPtr attrBuf,
                     virBufferPtr childBuf)
 {
-    int ret = -1;
-
     if ((!attrBuf || virBufferUse(attrBuf) == 0) &&
-        (!childBuf || virBufferUse(childBuf) == 0)) {
-        return 0;
-    }
-
-    if ((attrBuf && virBufferCheckError(attrBuf) < 0) ||
-        (childBuf && virBufferCheckError(childBuf) < 0))
-        goto cleanup;
+        (!childBuf || virBufferUse(childBuf) == 0))
+        return;
 
     virBufferAsprintf(buf, "<%s", name);
 
@@ -1410,12 +1400,8 @@ virXMLFormatElement(virBufferPtr buf,
         virBufferAddLit(buf, "/>\n");
     }
 
-    ret = 0;
-
- cleanup:
     virBufferFreeAndReset(attrBuf);
     virBufferFreeAndReset(childBuf);
-    return ret;
 }
 
 

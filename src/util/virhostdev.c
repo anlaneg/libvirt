@@ -169,8 +169,7 @@ virHostdevManagerNew(void)
         return NULL;
 
     if (privileged) {
-        if (VIR_STRDUP(hostdevMgr->stateDir, HOSTDEV_STATE_DIR) < 0)
-            return NULL;
+        hostdevMgr->stateDir = g_strdup(HOSTDEV_STATE_DIR);
 
         if (virFileMakePath(hostdevMgr->stateDir) < 0) {
             virReportError(VIR_ERR_OPERATION_FAILED,
@@ -354,7 +353,7 @@ virHostdevNetDevice(virDomainHostdevDefPtr hostdev,
 
 
 static bool
-virHostdevIsPCINetDevice(virDomainHostdevDefPtr hostdev)
+virHostdevIsPCINetDevice(const virDomainHostdevDef *hostdev)
 {
     return hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
         hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI &&
@@ -369,7 +368,7 @@ virHostdevIsPCINetDevice(virDomainHostdevDefPtr hostdev)
  * Returns true if @hostdev is a SCSI device, false otherwise.
  */
 bool
-virHostdevIsSCSIDevice(virDomainHostdevDefPtr hostdev)
+virHostdevIsSCSIDevice(const virDomainHostdevDef *hostdev)
 {
     return hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
         hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI;
@@ -383,10 +382,25 @@ virHostdevIsSCSIDevice(virDomainHostdevDefPtr hostdev)
  * Returns true if @hostdev is a Mediated device, false otherwise.
  */
 bool
-virHostdevIsMdevDevice(virDomainHostdevDefPtr hostdev)
+virHostdevIsMdevDevice(const virDomainHostdevDef *hostdev)
 {
     return hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
         hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV;
+}
+
+
+/**
+ * virHostdevIsVFIODevice:
+ * @hostdev: host device to check
+ *
+ * Returns true if @hostdev is a PCI device with VFIO backend, false otherwise.
+ */
+bool
+virHostdevIsVFIODevice(const virDomainHostdevDef *hostdev)
+{
+    return hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
+        hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI &&
+        hostdev->source.subsys.u.pci.backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO;
 }
 
 

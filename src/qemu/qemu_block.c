@@ -172,12 +172,11 @@ qemuBlockNodeNameGetBackingChainBacking(virJSONValuePtr next,
     if (VIR_ALLOC(data) < 0)
         return -1;
 
-    if (VIR_STRDUP(data->nodeformat, nodename) < 0 ||
-        VIR_STRDUP(data->nodestorage, parentnodename) < 0 ||
-        VIR_STRDUP(data->qemufilename, filename) < 0 ||
-        VIR_STRDUP(data->drvformat, drvname) < 0 ||
-        VIR_STRDUP(data->drvstorage, drvparent) < 0)
-        return -1;
+    data->nodeformat = g_strdup(nodename);
+    data->nodestorage = g_strdup(parentnodename);
+    data->qemufilename = g_strdup(filename);
+    data->drvformat = g_strdup(drvname);
+    data->drvstorage = g_strdup(drvparent);
 
     if (backing &&
         qemuBlockNodeNameGetBackingChainBacking(backing, nodenamestable,
@@ -302,9 +301,8 @@ qemuBlockDiskDetectNodes(virDomainDiskDefPtr disk,
 
             break;
         } else {
-            if (VIR_STRDUP(src->nodeformat, entry->nodeformat) < 0 ||
-                VIR_STRDUP(src->nodestorage, entry->nodestorage) < 0)
-                goto cleanup;
+            src->nodeformat = g_strdup(entry->nodeformat);
+            src->nodestorage = g_strdup(entry->nodestorage);
         }
 
         entry = entry->backing;
@@ -423,9 +421,7 @@ qemuBlockStorageSourceGetURI(virStorageSourcePtr src)
     if (src->hosts->transport == VIR_STORAGE_NET_HOST_TRANS_TCP) {
         uri->port = src->hosts->port;
 
-        if (VIR_STRDUP(uri->scheme,
-                       virStorageNetProtocolTypeToString(src->protocol)) < 0)
-            return NULL;
+        uri->scheme = g_strdup(virStorageNetProtocolTypeToString(src->protocol));
     } else {
         if (virAsprintf(&uri->scheme, "%s+%s",
                         virStorageNetProtocolTypeToString(src->protocol),
@@ -446,8 +442,7 @@ qemuBlockStorageSourceGetURI(virStorageSourcePtr src)
         }
     }
 
-    if (VIR_STRDUP(uri->server, src->hosts->name) < 0)
-        return NULL;
+    uri->server = g_strdup(src->hosts->name);
 
     return g_steal_pointer(&uri);
 }
@@ -757,8 +752,7 @@ qemuBlockStorageSourceGetISCSIProps(virStorageSourcePtr src,
      * }
      */
 
-    if (VIR_STRDUP(target, src->path) < 0)
-        return NULL;
+    target = g_strdup(src->path);
 
     /* Separate the target and lun */
     if ((lunStr = strchr(target, '/'))) {
@@ -1685,23 +1679,17 @@ qemuBlockStorageSourceDetachPrepare(virStorageSourcePtr src,
     }
 
     if (src->pr &&
-        !virStoragePRDefIsManaged(src->pr) &&
-        VIR_STRDUP(data->prmgrAlias, src->pr->mgralias) < 0)
-        goto cleanup;
+        !virStoragePRDefIsManaged(src->pr))
+        data->prmgrAlias = g_strdup(src->pr->mgralias);
 
-    if (VIR_STRDUP(data->tlsAlias, src->tlsAlias) < 0)
-        goto cleanup;
+    data->tlsAlias = g_strdup(src->tlsAlias);
 
     if (srcpriv) {
-        if (srcpriv->secinfo &&
-            srcpriv->secinfo->type == VIR_DOMAIN_SECRET_INFO_TYPE_AES &&
-            VIR_STRDUP(data->authsecretAlias, srcpriv->secinfo->s.aes.alias) < 0)
-            goto cleanup;
+        if (srcpriv->secinfo && srcpriv->secinfo->type == VIR_DOMAIN_SECRET_INFO_TYPE_AES)
+            data->authsecretAlias = g_strdup(srcpriv->secinfo->s.aes.alias);
 
-        if (srcpriv->encinfo &&
-            srcpriv->encinfo->type == VIR_DOMAIN_SECRET_INFO_TYPE_AES &&
-            VIR_STRDUP(data->encryptsecretAlias, srcpriv->encinfo->s.aes.alias) < 0)
-            goto cleanup;
+        if (srcpriv->encinfo && srcpriv->encinfo->type == VIR_DOMAIN_SECRET_INFO_TYPE_AES)
+            data->encryptsecretAlias = g_strdup(srcpriv->encinfo->s.aes.alias);
     }
 
     ret = g_steal_pointer(&data);
@@ -1934,7 +1922,7 @@ qemuBlockGetBackingStoreString(virStorageSourcePtr src)
     char *ret = NULL;
 
     if (virStorageSourceIsLocalStorage(src)) {
-        ignore_value(VIR_STRDUP(ret, src->path));
+        ret = g_strdup(src->path);
         return ret;
     }
 
@@ -2578,10 +2566,9 @@ qemuBlockStorageSourceCreate(virDomainObjPtr vm,
 
 /**
  * qemuBlockStorageSourceCreateDetectSize:
- * @vm: domain object
+ * @blockNamedNodeData: hash table filled with qemuBlockNamedNodeData
  * @src: storage source to update size/capacity on
  * @templ: storage source template
- * @asyncJob: qemu asynchronous job type
  *
  * When creating a storage source via blockdev-create we need to know the size
  * and capacity of the original volume (e.g. when creating a snapshot or copy).
@@ -2589,28 +2576,13 @@ qemuBlockStorageSourceCreate(virDomainObjPtr vm,
  * to the detected sizes from @templ.
  */
 int
-qemuBlockStorageSourceCreateDetectSize(virDomainObjPtr vm,
+qemuBlockStorageSourceCreateDetectSize(virHashTablePtr blockNamedNodeData,
                                        virStorageSourcePtr src,
-                                       virStorageSourcePtr templ,
-                                       qemuDomainAsyncJob asyncJob)
+                                       virStorageSourcePtr templ)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    g_autoptr(virHashTable) stats = NULL;
-    qemuBlockStatsPtr entry;
-    int rc;
+    qemuBlockNamedNodeDataPtr entry;
 
-    if (!(stats = virHashCreate(10, virHashValueFree)))
-        return -1;
-
-    if (qemuDomainObjEnterMonitorAsync(priv->driver, vm, asyncJob) < 0)
-        return -1;
-
-    rc = qemuMonitorBlockStatsUpdateCapacityBlockdev(priv->mon, stats);
-
-    if (qemuDomainObjExitMonitor(priv->driver, vm) < 0 || rc < 0)
-        return -1;
-
-    if (!(entry = virHashLookup(stats, templ->nodeformat))) {
+    if (!(entry = virHashLookup(blockNamedNodeData, templ->nodeformat))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("failed to update capacity data for block node '%s'"),
                        templ->nodeformat);

@@ -101,7 +101,7 @@ virTPMCreateCancelPath(const char *devpath)
     char *path;
     (void)devpath;
 
-    ignore_value(VIR_STRDUP(path, "/sys/class/misc/tpm0/device/cancel"));
+    path = g_strdup("/sys/class/misc/tpm0/device/cancel");
 
     return path;
 }
@@ -125,7 +125,7 @@ virSCSIDeviceGetSgName(const char *sysfs_prefix G_GNUC_UNUSED,
 {
     char *ret;
 
-    ignore_value(VIR_STRDUP(ret, "sg0"));
+    ret = g_strdup("sg0");
     return ret;
 }
 
@@ -153,7 +153,8 @@ virNetDevTapCreate(char **ifname,
         return 0;
     } else {
         VIR_FREE(*ifname);
-        return VIR_STRDUP(*ifname, "vnet0");
+        *ifname = g_strdup("vnet0");
+        return 0;
     }
 }
 
@@ -197,10 +198,7 @@ virNetDevRunEthernetScript(const char *ifname G_GNUC_UNUSED,
 char *
 virHostGetDRMRenderNode(void)
 {
-    char *dst = NULL;
-
-    ignore_value(VIR_STRDUP(dst, "/dev/dri/foo"));
-    return dst;
+    return g_strdup("/dev/dri/foo");
 }
 
 static void (*real_virCommandPassFD)(virCommandPtr cmd, int fd, unsigned int flags);
@@ -229,7 +227,8 @@ int
 virNetDevOpenvswitchGetVhostuserIfname(const char *path G_GNUC_UNUSED,
                                        char **ifname)
 {
-    return VIR_STRDUP(*ifname, "vhost-user0");
+    *ifname = g_strdup("vhost-user0");
+    return 1;
 }
 
 int

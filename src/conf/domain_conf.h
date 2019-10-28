@@ -2858,7 +2858,7 @@ int virDomainDiskGetFormat(virDomainDiskDefPtr def);
 void virDomainDiskSetFormat(virDomainDiskDefPtr def, int format);
 virDomainControllerDefPtr
 virDomainDeviceFindSCSIController(const virDomainDef *def,
-                                  virDomainDeviceInfoPtr info);
+                                  const virDomainDeviceDriveAddress *addr);
 virDomainDiskDefPtr virDomainDiskFindByBusAndDst(virDomainDefPtr def,
                                                  int bus,
                                                  char *dst);
@@ -3162,7 +3162,10 @@ int virDomainDiskIndexByName(virDomainDefPtr def, const char *name,
 virDomainDiskDefPtr virDomainDiskByName(virDomainDefPtr def,
                                         const char *name,
                                         bool allow_ambiguous);
-const char *virDomainDiskPathByName(virDomainDefPtr, const char *name);
+virDomainDiskDefPtr
+virDomainDiskByTarget(virDomainDefPtr def,
+                      const char *dst);
+
 int virDomainDiskInsert(virDomainDefPtr def,
                         virDomainDiskDefPtr disk)
     G_GNUC_WARN_UNUSED_RESULT;
@@ -3669,6 +3672,9 @@ virDomainDefHasManagedPR(const virDomainDef *def);
 
 bool
 virDomainDefHasVFIOHostdev(const virDomainDef *def);
+
+bool
+virDomainDefHasMdevHostdev(const virDomainDef *def);
 
 bool
 virDomainGraphicsDefHasOpenGL(const virDomainDef *def);

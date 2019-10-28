@@ -187,8 +187,7 @@ virErrorGenericFailure(virErrorPtr err)
     err->code = VIR_ERR_INTERNAL_ERROR;
     err->domain = VIR_FROM_NONE;
     err->level = VIR_ERR_ERROR;
-    ignore_value(VIR_STRDUP_QUIET(err->message,
-                                  _("An error occurred, but the cause is unknown")));
+    err->message = g_strdup(_("An error occurred, but the cause is unknown"));
 }
 
 
@@ -208,14 +207,10 @@ virCopyError(virErrorPtr from,
     to->code = from->code;
     to->domain = from->domain;
     to->level = from->level;
-    if (VIR_STRDUP_QUIET(to->message, from->message) < 0)
-        ret = -1;
-    if (VIR_STRDUP_QUIET(to->str1, from->str1) < 0)
-        ret = -1;
-    if (VIR_STRDUP_QUIET(to->str2, from->str2) < 0)
-        ret = -1;
-    if (VIR_STRDUP_QUIET(to->str3, from->str3) < 0)
-        ret = -1;
+    to->message = g_strdup(from->message);
+    to->str1 = g_strdup(from->str1);
+    to->str2 = g_strdup(from->str2);
+    to->str3 = g_strdup(from->str3);
     to->int1 = from->int1;
     to->int2 = from->int2;
     /*
@@ -831,7 +826,7 @@ virRaiseErrorFull(const char *filename,
      * formats the message; drop message on OOM situations
      */
     if (fmt == NULL) {
-        ignore_value(VIR_STRDUP_QUIET(str, _("No error message provided")));
+        str = g_strdup(_("No error message provided"));
     } else {
         va_list ap;
         va_start(ap, fmt);
@@ -850,9 +845,9 @@ virRaiseErrorFull(const char *filename,
     to->code = code;
     to->message = str;
     to->level = level;
-    ignore_value(VIR_STRDUP_QUIET(to->str1, str1));
-    ignore_value(VIR_STRDUP_QUIET(to->str2, str2));
-    ignore_value(VIR_STRDUP_QUIET(to->str3, str3));
+    to->str1 = g_strdup(str1);
+    to->str2 = g_strdup(str2);
+    to->str3 = g_strdup(str3);
     to->int1 = int1;
     to->int2 = int2;
 

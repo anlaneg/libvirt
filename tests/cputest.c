@@ -268,10 +268,6 @@ cpuTestGuestCPU(const void *arg)
         virBufferAsprintf(&buf, ",%s", data->modelsName);
     virBufferAddLit(&buf, "-result");
 
-    if (virBufferError(&buf)) {
-        virBufferFreeAndReset(&buf);
-        goto cleanup;
-    }
     result = virBufferContentAndReset(&buf);
 
     if (cpuTestCompareXML(data->arch, cpu, result) < 0)
@@ -492,8 +488,10 @@ cpuTestMakeQEMUCaps(const struct data *data)
     if (!(testMon = qemuMonitorTestNewFromFile(json, driver.xmlopt, true)))
         goto error;
 
-    if (VIR_ALLOC(cpu) < 0 || VIR_STRDUP(cpu->model, "host") < 0)
+    if (VIR_ALLOC(cpu) < 0)
         goto cleanup;
+
+    cpu->model = g_strdup("host");
 
     if (ARCH_IS_S390(data->arch))
         fail_no_props = false;

@@ -112,8 +112,7 @@ addnhostsAdd(dnsmasqAddnHostsfile *addnhostsfile,
         if (VIR_ALLOC(addnhostsfile->hosts[idx].hostnames) < 0)
             goto error;
 
-        if (VIR_STRDUP(addnhostsfile->hosts[idx].ip, ipstr) < 0)
-            goto error;
+        addnhostsfile->hosts[idx].ip = g_strdup(ipstr);
 
         addnhostsfile->hosts[idx].nhostnames = 0;
         addnhostsfile->nhosts++;
@@ -122,9 +121,7 @@ addnhostsAdd(dnsmasqAddnHostsfile *addnhostsfile,
     if (VIR_REALLOC_N(addnhostsfile->hosts[idx].hostnames, addnhostsfile->hosts[idx].nhostnames + 1) < 0)
         goto error;
 
-    if (VIR_STRDUP(addnhostsfile->hosts[idx].hostnames[addnhostsfile->hosts[idx].nhostnames],
-                   name) < 0)
-        goto error;
+    addnhostsfile->hosts[idx].hostnames[addnhostsfile->hosts[idx].nhostnames] = g_strdup(name);
 
     VIR_FREE(ipstr);
 
@@ -153,9 +150,6 @@ addnhostsNew(const char *name,
     virBufferAsprintf(&buf, "%s", config_dir);
     virBufferEscapeString(&buf, "/%s", name);
     virBufferAsprintf(&buf, ".%s", DNSMASQ_ADDNHOSTSFILE_SUFFIX);
-
-    if (virBufferCheckError(&buf) < 0)
-                goto error;
 
     if (!(addnhostsfile->path = virBufferContentAndReset(&buf)))
         goto error;
@@ -368,9 +362,6 @@ hostsfileNew(const char *name,
     virBufferEscapeString(&buf, "/%s", name);
     virBufferAsprintf(&buf, ".%s", DNSMASQ_HOSTSFILE_SUFFIX);
 
-    if (virBufferCheckError(&buf) < 0)
-                goto error;
-
     if (!(hostsfile->path = virBufferContentAndReset(&buf)))
         goto error;
     return hostsfile;
@@ -467,8 +458,7 @@ dnsmasqContextNew(const char *network_name,
     if (VIR_ALLOC(ctx) < 0)
         return NULL;
 
-    if (VIR_STRDUP(ctx->config_dir, config_dir) < 0)
-        goto error;
+    ctx->config_dir = g_strdup(config_dir);
 
     if (!(ctx->hostsfile = hostsfileNew(network_name, config_dir)))
         goto error;
@@ -786,8 +776,7 @@ dnsmasqCapsNewEmpty(const char *binaryPath)
         return NULL;
     if (!(caps->flags = virBitmapNew(DNSMASQ_CAPS_LAST)))
         goto error;
-    if (VIR_STRDUP(caps->binaryPath, binaryPath ? binaryPath : DNSMASQ) < 0)
-        goto error;
+    caps->binaryPath = g_strdup(binaryPath ? binaryPath : DNSMASQ);
     return caps;
 
  error:

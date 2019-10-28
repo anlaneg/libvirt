@@ -640,9 +640,8 @@ virStoragePoolDefParseSource(xmlXPathContextPtr ctxt,
     if (sourcedir)
         source->dir = virFileSanitizePath(sourcedir);
     /* In gluster, a missing dir defaults to "/" */
-    if (!source->dir && pool_type == VIR_STORAGE_POOL_GLUSTER &&
-        VIR_STRDUP(source->dir, "/") < 0)
-        goto cleanup;
+    if (!source->dir && pool_type == VIR_STORAGE_POOL_GLUSTER)
+        source->dir = g_strdup("/");
 
     if ((adapternode = virXPathNode("./adapter", ctxt))) {
         if (virStorageAdapterParseXML(&source->adapter, adapternode, ctxt) < 0)
@@ -847,7 +846,6 @@ virStoragePoolDefPtr
 virStoragePoolDefParseXML(xmlXPathContextPtr ctxt)
 {
     virStoragePoolOptionsPtr options;
-    virStoragePoolDefPtr ret = NULL;
     xmlNodePtr source_node;
     g_autoptr(virStoragePoolDef) def = NULL;
     g_autofree char *type = NULL;
@@ -885,9 +883,8 @@ virStoragePoolDefParseXML(xmlXPathContextPtr ctxt)
 
     def->name = virXPathString("string(./name)", ctxt);
     if (def->name == NULL &&
-        options->flags & VIR_STORAGE_POOL_SOURCE_NAME &&
-        VIR_STRDUP(def->name, def->source.name) < 0)
-        return NULL;
+        options->flags & VIR_STORAGE_POOL_SOURCE_NAME)
+        def->name = g_strdup(def->source.name);
 
     if (def->name == NULL) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -934,8 +931,7 @@ virStoragePoolDefParseXML(xmlXPathContextPtr ctxt)
     if (options->flags & VIR_STORAGE_POOL_SOURCE_NAME) {
         if (def->source.name == NULL) {
             /* source name defaults to pool name */
-            if (VIR_STRDUP(def->source.name, def->name) < 0)
-                return NULL;
+            def->source.name = g_strdup(def->name);
         }
     }
 
@@ -998,8 +994,7 @@ virStoragePoolDefParseXML(xmlXPathContextPtr ctxt)
             return NULL;
     }
 
-    ret = g_steal_pointer(&def);
-    return ret;
+    return g_steal_pointer(&def);
 }
 
 
@@ -1238,9 +1233,6 @@ virStoragePoolDefFormat(virStoragePoolDefPtr def)
     if (virStoragePoolDefFormatBuf(&buf, def) < 0)
         goto error;
 
-    if (virBufferCheckError(&buf) < 0)
-        goto error;
-
     return virBufferContentAndReset(&buf);
 
  error:
@@ -1273,7 +1265,6 @@ virStorageVolDefParseXML(virStoragePoolDefPtr pool,
                          xmlXPathContextPtr ctxt,
                          unsigned int flags)
 {
-    virStorageVolDefPtr ret = NULL;
     virStorageVolOptionsPtr options;
     xmlNodePtr node;
     size_t i;
@@ -1414,8 +1405,8 @@ virStorageVolDefParseXML(virStoragePoolDefPtr pool,
         if ((n = virXPathNodeSet("./target/features/*", ctxt, &nodes)) < 0)
             return NULL;
 
-        if (!def->target.compat && VIR_STRDUP(def->target.compat, "1.1") < 0)
-            return NULL;
+        if (!def->target.compat)
+            def->target.compat = g_strdup("1.1");
 
         if (!(def->target.features = virBitmapNew(VIR_STORAGE_FILE_FEATURE_LAST)))
             return NULL;
@@ -1433,8 +1424,7 @@ virStorageVolDefParseXML(virStoragePoolDefPtr pool,
         VIR_FREE(nodes);
     }
 
-    ret = g_steal_pointer(&def);
-    return ret;
+    return g_steal_pointer(&def);
 }
 
 
@@ -1675,9 +1665,6 @@ virStorageVolDefFormat(virStoragePoolDefPtr pool,
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</volume>\n");
 
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
-
     return virBufferContentAndReset(&buf);
 
  cleanup:
@@ -1692,14 +1679,11 @@ virStoragePoolSaveXML(const char *path,
                       const char *xml)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    int ret = -1;
 
     virUUIDFormat(def->uuid, uuidstr);
-    ret = virXMLSaveFile(path,
-                         virXMLPickShellSafeComment(def->name, uuidstr),
-                         "pool-edit", xml);
-
-    return ret;
+    return virXMLSaveFile(path,
+                          virXMLPickShellSafeComment(def->name, uuidstr),
+                          "pool-edit", xml);
 }
 
 
@@ -1718,9 +1702,6 @@ virStoragePoolSaveState(const char *stateFile,
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</poolstate>\n");
-
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
 
     if (!(xml = virBufferContentAndReset(&buf)))
         return -1;
@@ -1790,9 +1771,6 @@ virStoragePoolSourceListFormat(virStoragePoolSourceListPtr def)
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</sources>\n");
-
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
 
     return virBufferContentAndReset(&buf);
 

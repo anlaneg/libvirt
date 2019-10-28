@@ -210,8 +210,6 @@ testCgroupDetectMounts(const void *args)
     }
     virBufferAsprintf(&buf, "%-12s %s\n",
                       "unified", NULLSTR(group->unified.mountPoint));
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
 
     actual = virBufferCurrentContent(&buf);
     if (virTestCompareToFile(actual, parsed) < 0)
@@ -992,10 +990,7 @@ initFakeFS(const char *mode,
 {
     char *fakerootdir;
 
-    if (VIR_STRDUP_QUIET(fakerootdir, FAKEROOTDIRTEMPLATE) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        abort();
-    }
+    fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
     if (!mkdtemp(fakerootdir)) {
         fprintf(stderr, "Cannot create fakerootdir");

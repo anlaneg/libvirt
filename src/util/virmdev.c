@@ -140,7 +140,6 @@ virMediatedDeviceCheckModel(virMediatedDevicePtr dev,
 virMediatedDevicePtr
 virMediatedDeviceNew(const char *uuidstr, virMediatedDeviceModelType model)
 {
-    virMediatedDevicePtr ret = NULL;
     g_autoptr(virMediatedDevice) dev = NULL;
     g_autofree char *sysfspath = NULL;
 
@@ -165,9 +164,7 @@ virMediatedDeviceNew(const char *uuidstr, virMediatedDeviceModelType model)
         return NULL;
 
     dev->model = model;
-    ret = g_steal_pointer(&dev);
-
-    return ret;
+    return g_steal_pointer(&dev);
 }
 
 #else
@@ -271,10 +268,8 @@ virMediatedDeviceSetUsedBy(virMediatedDevicePtr dev,
 {
     VIR_FREE(dev->used_by_drvname);
     VIR_FREE(dev->used_by_domname);
-    if (VIR_STRDUP(dev->used_by_drvname, drvname) < 0)
-        return -1;
-    if (VIR_STRDUP(dev->used_by_domname, domname) < 0)
-        return -1;
+    dev->used_by_drvname = g_strdup(drvname);
+    dev->used_by_domname = g_strdup(domname);
 
     return 0;
 }
@@ -509,8 +504,7 @@ virMediatedDeviceTypeReadAttrs(const char *sysfspath,
     if (VIR_ALLOC(tmp) < 0)
         return -1;
 
-    if (VIR_STRDUP(tmp->id, last_component(sysfspath)) < 0)
-        return -1;
+    tmp->id = g_strdup(last_component(sysfspath));
 
     /* @name sysfs attribute is optional, so getting ENOENT is fine */
     MDEV_GET_SYSFS_ATTR("name", &tmp->name, virFileReadValueString, true);

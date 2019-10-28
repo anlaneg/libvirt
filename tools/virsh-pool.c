@@ -416,11 +416,6 @@ virshBuildPoolXML(vshControl *ctl,
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</pool>\n");
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-        return false;
-    }
-
     *xml = virBufferContentAndReset(&buf);
     *retname = name;
     return true;
@@ -1247,10 +1242,9 @@ cmdPoolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 
         /* Retrieve the autostart status of the pool */
         if (virStoragePoolGetAutostart(list->pools[i], &autostart) < 0)
-            poolInfoTexts[i].autostart = vshStrdup(ctl, _("no autostart"));
+            poolInfoTexts[i].autostart = g_strdup(_("no autostart"));
         else
-            poolInfoTexts[i].autostart = vshStrdup(ctl, autostart ?
-                                                    _("yes") : _("no"));
+            poolInfoTexts[i].autostart = g_strdup(autostart ? _("yes") : _("no"));
 
         /* Retrieve the persistence status of the pool */
         if (details) {
@@ -1258,28 +1252,27 @@ cmdPoolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
             vshDebug(ctl, VSH_ERR_DEBUG, "Persistent flag value: %d\n",
                      persistent);
             if (persistent < 0)
-                poolInfoTexts[i].persistent = vshStrdup(ctl, _("unknown"));
+                poolInfoTexts[i].persistent = g_strdup(_("unknown"));
             else
-                poolInfoTexts[i].persistent = vshStrdup(ctl, persistent ?
-                                                         _("yes") : _("no"));
+                poolInfoTexts[i].persistent = g_strdup(persistent ? _("yes") : _("no"));
         }
 
         /* Collect further extended information about the pool */
         if (virStoragePoolGetInfo(list->pools[i], &info) != 0) {
             /* Something went wrong retrieving pool info, cope with it */
             vshError(ctl, "%s", _("Could not retrieve pool information"));
-            poolInfoTexts[i].state = vshStrdup(ctl, _("unknown"));
+            poolInfoTexts[i].state = g_strdup(_("unknown"));
             if (details) {
-                poolInfoTexts[i].capacity = vshStrdup(ctl, _("unknown"));
-                poolInfoTexts[i].allocation = vshStrdup(ctl, _("unknown"));
-                poolInfoTexts[i].available = vshStrdup(ctl, _("unknown"));
+                poolInfoTexts[i].capacity = g_strdup(_("unknown"));
+                poolInfoTexts[i].allocation = g_strdup(_("unknown"));
+                poolInfoTexts[i].available = g_strdup(_("unknown"));
             }
         } else {
             /* Decide which state string to display */
             if (details) {
                 const char *state = virshStoragePoolStateToString(info.state);
 
-                poolInfoTexts[i].state = vshStrdup(ctl, state);
+                poolInfoTexts[i].state = g_strdup(state);
 
                 /* Create the pool size related strings */
                 if (info.state == VIR_STORAGE_POOL_RUNNING ||
@@ -1303,17 +1296,17 @@ cmdPoolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
                         goto cleanup;
                 } else {
                     /* Capacity related information isn't available */
-                    poolInfoTexts[i].capacity = vshStrdup(ctl, _("-"));
-                    poolInfoTexts[i].allocation = vshStrdup(ctl, _("-"));
-                    poolInfoTexts[i].available = vshStrdup(ctl, _("-"));
+                    poolInfoTexts[i].capacity = g_strdup(_("-"));
+                    poolInfoTexts[i].allocation = g_strdup(_("-"));
+                    poolInfoTexts[i].available = g_strdup(_("-"));
                 }
             } else {
                 /* --details option was not specified, only active/inactive
                  * state strings are used */
                 if (virStoragePoolIsActive(list->pools[i]))
-                    poolInfoTexts[i].state = vshStrdup(ctl, _("active"));
+                    poolInfoTexts[i].state = g_strdup(_("active"));
                 else
-                    poolInfoTexts[i].state = vshStrdup(ctl, _("inactive"));
+                    poolInfoTexts[i].state = g_strdup(_("inactive"));
            }
         }
     }
@@ -1482,10 +1475,6 @@ cmdPoolDiscoverSourcesAs(vshControl * ctl, const vshCmd * cmd G_GNUC_UNUSED)
         }
         virBufferAdjustIndent(&buf, -2);
         virBufferAddLit(&buf, "</source>\n");
-        if (virBufferError(&buf)) {
-            vshError(ctl, "%s", _("Out of memory"));
-            return false;
-        }
         srcSpec = virBufferContentAndReset(&buf);
     }
 

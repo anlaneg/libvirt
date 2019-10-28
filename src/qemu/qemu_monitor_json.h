@@ -87,6 +87,9 @@ int qemuMonitorJSONBlockStatsUpdateCapacity(qemuMonitorPtr mon,
 int qemuMonitorJSONBlockStatsUpdateCapacityBlockdev(qemuMonitorPtr mon,
                                                     virHashTablePtr stats);
 
+virHashTablePtr
+qemuMonitorJSONBlockGetNamedNodeData(qemuMonitorPtr mon);
+
 int qemuMonitorJSONBlockResize(qemuMonitorPtr mon,
                                const char *device,
                                const char *nodename,
@@ -665,6 +668,11 @@ qemuMonitorJSONTransactionBitmapMerge(virJSONValuePtr actions,
                                       const char *node,
                                       const char *target,
                                       virJSONValuePtr *sources);
+
+int
+qemuMonitorJSONTransactionBitmapMergeSourceAddBitmap(virJSONValuePtr sources,
+                                                     const char *sourcenode,
+                                                     const char *sourcebitmap);
 
 int
 qemuMonitorJSONTransactionSnapshotLegacy(virJSONValuePtr actions,

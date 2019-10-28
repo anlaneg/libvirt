@@ -1264,7 +1264,7 @@ virFileFindMountPoint(const char *type)
 
     while (getmntent_r(f, &mb, mntbuf, sizeof(mntbuf))) {
         if (STREQ(mb.mnt_type, type)) {
-            ignore_value(VIR_STRDUP_QUIET(ret, mb.mnt_dir));
+            ret = g_strdup(mb.mnt_dir);
             goto cleanup;
         }
     }
@@ -1583,8 +1583,10 @@ virFileResolveLinkHelper(const char *linkpath,
         if (lstat(linkpath, &st) < 0)
             return -1;
 
-        if (!S_ISLNK(st.st_mode))
-            return VIR_STRDUP_QUIET(*resultpath, linkpath) < 0 ? -1 : 0;
+        if (!S_ISLNK(st.st_mode)) {
+            *resultpath = g_strdup(linkpath);
+            return 0;
+        }
     }
 
     *resultpath = virFileCanonicalizePath(linkpath);
@@ -1676,7 +1678,7 @@ virFindFileInPath(const char *file)
         char *ret = NULL;
         if (virFileIsExecutable(file))
             //文件可执行，strdup一份数据
-            ignore_value(VIR_STRDUP_QUIET(ret, file));
+            ret = g_strdup(file);
         return ret;
     }
 
@@ -1695,9 +1697,7 @@ virFindFileInPath(const char *file)
     origpath = getenv("PATH");
     if (!origpath)
         origpath = "/bin:/usr/bin";
-
-    if (VIR_STRDUP_QUIET(path, origpath) <= 0)
-        return NULL;
+    path = g_strdup(origpath);
 
     /* for each path segment, append the file to search for and test for
      * it. return it if found.
@@ -2036,8 +2036,7 @@ virFileGetMountSubtreeImpl(const char *mtabpath,
 
         if (VIR_EXPAND_N(mounts, nmounts, nmounts ? 1 : 2) < 0)
             goto cleanup;
-        if (VIR_STRDUP(mounts[nmounts - 2], mntent.mnt_dir) < 0)
-            goto cleanup;
+        mounts[nmounts - 2] = g_strdup(mntent.mnt_dir);
     }
 
     if (mounts)
@@ -3090,10 +3089,7 @@ virFileMakePathWithMode(const char *path,
 {
     g_autofree char *tmp = NULL;
 
-    if (VIR_STRDUP(tmp, path) < 0) {
-        errno = ENOMEM;
-        return -1;
-    }
+    tmp = g_strdup(path);
 
     return virFileMakePathHelper(tmp, mode);
 }
@@ -3107,10 +3103,7 @@ virFileMakeParentPath(const char *path)
 
     VIR_DEBUG("path=%s", path);
 
-    if (VIR_STRDUP(tmp, path) < 0) {
-        errno = ENOMEM;
-        return -1;
-    }
+    tmp = g_strdup(path);
 
     if ((p = strrchr(tmp, '/')) == NULL) {
         errno = EINVAL;
@@ -3313,8 +3306,7 @@ int
 virFileAbsPath(const char *path, char **abspath)
 {
     if (path[0] == '/') {
-        if (VIR_STRDUP(*abspath, path) < 0)
-            return -1;
+        *abspath = g_strdup(path);
     } else {
         g_autofree char *buf = getcwd(NULL, 0);
 
@@ -3337,8 +3329,7 @@ virFileSanitizePath(const char *path)
     char *cleanpath;
     int idx = 0;
 
-    if (VIR_STRDUP(cleanpath, path) < 0)
-        return NULL;
+    cleanpath = g_strdup(path);
 
     /* don't sanitize URIs - rfc3986 states that two slashes may lead to a
      * different resource, thus removing them would possibly change the path */
@@ -3423,12 +3414,13 @@ int virFilePrintf(FILE *fp, const char *msg, ...)
 {
     va_list vargs;
     g_autofree char *str = NULL;
-    int ret;
+    int ret = -1;
 
     va_start(vargs, msg);
 
-    if ((ret = virVasprintf(&str, msg, vargs)) < 0)
+    if (virVasprintf(&str, msg, vargs) < 0)
         goto cleanup;
+    ret = strlen(str);
 
     if (fwrite(str, 1, ret, fp) != ret) {
         virReportSystemError(errno, "%s",
@@ -3524,9 +3516,8 @@ virFileIsSharedFixFUSE(const char *path,
             maxMatching = len;
             VIR_FREE(mntType);
             VIR_FREE(mntDir);
-            if (VIR_STRDUP(mntDir, mb.mnt_dir) < 0 ||
-                VIR_STRDUP(mntType, mb.mnt_type) < 0)
-                goto cleanup;
+            mntDir = g_strdup(mb.mnt_dir);
+            mntType = g_strdup(mb.mnt_type);
         }
     }
 
@@ -3560,8 +3551,7 @@ virFileIsSharedFSType(const char *path,
     int statfs_ret;
     long long f_type = 0;
 
-    if (VIR_STRDUP(dirpath, path) < 0)
-        return -1;
+    dirpath = g_strdup(path);
 
     statfs_ret = statfs(dirpath, &sb);
 
@@ -3732,8 +3722,7 @@ virFileFindHugeTLBFS(virHugeTLBFSPtr *ret_fs,
 
         tmp = &fs[nfs - 1];
 
-        if (VIR_STRDUP(tmp->mnt_dir, mb.mnt_dir) < 0)
-            goto cleanup;
+        tmp->mnt_dir = g_strdup(mb.mnt_dir);
 
         if (virFileGetHugepageSize(tmp->mnt_dir, &tmp->size) < 0)
             goto cleanup;
@@ -4028,12 +4017,12 @@ virFileComparePaths(const char *p1, const char *p2)
      * comparison.
      */
     ignore_value(virFileResolveLink(p1, &res1));
-    if (!res1 && VIR_STRDUP(res1, p1) < 0)
-        return -1;
+    if (!res1)
+        res1 = g_strdup(p1);
 
     ignore_value(virFileResolveLink(p2, &res2));
-    if (!res2 && VIR_STRDUP(res2, p2) < 0)
-        return -1;
+    if (!res2)
+        res2 = g_strdup(p2);
 
     return STREQ_NULLABLE(res1, res2);
 }

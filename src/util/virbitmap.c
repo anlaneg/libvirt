@@ -369,7 +369,6 @@ virBitmapToString(virBitmapPtr bitmap,
                           bitmap->map[sz]);
     }
 
-    virBufferCheckError(&buf);
     ret = virBufferContentAndReset(&buf);
     if (!ret)
         return NULL;
@@ -418,7 +417,7 @@ virBitmapFormat(virBitmapPtr bitmap)
 
     if (!bitmap || (cur = virBitmapNextSetBit(bitmap, -1)) < 0) {
         char *ret;
-        ignore_value(VIR_STRDUP(ret, ""));
+        ret = g_strdup("");
         return ret;
     }
 
@@ -444,12 +443,6 @@ virBitmapFormat(virBitmapPtr bitmap)
             virBufferAsprintf(&buf, "%d-%d", start, prev);
 
         start = prev = cur;
-    }
-
-    if (virBufferError(&buf)) {
-        virBufferFreeAndReset(&buf);
-        virReportOOMError();
-        return NULL;
     }
 
     return virBufferContentAndReset(&buf);

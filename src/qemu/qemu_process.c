@@ -959,7 +959,7 @@ qemuProcessHandleBlockJob(qemuMonitorPtr mon G_GNUC_UNUSED,
         /* We have a SYNC API waiting for this event, dispatch it back */
         job->newstate = status;
         VIR_FREE(job->errmsg);
-        ignore_value(VIR_STRDUP_QUIET(job->errmsg, error));
+        job->errmsg = g_strdup(error);
         virDomainObjBroadcast(vm);
     } else {
         /* there is no waiting SYNC API, dispatch the update to a thread */
@@ -967,8 +967,7 @@ qemuProcessHandleBlockJob(qemuMonitorPtr mon G_GNUC_UNUSED,
             goto cleanup;
 
         processEvent->eventType = QEMU_PROCESS_EVENT_BLOCK_JOB;
-        if (VIR_STRDUP(data, diskAlias) < 0)
-            goto cleanup;
+        data = g_strdup(diskAlias);
         processEvent->data = data;
         processEvent->vm = virObjectRef(vm);
         processEvent->action = type;
@@ -1076,16 +1075,14 @@ qemuProcessHandleGraphics(qemuMonitorPtr mon G_GNUC_UNUSED,
     if (VIR_ALLOC(localAddr) < 0)
         goto error;
     localAddr->family = localFamily;
-    if (VIR_STRDUP(localAddr->service, localService) < 0 ||
-        VIR_STRDUP(localAddr->node, localNode) < 0)
-        goto error;
+    localAddr->service = g_strdup(localService);
+    localAddr->node = g_strdup(localNode);
 
     if (VIR_ALLOC(remoteAddr) < 0)
         goto error;
     remoteAddr->family = remoteFamily;
-    if (VIR_STRDUP(remoteAddr->service, remoteService) < 0 ||
-        VIR_STRDUP(remoteAddr->node, remoteNode) < 0)
-        goto error;
+    remoteAddr->service = g_strdup(remoteService);
+    remoteAddr->node = g_strdup(remoteNode);
 
     if (VIR_ALLOC(subject) < 0)
         goto error;
@@ -1093,17 +1090,15 @@ qemuProcessHandleGraphics(qemuMonitorPtr mon G_GNUC_UNUSED,
         if (VIR_REALLOC_N(subject->identities, subject->nidentity+1) < 0)
             goto error;
         subject->nidentity++;
-        if (VIR_STRDUP(subject->identities[subject->nidentity-1].type, "x509dname") < 0 ||
-            VIR_STRDUP(subject->identities[subject->nidentity-1].name, x509dname) < 0)
-            goto error;
+        subject->identities[subject->nidentity - 1].type = g_strdup("x509dname");
+        subject->identities[subject->nidentity - 1].name = g_strdup(x509dname);
     }
     if (saslUsername) {
         if (VIR_REALLOC_N(subject->identities, subject->nidentity+1) < 0)
             goto error;
         subject->nidentity++;
-        if (VIR_STRDUP(subject->identities[subject->nidentity-1].type, "saslUsername") < 0 ||
-            VIR_STRDUP(subject->identities[subject->nidentity-1].name, saslUsername) < 0)
-            goto error;
+        subject->identities[subject->nidentity - 1].type = g_strdup("saslUsername");
+        subject->identities[subject->nidentity - 1].name = g_strdup(saslUsername);
     }
 
     virObjectLock(vm);
@@ -1385,8 +1380,7 @@ qemuProcessHandleDeviceDeleted(qemuMonitorPtr mon G_GNUC_UNUSED,
         goto error;
 
     processEvent->eventType = QEMU_PROCESS_EVENT_DEVICE_DELETED;
-    if (VIR_STRDUP(data, devAlias) < 0)
-        goto error;
+    data = g_strdup(devAlias);
     processEvent->data = data;
     processEvent->vm = virObjectRef(vm);
 
@@ -1559,8 +1553,7 @@ qemuProcessHandleNicRxFilterChanged(qemuMonitorPtr mon G_GNUC_UNUSED,
         goto error;
 
     processEvent->eventType = QEMU_PROCESS_EVENT_NIC_RX_FILTER_CHANGED;
-    if (VIR_STRDUP(data, devAlias) < 0)
-        goto error;
+    data = g_strdup(devAlias);
     processEvent->data = data;
     processEvent->vm = virObjectRef(vm);
 
@@ -1598,8 +1591,7 @@ qemuProcessHandleSerialChanged(qemuMonitorPtr mon G_GNUC_UNUSED,
         goto error;
 
     processEvent->eventType = QEMU_PROCESS_EVENT_SERIAL_CHANGED;
-    if (VIR_STRDUP(data, devAlias) < 0)
-        goto error;
+    data = g_strdup(devAlias);
     processEvent->data = data;
     processEvent->action = connected;
     processEvent->vm = virObjectRef(vm);
@@ -1749,11 +1741,11 @@ qemuProcessHandleDumpCompleted(qemuMonitorPtr mon G_GNUC_UNUSED,
     }
     priv->job.dumpCompleted = true;
     priv->job.current->stats.dump = *stats;
-    ignore_value(VIR_STRDUP_QUIET(priv->job.error, error));
+    priv->job.error = g_strdup(error);
 
     /* Force error if extracting the DUMP_COMPLETED status failed */
     if (!error && status < 0) {
-        ignore_value(VIR_STRDUP_QUIET(priv->job.error, virGetLastErrorMessage()));
+        priv->job.error = g_strdup(virGetLastErrorMessage());
         priv->job.current->stats.dump.status = QEMU_MONITOR_DUMP_STATUS_FAILED;
     }
 
@@ -1839,9 +1831,10 @@ qemuProcessHandleRdmaGidStatusChanged(qemuMonitorPtr mon G_GNUC_UNUSED,
     VIR_DEBUG("netdev=%s,gid_status=%d,subnet_prefix=0x%llx,interface_id=0x%llx",
               netdev, gid_status, subnet_prefix, interface_id);
 
-    if (VIR_ALLOC(info) < 0 ||
-        VIR_STRDUP(info->netdev, netdev) < 0)
+    if (VIR_ALLOC(info) < 0)
         goto cleanup;
+
+    info->netdev = g_strdup(netdev);
 
     info->gid_status = gid_status;
     info->subnet_prefix = subnet_prefix;
@@ -2133,8 +2126,7 @@ qemuProcessLookupPTYs(virDomainChrDefPtr *devices,
             }
 
             VIR_FREE(chr->source->data.file.path);
-            if (VIR_STRDUP(chr->source->data.file.path, entry->ptyPath) < 0)
-                goto cleanup;
+            chr->source->data.file.path = g_strdup(entry->ptyPath);
         }
     }
 
@@ -3407,20 +3399,20 @@ qemuProcessUpdateState(virQEMUDriverPtr driver, virDomainObjPtr vm)
           oldReason == VIR_DOMAIN_PAUSED_STARTING_UP))) {
         newState = VIR_DOMAIN_RUNNING;
         newReason = VIR_DOMAIN_RUNNING_BOOTED;
-        ignore_value(VIR_STRDUP_QUIET(msg, "finished booting"));
+        msg = g_strdup("finished booting");
     } else if (state == VIR_DOMAIN_PAUSED && running) {
         newState = VIR_DOMAIN_RUNNING;
         newReason = VIR_DOMAIN_RUNNING_UNPAUSED;
-        ignore_value(VIR_STRDUP_QUIET(msg, "was unpaused"));
+        msg = g_strdup("was unpaused");
     } else if (state == VIR_DOMAIN_RUNNING && !running) {
         if (reason == VIR_DOMAIN_PAUSED_SHUTTING_DOWN) {
             newState = VIR_DOMAIN_SHUTDOWN;
             newReason = VIR_DOMAIN_SHUTDOWN_UNKNOWN;
-            ignore_value(VIR_STRDUP_QUIET(msg, "shutdown"));
+            msg = g_strdup("shutdown");
         } else if (reason == VIR_DOMAIN_PAUSED_CRASHED) {
             newState = VIR_DOMAIN_CRASHED;
             newReason = VIR_DOMAIN_CRASHED_PANICKED;
-            ignore_value(VIR_STRDUP_QUIET(msg, "crashed"));
+            msg = g_strdup("crashed");
         } else {
             newState = VIR_DOMAIN_PAUSED;
             newReason = reason;
@@ -4586,8 +4578,7 @@ qemuProcessIncomingDefNew(virQEMUCapsPtr qemuCaps,
     if (VIR_ALLOC(inc) < 0)
         return NULL;
 
-    if (VIR_STRDUP(inc->address, listenAddress) < 0)
-        goto error;
+    inc->address = g_strdup(listenAddress);
 
     inc->launchURI = qemuMigrationDstGetURI(migrateFrom, fd);
     if (!inc->launchURI)
@@ -4595,8 +4586,7 @@ qemuProcessIncomingDefNew(virQEMUCapsPtr qemuCaps,
 
     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_INCOMING_DEFER)) {
         inc->deferredURI = inc->launchURI;
-        if (VIR_STRDUP(inc->launchURI, "defer") < 0)
-            goto error;
+        inc->launchURI = g_strdup("defer");
     }
 
     inc->fd = fd;
@@ -4865,8 +4855,7 @@ qemuProcessGraphicsSetupNetworkAddress(virDomainGraphicsListenDefPtr glisten,
 
     /* TODO: reject configuration without network specified for network listen */
     if (!glisten->network) {
-        if (VIR_STRDUP(glisten->address, listenAddr) < 0)
-            return -1;
+        glisten->address = g_strdup(listenAddr);
         return 0;
     }
 
@@ -4933,8 +4922,7 @@ qemuProcessGraphicsSetupListen(virQEMUDriverPtr driver,
                     glisten->fromConfig = true;
                     glisten->type = VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_SOCKET;
                 } else if (listenAddr) {
-                    if (VIR_STRDUP(glisten->address, listenAddr) < 0)
-                        goto cleanup;
+                    glisten->address = g_strdup(listenAddr);
                     glisten->fromConfig = true;
                 }
             }
@@ -7321,8 +7309,6 @@ qemuProcessCreatePretendCmd(virQEMUDriverPtr driver,
 int
 qemuProcessKill(virDomainObjPtr vm, unsigned int flags)
 {
-    int ret;
-
     VIR_DEBUG("vm=%p name=%s pid=%lld flags=0x%x",
               vm, vm->def->name,
               (long long)vm->pid, flags);
@@ -7343,11 +7329,9 @@ qemuProcessKill(virDomainObjPtr vm, unsigned int flags)
 
     /* Request an extra delay of two seconds per current nhostdevs
      * to be safe against stalls by the kernel freeing up the resources */
-    ret = virProcessKillPainfullyDelay(vm->pid,
-                                       !!(flags & VIR_QEMU_PROCESS_KILL_FORCE),
-                                       vm->def->nhostdevs * 2);
-
-    return ret;
+    return virProcessKillPainfullyDelay(vm->pid,
+                                        !!(flags & VIR_QEMU_PROCESS_KILL_FORCE),
+                                        vm->def->nhostdevs * 2);
 }
 
 
@@ -7769,11 +7753,9 @@ int qemuProcessAutoDestroyAdd(virQEMUDriverPtr driver,
 int qemuProcessAutoDestroyRemove(virQEMUDriverPtr driver,
                                  virDomainObjPtr vm)
 {
-    int ret;
     VIR_DEBUG("vm=%s", vm->def->name);
-    ret = virCloseCallbacksUnset(driver->closeCallbacks, vm,
-                                 qemuProcessAutoDestroy);
-    return ret;
+    return virCloseCallbacksUnset(driver->closeCallbacks, vm,
+                                  qemuProcessAutoDestroy);
 }
 
 bool qemuProcessAutoDestroyActive(virQEMUDriverPtr driver,
@@ -8482,9 +8464,8 @@ qemuProcessQMPNew(const char *binary,
     if (VIR_ALLOC(proc) < 0)
         goto cleanup;
 
-    if (VIR_STRDUP(proc->binary, binary) < 0 ||
-        VIR_STRDUP(proc->libDir, libDir) < 0)
-        goto cleanup;
+    proc->binary = g_strdup(binary);
+    proc->libDir = g_strdup(libDir);
 
     proc->runUid = runUid;
     proc->runGid = runGid;

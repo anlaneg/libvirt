@@ -172,8 +172,7 @@ qemuVhostUserBinaryParse(const char *path,
     VIR_DEBUG("vhost-user description path '%s' binary : %s",
               path, binary);
 
-    if (VIR_STRDUP(vu->binary, binary) < 0)
-        return -1;
+    vu->binary = g_strdup(binary);
 
     return 0;
 }
@@ -185,7 +184,6 @@ qemuVhostUserParse(const char *path)
     g_autofree char *cont = NULL;
     g_autoptr(virJSONValue) doc = NULL;
     g_autoptr(qemuVhostUser) vu = NULL;
-    qemuVhostUserPtr ret = NULL;
 
     if (virFileReadAll(path, DOCUMENT_SIZE, &cont) < 0)
         return NULL;
@@ -206,8 +204,7 @@ qemuVhostUserParse(const char *path)
     if (qemuVhostUserBinaryParse(path, doc, vu) < 0)
         return NULL;
 
-    ret = g_steal_pointer(&vu);
-    return ret;
+    return g_steal_pointer(&vu);
 }
 
 
@@ -389,8 +386,7 @@ qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
             goto end;
 
         VIR_FREE(video->driver->vhost_user_binary);
-        if (VIR_STRDUP(video->driver->vhost_user_binary, vu->binary) < 0)
-            goto end;
+        video->driver->vhost_user_binary = g_strdup(vu->binary);
 
         break;
     }

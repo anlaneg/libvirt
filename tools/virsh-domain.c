@@ -754,11 +754,6 @@ cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</disk>\n");
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-        goto cleanup;
-    }
-
     xml = virBufferContentAndReset(&buf);
 
     if (vshCommandOptBool(cmd, "print-xml")) {
@@ -1071,11 +1066,6 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</interface>\n");
-
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-        goto cleanup;
-    }
 
     xml = virBufferContentAndReset(&buf);
 
@@ -2427,8 +2417,6 @@ cmdBlockcopy(vshControl *ctl, const vshCmd *cmd)
             virBufferEscapeString(&buf, "<driver type='%s'/>\n", format);
             virBufferAdjustIndent(&buf, -2);
             virBufferAddLit(&buf, "</disk>\n");
-            if (virBufferCheckError(&buf) < 0)
-                goto cleanup;
             xmlstr = virBufferContentAndReset(&buf);
         }
 
@@ -5085,7 +5073,7 @@ cmdSchedInfoUpdate(vshControl *ctl, const vshCmd *cmd,
     int rv;
 
     while ((opt = vshCommandOptArgv(ctl, cmd, opt))) {
-        set_field = vshStrdup(ctl, opt->data);
+        set_field = g_strdup(opt->data);
         if (!(set_val = strchr(set_field, '='))) {
             vshError(ctl, "%s", _("Invalid syntax for --set, "
                                   "expecting name=value"));
@@ -8400,10 +8388,6 @@ cmdDesc(vshControl *ctl, const vshCmd *cmd)
 
     virBufferTrim(&buf, " ", -1);
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to collect new description/title"));
-        goto cleanup;
-    }
     desc = virBufferContentAndReset(&buf);
 
     if (edit || desc) {
@@ -8527,7 +8511,7 @@ static const vshCmdOptDef opts_metadata[] = {
 
 /* helper to add new metadata using the --edit option */
 static char *
-virshDomainGetEditMetadata(vshControl *ctl,
+virshDomainGetEditMetadata(vshControl *ctl G_GNUC_UNUSED,
                            virDomainPtr dom,
                            const char *uri,
                            unsigned int flags)
@@ -8537,7 +8521,7 @@ virshDomainGetEditMetadata(vshControl *ctl,
     if (!(ret = virDomainGetMetadata(dom, VIR_DOMAIN_METADATA_ELEMENT,
                                      uri, flags))) {
         vshResetLibvirtError();
-        ret = vshStrdup(ctl, "\n");
+        ret = g_strdup("\n");
     }
 
     return ret;
@@ -8806,31 +8790,25 @@ VIR_ENUM_IMPL(virDomainProcessSignal,
               "rt23",   "rt24", "rt25",  "rt26", "rt27", /* 55-59 */
               "rt28",   "rt29", "rt30",  "rt31", "rt32"); /* 60-64 */
 
-static int getSignalNumber(vshControl *ctl, const char *signame)
+static int getSignalNumber(const char *signame)
 {
     size_t i;
     int signum;
-    char *lower = vshStrdup(ctl, signame);
-    char *tmp = lower;
+    g_autofree char *str = g_strdup(signame);
+    char *p = str;
 
     for (i = 0; signame[i]; i++)
-        lower[i] = c_tolower(signame[i]);
+        p[i] = c_tolower(signame[i]);
 
-    if (virStrToLong_i(lower, NULL, 10, &signum) >= 0)
-        goto cleanup;
+    if (virStrToLong_i(p, NULL, 10, &signum) >= 0)
+        return signum;
 
-    if (STRPREFIX(lower, "sig_"))
-        lower += 4;
-    else if (STRPREFIX(lower, "sig"))
-        lower += 3;
+    if (STRPREFIX(p, "sig_"))
+        p += 4;
+    else if (STRPREFIX(p, "sig"))
+        p += 3;
 
-    if ((signum = virDomainProcessSignalTypeFromString(lower)) >= 0)
-        goto cleanup;
-
-    signum = -1;
- cleanup:
-    VIR_FREE(tmp);
-    return signum;
+    return virDomainProcessSignalTypeFromString(p);
 }
 
 static bool
@@ -8850,7 +8828,7 @@ cmdSendProcessSignal(vshControl *ctl, const vshCmd *cmd)
     if (vshCommandOptStringReq(ctl, cmd, "signame", &signame) < 0)
         return false;
 
-    if ((signum = getSignalNumber(ctl, signame)) < 0) {
+    if ((signum = getSignalNumber(signame)) < 0) {
         vshError(ctl, _("malformed signal name: %s"), signame);
         return false;
     }
@@ -9527,10 +9505,6 @@ cmdQemuMonitorCommand(vshControl *ctl, const vshCmd *cmd)
 
     virBufferTrim(&buf, " ", -1);
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to collect command"));
-        return false;
-    }
     monitor_cmd = virBufferContentAndReset(&buf);
 
     if (vshCommandOptBool(cmd, "hmp"))
@@ -9828,10 +9802,6 @@ cmdQemuAgentCommand(vshControl *ctl, const vshCmd *cmd)
 
     virBufferTrim(&buf, " ", -1);
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to collect command"));
-        goto cleanup;
-    }
     guest_agent_cmd = virBufferContentAndReset(&buf);
 
     judge = vshCommandOptInt(ctl, cmd, "timeout", &timeout);
@@ -11492,7 +11462,7 @@ cmdDomDisplay(vshControl *ctl, const vshCmd *cmd)
                 VIR_FREE(listen_addr);
 
                 if (uri) {
-                    listen_addr = vshStrdup(ctl, uri->server);
+                    listen_addr = g_strdup(uri->server);
                     virURIFree(uri);
                 }
             }
@@ -11560,12 +11530,6 @@ cmdDomDisplay(vshControl *ctl, const vshCmd *cmd)
                               params ? "&" : "?",
                               passwd);
             params = true;
-        }
-
-        /* Ensure we can print our URI */
-        if (virBufferError(&buf)) {
-            vshError(ctl, "%s", _("Failed to create display URI"));
-            goto cleanup;
         }
 
         /* Print out our full URI */

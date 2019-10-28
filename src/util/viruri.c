@@ -41,8 +41,8 @@ virURIParamAppend(virURIPtr uri,
     char *pname = NULL;
     char *pvalue = NULL;
 
-    if (VIR_STRDUP(pname, name) < 0 || VIR_STRDUP(pvalue, value) < 0)
-        goto error;
+    pname = g_strdup(name);
+    pvalue = g_strdup(value);
 
     if (VIR_RESIZE_N(uri->params, uri->paramsAlloc, uri->paramsCount, 1) < 0)
         goto error;
@@ -167,10 +167,8 @@ virURIParse(const char *uri)
     if (VIR_ALLOC(ret) < 0)
         goto error;
 
-    if (VIR_STRDUP(ret->scheme, xmluri->scheme) < 0)
-        goto error;
-    if (VIR_STRDUP(ret->server, xmluri->server) < 0)
-        goto error;
+    ret->scheme = g_strdup(xmluri->scheme);
+    ret->server = g_strdup(xmluri->server);
     /* xmluri->port value is not defined if server was
      * not given. Modern versions libxml2 fill port
      * differently to old versions in this case, so
@@ -181,14 +179,10 @@ virURIParse(const char *uri)
         ret->port = 0;
     else
         ret->port = xmluri->port;
-    if (VIR_STRDUP(ret->path, xmluri->path) < 0)
-        goto error;
-    if (VIR_STRDUP(ret->query, xmluri->query_raw) < 0)
-        goto error;
-    if (VIR_STRDUP(ret->fragment, xmluri->fragment) < 0)
-        goto error;
-    if (VIR_STRDUP(ret->user, xmluri->user) < 0)
-        goto error;
+    ret->path = g_strdup(xmluri->path);
+    ret->query = g_strdup(xmluri->query_raw);
+    ret->fragment = g_strdup(xmluri->fragment);
+    ret->user = g_strdup(xmluri->user);
 
     /* Strip square bracket from an IPv6 address.
      * The function modifies the string in-place. Even after such
@@ -281,9 +275,6 @@ char *virURIFormatParams(virURIPtr uri)
         }
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -350,7 +341,8 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
             STREQLEN(*aliases, alias, alias_len)) {
             VIR_DEBUG("Resolved alias '%s' to '%s'",
                       alias, offset+1);
-            return VIR_STRDUP(*uri, offset+1);
+            *uri = g_strdup(offset + 1);
+            return 0;
         }
 
         aliases++;

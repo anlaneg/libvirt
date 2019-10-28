@@ -256,13 +256,13 @@ qemuVirCommandGetFDSet(virCommandPtr cmd, int fd)
     char *result = NULL;
     int idx = virCommandPassFDGetFDIndex(cmd, fd);
 
-    if (idx >= 0) {
-        ignore_value(virAsprintf(&result, "set=%d,fd=%d", idx, fd));
-    } else {
+    if (idx < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("file descriptor %d has not been transferred"), fd);
+        return NULL;
     }
 
+    ignore_value(virAsprintf(&result, "set=%d,fd=%d", idx, fd));
     return result;
 }
 
@@ -283,12 +283,13 @@ qemuVirCommandGetDevSet(virCommandPtr cmd, int fd)
     char *result = NULL;
     int idx = virCommandPassFDGetFDIndex(cmd, fd);
 
-    if (idx >= 0) {
-        ignore_value(virAsprintf(&result, "/dev/fdset/%d", idx));
-    } else {
+    if (idx < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("file descriptor %d has not been transferred"), fd);
+        return NULL;
     }
+
+    ignore_value(virAsprintf(&result, "/dev/fdset/%d", idx));
     return result;
 }
 
@@ -697,20 +698,16 @@ int
 qemuBuildSecretInfoProps(qemuDomainSecretInfoPtr secinfo,
                          virJSONValuePtr *propsret)
 {
-    int ret = -1;
     g_autofree char *keyid = NULL;
 
     if (!(keyid = qemuDomainGetMasterKeyAlias()))
         return -1;
 
-    ret = qemuMonitorCreateObjectProps(propsret,
-                                       "secret", secinfo->s.aes.alias,
-                                       "s:data", secinfo->s.aes.ciphertext,
-                                       "s:keyid", keyid,
-                                       "s:iv", secinfo->s.aes.iv,
-                                       "s:format", "base64", NULL);
-
-    return ret;
+    return qemuMonitorCreateObjectProps(propsret, "secret",
+                                        secinfo->s.aes.alias, "s:data",
+                                        secinfo->s.aes.ciphertext, "s:keyid",
+                                        keyid, "s:iv", secinfo->s.aes.iv,
+                                        "s:format", "base64", NULL);
 }
 
 
@@ -799,8 +796,7 @@ qemuBuildGeneralSecinfoURI(virURIPtr uri,
                             secinfo->s.plain.secret) < 0)
                 return -1;
         } else {
-            if (VIR_STRDUP(uri->user, secinfo->s.plain.username) < 0)
-                return -1;
+            uri->user = g_strdup(secinfo->s.plain.username);
         }
         break;
 
@@ -1011,9 +1007,6 @@ qemuBuildNetworkDriveStr(virStorageSourcePtr src,
                 if (src->path)
                     virBufferAsprintf(&buf, ":exportname=%s", src->path);
 
-                if (virBufferCheckError(&buf) < 0)
-                    return NULL;
-
                 return virBufferContentAndReset(&buf);
             }
             /* NBD code uses URI formatting scheme as others in some cases */
@@ -1090,9 +1083,6 @@ qemuBuildNetworkDriveStr(virStorageSourcePtr src,
             if (src->configFile)
                 virBufferEscape(&buf, '\\', ":", ":conf=%s", src->configFile);
 
-            if (virBufferCheckError(&buf) < 0)
-                return NULL;
-
             ret = virBufferContentAndReset(&buf);
             break;
 
@@ -1135,8 +1125,7 @@ qemuGetDriveSourceString(virStorageSourcePtr src,
     case VIR_STORAGE_TYPE_BLOCK:
     case VIR_STORAGE_TYPE_FILE:
     case VIR_STORAGE_TYPE_DIR:
-        if (VIR_STRDUP(*source, src->path) < 0)
-            return -1;
+        *source = g_strdup(src->path);
 
         break;
 
@@ -1863,9 +1852,6 @@ qemuBuildDriveStr(virDomainDiskDefPtr disk,
 
     qemuBuildDiskThrottling(disk, &opt);
 
-    if (virBufferCheckError(&opt) < 0)
-        goto error;
-
     return virBufferContentAndReset(&opt);
 
  error:
@@ -2053,8 +2039,7 @@ qemuBuildDiskDeviceStr(const virDomainDef *def,
              * ourselves especially for cases when -blockdev will be used */
             if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_SCSI_DISK_DEVICE_ID)) {
                 if (disk->serial) {
-                    if (VIR_STRDUP(scsiVPDDeviceId, disk->serial) < 0)
-                        goto error;
+                    scsiVPDDeviceId = g_strdup(disk->serial);
                 } else {
                     if (!(scsiVPDDeviceId = qemuAliasDiskDriveFromDisk(disk)))
                         goto error;
@@ -2281,9 +2266,6 @@ qemuBuildDiskDeviceStr(const virDomainDef *def,
     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_USB_STORAGE_WERROR))
         qemuBuildDiskFrontendAttributeErrorPolicy(disk, &opt);
 
-    if (virBufferCheckError(&opt) < 0)
-        goto error;
-
     return virBufferContentAndReset(&opt);
 
  error:
@@ -2301,9 +2283,6 @@ qemuBuildZPCIDevStr(virDomainDeviceInfoPtr dev)
                       dev->addr.pci.zpci.fid,
                       dev->alias,
                       dev->addr.pci.zpci.uid);
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -2645,9 +2624,6 @@ qemuBuildFSStr(virDomainFSDefPtr fs)
     if (fs->readonly)
         virBufferAddLit(&opt, ",readonly");
 
-    if (virBufferCheckError(&opt) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&opt);
 }
 
@@ -2673,9 +2649,6 @@ qemuBuildFSDevStr(const virDomainDef *def,
         return NULL;
 
     if (qemuBuildDeviceAddressStr(&opt, def, &fs->info, qemuCaps) < 0)
-        return NULL;
-
-    if (virBufferCheckError(&opt) < 0)
         return NULL;
 
     return virBufferContentAndReset(&opt);
@@ -3038,9 +3011,6 @@ qemuBuildControllerDevStr(const virDomainDef *domainDef,
     qemuBuildIoEventFdStr(&buf, def->ioeventfd, qemuCaps);
 
     if (qemuBuildDeviceAddressStr(&buf, domainDef, &def->info, qemuCaps) < 0)
-        return -1;
-
-    if (virBufferCheckError(&buf) < 0)
         return -1;
 
     *devstr = virBufferContentAndReset(&buf);
@@ -3449,8 +3419,7 @@ qemuBuildMemoryBackendProps(virJSONValuePtr *backendProps,
         def->mem.source == VIR_DOMAIN_MEMORY_SOURCE_FILE) {
 
         if (mem->nvdimmPath) {
-            if (VIR_STRDUP(memPath, mem->nvdimmPath) < 0)
-                return -1;
+            memPath = g_strdup(mem->nvdimmPath);
             if (!priv->memPrealloc)
                 prealloc = true;
         } else if (useHugepage) {
@@ -3696,9 +3665,6 @@ qemuBuildMemoryDeviceStr(virDomainMemoryDefPtr mem,
 
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -3884,9 +3850,6 @@ qemuBuildNicDevStr(virDomainDefPtr def,
         qemuBuildVirtioOptionsStr(&buf, net->virtio, qemuCaps) < 0)
         goto error;
 
-    if (virBufferCheckError(&buf) < 0)
-        goto error;
-
     return virBufferContentAndReset(&buf);
 
  error:
@@ -4034,8 +3997,6 @@ qemuBuildHostNetStr(virDomainNetDefPtr net,
 
 
     virBufferTrim(&buf, ",", -1);
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -4057,9 +4018,6 @@ qemuBuildWatchdogDevStr(const virDomainDef *def,
 
     virBufferAsprintf(&buf, "%s,id=%s", model, dev->info.alias);
     if (qemuBuildDeviceAddressStr(&buf, def, &dev->info, qemuCaps) < 0)
-        return NULL;
-
-    if (virBufferCheckError(&buf) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -4161,9 +4119,6 @@ qemuBuildNVRAMDevStr(virDomainNVRAMDefPtr dev)
         return NULL;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -4251,9 +4206,6 @@ qemuBuildVirtioInputDevStr(const virDomainDef *def,
     if (qemuBuildVirtioOptionsStr(&buf, dev->virtio, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -4283,9 +4235,6 @@ qemuBuildUSBInputDevStr(const virDomainDef *def,
     }
 
     if (qemuBuildDeviceAddressStr(&buf, def, &dev->info, qemuCaps) < 0)
-        return NULL;
-
-    if (virBufferCheckError(&buf) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -4390,9 +4339,6 @@ qemuBuildSoundDevStr(const virDomainDef *def,
 
     virBufferAsprintf(&buf, "%s,id=%s", model, sound->info.alias);
     if (qemuBuildDeviceAddressStr(&buf, def, &sound->info, qemuCaps) < 0)
-        return NULL;
-
-    if (virBufferCheckError(&buf) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -4609,9 +4555,6 @@ qemuBuildDeviceVideoStr(const virDomainDef *def,
     if (qemuBuildVirtioOptionsStr(&buf, video->virtio, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -4826,9 +4769,6 @@ qemuBuildPCIHostdevDevStr(const virDomainDef *def,
     if (qemuBuildRomStr(&buf, dev->info) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -4859,9 +4799,6 @@ qemuBuildUSBHostdevDevStr(const virDomainDef *def,
     if (qemuBuildDeviceAddressStr(&buf, def, dev->info, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -4889,9 +4826,6 @@ qemuBuildHubDevStr(const virDomainDef *def,
     virBufferAddLit(&buf, "usb-hub");
     virBufferAsprintf(&buf, ",id=%s", dev->info.alias);
     if (qemuBuildDeviceAddressStr(&buf, def, &dev->info, qemuCaps) < 0)
-        return NULL;
-
-    if (virBufferCheckError(&buf) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -4960,9 +4894,6 @@ qemuBuildSCSIiSCSIHostdevDrvStr(virDomainHostdevDefPtr dev,
         virBufferAddLit(&buf, ",if=none,format=raw");
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -4994,9 +4925,6 @@ qemuBuildSCSIVHostHostdevDevStr(const virDomainDef *def,
     if (qemuBuildDeviceAddressStr(&buf, def, dev->info, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -5025,9 +4953,6 @@ qemuBuildSCSIHostdevDrvStr(virDomainHostdevDefPtr dev,
 
     if (dev->readonly)
         virBufferAddLit(&buf, ",readonly=on");
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -5086,9 +5011,6 @@ qemuBuildSCSIHostdevDevStr(const virDomainDef *def,
 
     if (dev->info->bootIndex)
         virBufferAsprintf(&buf, ",bootindex=%u", dev->info->bootIndex);
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -5415,9 +5337,6 @@ qemuBuildChrChardevStr(virLogManagerPtr logManager,
             return NULL;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -5452,9 +5371,6 @@ qemuBuildHostdevMediatedDevStr(const virDomainDef *def,
 
     if (dev->info->bootIndex)
         virBufferAsprintf(&buf, ",bootindex=%u", dev->info->bootIndex);
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -5715,8 +5631,6 @@ qemuBuildVirtioSerialPortDevStr(const virDomainDef *def,
         virBufferAsprintf(&buf, ",name=%s", dev->target.name
                           ? dev->target.name : "com.redhat.spice.0");
     }
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -5741,8 +5655,6 @@ qemuBuildSclpDevStr(virDomainChrDefPtr dev)
     }
     virBufferAsprintf(&buf, ",chardev=char%s,id=%s",
                       dev->info.alias, dev->info.alias);
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -5872,8 +5784,6 @@ qemuBuildRNGDevStr(const virDomainDef *def,
         return NULL;
 
     if (qemuBuildDeviceAddressStr(&buf, def, &dev->info, qemuCaps) < 0)
-        return NULL;
-    if (virBufferCheckError(&buf) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -6066,9 +5976,6 @@ qemuBuildSmbiosBaseBoardStr(virSysinfoBaseBoardDefPtr def)
         virQEMUBuildBufferEscapeComma(&buf, def->location);
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -6126,9 +6033,6 @@ qemuBuildSmbiosChassisStr(virSysinfoChassisDefPtr def)
         virBufferAddLit(&buf, ",sku=");
         virQEMUBuildBufferEscapeComma(&buf, def->sku);
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -6376,9 +6280,6 @@ qemuBuildClockArgStr(virDomainClockDefPtr def)
         }
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -6590,9 +6491,6 @@ qemuBuildBootCommandLine(virCommandPtr cmd,
         virBufferAddLit(&boot_buf, "strict=on,");
 
     virBufferTrim(&boot_buf, ",", -1);
-
-    if (virBufferCheckError(&boot_buf) < 0)
-        return -1;
 
     boot_opts_str = virBufferContentAndReset(&boot_buf);
     if (boot_opts_str) {
@@ -7018,11 +6916,6 @@ qemuBuildCpuCommandLine(virCommandPtr cmd,
             virBufferAddLit(&buf, ",l3-cache=off");
     }
 
-    if (virBufferCheckError(&cpu_buf) < 0)
-        return -1;
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
-
     cpu = virBufferContentAndReset(&cpu_buf);
     cpu_flags = virBufferContentAndReset(&buf);
 
@@ -7044,8 +6937,7 @@ qemuBuildCpuCommandLine(virCommandPtr cmd,
             return -1;
         }
 
-        if (VIR_STRDUP(cpu, default_model) < 0)
-            return -1;
+        cpu = g_strdup(default_model);
     }
 
     if (cpu) {
@@ -7511,9 +7403,6 @@ qemuBuildSmpCommandLine(virCommandPtr cmd,
         virBufferAsprintf(&buf, ",threads=%u", 1);
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
-
     virCommandAddArgBuffer(cmd, &buf);
     return 0;
 }
@@ -7861,9 +7750,6 @@ qemuBuildGraphicsSDLCommandLine(virQEMUDriverConfigPtr cfg G_GNUC_UNUSED,
                           virTristateSwitchTypeToString(graphics->data.sdl.gl));
 
     }
-
-    if (virBufferCheckError(&opt) < 0)
-        return -1;
 
     virCommandAddArgBuffer(cmd, &opt);
 
@@ -8274,9 +8160,6 @@ qemuBuildGraphicsEGLHeadlessCommandLine(virQEMUDriverConfigPtr cfg G_GNUC_UNUSED
         virQEMUBuildBufferEscapeComma(&opt,
                                       graphics->data.egl_headless.rendernode);
     }
-
-    if (virBufferCheckError(&opt) < 0)
-        return -1;
 
     virCommandAddArg(cmd, "-display");
     virCommandAddArgBuffer(cmd, &opt);
@@ -8931,9 +8814,6 @@ qemuBuildShmemDevLegacyStr(virDomainDefPtr def,
     if (qemuBuildDeviceAddressStr(&buf, def, &shmem->info, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -8971,9 +8851,6 @@ qemuBuildShmemDevStr(virDomainDefPtr def,
     }
 
     if (qemuBuildDeviceAddressStr(&buf, def, &shmem->info, qemuCaps) < 0)
-        return NULL;
-
-    if (virBufferCheckError(&buf) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -9503,9 +9380,6 @@ qemuBuildRedirdevDevStr(const virDomainDef *def,
     if (qemuBuildDeviceAddressStr(&buf, def, &dev->info, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -9643,9 +9517,6 @@ qemuBuildTPMDevStr(const virDomainDef *def,
     virBufferAsprintf(&buf, "%s,tpmdev=tpm-%s,id=%s",
                       model, tpm->info.alias, tpm->info.alias);
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -9729,9 +9600,6 @@ qemuBuildTPMBackendStr(const virDomainDef *def,
     case VIR_DOMAIN_TPM_TYPE_LAST:
         return NULL;
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -10239,9 +10107,6 @@ qemuBuildVsockDevStr(virDomainDefPtr def,
     if (qemuBuildDeviceAddressStr(&buf, def, &vsock->info, qemuCaps) < 0)
         return NULL;
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -10606,9 +10471,6 @@ qemuBuildSerialChrDeviceStr(char **deviceStr,
     if (qemuBuildDeviceAddressStr(&buf, def, &serial->info, qemuCaps) < 0)
         return -1;
 
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
-
     *deviceStr = virBufferContentAndReset(&buf);
     return 0;
 }
@@ -10759,7 +10621,6 @@ qemuBuildStorageSourceAttachPrepareDrive(virDomainDiskDefPtr disk,
                                          virQEMUCapsPtr qemuCaps)
 {
     g_autoptr(qemuBlockStorageSourceAttachData) data = NULL;
-    qemuBlockStorageSourceAttachDataPtr ret = NULL;
 
     if (VIR_ALLOC(data) < 0)
         return NULL;
@@ -10768,9 +10629,7 @@ qemuBuildStorageSourceAttachPrepareDrive(virDomainDiskDefPtr disk,
         !(data->driveAlias = qemuAliasDiskDriveFromDisk(disk)))
         return NULL;
 
-    ret = g_steal_pointer(&data);
-
-    return ret;
+    return g_steal_pointer(&data);
 }
 
 

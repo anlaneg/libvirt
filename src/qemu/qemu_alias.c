@@ -134,7 +134,8 @@ qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
              * hardcoded the name of their single PCI controller as
              * "pci".
              */
-            return VIR_STRDUP(controller->info.alias, "pci");
+            controller->info.alias = g_strdup("pci");
+            return 0;
         } else if (controller->model == VIR_DOMAIN_CONTROLLER_MODEL_PCIE_ROOT) {
             /* The pcie-root controller on Q35 machinetypes uses a
              * different naming convention ("pcie.0"), because it is
@@ -153,18 +154,24 @@ qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
          * controller hardcoded with id "ide"
          */
         if (qemuDomainHasBuiltinIDE(domainDef) &&
-            controller->idx == 0)
-            return VIR_STRDUP(controller->info.alias, "ide");
+            controller->idx == 0) {
+            controller->info.alias = g_strdup("ide");
+            return 0;
+        }
     } else if (controller->type == VIR_DOMAIN_CONTROLLER_TYPE_SATA) {
         /* for any Q35 machine, the first SATA controller is the
          * integrated one, and it too is hardcoded with id "ide"
          */
-        if (qemuDomainIsQ35(domainDef) && controller->idx == 0)
-            return VIR_STRDUP(controller->info.alias, "ide");
+        if (qemuDomainIsQ35(domainDef) && controller->idx == 0) {
+            controller->info.alias = g_strdup("ide");
+            return 0;
+        }
     } else if (controller->type == VIR_DOMAIN_CONTROLLER_TYPE_USB) {
         /* first USB device is "usb", others are normal "usb%d" */
-        if (controller->idx == 0)
-            return VIR_STRDUP(controller->info.alias, "usb");
+        if (controller->idx == 0) {
+            controller->info.alias = g_strdup("usb");
+            return 0;
+        }
     }
     /* all other controllers use the default ${type}${index} naming
      * scheme for alias/id.
@@ -224,8 +231,7 @@ qemuAssignDeviceDiskAlias(virDomainDefPtr def,
         case VIR_DOMAIN_DISK_BUS_IDE:
         case VIR_DOMAIN_DISK_BUS_SATA:
         case VIR_DOMAIN_DISK_BUS_SCSI:
-            if (VIR_STRDUP(diskPriv->qomName, disk->info.alias) < 0)
-                return -1;
+            diskPriv->qomName = g_strdup(disk->info.alias);
             break;
 
         case VIR_DOMAIN_DISK_BUS_VIRTIO:
@@ -536,8 +542,7 @@ qemuAssignDeviceWatchdogAlias(virDomainWatchdogDefPtr watchdog)
     if (watchdog->info.alias)
         return 0;
 
-    if (VIR_STRDUP(watchdog->info.alias, "watchdog0") < 0)
-        return -1;
+    watchdog->info.alias = g_strdup("watchdog0");
 
     return 0;
 }
@@ -572,8 +577,7 @@ qemuAssignDeviceVsockAlias(virDomainVsockDefPtr vsock)
 {
     if (vsock->info.alias)
         return 0;
-    if (VIR_STRDUP(vsock->info.alias, "vsock0") < 0)
-        return -1;
+    vsock->info.alias = g_strdup("vsock0");
 
     return 0;
 }
@@ -758,7 +762,7 @@ qemuDomainGetMasterKeyAlias(void)
 {
     char *alias;
 
-    ignore_value(VIR_STRDUP(alias, "masterKey0"));
+    alias = g_strdup("masterKey0");
 
     return alias;
 }

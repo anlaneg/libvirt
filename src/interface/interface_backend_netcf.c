@@ -251,17 +251,10 @@ netcfGetMinimalDefForDevice(struct netcf_if *iface)
     if (VIR_ALLOC(def) < 0)
         return NULL;
 
-    if (VIR_STRDUP(def->name, ncf_if_name(iface)) < 0)
-        goto cleanup;
-
-    if (VIR_STRDUP(def->mac, ncf_if_mac_string(iface)) < 0)
-        goto cleanup;
+    def->name = g_strdup(ncf_if_name(iface));
+    def->mac = g_strdup(ncf_if_mac_string(iface));
 
     return def;
-
- cleanup:
-    virInterfaceDefFree(def);
-    return NULL;
 }
 
 
@@ -1124,7 +1117,6 @@ static int netcfInterfaceIsActive(virInterfacePtr ifinfo)
     return ret;
 }
 
-#ifdef HAVE_NETCF_TRANSACTIONS
 static int netcfInterfaceChangeBegin(virConnectPtr conn, unsigned int flags)
 {
     int ret;
@@ -1199,7 +1191,6 @@ static int netcfInterfaceChangeRollback(virConnectPtr conn, unsigned int flags)
     virObjectUnlock(driver);
     return ret;
 }
-#endif /* HAVE_NETCF_TRANSACTIONS */
 
 static virInterfaceDriver interfaceDriver = {
     .name = INTERFACE_DRIVER_NAME,
@@ -1216,11 +1207,9 @@ static virInterfaceDriver interfaceDriver = {
     .interfaceCreate = netcfInterfaceCreate, /* 0.7.0 */
     .interfaceDestroy = netcfInterfaceDestroy, /* 0.7.0 */
     .interfaceIsActive = netcfInterfaceIsActive, /* 0.7.3 */
-#ifdef HAVE_NETCF_TRANSACTIONS
     .interfaceChangeBegin = netcfInterfaceChangeBegin, /* 0.9.2 */
     .interfaceChangeCommit = netcfInterfaceChangeCommit, /* 0.9.2 */
     .interfaceChangeRollback = netcfInterfaceChangeRollback, /* 0.9.2 */
-#endif /* HAVE_NETCF_TRANSACTIONS */
 };
 
 

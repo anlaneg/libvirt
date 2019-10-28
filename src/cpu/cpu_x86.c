@@ -775,15 +775,17 @@ x86DataToCPU(const virCPUx86Data *data,
     virCPUx86Data modelData = VIR_CPU_X86_DATA_INIT;
     virCPUx86VendorPtr vendor;
 
-    if (VIR_ALLOC(cpu) < 0 ||
-        VIR_STRDUP(cpu->model, model->name) < 0 ||
-        x86DataCopy(&copy, data) < 0 ||
+    if (VIR_ALLOC(cpu) < 0)
+        goto error;
+
+    cpu->model = g_strdup(model->name);
+
+    if (x86DataCopy(&copy, data) < 0 ||
         x86DataCopy(&modelData, &model->data) < 0)
         goto error;
 
-    if ((vendor = x86DataToVendor(&copy, map)) &&
-        VIR_STRDUP(cpu->vendor, vendor->name) < 0)
-        goto error;
+    if ((vendor = x86DataToVendor(&copy, map)))
+        cpu->vendor = g_strdup(vendor->name);
 
     x86DataSubtract(&copy, &modelData);
     x86DataSubtract(&modelData, data);
@@ -862,8 +864,7 @@ x86VendorParse(xmlXPathContextPtr ctxt,
     if (VIR_ALLOC(vendor) < 0)
         goto cleanup;
 
-    if (VIR_STRDUP(vendor->name, name) < 0)
-        goto cleanup;
+    vendor->name = g_strdup(name);
 
     if (x86VendorFind(map, vendor->name)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1062,8 +1063,7 @@ x86FeatureParse(xmlXPathContextPtr ctxt,
 
     feature->migratable = true;
 
-    if (VIR_STRDUP(feature->name, name) < 0)
-        goto cleanup;
+    feature->name = g_strdup(name);
 
     if (x86FeatureFind(map, feature->name)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1177,9 +1177,12 @@ x86ModelCopy(virCPUx86ModelPtr model)
 {
     virCPUx86ModelPtr copy;
 
-    if (VIR_ALLOC(copy) < 0 ||
-        VIR_STRDUP(copy->name, model->name) < 0 ||
-        x86ModelCopySignatures(copy, model) < 0 ||
+    if (VIR_ALLOC(copy) < 0)
+        return NULL;
+
+    copy->name = g_strdup(model->name);
+
+    if (x86ModelCopySignatures(copy, model) < 0 ||
         x86DataCopy(&copy->data, &model->data) < 0) {
         x86ModelFree(copy);
         return NULL;
@@ -1517,8 +1520,7 @@ x86ModelParse(xmlXPathContextPtr ctxt,
     if (!(model = x86ModelNew()))
         goto cleanup;
 
-    if (VIR_STRDUP(model->name, name) < 0)
-        goto cleanup;
+    model->name = g_strdup(name);
 
     if (x86ModelParseAncestor(model, ctxt, map) < 0)
         goto cleanup;
@@ -1649,9 +1651,6 @@ virCPUx86DataFormat(const virCPUData *data)
         }
     }
     virBufferAddLit(&buf, "</cpudata>\n");
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -1990,9 +1989,6 @@ x86FormatSignatures(virCPUx86ModelPtr model)
 
     virBufferTrim(&buf, ",", -1);
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
@@ -2210,8 +2206,8 @@ x86Decode(virCPUDefPtr cpu,
         }
     }
 
-    if (vendor && VIR_STRDUP(cpu->vendor, vendor->name) < 0)
-        goto cleanup;
+    if (vendor)
+        cpu->vendor = g_strdup(vendor->name);
 
     sigs = x86FormatSignatures(model);
 
@@ -2947,8 +2943,7 @@ x86UpdateHostModel(virCPUDefPtr guest,
 
     if (guest->vendor_id) {
         VIR_FREE(updated->vendor_id);
-        if (VIR_STRDUP(updated->vendor_id, guest->vendor_id) < 0)
-            goto cleanup;
+        updated->vendor_id = g_strdup(guest->vendor_id);
     }
 
     for (i = 0; i < guest->nfeatures; i++) {
@@ -3074,10 +3069,6 @@ virCPUx86UpdateLive(virCPUDefPtr cpu,
     virBufferTrim(&bufAdded, ",", -1);
     virBufferTrim(&bufRemoved, ",", -1);
 
-    if (virBufferCheckError(&bufAdded) < 0 ||
-        virBufferCheckError(&bufRemoved) < 0)
-        goto cleanup;
-
     added = virBufferContentAndReset(&bufAdded);
     removed = virBufferContentAndReset(&bufRemoved);
 
@@ -3134,10 +3125,8 @@ virCPUx86GetModels(char ***models)
         if (VIR_ALLOC_N(*models, map->nmodels + 1) < 0)
             goto error;
 
-        for (i = 0; i < map->nmodels; i++) {
-            if (VIR_STRDUP((*models)[i], map->models[i]->name) < 0)
-                goto error;
-        }
+        for (i = 0; i < map->nmodels; i++)
+            (*models)[i] = g_strdup(map->models[i]->name);
     }
 
     return map->nmodels;

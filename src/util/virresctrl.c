@@ -1388,7 +1388,8 @@ virResctrlSetID(char **resctrlid,
         return -1;
     }
 
-    return VIR_STRDUP(*resctrlid, id);
+    *resctrlid = g_strdup(id);
+    return 0;
 }
 
 
@@ -1436,7 +1437,7 @@ virResctrlAllocMemoryBandwidthFormat(virResctrlAllocPtr alloc,
 
     virBufferTrim(buf, ";", 1);
     virBufferAddChar(buf, '\n');
-    return virBufferCheckError(buf);
+    return 0;
 }
 
 
@@ -1581,7 +1582,7 @@ virResctrlAllocFormatCache(virResctrlAllocPtr alloc,
         }
     }
 
-    return virBufferCheckError(buf);
+    return 0;
 }
 
 
@@ -2338,8 +2339,7 @@ virResctrlAllocDeterminePath(virResctrlAllocPtr alloc,
 
     /* If the allocation is empty, then the path will be SYSFS_RESCTRL_PATH */
     if (virResctrlAllocIsEmpty(alloc)) {
-        if (VIR_STRDUP(alloc->path, SYSFS_RESCTRL_PATH) < 0)
-            return -1;
+        alloc->path = g_strdup(SYSFS_RESCTRL_PATH);
 
         return 0;
     }
@@ -2562,8 +2562,7 @@ virResctrlMonitorDeterminePath(virResctrlMonitorPtr monitor,
 
     if (!virResctrlAllocIsEmpty(monitor->alloc) &&
         STREQ_NULLABLE(monitor->id, monitor->alloc->id)) {
-        if (VIR_STRDUP(monitor->path, monitor->alloc->path) < 0)
-            return -1;
+        monitor->path = g_strdup(monitor->alloc->path);
         return 0;
     }
 

@@ -85,7 +85,6 @@ testStorageFileGetMetadata(const char *path,
                            uid_t uid, gid_t gid)
 {
     struct stat st;
-    virStorageSourcePtr ret = NULL;
     g_autoptr(virStorageSource) def = NULL;
 
     if (!(def = virStorageSourceNew()))
@@ -102,14 +101,12 @@ testStorageFileGetMetadata(const char *path,
         }
     }
 
-    if (VIR_STRDUP(def->path, path) < 0)
-        return NULL;
+    def->path = g_strdup(path);
 
     if (virStorageFileGetMetadata(def, uid, gid, false) < 0)
         return NULL;
 
-    ret = g_steal_pointer(&def);
-    return ret;
+    return g_steal_pointer(&def);
 }
 
 static int
@@ -480,8 +477,7 @@ testPathCanonicalizeReadlink(const char *path,
 
     for (i = 0; i < G_N_ELEMENTS(testPathCanonicalizeSymlinks); i++) {
         if (STREQ(path, testPathCanonicalizeSymlinks[i][0])) {
-            if (VIR_STRDUP(*linkpath, testPathCanonicalizeSymlinks[i][1]) < 0)
-                return -1;
+            *linkpath = g_strdup(testPathCanonicalizeSymlinks[i][1]);
 
             return 0;
         }

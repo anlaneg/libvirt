@@ -118,10 +118,8 @@ openvzDomainDefPostParse(virDomainDefPtr def,
                          void *parseOpaque G_GNUC_UNUSED)
 {
     /* fill the init path */
-    if (def->os.type == VIR_DOMAIN_OSTYPE_EXE && !def->os.init) {
-        if (VIR_STRDUP(def->os.init, "/sbin/init") < 0)
-            return -1;
-    }
+    if (def->os.type == VIR_DOMAIN_OSTYPE_EXE && !def->os.init)
+        def->os.init = g_strdup("/sbin/init");
 
     return 0;
 }
@@ -373,7 +371,7 @@ static char *openvzDomainGetOSType(virDomainPtr dom)
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
         return NULL;
 
-    ignore_value(VIR_STRDUP(ret, virDomainOSTypeToString(vm->def->os.type)));
+    ret = g_strdup(virDomainOSTypeToString(vm->def->os.type));
 
     virDomainObjEndAPI(&vm);
     return ret;
@@ -716,7 +714,7 @@ openvzGenerateContainerVethName(int veid)
 
     /* try to get line "^NETIF=..." from config */
     if (openvzReadVPSConfigParam(veid, "NETIF", &temp) <= 0) {
-        ignore_value(VIR_STRDUP(name, "eth0"));
+        name = g_strdup("eth0");
     } else {
         char *saveptr = NULL;
         char *s;
@@ -780,8 +778,7 @@ openvzDomainSetNetwork(virConnectPtr conn, const char *vpsid,
         /* if net is ethernet and the user has specified guest interface name,
          * let's use it; otherwise generate a new one */
         if (net->ifname_guest) {
-            if (VIR_STRDUP(guest_ifname, net->ifname_guest) < 0)
-                goto cleanup;
+            guest_ifname = g_strdup(net->ifname_guest);
         } else {
             guest_ifname = openvzGenerateContainerVethName(veid);
             if (guest_ifname == NULL) {
@@ -1317,7 +1314,8 @@ openvzConnectURIProbe(char **uri)
     if (access("/proc/vz", W_OK) < 0)
         return 0;
 
-    return VIR_STRDUP(*uri, "openvz:///system");
+    *uri = g_strdup("openvz:///system");
+    return 1;
 }
 
 
@@ -1506,8 +1504,7 @@ static int openvzConnectListDefinedDomains(virConnectPtr conn G_GNUC_UNUSED,
             continue;
         }
         snprintf(vpsname, sizeof(vpsname), "%d", veid);
-        if (VIR_STRDUP(names[got], vpsname) < 0)
-            goto out;
+        names[got] = g_strdup(vpsname);
         got ++;
     }
 

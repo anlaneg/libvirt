@@ -2220,6 +2220,24 @@ qemuMonitorBlockStatsUpdateCapacityBlockdev(qemuMonitorPtr mon,
     return qemuMonitorJSONBlockStatsUpdateCapacityBlockdev(mon, stats);
 }
 
+
+/**
+ * qemuMonitorBlockGetNamedNodeData:
+ * @mon: monitor object
+ *
+ * Uses 'query-named-block-nodes' to retrieve information about individual
+ * storage nodes and returns them in a hash table of qemuBlockNamedNodeDataPtrs
+ * filled with the data. The hash table keys are node names.
+ */
+virHashTablePtr
+qemuMonitorBlockGetNamedNodeData(qemuMonitorPtr mon)
+{
+    QEMU_CHECK_MONITOR_NULL(mon);
+
+    return qemuMonitorJSONBlockGetNamedNodeData(mon);
+}
+
+
 int
 qemuMonitorBlockResize(qemuMonitorPtr mon,
                        const char *device,
@@ -2987,8 +3005,8 @@ qemuMonitorAddObject(qemuMonitorPtr mon,
         goto cleanup;
     }
 
-    if (alias && VIR_STRDUP(tmp, id) < 0)
-        goto cleanup;
+    if (alias)
+        tmp = g_strdup(id);
 
     ret = qemuMonitorJSONAddObject(mon, *props);
     *props = NULL;
@@ -3635,15 +3653,13 @@ qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig)
     if (VIR_ALLOC_N(copy->props, orig->nprops) < 0)
         goto error;
 
-    if (VIR_STRDUP(copy->name, orig->name) < 0)
-        goto error;
+    copy->name = g_strdup(orig->name);
 
     copy->migratability = orig->migratability;
     copy->nprops = orig->nprops;
 
     for (i = 0; i < orig->nprops; i++) {
-        if (VIR_STRDUP(copy->props[i].name, orig->props[i].name) < 0)
-            goto error;
+        copy->props[i].name = g_strdup(orig->props[i].name);
 
         copy->props[i].migratable = orig->props[i].migratable;
         copy->props[i].type = orig->props[i].type;
@@ -3653,9 +3669,7 @@ qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig)
             break;
 
         case QEMU_MONITOR_CPU_PROPERTY_STRING:
-            if (VIR_STRDUP(copy->props[i].value.string,
-                           orig->props[i].value.string) < 0)
-                goto error;
+            copy->props[i].value.string = g_strdup(orig->props[i].value.string);
             break;
 
         case QEMU_MONITOR_CPU_PROPERTY_NUMBER:
@@ -4581,6 +4595,15 @@ qemuMonitorTransactionBitmapMerge(virJSONValuePtr actions,
                                   virJSONValuePtr *sources)
 {
     return qemuMonitorJSONTransactionBitmapMerge(actions, node, target, sources);
+}
+
+
+int
+qemuMonitorTransactionBitmapMergeSourceAddBitmap(virJSONValuePtr sources,
+                                                 const char *sourcenode,
+                                                 const char *sourcebitmap)
+{
+    return qemuMonitorJSONTransactionBitmapMergeSourceAddBitmap(sources, sourcenode, sourcebitmap);
 }
 
 

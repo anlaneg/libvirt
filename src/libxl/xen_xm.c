@@ -96,8 +96,7 @@ xenParseXMOS(virConfPtr conf, virDomainDefPtr def)
             if (virAsprintf(&def->os.cmdline, "root=%s", root) < 0)
                 return -1;
         } else if (extra) {
-            if (VIR_STRDUP(def->os.cmdline, extra) < 0)
-                return -1;
+            def->os.cmdline = g_strdup(extra);
         }
     }
 
@@ -351,9 +350,6 @@ xenFormatXMDisk(virConfValuePtr list,
                        _("transient disks not supported yet"));
         return -1;
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
 
     if (VIR_ALLOC(val) < 0)
         goto cleanup;

@@ -107,15 +107,12 @@ virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
             virBufferAsprintf(&buf, "%d", virtVlan->tag[i]);
         }
 
-        if (virBufferCheckError(&buf) < 0)
-            goto cleanup;
         virCommandAddArg(cmd, virBufferCurrentContent(&buf));
     } else if (virtVlan->nTags) {
         virCommandAddArgFormat(cmd, "tag=%d", virtVlan->tag[0]);
     }
 
     ret = 0;
- cleanup:
     virBufferFreeAndReset(&buf);
     return ret;
 }
@@ -529,8 +526,7 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
         goto cleanup;
     }
 
-    if (VIR_STRDUP(*ifname, tmpIfname) < 0)
-        goto cleanup;
+    *ifname = g_strdup(tmpIfname);
     ret = 1;
 
  cleanup:

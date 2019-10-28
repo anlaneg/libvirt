@@ -62,8 +62,7 @@ virshDomainNameCompleter(vshControl *ctl,
     for (i = 0; i < ndomains; i++) {
         const char *name = virDomainGetName(domains[i]);
 
-        if (VIR_STRDUP(tmp[i], name) < 0)
-            goto cleanup;
+        tmp[i] = g_strdup(name);
     }
 
     ret = g_steal_pointer(&tmp);
@@ -88,7 +87,6 @@ virshDomainInterfaceCompleter(vshControl *ctl,
     g_autofree xmlNodePtr *interfaces = NULL;
     size_t i;
     unsigned int domainXMLFlags = 0;
-    char **ret = NULL;
     VIR_AUTOSTRINGLIST tmp = NULL;
 
     virCheckFlags(VIRSH_DOMAIN_INTERFACE_COMPLETER_MAC, NULL);
@@ -122,8 +120,7 @@ virshDomainInterfaceCompleter(vshControl *ctl,
             return NULL;
     }
 
-    ret = g_steal_pointer(&tmp);
-    return ret;
+    return g_steal_pointer(&tmp);
 }
 
 
@@ -139,7 +136,6 @@ virshDomainDiskTargetCompleter(vshControl *ctl,
     int ndisks;
     size_t i;
     VIR_AUTOSTRINGLIST tmp = NULL;
-    char **ret = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -162,8 +158,7 @@ virshDomainDiskTargetCompleter(vshControl *ctl,
             return NULL;
     }
 
-    ret = g_steal_pointer(&tmp);
-    return ret;
+    return g_steal_pointer(&tmp);
 }
 
 
@@ -173,7 +168,6 @@ virshDomainEventNameCompleter(vshControl *ctl G_GNUC_UNUSED,
                               unsigned int flags)
 {
     size_t i = 0;
-    char **ret = NULL;
     VIR_AUTOSTRINGLIST tmp = NULL;
 
     virCheckFlags(0, NULL);
@@ -181,13 +175,10 @@ virshDomainEventNameCompleter(vshControl *ctl G_GNUC_UNUSED,
     if (VIR_ALLOC_N(tmp, VIR_DOMAIN_EVENT_ID_LAST + 1) < 0)
         return NULL;
 
-    for (i = 0; i < VIR_DOMAIN_EVENT_ID_LAST; i++) {
-        if (VIR_STRDUP(tmp[i], virshDomainEventCallbacks[i].name) < 0)
-            return NULL;
-    }
+    for (i = 0; i < VIR_DOMAIN_EVENT_ID_LAST; i++)
+        tmp[i] = g_strdup(virshDomainEventCallbacks[i].name);
 
-    ret = g_steal_pointer(&tmp);
-    return ret;
+    return g_steal_pointer(&tmp);
 }
 
 
@@ -198,7 +189,6 @@ virshDomainInterfaceStateCompleter(vshControl *ctl,
 {
     virshControlPtr priv = ctl->privData;
     const char *iface = NULL;
-    char **ret = NULL;
     g_autoptr(xmlDoc) xml = NULL;
     g_autoptr(xmlXPathContext) ctxt = NULL;
     virMacAddr macaddr;
@@ -242,15 +232,12 @@ virshDomainInterfaceStateCompleter(vshControl *ctl,
 
     if ((state = virXPathString("string(./link/@state)", ctxt)) &&
         STREQ(state, "down")) {
-        if (VIR_STRDUP(tmp[0], "up") < 0)
-            return NULL;
+        tmp[0] = g_strdup("up");
     } else {
-        if (VIR_STRDUP(tmp[0], "down") < 0)
-            return NULL;
+        tmp[0] = g_strdup("down");
     }
 
-    ret = g_steal_pointer(&tmp);
-    return ret;
+    return g_steal_pointer(&tmp);
 }
 
 
@@ -266,7 +253,6 @@ virshDomainDeviceAliasCompleter(vshControl *ctl,
     g_autofree xmlNodePtr *aliases = NULL;
     size_t i;
     unsigned int domainXMLFlags = 0;
-    char **ret = NULL;
     VIR_AUTOSTRINGLIST tmp = NULL;
 
     virCheckFlags(0, NULL);
@@ -292,8 +278,7 @@ virshDomainDeviceAliasCompleter(vshControl *ctl,
             return NULL;
     }
 
-    ret = g_steal_pointer(&tmp);
-    return ret;
+    return g_steal_pointer(&tmp);
 }
 
 

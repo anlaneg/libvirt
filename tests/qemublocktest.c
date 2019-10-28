@@ -161,8 +161,7 @@ testQemuDiskXMLToJSONFakeSecrets(virStorageSourcePtr src)
             return -1;
 
         srcpriv->secinfo->type = VIR_DOMAIN_SECRET_INFO_TYPE_AES;
-        if (VIR_STRDUP(srcpriv->secinfo->s.aes.username, src->auth->username) < 0)
-            return -1;
+        srcpriv->secinfo->s.aes.username = g_strdup(src->auth->username);
 
         if (virAsprintf(&srcpriv->secinfo->s.aes.alias, "%s-secalias",
                         NULLSTR(src->nodestorage)) < 0)
@@ -223,8 +222,7 @@ testQemuDiskXMLToProps(const void *opaque)
         if (qemuDomainValidateStorageSource(n, data->qemuCaps) < 0)
             goto cleanup;
 
-        if (qemuDomainPrepareDiskSourceData(disk, n, NULL, data->qemuCaps) < 0)
-            goto cleanup;
+        qemuDomainPrepareDiskSourceData(disk, n);
 
         if (!(formatProps = qemuBlockStorageSourceGetBlockdevProps(n, n->backingStore)) ||
             !(storageSrcOnlyProps = qemuBlockStorageSourceGetBackendProps(n, false, true, true)) ||
@@ -331,9 +329,6 @@ testQemuDiskXMLToPropsValidateFile(const void *opaque)
         virBufferAdd(&buf, jsonstr, -1);
         VIR_FREE(jsonstr);
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
 
     actual = virBufferContentAndReset(&buf);
 
@@ -502,9 +497,6 @@ testQemuDiskXMLToPropsValidateFileSrcOnly(const void *opaque)
 
         virBufferAdd(&buf, jsonstr, -1);
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
 
     actual = virBufferContentAndReset(&buf);
 

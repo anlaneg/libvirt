@@ -610,8 +610,7 @@ libxlAddDom0(libxlDriverPrivatePtr driver)
 
     def->id = 0;
     def->virtType = VIR_DOMAIN_VIRT_XEN;
-    if (VIR_STRDUP(def->name, "Domain-0") < 0)
-        goto cleanup;
+    def->name = g_strdup("Domain-0");
 
     def->os.type = VIR_DOMAIN_OSTYPE_XEN;
 
@@ -855,7 +854,8 @@ libxlConnectURIProbe(char **uri)
     if (libxl_driver == NULL)
         return 0;
 
-    return VIR_STRDUP(*uri, "xen:///system");
+    *uri = g_strdup("xen:///system");
+    return 1;
 }
 
 
@@ -951,8 +951,6 @@ libxlConnectGetSysinfo(virConnectPtr conn, unsigned int flags)
 
     if (virSysinfoFormat(&buf, driver->hostsysinfo) < 0)
         return NULL;
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
     return virBufferContentAndReset(&buf);
 }
 
@@ -1009,30 +1007,24 @@ static int
 libxlConnectListDomains(virConnectPtr conn, int *ids, int nids)
 {
     libxlDriverPrivatePtr driver = conn->privateData;
-    int n;
 
     if (virConnectListDomainsEnsureACL(conn) < 0)
         return -1;
 
-    n = virDomainObjListGetActiveIDs(driver->domains, ids, nids,
-                                     virConnectListDomainsCheckACL, conn);
-
-    return n;
+    return virDomainObjListGetActiveIDs(driver->domains, ids, nids,
+                                        virConnectListDomainsCheckACL, conn);
 }
 
 static int
 libxlConnectNumOfDomains(virConnectPtr conn)
 {
     libxlDriverPrivatePtr driver = conn->privateData;
-    int n;
 
     if (virConnectNumOfDomainsEnsureACL(conn) < 0)
         return -1;
 
-    n = virDomainObjListNumOfDomains(driver->domains, true,
-                                     virConnectNumOfDomainsCheckACL, conn);
-
-    return n;
+    return virDomainObjListNumOfDomains(driver->domains, true,
+                                        virConnectNumOfDomainsCheckACL, conn);
 }
 
 static virDomainPtr
@@ -1576,8 +1568,7 @@ libxlDomainGetOSType(virDomainPtr dom)
     if (virDomainGetOSTypeEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (VIR_STRDUP(type, virDomainOSTypeToString(vm->def->os.type)) < 0)
-        goto cleanup;
+    type = g_strdup(virDomainOSTypeToString(vm->def->os.type));
 
  cleanup:
     virDomainObjEndAPI(&vm);
@@ -2777,29 +2768,26 @@ libxlConnectListDefinedDomains(virConnectPtr conn,
                                char **const names, int nnames)
 {
     libxlDriverPrivatePtr driver = conn->privateData;
-    int n;
 
     if (virConnectListDefinedDomainsEnsureACL(conn) < 0)
         return -1;
 
-    n = virDomainObjListGetInactiveNames(driver->domains, names, nnames,
-                                         virConnectListDefinedDomainsCheckACL, conn);
-    return n;
+    return virDomainObjListGetInactiveNames(driver->domains, names, nnames,
+                                            virConnectListDefinedDomainsCheckACL,
+                                            conn);
 }
 
 static int
 libxlConnectNumOfDefinedDomains(virConnectPtr conn)
 {
     libxlDriverPrivatePtr driver = conn->privateData;
-    int n;
 
     if (virConnectNumOfDefinedDomainsEnsureACL(conn) < 0)
         return -1;
 
-    n = virDomainObjListNumOfDomains(driver->domains, false,
-                                     virConnectNumOfDefinedDomainsCheckACL,
-                                     conn);
-    return n;
+    return virDomainObjListNumOfDomains(driver->domains, false,
+                                        virConnectNumOfDefinedDomainsCheckACL,
+                                        conn);
 }
 
 static int
@@ -4072,7 +4060,7 @@ libxlDomainUpdateDeviceConfig(virDomainDefPtr vmdef, virDomainDeviceDefPtr dev)
     switch (dev->type) {
         case VIR_DOMAIN_DEVICE_DISK:
             disk = dev->data.disk;
-            if (!(orig = virDomainDiskByName(vmdef, disk->dst, false))) {
+            if (!(orig = virDomainDiskByTarget(vmdef, disk->dst))) {
                 virReportError(VIR_ERR_INVALID_ARG,
                                _("target %s doesn't exist."), disk->dst);
                 goto cleanup;
@@ -4607,7 +4595,7 @@ libxlDomainGetSchedulerType(virDomainPtr dom, int *nparams)
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(ret, name));
+    ret = g_strdup(name);
 
  cleanup:
     virDomainObjEndAPI(&vm);
@@ -5437,8 +5425,7 @@ libxlDomainBlockStatsVBD(virDomainObjPtr vm,
 
     size = libxlDiskSectorSize(vm->def->id, devno);
 
-    if (VIR_STRDUP(stats->backend, "vbd") < 0)
-        return ret;
+    stats->backend = g_strdup("vbd");
 
     if (virAsprintf(&path, "/sys/bus/xen-backend/devices/vbd-%d-%d/statistics",
                     vm->def->id, devno) < 0)
@@ -5717,17 +5704,14 @@ libxlConnectListAllDomains(virConnectPtr conn,
                            unsigned int flags)
 {
     libxlDriverPrivatePtr driver = conn->privateData;
-    int ret = -1;
 
     virCheckFlags(VIR_CONNECT_LIST_DOMAINS_FILTERS_ALL, -1);
 
     if (virConnectListAllDomainsEnsureACL(conn) < 0)
         return -1;
 
-    ret = virDomainObjListExport(driver->domains, conn, domains,
-                                 virConnectListAllDomainsCheckACL, flags);
-
-    return ret;
+    return virDomainObjListExport(driver->domains, conn, domains,
+                                  virConnectListAllDomainsCheckACL, flags);
 }
 
 /* Which features are supported by this driver? */
@@ -6305,19 +6289,16 @@ libxlGetDHCPInterfaces(virDomainPtr dom,
             if (VIR_ALLOC_N(iface->addrs, iface->naddrs) < 0)
                 goto error;
 
-            if (VIR_STRDUP(iface->name, vm->def->nets[i]->ifname) < 0)
-                goto cleanup;
+            iface->name = g_strdup(vm->def->nets[i]->ifname);
 
-            if (VIR_STRDUP(iface->hwaddr, macaddr) < 0)
-                goto cleanup;
+            iface->hwaddr = g_strdup(macaddr);
         }
 
         for (j = 0; j < n_leases; j++) {
             virNetworkDHCPLeasePtr lease = leases[j];
             virDomainIPAddressPtr ip_addr = &iface->addrs[j];
 
-            if (VIR_STRDUP(ip_addr->addr, lease->ipaddr) < 0)
-                goto cleanup;
+            ip_addr->addr = g_strdup(lease->ipaddr);
 
             ip_addr->type = lease->type;
             ip_addr->prefix = lease->prefix;

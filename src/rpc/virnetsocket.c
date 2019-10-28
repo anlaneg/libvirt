@@ -898,18 +898,10 @@ int virNetSocketNewConnectSSH(const char *nodename,
     virCommandAddArgList(cmd, "--", nodename, "sh", "-c", NULL);
 
     virBufferEscapeShell(&buf, netcat);
-    if (virBufferCheckError(&buf) < 0) {
-        virCommandFree(cmd);
-        return -1;
-    }
     quoted = virBufferContentAndReset(&buf);
 
     virBufferEscapeShell(&buf, quoted);
     VIR_FREE(quoted);
-    if (virBufferCheckError(&buf) < 0) {
-        virCommandFree(cmd);
-        return -1;
-    }
     quoted = virBufferContentAndReset(&buf);
 
     /*
@@ -999,8 +991,7 @@ virNetSocketNewConnectLibSSH2(const char *host,
     if (virNetSSHSessionSetChannelCommand(sess, command) != 0)
         goto error;
 
-    if (VIR_STRDUP(authMethodsCopy, authMethods) < 0)
-        goto error;
+    authMethodsCopy = g_strdup(authMethods);
 
     authMethodNext = authMethodsCopy;
 
@@ -1134,8 +1125,7 @@ virNetSocketNewConnectLibssh(const char *host,
     if (virNetLibsshSessionSetChannelCommand(sess, command) != 0)
         goto error;
 
-    if (VIR_STRDUP(authMethodsCopy, authMethods) < 0)
-        goto error;
+    authMethodsCopy = g_strdup(authMethods);
 
     authMethodNext = authMethodsCopy;
 
@@ -1635,8 +1625,7 @@ int virNetSocketGetSELinuxContext(virNetSocketPtr sock,
         goto cleanup;
     }
 
-    if (VIR_STRDUP(*context, seccon) < 0)
-        goto cleanup;
+    *context = g_strdup(seccon);
 
     ret = 0;
  cleanup:

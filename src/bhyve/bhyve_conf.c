@@ -56,14 +56,9 @@ virBhyveDriverConfigNew(void)
     if (!(cfg = virObjectNew(virBhyveDriverConfigClass)))
         return NULL;
 
-    if (VIR_STRDUP(cfg->firmwareDir, DATADIR "/uefi-firmware") < 0)
-        goto error;
+    cfg->firmwareDir = g_strdup(DATADIR "/uefi-firmware");
 
     return cfg;
-
- error:
-    virObjectUnref(cfg);
-    return NULL;
 }
 
 int

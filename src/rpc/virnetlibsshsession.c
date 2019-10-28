@@ -694,9 +694,6 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
         if (virBufferUse(&buff) > 0)
             virBufferAddChar(&buff, '\n');
 
-        if (virBufferCheckError(&buff) < 0)
-            return -1;
-
         for (iprompt = 0; iprompt < nprompts; ++iprompt) {
             virConnectCredential retr_passphrase;
             const char *promptStr;
@@ -726,9 +723,6 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
 
                 virBufferAddBuffer(&prompt_buff, &buff);
                 virBufferAdd(&prompt_buff, promptStr, promptStrLen);
-
-                if (virBufferCheckError(&prompt_buff) < 0)
-                    goto prompt_error;
 
                 prompt = virBufferContentAndReset(&prompt_buff);
             } else {
@@ -1052,11 +1046,8 @@ virNetLibsshSessionAuthAddPrivKeyAuth(virNetLibsshSessionPtr sess,
 
     virObjectLock(sess);
 
-    if (VIR_STRDUP(file, keyfile) < 0 ||
-        VIR_STRDUP(pass, password) < 0) {
-        ret = -1;
-        goto error;
-    }
+    file = g_strdup(keyfile);
+    pass = g_strdup(password);
 
     if (!(auth = virNetLibsshSessionAuthMethodNew(sess))) {
         ret = -1;
@@ -1114,8 +1105,7 @@ virNetLibsshSessionSetChannelCommand(virNetLibsshSessionPtr sess,
 
     VIR_FREE(sess->channelCommand);
 
-    if (VIR_STRDUP(sess->channelCommand, command) < 0)
-        ret = -1;
+    sess->channelCommand = g_strdup(command);
 
     virObjectUnlock(sess);
     return ret;
@@ -1135,8 +1125,7 @@ virNetLibsshSessionSetHostKeyVerification(virNetLibsshSessionPtr sess,
 
     VIR_FREE(sess->hostname);
 
-    if (VIR_STRDUP(sess->hostname, hostname) < 0)
-        goto error;
+    sess->hostname = g_strdup(hostname);
 
     /* set the hostname */
     if (ssh_options_set(sess->session, SSH_OPTIONS_HOST, sess->hostname) < 0)
@@ -1156,8 +1145,7 @@ virNetLibsshSessionSetHostKeyVerification(virNetLibsshSessionPtr sess,
             goto error;
 
         VIR_FREE(sess->knownHostsFile);
-        if (VIR_STRDUP(sess->knownHostsFile, hostsfile) < 0)
-            goto error;
+        sess->knownHostsFile = g_strdup(hostsfile);
     } else {
         /* libssh does not support trying no known_host file at all:
          * hence use /dev/null here, without storing it as file */
@@ -1191,8 +1179,7 @@ virNetLibsshSessionPtr virNetLibsshSessionNew(const char *username)
         goto error;
     }
 
-    if (VIR_STRDUP(sess->username, username) < 0)
-        goto error;
+    sess->username = g_strdup(username);
 
     VIR_DEBUG("virNetLibsshSessionPtr: %p, ssh_session: %p",
               sess, sess->session);

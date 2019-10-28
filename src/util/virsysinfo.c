@@ -420,8 +420,7 @@ virSysinfoParseARMProcessor(const char *base, virSysinfoDefPtr ret)
                         cur, eol - cur) < 0)
             goto error;
 
-        if (VIR_STRDUP(processor->processor_type, processor_type) < 0)
-            goto error;
+        processor->processor_type = g_strdup(processor_type);
 
         base = cur;
     }
@@ -558,8 +557,7 @@ virSysinfoParseS390Processor(const char *base, virSysinfoDefPtr ret)
         if (VIR_EXPAND_N(ret->processor, ret->nprocessor, 1) < 0)
             goto error;
         processor = &ret->processor[ret->nprocessor - 1];
-        if (VIR_STRDUP(processor->processor_manufacturer, manufacturer) < 0)
-            goto error;
+        processor->processor_manufacturer = g_strdup(manufacturer);
         if (!virSysinfoParseS390Delimited(procline, "version",
                                           &processor->processor_version,
                                           '=', ',') ||
@@ -1483,20 +1481,19 @@ virSysinfoOEMStringsFormat(virBufferPtr buf, virSysinfoOEMStringsDefPtr def)
 int
 virSysinfoFormat(virBufferPtr buf, virSysinfoDefPtr def)
 {
+    virBuffer attrBuf = VIR_BUFFER_INITIALIZER;
     virBuffer childrenBuf = VIR_BUFFER_INITIALIZER;
     const char *type = virSysinfoTypeToString(def->type);
-    int indent = virBufferGetIndent(buf, false);
-    int ret = -1;
 
     if (!type) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("unexpected sysinfo type model %d"),
                        def->type);
         virBufferFreeAndReset(buf);
-        goto cleanup;
+        return -1;
     }
 
-    virBufferAdjustIndent(&childrenBuf, indent + 2);
+    virBufferSetChildIndent(&childrenBuf, buf);
 
     virSysinfoBIOSFormat(&childrenBuf, def->bios);
     virSysinfoSystemFormat(&childrenBuf, def->system);
@@ -1506,22 +1503,11 @@ virSysinfoFormat(virBufferPtr buf, virSysinfoDefPtr def)
     virSysinfoMemoryFormat(&childrenBuf, def);
     virSysinfoOEMStringsFormat(&childrenBuf, def->oemStrings);
 
-    virBufferAsprintf(buf, "<sysinfo type='%s'", type);
-    if (virBufferUse(&childrenBuf)) {
-        virBufferAddLit(buf, ">\n");
-        virBufferAddBuffer(buf, &childrenBuf);
-        virBufferAddLit(buf, "</sysinfo>\n");
-    } else {
-        virBufferAddLit(buf, "/>\n");
-    }
+    virBufferAsprintf(&attrBuf, " type='%s'", type);
 
-    if (virBufferCheckError(buf) < 0)
-        goto cleanup;
+    virXMLFormatElement(buf, "sysinfo", &attrBuf, &childrenBuf);
 
-    ret = 0;
- cleanup:
-    virBufferFreeAndReset(&childrenBuf);
-    return ret;
+    return 0;
 }
 
 #define CHECK_FIELD(name, desc) \

@@ -205,10 +205,8 @@ virSCSIVHostDeviceSetUsedBy(virSCSIVHostDevicePtr dev,
 {
     VIR_FREE(dev->used_by_drvname);
     VIR_FREE(dev->used_by_domname);
-    if (VIR_STRDUP(dev->used_by_drvname, drvname) < 0)
-        return -1;
-    if (VIR_STRDUP(dev->used_by_domname, domname) < 0)
-        return -1;
+    dev->used_by_drvname = g_strdup(drvname);
+    dev->used_by_domname = g_strdup(domname);
 
     return 0;
 }
@@ -251,17 +249,11 @@ virSCSIVHostDevicePtr
 virSCSIVHostDeviceNew(const char *name)
 {
     g_autoptr(virSCSIVHostDevice) dev = NULL;
-    virSCSIVHostDevicePtr ret = NULL;
 
     if (VIR_ALLOC(dev) < 0)
         return NULL;
 
-    if (VIR_STRDUP(dev->name, name) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("dev->name buffer overflow: %s"),
-                       name);
-        return NULL;
-    }
+    dev->name = g_strdup(name);
 
     if (virAsprintf(&dev->path, "%s/%s",
                     SYSFS_VHOST_SCSI_DEVICES, name) < 0)
@@ -269,9 +261,7 @@ virSCSIVHostDeviceNew(const char *name)
 
     VIR_DEBUG("%s: initialized", dev->name);
 
-    ret = g_steal_pointer(&dev);
-
-    return ret;
+    return g_steal_pointer(&dev);
 }
 
 

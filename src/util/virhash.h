@@ -31,6 +31,15 @@ typedef virHashAtomic *virHashAtomicPtr;
  */
 typedef void (*virHashDataFree) (void *payload, const void *name);
 /**
+ * virHashDataFreeSimple:
+ * @payload:  the data in the hash
+ * @name:  the name associated
+ *
+ * Callback to free data from a hash.
+ */
+typedef void (*virHashDataFreeSimple) (void *payload);
+
+/**
  * virHashIterator:
  * @payload: the data in the hash
  * @name: the hash key
@@ -98,12 +107,14 @@ typedef void (*virHashKeyFree)(void *name);
 /*
  * Constructor and destructor.
  */
+virHashTablePtr virHashNew(virHashDataFreeSimple dataFree);
 virHashTablePtr virHashCreate(ssize_t size,
                               virHashDataFree dataFree);
 virHashAtomicPtr virHashAtomicNew(ssize_t size,
                                   virHashDataFree dataFree);
 virHashTablePtr virHashCreateFull(ssize_t size,
                                   virHashDataFree dataFree,
+                                  virHashDataFreeSimple dataFreeSimple,
                                   virHashKeyCode keyCode,
                                   virHashKeyEqual keyEqual,
                                   virHashKeyCopy keyCopy,
@@ -139,6 +150,7 @@ ssize_t virHashRemoveAll(virHashTablePtr table);
  * Retrieve the userdata.
  */
 void *virHashLookup(const virHashTable *table, const void *name);
+bool virHashHasEntry(const virHashTable *table, const void *name);
 
 /*
  * Retrieve & remove the userdata.

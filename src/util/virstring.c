@@ -102,8 +102,7 @@ virStringSplitCount(const char *string,
         if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
             goto error;
 
-        if (VIR_STRDUP(tokens[ntokens], remainder) < 0)
-            goto error;
+        tokens[ntokens] = g_strdup(remainder);
         ntokens++;
     }
 
@@ -156,11 +155,9 @@ char *virStringListJoin(const char **strings,
             virBufferAdd(&buf, delim, -1);
         strings++;
     }
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
     ret = virBufferContentAndReset(&buf);
     if (!ret)
-        ignore_value(VIR_STRDUP(ret, ""));
+        ret = g_strdup("");
     return ret;
 }
 
@@ -182,9 +179,10 @@ virStringListAdd(char ***strings,
 {
     size_t i = virStringListLength((const char **) *strings);
 
-    if (VIR_EXPAND_N(*strings, i, 2) < 0 ||
-        VIR_STRDUP((*strings)[i - 2], item) < 0)
+    if (VIR_EXPAND_N(*strings, i, 2) < 0)
         return -1;
+
+    (*strings)[i - 2] = g_strdup(item);
 
     return 0;
 }
@@ -286,10 +284,8 @@ virStringListCopy(char ***dst,
     if (VIR_ALLOC_N(copy, virStringListLength(src) + 1) < 0)
         goto error;
 
-    for (i = 0; src[i]; i++) {
-        if (VIR_STRDUP(copy[i], src[i]) < 0)
-            goto error;
-    }
+    for (i = 0; src[i]; i++)
+        copy[i] = g_strdup(src[i]);
 
     *dst = copy;
     return 0;
@@ -706,23 +702,25 @@ virStrToDouble(char const *s,
  *
  * converts double to string with C locale (thread-safe).
  *
- * Returns -1 on error, size of the string otherwise.
+ * Returns: 0 on success, -1 otherwise.
  */
 int
 virDoubleToStr(char **strp, double number)
 {
     virLocale oldlocale;
-    int ret = -1;
+    int rc;
 
     if (virLocaleSetRaw(&oldlocale) < 0)
         return -1;
 
-    ret = virAsprintf(strp, "%lf", number);
+    rc = virAsprintf(strp, "%lf", number);
 
     virLocaleRevert(&oldlocale);
     virLocaleFixupRadix(strp);
 
-    return ret;
+    if (rc < 0)
+        return -1;
+    return 0;
 }
 
 
@@ -1197,9 +1195,6 @@ virStringReplace(const char *haystack,
 
         tmp1 = tmp2;
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }

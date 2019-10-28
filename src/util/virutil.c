@@ -527,7 +527,7 @@ virGetHostnameImpl(bool quiet)
          * string as-is; it's up to callers to check whether "localhost"
          * is allowed.
          */
-        ignore_value(VIR_STRDUP_QUIET(result, hostname));
+        result = g_strdup(hostname);
         goto cleanup;
     }
 
@@ -543,7 +543,7 @@ virGetHostnameImpl(bool quiet)
         if (!quiet)
             VIR_WARN("getaddrinfo failed for '%s': %s",
                      hostname, gai_strerror(r));
-        ignore_value(VIR_STRDUP_QUIET(result, hostname));
+        result = g_strdup(hostname);
         goto cleanup;
     }
 
@@ -556,10 +556,10 @@ virGetHostnameImpl(bool quiet)
          * localhost.  Ignore the canonicalized name and just return the
          * original hostname
          */
-        ignore_value(VIR_STRDUP_QUIET(result, hostname));
+        result = g_strdup(hostname);
     else
         /* Caller frees this string. */
-        ignore_value(VIR_STRDUP_QUIET(result, info->ai_canonname));
+        result = g_strdup(info->ai_canonname);
 
     freeaddrinfo(info);
 
@@ -650,14 +650,14 @@ virGetUserEnt(uid_t uid, char **name, gid_t *group, char **dir, char **shell, bo
         goto cleanup;
     }
 
-    if (name && VIR_STRDUP(*name, pw->pw_name) < 0)
-        goto cleanup;
+    if (name)
+        *name = g_strdup(pw->pw_name);
     if (group)
         *group = pw->pw_gid;
-    if (dir && VIR_STRDUP(*dir, pw->pw_dir) < 0)
-        goto cleanup;
-    if (shell && VIR_STRDUP(*shell, pw->pw_shell) < 0)
-        goto cleanup;
+    if (dir)
+        *dir = g_strdup(pw->pw_dir);
+    if (shell)
+        *shell = g_strdup(pw->pw_shell);
 
     ret = 0;
  cleanup:
@@ -718,7 +718,7 @@ static char *virGetGroupEnt(gid_t gid)
         return NULL;
     }
 
-    ignore_value(VIR_STRDUP(ret, gr->gr_name));
+    ret = g_strdup(gr->gr_name);
     VIR_FREE(strbuf);
     return ret;
 }
@@ -1098,8 +1098,8 @@ virGetWin32SpecialFolder(int csidl, char **path)
     *path = NULL;
 
     if (SHGetSpecialFolderLocation(NULL, csidl, &pidl) == S_OK) {
-        if (SHGetPathFromIDList(pidl, buf) && VIR_STRDUP(*path, buf) < 0)
-            ret = -1;
+        if (SHGetPathFromIDList(pidl, buf))
+            *path = g_strdup(buf);
         CoTaskMemFree(pidl);
     }
     return ret;
@@ -1127,7 +1127,8 @@ virGetWin32DirectoryRoot(char **path)
         strcpy(windowsdir, "C:\\");
     }
 
-    return VIR_STRDUP(*path, windowsdir) < 0 ? -1 : 0;
+    *path = g_strdup(windowsdir);
+    return 0;
 }
 
 
@@ -1163,8 +1164,7 @@ virGetUserDirectoryByUID(uid_t uid G_GNUC_UNUSED)
         /* USERPROFILE is probably the closest equivalent to $HOME? */
         dir = getenv("USERPROFILE");
 
-    if (VIR_STRDUP(ret, dir) < 0)
-        return NULL;
+    ret = g_strdup(dir);
 
     if (!ret &&
         virGetWin32SpecialFolder(CSIDL_PROFILE, &ret) < 0)
@@ -1691,8 +1691,7 @@ virParseOwnershipIds(const char *label, uid_t *uidPtr, gid_t *gidPtr)
     char *owner = NULL;
     char *group = NULL;
 
-    if (VIR_STRDUP(tmp_label, label) < 0)
-        goto cleanup;
+    tmp_label = g_strdup(label);
 
     /* Split label */
     sep = strchr(tmp_label, ':');

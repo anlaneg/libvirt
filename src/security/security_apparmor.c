@@ -452,15 +452,13 @@ AppArmorGenSecurityLabel(virSecurityManagerPtr mgr G_GNUC_UNUSED,
     if ((profile_name = get_profile_name(def)) == NULL)
         return rc;
 
-    if (VIR_STRDUP(secdef->label, profile_name) < 0)
-        goto cleanup;
+    secdef->label = g_strdup(profile_name);
 
     /* set imagelabel the same as label (but we won't use it) */
-    if (VIR_STRDUP(secdef->imagelabel, profile_name) < 0)
-        goto err;
+    secdef->imagelabel = g_strdup(profile_name);
 
-    if (!secdef->model && VIR_STRDUP(secdef->model, SECURITY_APPARMOR_NAME) < 0)
-        goto err;
+    if (!secdef->model)
+        secdef->model = g_strdup(SECURITY_APPARMOR_NAME);
 
     /* Now that we have a label, load the profile into the kernel. */
     if (load_profile(mgr, secdef->label, def, NULL, false) < 0) {
@@ -1158,7 +1156,7 @@ AppArmorGetMountOptions(virSecurityManagerPtr mgr G_GNUC_UNUSED,
 {
     char *opts;
 
-    ignore_value(VIR_STRDUP(opts, ""));
+    opts = g_strdup("");
     return opts;
 }
 

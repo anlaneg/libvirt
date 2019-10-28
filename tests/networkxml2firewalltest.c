@@ -53,8 +53,8 @@ testCommandDryRun(const char *const*args G_GNUC_UNUSED,
                   void *opaque G_GNUC_UNUSED)
 {
     *status = 0;
-    ignore_value(VIR_STRDUP_QUIET(*output, ""));
-    ignore_value(VIR_STRDUP_QUIET(*error, ""));
+    *output = g_strdup("");
+    *error = g_strdup("");
 }
 
 static int testCompareXMLToArgvFiles(const char *xml,
@@ -74,9 +74,6 @@ static int testCompareXMLToArgvFiles(const char *xml,
         goto cleanup;
 
     if (networkAddFirewallRules(def) < 0)
-        goto cleanup;
-
-    if (virBufferError(&buf))
         goto cleanup;
 
     actual = actualargv = virBufferContentAndReset(&buf);

@@ -146,7 +146,8 @@ static int
 virCgroupV2CopyMounts(virCgroupPtr group,
                       virCgroupPtr parent)
 {
-    return VIR_STRDUP(group->unified.mountPoint, parent->unified.mountPoint);
+    group->unified.mountPoint = g_strdup(parent->unified.mountPoint);
+    return 0;
 }
 
 
@@ -158,8 +159,7 @@ virCgroupV2CopyPlacement(virCgroupPtr group,
     VIR_DEBUG("group=%p path=%s parent=%p", group, path, parent);
 
     if (path[0] == '/') {
-        if (VIR_STRDUP(group->unified.placement, path) < 0)
-            return -1;
+        group->unified.placement = g_strdup(path);
     } else {
         /*
          * parent == "/" + path="" => "/"
@@ -189,7 +189,8 @@ virCgroupV2DetectMounts(virCgroupPtr group,
 
     VIR_FREE(group->unified.mountPoint);
 
-    return VIR_STRDUP(group->unified.mountPoint, mntDir);
+    group->unified.mountPoint = g_strdup(mntDir);
+    return 0;
 }
 
 
@@ -242,11 +243,7 @@ virCgroupV2ValidatePlacement(virCgroupPtr group,
 static char *
 virCgroupV2StealPlacement(virCgroupPtr group)
 {
-    char *ret;
-
-    ret = g_steal_pointer(&group->unified.placement);
-
-    return ret;
+    return g_steal_pointer(&group->unified.placement);
 }
 
 

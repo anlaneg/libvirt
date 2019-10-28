@@ -265,8 +265,7 @@ virPCIDeviceGetDriverPathAndName(virPCIDevicePtr dev, char **path, char **name)
     }
     /* path = "/sys/bus/pci/drivers/${drivername}" */
 
-    if (VIR_STRDUP(*name, last_component(*path)) < 0)
-        goto cleanup;
+    *name = g_strdup(last_component(*path));
     /* name = "${drivername}" */
 
     ret = 0;
@@ -1435,17 +1434,11 @@ virPCIDeviceCopy(virPCIDevicePtr dev)
     *copy = *dev;
     copy->path = NULL;
     copy->used_by_drvname = copy->used_by_domname = NULL;
-    if (VIR_STRDUP(copy->name, dev->name) < 0 ||
-        VIR_STRDUP(copy->path, dev->path) < 0 ||
-        VIR_STRDUP(copy->used_by_drvname, dev->used_by_drvname) < 0 ||
-        VIR_STRDUP(copy->used_by_domname, dev->used_by_domname) < 0) {
-        goto error;
-    }
+    copy->name = g_strdup(dev->name);
+    copy->path = g_strdup(dev->path);
+    copy->used_by_drvname = g_strdup(dev->used_by_drvname);
+    copy->used_by_domname = g_strdup(dev->used_by_domname);
     return copy;
-
- error:
-    virPCIDeviceFree(copy);
-    return NULL;
 }
 
 
@@ -1561,10 +1554,8 @@ virPCIDeviceSetUsedBy(virPCIDevicePtr dev,
 {
     VIR_FREE(dev->used_by_drvname);
     VIR_FREE(dev->used_by_domname);
-    if (VIR_STRDUP(dev->used_by_drvname, drv_name) < 0)
-        return -1;
-    if (VIR_STRDUP(dev->used_by_domname, dom_name) < 0)
-        return -1;
+    dev->used_by_drvname = g_strdup(drv_name);
+    dev->used_by_domname = g_strdup(dom_name);
 
     return 0;
 }
@@ -2493,10 +2484,8 @@ virPCIGetNetName(const char *device_link_sysfs_path,
                  * needed because some NIC drivers (e.g. i40e)
                  * implement phys_port_id for PFs, but not for VFs
                  */
-                if (!firstEntryName &&
-                    VIR_STRDUP(firstEntryName, entry->d_name) < 0) {
-                    goto cleanup;
-                }
+                if (!firstEntryName)
+                    firstEntryName = g_strdup(entry->d_name);
 
                 continue;
             }
@@ -2505,8 +2494,7 @@ virPCIGetNetName(const char *device_link_sysfs_path,
                 continue;
         }
 
-        if (VIR_STRDUP(*netname, entry->d_name) < 0)
-            goto cleanup;
+        *netname = g_strdup(entry->d_name);
 
         ret = 0;
         break;

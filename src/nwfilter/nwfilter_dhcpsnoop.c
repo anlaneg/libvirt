@@ -1093,8 +1093,7 @@ virNWFilterSnoopDHCPOpen(const char *ifname, virMacAddr *mac,
          * generate much more traffic than if we filtered by VM and
          * braodcast MAC as well
          */
-        if (VIR_STRDUP(ext_filter, filter) < 0)
-            return NULL;
+        ext_filter = g_strdup(filter);
     }
 
     handle = pcap_create(ifname, pcap_errbuf);
@@ -1395,7 +1394,7 @@ virNWFilterDHCPSnoopThread(void *req0)
             fds[i].fd = pcap_fileno(pcapConf[i].handle);
         }
         tmp = virNetDevGetIndex(req->binding->portdevname, &ifindex);
-        ignore_value(VIR_STRDUP(threadkey, req->threadkey));
+        threadkey = g_strdup(req->threadkey);
         worker = virThreadPoolNew(1, 1, 0,
                                   virNWFilterDHCPDecodeWorker,
                                   req);
@@ -1767,13 +1766,12 @@ virNWFilterSnoopLeaseFileWrite(int lfd, const char *ifkey,
     }
 
     /* time intf ip dhcpserver */
-    len = virAsprintf(&lbuf, "%u %s %s %s\n", ipl->timeout,
-                      ifkey, ipstr, dhcpstr);
-
-    if (len < 0) {
+    if (virAsprintf(&lbuf, "%u %s %s %s\n", ipl->timeout,
+                    ifkey, ipstr, dhcpstr) < 0) {
         ret = -1;
         goto cleanup;
     }
+    len = strlen(lbuf);
 
     if (safewrite(lfd, lbuf, len) != len) {
         virReportSystemError(errno, "%s", _("lease file write failed"));

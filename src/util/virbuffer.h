@@ -33,40 +33,19 @@
 typedef struct _virBuffer virBuffer;
 typedef virBuffer *virBufferPtr;
 
-#define VIR_BUFFER_INITIALIZER { 0, 0, 0, 0, NULL }
+#define VIR_BUFFER_INITIALIZER { NULL, 0 }
 
 struct _virBuffer {
-    size_t size;
-    size_t use;
-    int error; /* errno value, or -1 for usage error */
+    GString *str;
     int indent;
-    char *content;
 };
 
 const char *virBufferCurrentContent(virBufferPtr buf);
 char *virBufferContentAndReset(virBufferPtr buf);
 void virBufferFreeAndReset(virBufferPtr buf);
-int virBufferError(const virBuffer *buf);
-int virBufferCheckErrorInternal(const virBuffer *buf,
-                                int domcode,
-                                const char *filename,
-                                const char *funcname,
-                                size_t linenr)
-    ATTRIBUTE_NONNULL(1);
 
 G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(virBuffer, virBufferFreeAndReset);
 
-/**
- * virBufferCheckError
- *
- * Checks if the buffer is in error state and reports an error.
- *
- * Returns 0 if no error has occurred, otherwise an error is reported
- * and -1 is returned.
- */
-#define virBufferCheckError(buf) \
-    virBufferCheckErrorInternal(buf, VIR_FROM_THIS, __FILE__, __FUNCTION__, \
-    __LINE__)
 size_t virBufferUse(const virBuffer *buf);
 void virBufferAdd(virBufferPtr buf, const char *str, int len);
 void virBufferAddBuffer(virBufferPtr buf, virBufferPtr toadd);
@@ -107,9 +86,10 @@ void virBufferSetIndent(virBufferPtr, int indent);
  * child buffer.
  */
 #define virBufferSetChildIndent(childBuf_, parentBuf_) \
-    virBufferSetIndent(childBuf_, virBufferGetIndent(parentBuf_, false) + 2)
+    virBufferSetIndent(childBuf_, virBufferGetIndent(parentBuf_) + 2)
 
-int virBufferGetIndent(const virBuffer *buf, bool dynamic);
+size_t virBufferGetIndent(const virBuffer *buf);
+size_t virBufferGetEffectiveIndent(const virBuffer *buf);
 
 void virBufferTrim(virBufferPtr buf, const char *trim, int len);
 void virBufferAddStr(virBufferPtr buf, const char *str);

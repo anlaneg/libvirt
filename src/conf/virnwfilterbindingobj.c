@@ -91,10 +91,7 @@ virNWFilterBindingObjSetDef(virNWFilterBindingObjPtr obj,
 virNWFilterBindingDefPtr
 virNWFilterBindingObjStealDef(virNWFilterBindingObjPtr obj)
 {
-    virNWFilterBindingDefPtr def;
-
-    def = g_steal_pointer(&obj->def);
-    return def;
+    return g_steal_pointer(&obj->def);
 }
 
 
@@ -299,9 +296,6 @@ virNWFilterBindingObjFormat(const virNWFilterBindingObj *obj)
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</filterbindingstatus>\n");
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }

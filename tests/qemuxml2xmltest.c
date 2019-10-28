@@ -157,10 +157,7 @@ mymain(void)
     if (!capslatest)
         return EXIT_FAILURE;
 
-    if (VIR_STRDUP_QUIET(fakerootdir, FAKEROOTDIRTEMPLATE) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        abort();
-    }
+    fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
     if (!mkdtemp(fakerootdir)) {
         fprintf(stderr, "Cannot create fakerootdir");
@@ -329,6 +326,7 @@ mymain(void)
     DO_TEST("qemu-ns-no-env", NONE);
     DO_TEST("disk-aio", NONE);
     DO_TEST("disk-cdrom", NONE);
+    DO_TEST_CAPS_LATEST("disk-cdrom-empty-network-invalid");
     DO_TEST("disk-cdrom-bus-other", NONE);
     DO_TEST("disk-floppy", NONE);
     DO_TEST("disk-usb-device", NONE);

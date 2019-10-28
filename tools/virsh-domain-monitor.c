@@ -73,7 +73,7 @@ virshGetDomainDescription(vshControl *ctl, virDomainPtr dom, bool title,
         int errCode = virGetLastErrorCode();
 
         if (errCode == VIR_ERR_NO_DOMAIN_METADATA) {
-            desc = vshStrdup(ctl, "");
+            desc = g_strdup("");
             vshResetLibvirtError();
             return desc;
         }
@@ -92,7 +92,7 @@ virshGetDomainDescription(vshControl *ctl, virDomainPtr dom, bool title,
         desc = virXPathString("string(./description[1])", ctxt);
 
     if (!desc)
-        desc = vshStrdup(ctl, "");
+        desc = g_strdup("");
 
  cleanup:
     xmlXPathFreeContext(ctxt);
@@ -420,17 +420,16 @@ static const vshCmdOptDef opts_domblkinfo[] = {
 };
 
 static bool
-cmdDomblkinfoGet(vshControl *ctl,
-                   const virDomainBlockInfo *info,
-                   char **cap,
-                   char **alloc,
-                   char **phy,
-                   bool human)
+cmdDomblkinfoGet(const virDomainBlockInfo *info,
+                 char **cap,
+                 char **alloc,
+                 char **phy,
+                 bool human)
 {
     if (info->capacity == 0 && info->allocation == 0 && info->physical == 0) {
-        *cap = vshStrdup(ctl, "-");
-        *alloc = vshStrdup(ctl, "-");
-        *phy = vshStrdup(ctl, "-");
+        *cap = g_strdup("-");
+        *alloc = g_strdup("-");
+        *phy = g_strdup("-");
     } else if (!human) {
         if (virAsprintf(cap, "%llu", info->capacity) < 0 ||
             virAsprintf(alloc, "%llu", info->allocation) < 0 ||
@@ -530,7 +529,7 @@ cmdDomblkinfo(vshControl *ctl, const vshCmd *cmd)
                 memset(&info, 0, sizeof(info));
             }
 
-            if (!cmdDomblkinfoGet(ctl, &info, &cap, &alloc, &phy, human))
+            if (!cmdDomblkinfoGet(&info, &cap, &alloc, &phy, human))
                 goto cleanup;
             if (vshTableRowAppend(table, target, cap, alloc, phy, NULL) < 0)
                 goto cleanup;
@@ -545,7 +544,7 @@ cmdDomblkinfo(vshControl *ctl, const vshCmd *cmd)
         if (virDomainGetBlockInfo(dom, device, &info, 0) < 0)
             goto cleanup;
 
-        if (!cmdDomblkinfoGet(ctl, &info, &cap, &alloc, &phy, human))
+        if (!cmdDomblkinfoGet(&info, &cap, &alloc, &phy, human))
             goto cleanup;
         vshPrint(ctl, "%-15s %s\n", _("Capacity:"), cap);
         vshPrint(ctl, "%-15s %s\n", _("Allocation:"), alloc);
@@ -2415,16 +2414,10 @@ cmdDomIfAddr(vshControl *ctl, const vshCmd *cmd)
                               type, iface->addrs[j].addr,
                               iface->addrs[j].prefix);
 
-            if (virBufferError(&buf)) {
-                virBufferFreeAndReset(&buf);
-                virReportOOMError();
-                goto cleanup;
-            }
-
             ip_addr_str = virBufferContentAndReset(&buf);
 
             if (!ip_addr_str)
-                ip_addr_str = vshStrdup(ctl, "");
+                ip_addr_str = g_strdup("");
 
             /* Don't repeat interface name */
             if (full || !j)

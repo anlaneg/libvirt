@@ -359,11 +359,9 @@ testBuildCapabilities(virConnectPtr conn)
     caps->host.nsecModels = 1;
     if (VIR_ALLOC_N(caps->host.secModels, caps->host.nsecModels) < 0)
         goto error;
-    if (VIR_STRDUP(caps->host.secModels[0].model, "testSecurity") < 0)
-        goto error;
+    caps->host.secModels[0].model = g_strdup("testSecurity");
 
-    if (VIR_STRDUP(caps->host.secModels[0].doi, "") < 0)
-        goto error;
+    caps->host.secModels[0].doi = g_strdup("");
 
     return caps;
 
@@ -725,7 +723,7 @@ static char *testBuildFilename(const char *relativeTo,
     if (!filename || filename[0] == '\0')
         return NULL;
     if (filename[0] == '/') {
-        ignore_value(VIR_STRDUP(ret, filename));
+        ret = g_strdup(filename);
         return ret;
     }
 
@@ -742,7 +740,7 @@ static char *testBuildFilename(const char *relativeTo,
         strcat(absFile, filename);
         return absFile;
     } else {
-        ignore_value(VIR_STRDUP(ret, filename));
+        ret = g_strdup(filename);
         return ret;
     }
 }
@@ -1100,8 +1098,8 @@ testOpenVolumesForPool(const char *file,
                 return -1;
         }
 
-        if (!volDef->key && VIR_STRDUP(volDef->key, volDef->target.path) < 0)
-            return -1;
+        if (!volDef->key)
+            volDef->key = g_strdup(volDef->target.path);
 
         if (virStoragePoolObjAddVol(obj, volDef) < 0)
             return -1;
@@ -1585,7 +1583,7 @@ testConnectGetSysinfo(virConnectPtr conn G_GNUC_UNUSED,
 
     virCheckFlags(0, NULL);
 
-    ignore_value(VIR_STRDUP(ret, sysinfo));
+    ret = g_strdup(sysinfo);
     return ret;
 }
 
@@ -2561,7 +2559,7 @@ testDomainGetOSType(virDomainPtr dom G_GNUC_UNUSED)
 {
     char *ret;
 
-    ignore_value(VIR_STRDUP(ret, "linux"));
+    ret = g_strdup("linux");
     return ret;
 }
 
@@ -3105,8 +3103,7 @@ testDomainRenameCallback(virDomainObjPtr privdom,
         return -1;
     }
 
-    if (VIR_STRDUP(new_dom_name, new_name) < 0)
-        goto cleanup;
+    new_dom_name = g_strdup(new_name);
 
     event_old = virDomainEventLifecycleNewFromObj(privdom,
                                                   VIR_DOMAIN_EVENT_UNDEFINED,
@@ -3121,7 +3118,6 @@ testDomainRenameCallback(virDomainObjPtr privdom,
                                                   VIR_DOMAIN_EVENT_DEFINED_RENAMED);
     ret = 0;
 
- cleanup:
     virObjectEventStateQueue(driver->eventState, event_old);
     virObjectEventStateQueue(driver->eventState, event_new);
     return ret;
@@ -3692,8 +3688,7 @@ testDomainSetBlockIoTune(virDomainPtr dom,
     }
 
     info = conf_disk->blkdeviotune;
-    if (VIR_STRDUP(info.group_name, conf_disk->blkdeviotune.group_name) < 0)
-        goto cleanup;
+    info.group_name = g_strdup(conf_disk->blkdeviotune.group_name);
 
     if (virTypedParamsAddString(&eventParams, &eventNparams, &eventMaxparams,
                                 VIR_DOMAIN_TUNABLE_BLKDEV_DISK, path) < 0)
@@ -3763,8 +3758,7 @@ testDomainSetBlockIoTune(virDomainPtr dom,
 
         if (STREQ(param->field, VIR_DOMAIN_BLOCK_IOTUNE_GROUP_NAME)) {
             VIR_FREE(info.group_name);
-            if (VIR_STRDUP(info.group_name, param->value.s) < 0)
-                goto cleanup;
+            info.group_name = g_strdup(param->value.s);
             if (virTypedParamsAddString(&eventParams,
                                         &eventNparams,
                                         &eventMaxparams,
@@ -3899,8 +3893,7 @@ testDomainGetBlockIoTune(virDomainPtr dom,
     }
 
     reply = disk->blkdeviotune;
-    if (VIR_STRDUP(reply.group_name, disk->blkdeviotune.group_name) < 0)
-        goto cleanup;
+    reply.group_name = g_strdup(disk->blkdeviotune.group_name);
 
     TEST_SET_PARAM(0, VIR_DOMAIN_BLOCK_IOTUNE_TOTAL_BYTES_SEC,
                    VIR_TYPED_PARAM_ULLONG, reply.total_bytes_sec);
@@ -4689,8 +4682,7 @@ static int testDomainGetDiskErrors(virDomainPtr dom,
         memset(errors, 0, sizeof(virDomainDiskError) * nerrors);
 
         for (i = 0; i < nerrors; i++) {
-            if (VIR_STRDUP(errors[i].disk, vm->def->disks[i]->dst) < 0)
-                goto cleanup;
+            errors[i].disk = g_strdup(vm->def->disks[i]->dst);
             errors[i].error = (i % (VIR_DOMAIN_DISK_ERROR_LAST - 1)) + 1;
         }
         ret = i;
@@ -4737,19 +4729,23 @@ testDomainGetFSInfo(virDomainPtr dom,
                 goto cleanup;
 
             if (VIR_ALLOC(info_ret[0]) < 0 ||
-                VIR_ALLOC(info_ret[0]->devAlias) < 0 ||
-                VIR_STRDUP(info_ret[0]->mountpoint, "/") < 0 ||
-                VIR_STRDUP(info_ret[0]->fstype, "ext4") < 0 ||
-                VIR_STRDUP(info_ret[0]->devAlias[0], name) < 0 ||
-                virAsprintf(&info_ret[0]->name, "%s1", name) < 0)
+                VIR_ALLOC(info_ret[0]->devAlias) < 0)
+                goto cleanup;
+
+            info_ret[0]->mountpoint = g_strdup("/");
+            info_ret[0]->fstype = g_strdup("ext4");
+            info_ret[0]->devAlias[0] = g_strdup(name);
+            if (virAsprintf(&info_ret[0]->name, "%s1", name) < 0)
                 goto cleanup;
 
             if (VIR_ALLOC(info_ret[1]) < 0 ||
-                VIR_ALLOC(info_ret[1]->devAlias) < 0 ||
-                VIR_STRDUP(info_ret[1]->mountpoint, "/boot") < 0 ||
-                VIR_STRDUP(info_ret[1]->fstype, "ext4") < 0 ||
-                VIR_STRDUP(info_ret[1]->devAlias[0], name) < 0 ||
-                virAsprintf(&info_ret[1]->name, "%s2", name) < 0)
+                VIR_ALLOC(info_ret[1]->devAlias) < 0)
+                goto cleanup;
+
+            info_ret[1]->mountpoint = g_strdup("/boot");
+            info_ret[1]->fstype = g_strdup("ext4");
+            info_ret[1]->devAlias[0] = g_strdup(name);
+            if (virAsprintf(&info_ret[1]->name, "%s2", name) < 0)
                 goto cleanup;
 
             info_ret[0]->ndevAlias = info_ret[1]->ndevAlias = 1;
@@ -4884,14 +4880,10 @@ testDomainGetPerfEvents(virDomainPtr dom,
 static char *testDomainGetSchedulerType(virDomainPtr domain G_GNUC_UNUSED,
                                         int *nparams)
 {
-    char *type = NULL;
-
     if (nparams)
         *nparams = 1;
 
-    ignore_value(VIR_STRDUP(type, "fair"));
-
-    return type;
+    return g_strdup("fair");
 }
 
 static int
@@ -5101,12 +5093,10 @@ testDomainInterfaceAddresses(virDomainPtr dom,
         if (VIR_ALLOC(iface) < 0)
             goto cleanup;
 
-        if (VIR_STRDUP(iface->name, net->ifname) < 0)
-            goto cleanup;
+        iface->name = g_strdup(net->ifname);
 
         virMacAddrFormat(&net->mac, macaddr);
-        if (VIR_STRDUP(iface->hwaddr, macaddr) < 0)
-            goto cleanup;
+        iface->hwaddr = g_strdup(macaddr);
 
         if (VIR_ALLOC(iface->addrs) < 0)
             goto cleanup;
@@ -5270,11 +5260,8 @@ static int
 testConnectNumOfNetworks(virConnectPtr conn)
 {
     testDriverPtr privconn = conn->privateData;
-    int numActive;
-
-    numActive = virNetworkObjListNumOfNetworks(privconn->networks,
-                                               true, NULL, conn);
-    return numActive;
+    return virNetworkObjListNumOfNetworks(privconn->networks, true, NULL,
+                                          conn);
 }
 
 
@@ -5284,11 +5271,8 @@ testConnectListNetworks(virConnectPtr conn,
                         int maxnames)
 {
     testDriverPtr privconn = conn->privateData;
-    int n;
-
-    n = virNetworkObjListGetNames(privconn->networks,
-                                  true, names, maxnames, NULL, conn);
-    return n;
+    return virNetworkObjListGetNames(privconn->networks, true, names,
+                                     maxnames, NULL, conn);
 }
 
 
@@ -5296,11 +5280,8 @@ static int
 testConnectNumOfDefinedNetworks(virConnectPtr conn)
 {
     testDriverPtr privconn = conn->privateData;
-    int numInactive;
-
-    numInactive = virNetworkObjListNumOfNetworks(privconn->networks,
-                                                 false, NULL, conn);
-    return numInactive;
+    return virNetworkObjListNumOfNetworks(privconn->networks, false, NULL,
+                                          conn);
 }
 
 
@@ -5310,11 +5291,8 @@ testConnectListDefinedNetworks(virConnectPtr conn,
                                int maxnames)
 {
     testDriverPtr privconn = conn->privateData;
-    int n;
-
-    n = virNetworkObjListGetNames(privconn->networks,
-                                  false, names, maxnames, NULL, conn);
-    return n;
+    return virNetworkObjListGetNames(privconn->networks, false, names,
+                                     maxnames, NULL, conn);
 }
 
 
@@ -5611,7 +5589,7 @@ testNetworkGetBridgeName(virNetworkPtr net)
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(bridge, def->bridge));
+    bridge = g_strdup(def->bridge);
 
  cleanup:
     virNetworkObjEndAPI(&obj);
@@ -6059,8 +6037,7 @@ testStoragePoolObjSetDefaults(virStoragePoolObjPtr obj)
     def->allocation = defaultPoolAlloc;
     def->available = defaultPoolCap - defaultPoolAlloc;
 
-    if (VIR_STRDUP(configFile, "") < 0)
-        return -1;
+    configFile = g_strdup("");
 
     virStoragePoolObjSetConfigFile(obj, configFile);
     return 0;
@@ -6367,7 +6344,7 @@ testConnectFindStoragePoolSources(virConnectPtr conn G_GNUC_UNUSED,
     switch (pool_type) {
 
     case VIR_STORAGE_POOL_LOGICAL:
-        ignore_value(VIR_STRDUP(ret, defaultPoolSourcesLogicalXML));
+        ret = g_strdup(defaultPoolSourcesLogicalXML);
         return ret;
 
     case VIR_STORAGE_POOL_NETFS:
@@ -7025,8 +7002,8 @@ testStorageVolCreateXML(virStoragePoolPtr pool,
                     def->target.path, privvol->name) < 0)
         goto cleanup;
 
-    if (VIR_STRDUP(privvol->key, privvol->target.path) < 0 ||
-        virStoragePoolObjAddVol(obj, privvol) < 0)
+    privvol->key = g_strdup(privvol->target.path);
+    if (virStoragePoolObjAddVol(obj, privvol) < 0)
         goto cleanup;
 
     def->allocation += privvol->target.allocation;
@@ -7093,8 +7070,8 @@ testStorageVolCreateXMLFrom(virStoragePoolPtr pool,
                     def->target.path, privvol->name) < 0)
         goto cleanup;
 
-    if (VIR_STRDUP(privvol->key, privvol->target.path) < 0 ||
-        virStoragePoolObjAddVol(obj, privvol) < 0)
+    privvol->key = g_strdup(privvol->target.path);
+    if (virStoragePoolObjAddVol(obj, privvol) < 0)
         goto cleanup;
 
     def->allocation += privvol->target.allocation;
@@ -7241,7 +7218,7 @@ testStorageVolGetPath(virStorageVolPtr vol)
     if (!(privvol = testStorageVolDefFindByName(obj, vol->name)))
         goto cleanup;
 
-    ignore_value(VIR_STRDUP(ret, privvol->target.path));
+    ret = g_strdup(privvol->target.path);
 
  cleanup:
     virStoragePoolObjEndAPI(&obj);
@@ -7319,12 +7296,8 @@ testNodeDeviceLookupByName(virConnectPtr conn, const char *name)
         return NULL;
     def = virNodeDeviceObjGetDef(obj);
 
-    if ((ret = virGetNodeDevice(conn, name))) {
-        if (VIR_STRDUP(ret->parentName, def->parent) < 0) {
-            virObjectUnref(ret);
-            ret = NULL;
-        }
-    }
+    if ((ret = virGetNodeDevice(conn, name)))
+        ret->parentName = g_strdup(def->parent);
 
     virNodeDeviceObjEndAPI(&obj);
     return ret;
@@ -7362,7 +7335,7 @@ testNodeDeviceGetParent(virNodeDevicePtr dev)
     def = virNodeDeviceObjGetDef(obj);
 
     if (def->parent) {
-        ignore_value(VIR_STRDUP(ret, def->parent));
+        ret = g_strdup(def->parent);
     } else {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("no parent for this device"));
@@ -7408,20 +7381,12 @@ testNodeDeviceListCaps(virNodeDevicePtr dev, char **const names, int maxnames)
     def = virNodeDeviceObjGetDef(obj);
 
     for (caps = def->caps; caps && ncaps < maxnames; caps = caps->next) {
-        if (VIR_STRDUP(names[ncaps],
-                       virNodeDevCapTypeToString(caps->data.type)) < 0)
-            goto error;
+        names[ncaps] = g_strdup(virNodeDevCapTypeToString(caps->data.type));
         ncaps++;
     }
 
     virNodeDeviceObjEndAPI(&obj);
     return ncaps;
-
- error:
-    while (--ncaps >= 0)
-        VIR_FREE(names[ncaps]);
-    virNodeDeviceObjEndAPI(&obj);
-    return -1;
 }
 
 
@@ -7459,8 +7424,7 @@ testNodeDeviceMockCreateVport(testDriverPtr driver,
         goto cleanup;
 
     VIR_FREE(def->name);
-    if (VIR_STRDUP(def->name, "scsi_host12") < 0)
-        goto cleanup;
+    def->name = g_strdup("scsi_host12");
 
     /* Find the 'scsi_host' cap and alter the host # and unique_id and
      * then for the 'fc_host' capability modify the wwnn/wwpn to be that
@@ -7474,9 +7438,8 @@ testNodeDeviceMockCreateVport(testDriverPtr driver,
         if (caps->data.scsi_host.flags & VIR_NODE_DEV_CAP_FLAG_HBA_FC_HOST) {
             VIR_FREE(caps->data.scsi_host.wwnn);
             VIR_FREE(caps->data.scsi_host.wwpn);
-            if (VIR_STRDUP(caps->data.scsi_host.wwnn, wwnn) < 0 ||
-                VIR_STRDUP(caps->data.scsi_host.wwpn, wwpn) < 0)
-                goto cleanup;
+            caps->data.scsi_host.wwnn = g_strdup(wwnn);
+            caps->data.scsi_host.wwpn = g_strdup(wwpn);
         } else {
             /* For the "scsi_host" cap, increment our host and unique_id to
              * give the appearance that something new was created - then add
@@ -7547,8 +7510,7 @@ testNodeDeviceCreateXML(virConnectPtr conn,
         goto cleanup;
 
     VIR_FREE(dev->parentName);
-    if (VIR_STRDUP(dev->parentName, def->parent) < 0)
-        goto cleanup;
+    dev->parentName = g_strdup(def->parent);
 
     ret = g_steal_pointer(&dev);
 
@@ -7819,8 +7781,7 @@ testDomainScreenshot(virDomainPtr dom G_GNUC_UNUSED,
 
     virCheckFlags(0, NULL);
 
-    if (VIR_STRDUP(ret, "image/png") < 0)
-        return NULL;
+    ret = g_strdup("image/png");
 
     if (virFDStreamOpenFile(st, PKGDATADIR "/test-screenshot.png", 0, 0, O_RDONLY) < 0)
         VIR_FREE(ret);
@@ -8614,7 +8575,7 @@ testDomainSnapshotCreateXML(virDomainPtr domain,
     if (redefine) {
         if (virDomainSnapshotRedefinePrep(vm, &def, &snap,
                                           privconn->xmlopt,
-                                          &update_current, flags) < 0)
+                                          flags) < 0)
             goto cleanup;
     } else {
         if (!(def->parent.dom = virDomainDefCopy(vm->def,
@@ -8635,9 +8596,7 @@ testDomainSnapshotCreateXML(virDomainPtr domain,
     }
 
     if (!redefine) {
-        if (VIR_STRDUP(snap->def->parent_name,
-                       virDomainSnapshotGetCurrentName(vm->snapshots)) < 0)
-            goto cleanup;
+        snap->def->parent_name = g_strdup(virDomainSnapshotGetCurrentName(vm->snapshots));
 
         if ((flags & VIR_DOMAIN_SNAPSHOT_CREATE_HALT) &&
             virDomainObjIsActive(vm)) {
@@ -8703,11 +8662,8 @@ testDomainMomentReparentChildren(void *payload,
 
     VIR_FREE(moment->def->parent_name);
 
-    if (rep->parent->def &&
-        VIR_STRDUP(moment->def->parent_name, rep->parent->def->name) < 0) {
-        rep->err = -1;
-        return 0;
-    }
+    if (rep->parent->def)
+        moment->def->parent_name = g_strdup(rep->parent->def->name);
 
     return 0;
 }
@@ -9098,9 +9054,8 @@ testDomainCheckpointCreateXML(virDomainPtr domain,
 
     current = virDomainCheckpointGetCurrent(vm->checkpoints);
     if (current) {
-        if (!redefine &&
-            VIR_STRDUP(chk->def->parent_name, current->def->name) < 0)
-            goto cleanup;
+        if (!redefine)
+            chk->def->parent_name = g_strdup(current->def->name);
         if (update_current)
             virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
     }

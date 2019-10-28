@@ -74,8 +74,7 @@ static virCapsGuestMachinePtr *testQemuAllocNewerMachines(int *nmachines)
         "pc-0.11", "pc", "pc-0.10", "isapc"
     };
 
-    if (VIR_STRDUP(canonical, x86_machines[0]) < 0)
-        return NULL;
+    canonical = g_strdup(x86_machines[0]);
 
     machines = virCapabilitiesAllocMachines(x86_machines,
                                             G_N_ELEMENTS(x86_machines));
@@ -503,9 +502,8 @@ virCapsPtr testQemuCapsInit(void)
         goto cleanup;
     caps->host.nsecModels = 1;
 
-    if (VIR_STRDUP(caps->host.secModels[0].model, "none") < 0 ||
-        VIR_STRDUP(caps->host.secModels[0].doi, "0") < 0)
-        goto cleanup;
+    caps->host.secModels[0].model = g_strdup("none");
+    caps->host.secModels[0].doi = g_strdup("0");
 
     if (!(cpuDefault = virCPUDefCopy(&cpuDefaultData)) ||
         !(cpuHaswell = virCPUDefCopy(&cpuHaswellData)) ||
@@ -710,29 +708,22 @@ int qemuTestDriverInit(virQEMUDriver *driver)
     /* Overwrite some default paths so it's consistent for tests. */
     VIR_FREE(driver->config->libDir);
     VIR_FREE(driver->config->channelTargetDir);
-    if (VIR_STRDUP(driver->config->libDir, "/tmp/lib") < 0 ||
-        VIR_STRDUP(driver->config->channelTargetDir, "/tmp/channel") < 0)
-        goto error;
+    driver->config->libDir = g_strdup("/tmp/lib");
+    driver->config->channelTargetDir = g_strdup("/tmp/channel");
 
     if (!mkdtemp(statedir)) {
         virFilePrintf(stderr, "Cannot create fake stateDir");
         goto error;
     }
 
-    if (VIR_STRDUP(driver->config->stateDir, statedir) < 0) {
-        rmdir(statedir);
-        goto error;
-    }
+    driver->config->stateDir = g_strdup(statedir);
 
     if (!mkdtemp(configdir)) {
         virFilePrintf(stderr, "Cannot create fake configDir");
         goto error;
     }
 
-    if (VIR_STRDUP(driver->config->configDir, configdir) < 0) {
-        rmdir(configdir);
-        goto error;
-    }
+    driver->config->configDir = g_strdup(configdir);
 
     driver->caps = testQemuCapsInit();
     if (!driver->caps)
@@ -827,10 +818,9 @@ testQemuGetLatestCapsForArch(const char *arch,
     while ((rc = virDirRead(dir, &ent, TEST_QEMU_CAPS_PATH)) > 0) {
         VIR_FREE(tmp);
 
-        if ((rc = VIR_STRDUP(tmp, STRSKIP(ent->d_name, "caps_"))) < 0)
-            goto cleanup;
+        tmp = g_strdup(STRSKIP(ent->d_name, "caps_"));
 
-        if (rc == 0)
+        if (!tmp)
             continue;
 
         if (!virStringStripSuffix(tmp, fullsuffix))
@@ -916,31 +906,52 @@ testQemuCapsIterate(const char *suffix,
     if (!callback)
         return 0;
 
+    /* Validate suffix */
+    if (!STRPREFIX(suffix, ".")) {
+        VIR_TEST_VERBOSE("malformed suffix '%s'", suffix);
+        goto cleanup;
+    }
+
     if (virDirOpen(&dir, TEST_QEMU_CAPS_PATH) < 0)
         goto cleanup;
 
     while ((rc = virDirRead(dir, &ent, TEST_QEMU_CAPS_PATH)) > 0) {
-        char *tmp = ent->d_name;
-        char *base = NULL;
+        g_autofree char *tmp = g_strdup(ent->d_name);
+        char *version = NULL;
         char *archName = NULL;
 
         /* Strip the trailing suffix, moving on if it's not present */
         if (!virStringStripSuffix(tmp, suffix))
             continue;
 
-        /* Find the last dot, moving on if none is present */
-        if (!(archName = strrchr(tmp, '.')))
-            continue;
+        /* Strip the leading prefix */
+        if (!(version = STRSKIP(tmp, "caps_"))) {
+            VIR_TEST_VERBOSE("malformed file name '%s'", ent->d_name);
+            goto cleanup;
+        }
 
-        /* The base name is everything before the last dot, and
-         * the architecture name everything after it */
-        base = tmp;
+        /* Find the last dot */
+        if (!(archName = strrchr(tmp, '.'))) {
+            VIR_TEST_VERBOSE("malformed file name '%s'", ent->d_name);
+            goto cleanup;
+        }
+
+        /* The version number and the architecture name are separated by
+         * a dot: overwriting that dot with \0 results in both being usable
+         * as independent, null-terminated strings */
         archName[0] = '\0';
         archName++;
 
-        /* Run the user-provided callback */
-        if (callback(base, archName, opaque) < 0)
+        /* Run the user-provided callback.
+         *
+         * We skip the dot that, as verified earlier, starts the suffix
+         * to make it nicer to rebuild the original file name from inside
+         * the callback.
+         */
+        if (callback(TEST_QEMU_CAPS_PATH, "caps", version,
+                     archName, suffix + 1, opaque) < 0) {
             goto cleanup;
+        }
     }
 
     if (rc < 0)
@@ -1051,8 +1062,7 @@ testQemuInfoSetArgs(struct testQemuInfo *info,
         bool stripmachinealiases = false;
 
         if (STREQ(capsver, "latest")) {
-            if (VIR_STRDUP(capsfile, virHashLookup(capslatest, capsarch)) < 0)
-                goto cleanup;
+            capsfile = g_strdup(virHashLookup(capslatest, capsarch));
             stripmachinealiases = true;
         } else if (virAsprintf(&capsfile, "%s/caps_%s.%s.xml",
                                TEST_QEMU_CAPS_PATH, capsver, capsarch) < 0) {

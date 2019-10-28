@@ -405,18 +405,10 @@ qemuTeardownHostdevCgroup(virDomainObjPtr vm,
     size_t i, npaths = 0;
     int rv, ret = -1;
 
-    /* currently this only does something for PCI devices using vfio
-     * for device assignment, but it is called for *all* hostdev
-     * devices.
-     */
-
     if (!virCgroupHasController(priv->cgroup, VIR_CGROUP_CONTROLLER_DEVICES))
         return 0;
 
-    if (dev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
-        dev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI &&
-        dev->source.subsys.u.pci.backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO &&
-        qemuDomainGetHostdevPath(vm->def, dev, true,
+    if (qemuDomainGetHostdevPath(vm->def, dev, true,
                                  &npaths, &path, NULL) < 0)
         goto cleanup;
 
@@ -933,10 +925,7 @@ qemuInitCgroup(virDomainObjPtr vm,
         if (VIR_ALLOC(res) < 0)
             goto cleanup;
 
-        if (VIR_STRDUP(res->partition, "/machine") < 0) {
-            VIR_FREE(res);
-            goto cleanup;
-        }
+        res->partition = g_strdup("/machine");
 
         vm->def->resource = res;
     }

@@ -35,9 +35,12 @@ typedef struct _testQemuData testQemuData;
 typedef testQemuData *testQemuDataPtr;
 struct _testQemuData {
     virQEMUDriver driver;
-    const char *dataDir;
+    const char *inputDir;
+    const char *outputDir;
+    const char *prefix;
+    const char *version;
     const char *archName;
-    const char *base;
+    const char *suffix;
     int ret;
 };
 
@@ -48,7 +51,7 @@ testQemuDataInit(testQemuDataPtr data)
     if (qemuTestDriverInit(&data->driver) < 0)
         return -1;
 
-    data->dataDir = TEST_QEMU_CAPS_PATH;
+    data->outputDir = TEST_QEMU_CAPS_PATH;
 
     data->ret = 0;
 
@@ -76,10 +79,12 @@ testQemuCaps(const void *opaque)
     unsigned int fakeMicrocodeVersion = 0;
     const char *p;
 
-    if (virAsprintf(&repliesFile, "%s/%s.%s.replies",
-                    data->dataDir, data->base, data->archName) < 0 ||
-        virAsprintf(&capsFile, "%s/%s.%s.xml",
-                    data->dataDir, data->base, data->archName) < 0)
+    if (virAsprintf(&repliesFile, "%s/%s_%s.%s.%s",
+                    data->inputDir, data->prefix, data->version,
+                    data->archName, data->suffix) < 0 ||
+        virAsprintf(&capsFile, "%s/%s_%s.%s.xml",
+                    data->outputDir, data->prefix, data->version,
+                    data->archName) < 0)
         goto cleanup;
 
     if (!(mon = qemuMonitorTestNewFromFileFull(repliesFile, &data->driver, NULL,
@@ -111,7 +116,7 @@ testQemuCaps(const void *opaque)
 
         fakeMicrocodeVersion *= 100000;
 
-        for (p = data->base; *p; p++)
+        for (p = data->version; *p; p++)
             fakeMicrocodeVersion += *p;
 
         virQEMUCapsSetMicrocodeVersion(capsActual, fakeMicrocodeVersion);
@@ -145,8 +150,9 @@ testQemuCapsCopy(const void *opaque)
     virQEMUCapsPtr copy = NULL;
     char *actual = NULL;
 
-    if (virAsprintf(&capsFile, "%s/%s.%s.xml",
-                    data->dataDir, data->base, data->archName) < 0)
+    if (virAsprintf(&capsFile, "%s/%s_%s.%s.xml",
+                    data->outputDir, data->prefix, data->version,
+                    data->archName) < 0)
         goto cleanup;
 
     if (!(caps = virCapabilitiesNew(virArchFromString(data->archName),
@@ -178,21 +184,27 @@ testQemuCapsCopy(const void *opaque)
 
 
 static int
-doCapsTest(const char *base,
+doCapsTest(const char *inputDir,
+           const char *prefix,
+           const char *version,
            const char *archName,
+           const char *suffix,
            void *opaque)
 {
     testQemuDataPtr data = (testQemuDataPtr) opaque;
     g_autofree char *title = NULL;
     g_autofree char *copyTitle = NULL;
 
-    if (virAsprintf(&title, "%s (%s)", base, archName) < 0 ||
-        virAsprintf(&copyTitle, "copy %s (%s)", base, archName) < 0) {
+    if (virAsprintf(&title, "%s (%s)", version, archName) < 0 ||
+        virAsprintf(&copyTitle, "copy %s (%s)", version, archName) < 0) {
         return -1;
     }
 
-    data->base = base;
+    data->inputDir = inputDir;
+    data->prefix = prefix;
+    data->version = version;
     data->archName = archName;
+    data->suffix = suffix;
 
     if (virTestRun(title, testQemuCaps, data) < 0)
         data->ret = -1;

@@ -149,8 +149,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
 
     /* Request credentials */
     if (conn->uri->user != NULL) {
-        if (VIR_STRDUP(username, conn->uri->user) < 0)
-            goto cleanup;
+        username = g_strdup(conn->uri->user);
     } else {
         if (!(username = virAuthGetUsername(conn, auth, "hyperv",
                                             "administrator",
@@ -221,7 +220,7 @@ hypervConnectGetHostname(virConnectPtr conn)
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(hostname, computerSystem->data.common->DNSHostName));
+    hostname = g_strdup(computerSystem->data.common->DNSHostName);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -602,7 +601,7 @@ hypervDomainGetOSType(virDomainPtr domain G_GNUC_UNUSED)
 {
     char *osType;
 
-    ignore_value(VIR_STRDUP(osType, "hvm"));
+    osType = g_strdup("hvm");
     return osType;
 }
 
@@ -846,13 +845,10 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         return NULL;
     }
 
-    if (VIR_STRDUP(def->name, computerSystem->data.common->ElementName) < 0)
-        goto cleanup;
+    def->name = g_strdup(computerSystem->data.common->ElementName);
 
     if (priv->wmiVersion == HYPERV_WMI_VERSION_V1) {
-        if (VIR_STRDUP(def->description,
-                       virtualSystemSettingData->data.v1->Notes) < 0)
-            goto cleanup;
+        def->description = g_strdup(virtualSystemSettingData->data.v1->Notes);
     } else if (priv->wmiVersion == HYPERV_WMI_VERSION_V2 &&
                virtualSystemSettingData->data.v2->Notes.data != NULL) {
         char **notes = (char **)virtualSystemSettingData->data.v2->Notes.data;
@@ -868,9 +864,6 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
             virBufferAdd(&buf, *notes, -1);
             notes++;
         }
-
-        if (virBufferCheckError(&buf))
-            goto cleanup;
 
         def->description = virBufferContentAndReset(&buf);
     }
@@ -935,8 +928,7 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
-        if (VIR_STRDUP(names[count], computerSystem->data.common->ElementName) < 0)
-            goto cleanup;
+        names[count] = g_strdup(computerSystem->data.common->ElementName);
 
         ++count;
 

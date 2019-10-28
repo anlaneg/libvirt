@@ -127,7 +127,7 @@ virSCSIDeviceGetSgName(const char *sysfs_prefix,
 
     while (virDirRead(dir, &entry, path) > 0) {
         /* Assume a single directory entry */
-        ignore_value(VIR_STRDUP(sg, entry->d_name));
+        sg = g_strdup(entry->d_name);
         break;
     }
 
@@ -165,7 +165,7 @@ virSCSIDeviceGetDevName(const char *sysfs_prefix,
         goto cleanup;
 
     while (virDirRead(dir, &entry, path) > 0) {
-        ignore_value(VIR_STRDUP(name, entry->d_name));
+        name = g_strdup(entry->d_name);
         break;
     }
 
@@ -184,7 +184,6 @@ virSCSIDeviceNew(const char *sysfs_prefix,
                  bool shareable)
 {
     g_autoptr(virSCSIDevice) dev = NULL;
-    virSCSIDevicePtr ret = NULL;
     g_autofree char *sg = NULL;
     g_autofree char *vendor_path = NULL;
     g_autofree char *model_path = NULL;
@@ -238,8 +237,7 @@ virSCSIDeviceNew(const char *sysfs_prefix,
     if (virAsprintf(&dev->id, "%s:%s", vendor, model) < 0)
         return NULL;
 
-    ret = g_steal_pointer(&dev);
-    return ret;
+    return g_steal_pointer(&dev);
 }
 
 static void
@@ -277,9 +275,8 @@ virSCSIDeviceSetUsedBy(virSCSIDevicePtr dev,
 
     if (VIR_ALLOC(copy) < 0)
         return -1;
-    if (VIR_STRDUP(copy->drvname, drvname) < 0 ||
-        VIR_STRDUP(copy->domname, domname) < 0)
-        return -1;
+    copy->drvname = g_strdup(drvname);
+    copy->domname = g_strdup(domname);
 
     if (VIR_APPEND_ELEMENT(dev->used_by, dev->n_used_by, copy) < 0)
         return -1;

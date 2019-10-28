@@ -234,9 +234,6 @@ testFirewallSingleGroup(const void *opaque)
     if (virFirewallApply(fw) < 0)
         goto cleanup;
 
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
-
     actual = virBufferCurrentContent(&cmdbuf);
 
     if (STRNEQ_NULLABLE(expected, actual)) {
@@ -298,9 +295,6 @@ testFirewallRemoveRule(const void *opaque)
     virFirewallRuleAddArgList(fw, fwrule, "--jump", "REJECT", NULL);
 
     if (virFirewallApply(fw) < 0)
-        goto cleanup;
-
-    if (virBufferError(&cmdbuf))
         goto cleanup;
 
     actual = virBufferCurrentContent(&cmdbuf);
@@ -371,9 +365,6 @@ testFirewallManyGroups(const void *opaque G_GNUC_UNUSED)
 
 
     if (virFirewallApply(fw) < 0)
-        goto cleanup;
-
-    if (virBufferError(&cmdbuf))
         goto cleanup;
 
     actual = virBufferCurrentContent(&cmdbuf);
@@ -469,9 +460,6 @@ testFirewallIgnoreFailGroup(const void *opaque G_GNUC_UNUSED)
     if (virFirewallApply(fw) < 0)
         goto cleanup;
 
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
-
     actual = virBufferCurrentContent(&cmdbuf);
 
     if (STRNEQ_NULLABLE(expected, actual)) {
@@ -543,9 +531,6 @@ testFirewallIgnoreFailRule(const void *opaque G_GNUC_UNUSED)
     if (virFirewallApply(fw) < 0)
         goto cleanup;
 
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
-
     actual = virBufferCurrentContent(&cmdbuf);
 
     if (STRNEQ_NULLABLE(expected, actual)) {
@@ -610,9 +595,6 @@ testFirewallNoRollback(const void *opaque G_GNUC_UNUSED)
         fprintf(stderr, "Firewall apply unexpectedly worked\n");
         goto cleanup;
     }
-
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
 
     actual = virBufferCurrentContent(&cmdbuf);
 
@@ -697,9 +679,6 @@ testFirewallSingleRollback(const void *opaque G_GNUC_UNUSED)
         fprintf(stderr, "Firewall apply unexpectedly worked\n");
         goto cleanup;
     }
-
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
 
     actual = virBufferCurrentContent(&cmdbuf);
 
@@ -787,9 +766,6 @@ testFirewallManyRollback(const void *opaque G_GNUC_UNUSED)
         fprintf(stderr, "Firewall apply unexpectedly worked\n");
         goto cleanup;
     }
-
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
 
     actual = virBufferCurrentContent(&cmdbuf);
 
@@ -908,9 +884,6 @@ testFirewallChainedRollback(const void *opaque G_GNUC_UNUSED)
         goto cleanup;
     }
 
-    if (virBufferError(&cmdbuf))
-        goto cleanup;
-
     actual = virBufferCurrentContent(&cmdbuf);
 
     if (STRNEQ_NULLABLE(expected, actual)) {
@@ -961,19 +934,17 @@ testFirewallQueryHook(const char *const*args,
                       const char *input G_GNUC_UNUSED,
                       char **output,
                       char **error G_GNUC_UNUSED,
-                      int *status,
+                      int *status G_GNUC_UNUSED,
                       void *opaque G_GNUC_UNUSED)
 {
     if (STREQ(args[0], IPTABLES_PATH) &&
         STREQ(args[1], "-L")) {
-        if (VIR_STRDUP(*output, TEST_FILTER_TABLE_LIST) < 0)
-            *status = 127;
+        *output = g_strdup(TEST_FILTER_TABLE_LIST);
     } else if (STREQ(args[0], IPTABLES_PATH) &&
                STREQ(args[1], "-t") &&
                STREQ(args[2], "nat") &&
                STREQ(args[3], "-L")) {
-        if (VIR_STRDUP(*output, TEST_NAT_TABLE_LIST) < 0)
-            *status = 127;
+        *output = g_strdup(TEST_NAT_TABLE_LIST);
     }
 }
 
@@ -1085,9 +1056,6 @@ testFirewallQuery(const void *opaque G_GNUC_UNUSED)
                        "--jump", "REJECT", NULL);
 
     if (virFirewallApply(fw) < 0)
-        goto cleanup;
-
-    if (virBufferError(&cmdbuf))
         goto cleanup;
 
     actual = virBufferCurrentContent(&cmdbuf);

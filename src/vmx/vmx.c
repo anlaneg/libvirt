@@ -1085,8 +1085,7 @@ virVMXHandleLegacySCSIDiskDriverName(virDomainDefPtr def,
     if (disk->bus != VIR_DOMAIN_DISK_BUS_SCSI || !driver)
         return 0;
 
-    if (VIR_STRDUP(copy, driver) < 0)
-        return -1;
+    copy = g_strdup(driver);
     tmp = copy;
 
     for (; *tmp != '\0'; ++tmp)
@@ -1812,12 +1811,14 @@ virVMXParseConfig(virVMXContext *ctx,
     if (ctx->datacenterPath || ctx->moref) {
         struct virVMXDomainDefNamespaceData *nsdata = NULL;
 
-        if (VIR_ALLOC(nsdata) < 0 ||
-            VIR_STRDUP(nsdata->datacenterPath, ctx->datacenterPath) < 0 ||
-            VIR_STRDUP(nsdata->moref, ctx->moref) < 0) {
+        if (VIR_ALLOC(nsdata) < 0) {
             virVMXDomainDefNamespaceFree(nsdata);
             goto cleanup;
         }
+
+        nsdata->datacenterPath = g_strdup(ctx->datacenterPath);
+
+        nsdata->moref = g_strdup(ctx->moref);
 
         def->ns = *virDomainXMLOptionGetNamespace(xmlopt);
         def->namespaceData = nsdata;
@@ -2659,8 +2660,8 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
                                   true) < 0)
             goto cleanup;
 
-        if (!networkName && VIR_STRDUP(networkName, "") < 0)
-            goto cleanup;
+        if (!networkName)
+            networkName = g_strdup("");
     }
 
     /* vmx:vnet -> def:data.ifname */
@@ -2839,8 +2840,7 @@ virVMXParseSerial(virVMXContext *ctx, virConfPtr conf, int port,
             goto cleanup;
         }
 
-        if (VIR_STRDUP((*def)->source->data.tcp.host, parsedUri->server) < 0)
-            goto cleanup;
+        (*def)->source->data.tcp.host = g_strdup(parsedUri->server);
 
         if (virAsprintf(&(*def)->source->data.tcp.service, "%d",
                         parsedUri->port) < 0)
@@ -3432,9 +3432,6 @@ virVMXFormatConfig(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virDomainDe
     }
 
     /* Get final VMX output */
-    if (virBufferCheckError(&buffer) < 0)
-        goto cleanup;
-
     vmx = virBufferContentAndReset(&buffer);
 
  cleanup:
@@ -3595,7 +3592,7 @@ virVMXFormatDisk(virVMXContext *ctx, virDomainDiskDefPtr def,
 
             fileName = ctx->formatFileName(src, ctx->opaque);
         } else if (def->device == VIR_DOMAIN_DISK_DEVICE_CDROM) {
-            ignore_value(VIR_STRDUP(fileName, "emptyBackingString"));
+            fileName = g_strdup("emptyBackingString");
         }
 
         if (fileName == NULL)

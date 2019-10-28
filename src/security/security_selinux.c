@@ -23,9 +23,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#if HAVE_SELINUX_LABEL_H
-# include <selinux/label.h>
-#endif
+#include <selinux/label.h>
 
 #include "security_driver.h"
 #include "security_selinux.h"
@@ -62,9 +60,7 @@ struct _virSecuritySELinuxData {
     char *content_context;
     virHashTablePtr mcs;
     bool skipAllLabel;
-#if HAVE_SELINUX_LABEL_H
     struct selabel_handle *label_handle;
-#endif
 };
 
 /* Data structure to pass to various callbacks so we have everything we need */
@@ -130,8 +126,8 @@ virSecuritySELinuxContextListAppend(virSecuritySELinuxContextListPtr list,
     if (VIR_ALLOC(item) < 0)
         return -1;
 
-    if (VIR_STRDUP(item->path, path) < 0 || VIR_STRDUP(item->tcon, tcon) < 0)
-        goto cleanup;
+    item->path = g_strdup(path);
+    item->tcon = g_strdup(tcon);
 
     item->remember = remember;
     item->restore = restore;
@@ -444,8 +440,7 @@ virSecuritySELinuxMCSGetProcessRange(char **sens,
     if (!(contextRange = context_range_get(ourContext)))
         contextRange = "s0";
 
-    if (VIR_STRDUP(*sens, contextRange) < 0)
-        goto cleanup;
+    *sens = g_strdup(contextRange);
 
     /* Find and blank out the category part (if any) */
     tmp = strchr(*sens, ':');
@@ -552,7 +547,7 @@ virSecuritySELinuxContextAddRange(security_context_t src,
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(ret, str));
+    ret = g_strdup(str);
 
  cleanup:
     if (srccon) context_free(srccon);
@@ -622,8 +617,7 @@ virSecuritySELinuxGenNewContext(const char *basecontext,
                              _("Unable to format SELinux context"));
         goto cleanup;
     }
-    if (VIR_STRDUP(ret, str) < 0)
-        goto cleanup;
+    ret = g_strdup(str);
     VIR_DEBUG("Generated context '%s'",  ret);
  cleanup:
     freecon(ourSecContext);
@@ -642,14 +636,12 @@ virSecuritySELinuxLXCInitialize(virSecurityManagerPtr mgr)
 
     data->skipAllLabel = true;
 
-# if HAVE_SELINUX_LABEL_H
     data->label_handle = selabel_open(SELABEL_CTX_FILE, NULL, 0);
     if (!data->label_handle) {
         virReportSystemError(errno, "%s",
                              _("cannot open SELinux label_handle"));
         return -1;
     }
-# endif
 
     if (!(selinux_conf = virConfReadFile(selinux_lxc_contexts_path(), 0)))
         goto error;
@@ -690,10 +682,8 @@ virSecuritySELinuxLXCInitialize(virSecurityManagerPtr mgr)
     return 0;
 
  error:
-# if HAVE_SELINUX_LABEL_H
     selabel_close(data->label_handle);
     data->label_handle = NULL;
-# endif
     VIR_FREE(data->domain_context);
     VIR_FREE(data->file_context);
     VIR_FREE(data->content_context);
@@ -719,14 +709,12 @@ virSecuritySELinuxQEMUInitialize(virSecurityManagerPtr mgr)
 
     data->skipAllLabel = false;
 
-#if HAVE_SELINUX_LABEL_H
     data->label_handle = selabel_open(SELABEL_CTX_FILE, NULL, 0);
     if (!data->label_handle) {
         virReportSystemError(errno, "%s",
                              _("cannot open SELinux label_handle"));
         return -1;
     }
-#endif
 
     if (virFileReadAll(selinux_virtual_domain_context_path(), MAX_CONTEXT, &(data->domain_context)) < 0) {
         virReportSystemError(errno,
@@ -740,8 +728,7 @@ virSecuritySELinuxQEMUInitialize(virSecurityManagerPtr mgr)
         *ptr = '\0';
         ptr++;
         if (*ptr != '\0') {
-            if (VIR_STRDUP(data->alt_domain_context, ptr) < 0)
-                goto error;
+            data->alt_domain_context = g_strdup(ptr);
             ptr = strchrnul(data->alt_domain_context, '\n');
             if (ptr && *ptr == '\n')
                 *ptr = '\0';
@@ -761,8 +748,7 @@ virSecuritySELinuxQEMUInitialize(virSecurityManagerPtr mgr)
     ptr = strchrnul(data->file_context, '\n');
     if (ptr && *ptr == '\n') {
         *ptr = '\0';
-        if (VIR_STRDUP(data->content_context, ptr + 1) < 0)
-            goto error;
+        data->content_context = g_strdup(ptr + 1);
         ptr = strchrnul(data->content_context, '\n');
         if (ptr && *ptr == '\n')
             *ptr = '\0';
@@ -777,10 +763,8 @@ virSecuritySELinuxQEMUInitialize(virSecurityManagerPtr mgr)
     return 0;
 
  error:
-#if HAVE_SELINUX_LABEL_H
     selabel_close(data->label_handle);
     data->label_handle = NULL;
-#endif
     VIR_FREE(data->domain_context);
     VIR_FREE(data->alt_domain_context);
     VIR_FREE(data->file_context);
@@ -868,8 +852,7 @@ virSecuritySELinuxGenLabel(virSecurityManagerPtr mgr,
             virReportSystemError(errno, "%s", _("unable to get selinux context range"));
             goto cleanup;
         }
-        if (VIR_STRDUP(mcs, range) < 0)
-            goto cleanup;
+        mcs = g_strdup(range);
         break;
 
     case VIR_DOMAIN_SECLABEL_DYNAMIC:
@@ -919,8 +902,7 @@ virSecuritySELinuxGenLabel(virSecurityManagerPtr mgr,
                                                  &catMax) < 0)
             goto cleanup;
 
-        if (VIR_STRDUP(mcs, sens) < 0)
-            goto cleanup;
+        mcs = g_strdup(sens);
 
         break;
 
@@ -938,9 +920,8 @@ virSecuritySELinuxGenLabel(virSecurityManagerPtr mgr,
     if (!seclabel->imagelabel)
         goto cleanup;
 
-    if (!seclabel->model &&
-        VIR_STRDUP(seclabel->model, SECURITY_SELINUX_NAME) < 0)
-        goto cleanup;
+    if (!seclabel->model)
+        seclabel->model = g_strdup(SECURITY_SELINUX_NAME);
 
     rc = 0;
 
@@ -1053,10 +1034,8 @@ virSecuritySELinuxDriverClose(virSecurityManagerPtr mgr)
     if (!data)
         return 0;
 
-#if HAVE_SELINUX_LABEL_H
     if (data->label_handle)
         selabel_close(data->label_handle);
-#endif
 
     virHashFree(data->mcs);
 
@@ -1279,7 +1258,7 @@ virSecuritySELinuxSetFileconImpl(const char *path,
 
     VIR_INFO("Setting SELinux context on '%s' to '%s'", path, tcon);
 
-    if (setfilecon_raw(path, (VIR_SELINUX_CTX_CONST char *)tcon) < 0) {
+    if (setfilecon_raw(path, (const char *)tcon) < 0) {
         int setfilecon_errno = errno;
 
         if (getfilecon_raw(path, &econ) >= 0) {
@@ -1465,13 +1444,9 @@ static int
 getContext(virSecurityManagerPtr mgr G_GNUC_UNUSED,
            const char *newpath, mode_t mode, security_context_t *fcon)
 {
-#if HAVE_SELINUX_LABEL_H
     virSecuritySELinuxDataPtr data = virSecurityManagerGetPrivateData(mgr);
 
     return selabel_lookup_raw(data->label_handle, fcon, newpath, mode);
-#else
-    return matchpathcon(newpath, mode, fcon);
-#endif
 }
 
 
@@ -2215,8 +2190,7 @@ virSecuritySELinuxSetHostdevCapsLabel(virSecurityManagerPtr mgr,
                             dev->source.caps.u.storage.block) < 0)
                 return -1;
         } else {
-            if (VIR_STRDUP(path, dev->source.caps.u.storage.block) < 0)
-                return -1;
+            path = g_strdup(dev->source.caps.u.storage.block);
         }
         ret = virSecuritySELinuxSetFilecon(mgr, path, secdef->imagelabel, true);
         VIR_FREE(path);
@@ -2229,8 +2203,7 @@ virSecuritySELinuxSetHostdevCapsLabel(virSecurityManagerPtr mgr,
                             dev->source.caps.u.misc.chardev) < 0)
                 return -1;
         } else {
-            if (VIR_STRDUP(path, dev->source.caps.u.misc.chardev) < 0)
-                return -1;
+            path = g_strdup(dev->source.caps.u.misc.chardev);
         }
         ret = virSecuritySELinuxSetFilecon(mgr, path, secdef->imagelabel, true);
         VIR_FREE(path);
@@ -2450,8 +2423,7 @@ virSecuritySELinuxRestoreHostdevCapsLabel(virSecurityManagerPtr mgr,
                             dev->source.caps.u.storage.block) < 0)
                 return -1;
         } else {
-            if (VIR_STRDUP(path, dev->source.caps.u.storage.block) < 0)
-                return -1;
+            path = g_strdup(dev->source.caps.u.storage.block);
         }
         ret = virSecuritySELinuxRestoreFileLabel(mgr, path, true);
         VIR_FREE(path);
@@ -2464,8 +2436,7 @@ virSecuritySELinuxRestoreHostdevCapsLabel(virSecurityManagerPtr mgr,
                             dev->source.caps.u.misc.chardev) < 0)
                 return -1;
         } else {
-            if (VIR_STRDUP(path, dev->source.caps.u.misc.chardev) < 0)
-                return -1;
+            path = g_strdup(dev->source.caps.u.misc.chardev);
         }
         ret = virSecuritySELinuxRestoreFileLabel(mgr, path, true);
         VIR_FREE(path);
@@ -3336,8 +3307,7 @@ virSecuritySELinuxGenImageLabel(virSecurityManagerPtr mgr,
         }
         range = context_range_get(ctx);
         if (range) {
-            if (VIR_STRDUP(mcs, range) < 0)
-                goto cleanup;
+            mcs = g_strdup(range);
             if (!(label = virSecuritySELinuxGenNewContext(data->file_context,
                                                           mcs, true)))
                 goto cleanup;
@@ -3368,8 +3338,8 @@ virSecuritySELinuxGetSecurityMountOptions(virSecurityManagerPtr mgr,
             return NULL;
     }
 
-    if (!opts && VIR_STRDUP(opts, "") < 0)
-        return NULL;
+    if (!opts)
+        opts = g_strdup("");
 
     VIR_DEBUG("imageLabel=%s opts=%s",
               secdef ? secdef->imagelabel : "(null)", opts);
