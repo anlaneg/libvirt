@@ -61,7 +61,9 @@ VIR_LOG_INIT("util.command");
 /* Flags for virExec */
 enum {
     VIR_EXEC_NONE       = 0,
+    //使用非阻塞的fdd
     VIR_EXEC_NONBLOCK   = (1 << 0),
+    //以daemon方式运行cmd
     VIR_EXEC_DAEMON     = (1 << 1),
     VIR_EXEC_CLEAR_CAPS = (1 << 2),
     VIR_EXEC_RUN_SYNC   = (1 << 3),
@@ -89,15 +91,15 @@ struct _virCommandSendBuffer {
 struct _virCommand {
     int has_error; /* ENOMEM on allocation failure, -1 for anything else.  */
 
-    char **args;
-    size_t nargs;
-    size_t maxargs;
+    char **args;//命令行参数
+    size_t nargs;//args数组大小
+    size_t maxargs;//args数组最大值
 
-    char **env;
+    char **env;//cmd运行时的env
     size_t nenv;
     size_t maxenv;
 
-    char *pwd;
+    char *pwd;//命令执行时的cwd
 
     size_t npassfd;
     virCommandFDPtr passfd;
@@ -113,19 +115,21 @@ struct _virCommand {
     int outfd;
     int errfd;
     int *outfdptr;
-    int *errfdptr;
+    int *errfdptr;//为-1时，采用pipe做为errfd
 
     virThreadPtr asyncioThread;
 
+    //是否需要handshake
     bool handshake;
     int handshakeWait[2];
     int handshakeNotify[2];
 
+    //cmd执行前的hook
     virExecHook hook;
     void *opaque;
 
-    pid_t pid;
-    char *pidfile;
+    pid_t pid;//命令产生的进程id
+    char *pidfile;//cmd对应的pid文件
     bool reap;
     bool rawStatus;
 
@@ -264,6 +268,7 @@ virFork(void)
     virLogUnlock();
 
     if (pid < 0) {
+        //fork出错
         /* attempt to restore signal mask, but ignore failure, to
          * avoid obscuring the fork failure */
         ignore_value(pthread_sigmask(SIG_SETMASK, &oldmask, NULL));
@@ -272,6 +277,7 @@ virFork(void)
         errno = saved_errno;
 
     } else if (pid) {
+        //父进程
         /* parent process */
 
         /* Restore our original signal mask now that the child is
@@ -333,6 +339,7 @@ virFork(void)
 static int
 getDevNull(int *null)
 {
+    //返回/dev/null对应fd
     if (*null == -1 && (*null = open("/dev/null", O_RDWR|O_CLOEXEC)) < 0) {
         virReportSystemError(errno,
                              _("cannot open %s"),
@@ -417,6 +424,7 @@ virExecCommon(virCommandPtr cmd, gid_t *groups, int ngroups)
             goto cleanup;
     }
 
+    //切换cmd对应的cwd
     if (cmd->pwd) {
         VIR_DEBUG("Running child in %s", cmd->pwd);
         if (chdir(cmd->pwd) < 0) {
@@ -555,6 +563,7 @@ virExec(virCommandPtr cmd)
     int ngroups;
 
     if (cmd->args[0][0] != '/') {
+        //获取可执行文件对应的绝对路径
         if (!(binary = binarystr = virFindFileInPath(cmd->args[0]))) {
             virReportSystemError(ENOENT,
                                  _("Cannot find '%s' in path"),
@@ -562,10 +571,12 @@ virExec(virCommandPtr cmd)
             return -1;
         }
     } else {
+        //args[0]即为绝对路径
         binary = cmd->args[0];
     }
 
     if (childin < 0) {
+        //使用null设备做为infd
         if (getDevNull(&null) < 0)
             goto cleanup;
         childin = null;
@@ -573,6 +584,7 @@ virExec(virCommandPtr cmd)
 
     if (cmd->outfdptr != NULL) {
         if (*cmd->outfdptr == -1) {
+            //构造pipe做为进程output fd
             if (pipe2(pipeout, O_CLOEXEC) < 0) {
                 virReportSystemError(errno,
                                      "%s", _("cannot create pipe"));
@@ -591,11 +603,13 @@ virExec(virCommandPtr cmd)
             childout = *cmd->outfdptr;
         }
     } else {
+        //使用null做为output fd
         if (getDevNull(&null) < 0)
             goto cleanup;
         childout = null;
     }
 
+    //err fd相关处理
     if (cmd->errfdptr != NULL) {
         if (cmd->errfdptr == cmd->outfdptr) {
             childerr = childout;
@@ -626,12 +640,14 @@ virExec(virCommandPtr cmd)
     if ((ngroups = virGetGroupList(cmd->uid, cmd->gid, &groups)) < 0)
         goto cleanup;
 
+    //fork产生子进程
     pid = virFork();
 
     if (pid < 0)
         goto cleanup;
 
     if (pid) { /* parent */
+        //父进程收集output fd,error fd信息
         VIR_FORCE_CLOSE(null);
         if (cmd->outfdptr && *cmd->outfdptr == -1) {
             VIR_FORCE_CLOSE(pipeout[1]);
@@ -656,6 +672,7 @@ virExec(virCommandPtr cmd)
     if (virCommandMassClose(cmd, childin, childout, childerr) < 0)
         goto fork_error;
 
+    //为子进程准备stdin,stdout,stderr
     if (prepareStdFd(childin, STDIN_FILENO) < 0) {
         virReportSystemError(errno,
                              "%s", _("failed to setup stdin file handle"));
@@ -687,6 +704,7 @@ virExec(virCommandPtr cmd)
     /* Daemonize as late as possible, so the parent process can detect
      * the above errors with wait* */
     if (cmd->flags & VIR_EXEC_DAEMON) {
+        //生成daemon
         if (setsid() < 0) {
             virReportSystemError(errno,
                                  "%s", _("cannot become session leader"));
@@ -707,6 +725,7 @@ virExec(virCommandPtr cmd)
         }
 
         if (pid > 0) {
+            //父进程写pidfile
             if (cmd->pidfile && (virPidFileWritePath(cmd->pidfile, pid) < 0)) {
                 if (virProcessKillPainfully(pid, true) >= 0)
                     virReportSystemError(errno,
@@ -727,6 +746,7 @@ virExec(virCommandPtr cmd)
     waxoff.sa_handler = SIG_IGN;
     sigemptyset(&waxoff.sa_mask);
     memset(&waxon, 0, sizeof(waxon));
+    //忽略sigpipe信号
     if (sigaction(SIGPIPE, &waxoff, &waxon) < 0) {
         virReportSystemError(errno, "%s",
                              _("Could not disable SIGPIPE"));
@@ -743,6 +763,7 @@ virExec(virCommandPtr cmd)
         virProcessSetMaxCoreSize(0, cmd->maxCore) < 0)
         goto fork_error;
 
+    //执行cmd执行前的hook
     if (cmd->hook) {
         VIR_DEBUG("Run hook %p %p", cmd->hook, cmd->opaque);
         ret = cmd->hook(cmd->opaque);
@@ -783,6 +804,7 @@ virExec(virCommandPtr cmd)
     if (virCommandHandshakeChild(cmd) < 0)
        goto fork_error;
 
+    //还原pipe信号处理
     if (sigaction(SIGPIPE, &waxon, NULL) < 0) {
         virReportSystemError(errno, "%s",
                              _("Could not re-enable SIGPIPE"));
@@ -792,16 +814,19 @@ virExec(virCommandPtr cmd)
     /* Close logging again to ensure no FDs leak to child */
     virLogReset();
 
+    //执行cmd
     if (cmd->env)
         execve(binary, cmd->args, cmd->env);
     else
         execv(binary, cmd->args);
 
+    //执行cmd出错，报告出错信息
     ret = errno == ENOENT ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
     virReportSystemError(errno,
                          _("cannot execute binary %s"),
                          cmd->args[0]);
 
+    //出错退出
  fork_error:
     virDispatchError(NULL);
     _exit(ret);
@@ -908,6 +933,7 @@ virCommandNew(const char *binary)
 virCommandPtr
 virCommandNewArgs(const char *const*args)
 {
+    //申请对象command
     virCommandPtr cmd;
 
     if (VIR_ALLOC(cmd) < 0)
@@ -923,6 +949,7 @@ virCommandNewArgs(const char *const*args)
     cmd->uid = -1;
     cmd->gid = -1;
 
+    //将args参数合入到cmd中
     virCommandAddArgSet(cmd, args);
 
     return cmd;
@@ -1059,6 +1086,7 @@ virCommandPassFDGetFDIndex(virCommandPtr cmd, int fd)
 void
 virCommandSetPidFile(virCommandPtr cmd, const char *pidfile)
 {
+    //设置cmd对应的pidfile
     if (!cmd || cmd->has_error)
         return;
 
@@ -1493,7 +1521,7 @@ virCommandAddEnvXDG(virCommandPtr cmd, const char *baseDir)
 void
 virCommandAddArg(virCommandPtr cmd, const char *val)
 {
-	//构造命令行参数
+	//添加命令行参数
     char *arg;
 
     if (!cmd || cmd->has_error)
@@ -1629,15 +1657,18 @@ virCommandAddArgSet(virCommandPtr cmd, const char *const*vals)
         return;
     }
 
+    //计算参数数目
     while (vals[narg] != NULL)
         narg++;
 
     /* narg plus trailing NULL. */
+    //cmd->args需要增大narg + 1 个数目
     if (VIR_RESIZE_N(cmd->args, cmd->maxargs, cmd->nargs, narg + 1) < 0) {
         cmd->has_error = ENOMEM;
         return;
     }
 
+    //将vals中的参数，合入到cmd->args中
     narg = 0;
     while (vals[narg] != NULL) {
         char *arg;
@@ -1987,6 +2018,7 @@ virCommandSetOutputFD(virCommandPtr cmd, int *outfd)
         return;
 
     if (cmd->outfdptr) {
+        //已设置过outfd了
         cmd->has_error = -1;
         VIR_DEBUG("cannot specify output twice");
         return;
@@ -2609,12 +2641,16 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
                        _("daemonized command cannot use virCommandRunAsync"));
         goto cleanup;
     }
+
+    //检查cwd与deamon的配置冲突
     if (cmd->pwd && (cmd->flags & VIR_EXEC_DAEMON)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("daemonized command cannot set working directory %s"),
                        cmd->pwd);
         goto cleanup;
     }
+
+    //非daemon情况下，不容许配置pidfile
     if (cmd->pidfile && !(cmd->flags & VIR_EXEC_DAEMON)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("creation of pid file requires daemonized command"));
@@ -2824,11 +2860,13 @@ void virCommandRequireHandshake(virCommandPtr cmd)
         return;
 
     if (cmd->handshake) {
+        //已设置
         cmd->has_error = -1;
         VIR_DEBUG("Cannot require handshake twice");
         return;
     }
 
+    //创建handshakewait pipe
     if (pipe2(cmd->handshakeWait, O_CLOEXEC) < 0) {
         cmd->has_error = errno;
         return;

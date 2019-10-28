@@ -195,10 +195,12 @@ virScaleInteger(unsigned long long *value, const char *suffix,
         suffix = "";
     } else if (STRCASEEQ(suffix, "b") || STRCASEEQ(suffix, "byte") ||
                STRCASEEQ(suffix, "bytes")) {
+        //采用bytes为单位，单位量为1
         scale = 1;
     } else {
         int base;
 
+        //B的单位量为1024,b的单位量为1000
         if (!suffix[1] || STRCASEEQ(suffix + 1, "iB")) {
             base = 1024;
         } else if (c_tolower(suffix[1]) == 'b' && !suffix[2]) {
@@ -208,6 +210,8 @@ virScaleInteger(unsigned long long *value, const char *suffix,
                            _("unknown suffix '%s'"), suffix);
             return -1;
         }
+
+        //计算单位量
         scale = 1;
         switch (c_tolower(*suffix)) {
         case 'e':

@@ -7117,7 +7117,7 @@ qemuAppendLoadparmMachineParm(virBuffer *buf,
     }
 }
 
-
+//构造qemu name对应的命令行
 static int
 qemuBuildNameCommandLine(virCommandPtr cmd,
                          virQEMUDriverConfigPtr cfg,
@@ -7126,17 +7126,22 @@ qemuBuildNameCommandLine(virCommandPtr cmd,
 {
     g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
+    //增加-name参数
     virCommandAddArg(cmd, "-name");
 
     /* The 'guest' option let's us handle a name with '=' embedded in it */
     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_NAME_GUEST))
+        //添加guest选项
         virBufferAddLit(&buf, "guest=");
 
+    //添加vm名称
     virQEMUBuildBufferEscapeComma(&buf, def->name);
 
+    //按配置指定进程名称
     if (cfg->setProcessName)
         virBufferAsprintf(&buf, ",process=qemu:%s", def->name);
 
+    //开启debug thread
     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_NAME_DEBUG_THREADS))
         virBufferAddLit(&buf, ",debug-threads=on");
 
@@ -8576,6 +8581,7 @@ qemuBuildInterfaceCommandLine(virQEMUDriverPtr driver,
 
         memset(vhostfd, -1, vhostfdSize * sizeof(vhostfd[0]));
 
+        //打开vhosttfdSize个vhostfd
         if (qemuInterfaceOpenVhostNet(def, net, vhostfd, &vhostfdSize) < 0)
             goto cleanup;
     }
@@ -8701,6 +8707,7 @@ qemuBuildNetCommandLine(virQEMUDriverPtr driver,
         unsigned int bootNet = 0;
 
         /* convert <boot dev='network'/> to bootindex since we didn't emit -boot n */
+        //遍历可boot的设备，获知自net boot的序号
         for (i = 0; i < def->os.nBootDevs; i++) {
             if (def->os.bootDevs[i] == VIR_DOMAIN_BOOT_NET) {
                 bootNet = i + 1;
@@ -8708,11 +8715,12 @@ qemuBuildNetCommandLine(virQEMUDriverPtr driver,
             }
         }
 
+        //遍历网络设备
         for (i = 0; i < def->nnets; i++) {
             virDomainNetDefPtr net = def->nets[i];
 
-            if (qemuBuildInterfaceCommandLine(driver, vm, logManager, secManager, cmd, net,
-                                              qemuCaps, bootNet, vmop,
+            if (qemuBuildInterfaceCommandLine(driver, vm, logManager, secManager, cmd/*命令行*/, net/*网络设备*/,
+                                              qemuCaps, bootNet/*可自网络boot的设备序号*/, vmop,
                                               standalone, nnicindexes,
                                               nicindexes) < 0)
                 goto error;
@@ -10297,8 +10305,10 @@ qemuBuildCommandLine(virQEMUDriverPtr driver,
     if (qemuBuildCommandLineValidate(driver, def) < 0)
         return NULL;
 
+    //构造cmd
     cmd = virCommandNew(def->emulator);
 
+    //为cmd添加公共的环境变量
     virCommandAddEnvPassCommon(cmd);
 
     /* For system QEMU we want to set both HOME and all the XDG variables to
@@ -10365,6 +10375,7 @@ qemuBuildCommandLine(virQEMUDriverPtr driver,
     if (qemuBuildMemoryDeviceCommandLine(cmd, cfg, def, priv) < 0)
         return NULL;
 
+    //添加uuid命令行
     virUUIDFormat(def->uuid, uuid);
     virCommandAddArgList(cmd, "-uuid", uuid, NULL);
 
@@ -10432,6 +10443,7 @@ qemuBuildCommandLine(virQEMUDriverPtr driver,
     if (qemuBuildFilesystemCommandLine(cmd, def, qemuCaps) < 0)
         return NULL;
 
+    //构造网络命令行
     if (qemuBuildNetCommandLine(driver, vm, logManager, secManager, cmd,
                                 qemuCaps, vmop, standalone,
                                 nnicindexes, nicindexes, &bootHostdevNet) < 0)

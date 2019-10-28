@@ -3512,6 +3512,7 @@ static void virDomainObjDispose(void *obj)
     virDomainCheckpointObjListFree(dom->checkpoints);
 }
 
+//创建vm
 virDomainObjPtr
 virDomainObjNew(virDomainXMLOptionPtr xmlopt)
 {
@@ -10351,13 +10352,13 @@ virDomainDiskDefParseXML(virDomainXMLOptionPtr xmlopt,
  *         -1 on failure after issuing error.
  */
 static int
-virDomainParseScaledValue(const char *xpath,
-                          const char *units_xpath,
+virDomainParseScaledValue(const char *xpath/*待提取数据对应的xpath*/,
+                          const char *units_xpath/*单位对应的xpath*/,
                           xmlXPathContextPtr ctxt,
-                          unsigned long long *val,
+                          unsigned long long *val/*出参，转换后的字节数*/,
                           unsigned long long scale,
                           unsigned long long max,
-                          bool required)
+                          bool required/*是否必须*/)
 {
     unsigned long long bytes;
     g_autofree char *xpath_full = NULL;
@@ -10365,11 +10366,13 @@ virDomainParseScaledValue(const char *xpath,
     g_autofree char *bytes_str = NULL;
 
     *val = 0;
+    //取xpath的值
     if (virAsprintf(&xpath_full, "string(%s)", xpath) < 0)
         return -1;
 
     bytes_str = virXPathString(xpath_full, ctxt);
     if (!bytes_str) {
+        //未提取到值
         if (!required)
             return 0;
         virReportError(VIR_ERR_XML_ERROR,
@@ -10379,6 +10382,7 @@ virDomainParseScaledValue(const char *xpath,
     }
     VIR_FREE(xpath_full);
 
+    //将xpath对应的值转换为整数表示的bytes值
     if (virStrToLong_ullp(bytes_str, NULL, 10, &bytes) < 0) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("Invalid value '%s' for element or attribute '%s'"),
@@ -10386,6 +10390,7 @@ virDomainParseScaledValue(const char *xpath,
         return -1;
     }
 
+    //如果有units_xpath或者有unit属性，则进行unit转换
     if ((units_xpath &&
          virAsprintf(&xpath_full, "string(%s)", units_xpath) < 0) ||
         (!units_xpath &&
@@ -10393,6 +10398,7 @@ virDomainParseScaledValue(const char *xpath,
         return -1;
     unit = virXPathString(xpath_full, ctxt);
 
+    //按单位解释bytes值，并换算为bytes
     if (virScaleInteger(&bytes, unit, scale, max) < 0)
         return -1;
 
@@ -10440,7 +10446,7 @@ virDomainParseMemory(const char *xpath,
         return -1;
 
     /* Yes, we really do use kibibytes for our internal sizing.  */
-    *mem = VIR_DIV_UP(bytes, 1024);
+    *mem = VIR_DIV_UP(bytes, 1024);/*内存以1024对齐*/
 
     if (*mem >= VIR_DIV_UP(max, 1024)) {
         virReportError(VIR_ERR_OVERFLOW, "%s", _("size value too large"));
@@ -11461,14 +11467,14 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
 
     type = virXMLPropString(node, "type");
     if (type != NULL) {
-    		//type字符串取值转对应枚举
+    	//type字符串取值转对应枚举
         if ((int)(def->type = virDomainNetTypeFromString(type)) < 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unknown interface type '%s'"), type);
             goto error;
         }
     } else {
-    		//默认为"user"类型interface
+    	//默认为"user"类型interface
         def->type = VIR_DOMAIN_NET_TYPE_USER;
     }
 
@@ -11482,10 +11488,12 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
         goto error;
     }
 
+    //遍历interface对应的子节点
     cur = node->children;
     while (cur != NULL) {
         if (cur->type == XML_ELEMENT_NODE) {
             if (virXMLNodeNameEqual(cur, "source")) {
+		//处理source节点
                 xmlNodePtr tmpnode = ctxt->node;
 
                 ctxt->node = cur;
@@ -11495,6 +11503,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                 ctxt->node = tmpnode;
             }
             if (!macaddr && virXMLNodeNameEqual(cur, "mac")) {
+		//处理mac节点
                 macaddr = virXMLPropString(cur, "address");
             } else if (!network &&
                        def->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
@@ -14361,6 +14370,7 @@ virDomainNetDefNew(virDomainXMLOptionPtr xmlopt)
     if (VIR_ALLOC(def) < 0)
         return NULL;
 
+    //申请domain net
     if (xmlopt && xmlopt->privateData.networkNew &&
         !(def->privateData = xmlopt->privateData.networkNew())) {
         virDomainNetDefFree(def);
@@ -19768,7 +19778,7 @@ virDomainMemorytuneDefParse(virDomainDefPtr def,
 
 static virDomainDefPtr
 virDomainDefParseXML(xmlDocPtr xml,
-                     xmlXPathContextPtr ctxt,
+                     xmlXPathContextPtr ctxt/*xpath对应的上下文*/,
                      virCapsPtr caps,
                      virDomainXMLOptionPtr xmlopt,
                      unsigned int flags)
@@ -19803,6 +19813,7 @@ virDomainDefParseXML(xmlDocPtr xml,
         return NULL;
 
     if (!(flags & VIR_DOMAIN_DEF_PARSE_INACTIVE))
+        //取domain下的id属性
         if (virXPathLong("string(./@id)", ctxt, &id) < 0)
             id = -1;
     def->id = (int)id;
@@ -19811,6 +19822,7 @@ virDomainDefParseXML(xmlDocPtr xml,
         goto error;
 
     /* Extract domain name */
+    //取domain下的第一个name节点，<name>instance-00005b4c</name>
     if (!(def->name = virXPathString("string(./name[1])", ctxt))) {
         virReportError(VIR_ERR_NO_NAME, NULL);
         goto error;
@@ -19821,6 +19833,7 @@ virDomainDefParseXML(xmlDocPtr xml,
      * also serve as the uuid. */
     tmp = virXPathString("string(./uuid[1])", ctxt);
     if (!tmp) {
+        //uuid标签不在xml中存在，这里创建
         if (virUUIDGenerate(def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("Failed to generate UUID"));
@@ -19828,6 +19841,7 @@ virDomainDefParseXML(xmlDocPtr xml,
         }
         uuid_generated = true;
     } else {
+	//uuid标签存在，直接提取
         if (virUUIDParse(tmp, def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("malformed uuid element"));
@@ -19866,6 +19880,7 @@ virDomainDefParseXML(xmlDocPtr xml,
     VIR_FREE(nodes);
 
     /* Extract short description of domain (title) */
+    //提取domain中的title标签
     def->title = virXPathString("string(./title[1])", ctxt);
     if (def->title && strchr(def->title, '\n')) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -19874,6 +19889,7 @@ virDomainDefParseXML(xmlDocPtr xml,
     }
 
     /* Extract documentation if present */
+    //提取domain中的description标签
     def->description = virXPathString("string(./description[1])", ctxt);
 
     /* analysis of security label, done early even though we format it
@@ -19884,10 +19900,12 @@ virDomainDefParseXML(xmlDocPtr xml,
     }
 
     /* Extract domain memory */
+    //解析总内存
     if (virDomainParseMemory("./memory[1]", NULL, ctxt,
                              &def->mem.total_memory, false, true) < 0)
         goto error;
 
+    //当前内存
     if (virDomainParseMemory("./currentMemory[1]", NULL, ctxt,
                              &def->mem.cur_balloon, false, true) < 0)
         goto error;
@@ -28999,7 +29017,7 @@ virDomainDefFormat(virDomainDefPtr def, virCapsPtr caps, unsigned int flags)
     return virBufferContentAndReset(&buf);
 }
 
-
+//将obj输出为xml
 char *
 virDomainObjFormat(virDomainXMLOptionPtr xmlopt,
                    virDomainObjPtr obj,
@@ -29173,6 +29191,7 @@ virDomainSaveXML(const char *configDir,
     if (!configDir)
         return 0;
 
+    //生成配置文件对应的路径
     if ((configFile = virDomainConfigFile(configDir, def->name)) == NULL)
         return -1;
 
@@ -29184,6 +29203,7 @@ virDomainSaveXML(const char *configDir,
     }
 
     virUUIDFormat(def->uuid, uuidstr);
+    //将生成的配置保存在configFile
     return virXMLSaveFile(configFile,
                            virXMLPickShellSafeComment(def->name, uuidstr), "edit",
                            xml);

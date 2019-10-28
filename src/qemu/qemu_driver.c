@@ -1777,6 +1777,7 @@ static virDomainPtr qemuDomainCreateXML(virConnectPtr conn,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         goto cleanup;
 
+    //通过xml产生domain对象
     if (!(def = virDomainDefParseString(xml, caps, driver->xmlopt,
                                         NULL, parse_flags)))
         goto cleanup;
@@ -1784,6 +1785,7 @@ static virDomainPtr qemuDomainCreateXML(virConnectPtr conn,
     if (virDomainCreateXMLEnsureACL(conn, def) < 0)
         goto cleanup;
 
+    //将domain添加进driver->domains中
     if (!(vm = virDomainObjListAdd(driver->domains, def,
                                    driver->xmlopt,
                                    VIR_DOMAIN_OBJ_LIST_ADD_LIVE |
@@ -1798,6 +1800,7 @@ static virDomainPtr qemuDomainCreateXML(virConnectPtr conn,
         goto cleanup;
     }
 
+    //启动qemu进程，boot虚机
     if (qemuProcessStart(conn, driver, vm, NULL, QEMU_ASYNC_JOB_START,
                          NULL, -1, NULL, NULL,
                          VIR_NETDEV_VPORT_PROFILE_OP_CREATE,
@@ -22695,6 +22698,7 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .connectNumOfDomains = qemuConnectNumOfDomains, /* 0.2.0 */
 	//列出所有满足条件的domain
     .connectListAllDomains = qemuConnectListAllDomains, /* 0.9.13 */
+    //通过xml创建domain
     .domainCreateXML = qemuDomainCreateXML, /* 0.2.0 */
     .domainLookupByID = qemuDomainLookupByID, /* 0.2.0 */
     .domainLookupByUUID = qemuDomainLookupByUUID, /* 0.2.0 */

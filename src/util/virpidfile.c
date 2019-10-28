@@ -60,7 +60,7 @@ char *virPidFileBuildPath(const char *dir, const char* name)
     return NULL;
 }
 
-
+//写pid文件
 int virPidFileWritePath(const char *pidfile,
                         pid_t pid)
 {
@@ -111,7 +111,7 @@ int virPidFileWrite(const char *dir,
     return virPidFileWritePath(pidfile, pid);
 }
 
-
+//读取pid文件
 int virPidFileReadPath(const char *path,
                        pid_t *pid)
 {
@@ -137,6 +137,7 @@ int virPidFileReadPath(const char *path,
     }
     pidstr[bytes] = '\0';
 
+    //将pid字符串转换为pid数值
     if (virStrToLong_ll(pidstr, &endptr, 10, &pid_value) < 0 ||
         !(*endptr == '\0' || c_isspace(*endptr)) ||
         (pid_t) pid_value != pid_value) {

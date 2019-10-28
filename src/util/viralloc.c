@@ -141,10 +141,10 @@ int virExpandN(void *ptrptr,
  * Returns zero on success, aborts on OOM
  */
 int virResizeN(void *ptrptr,
-               size_t size,
-               size_t *allocptr,
-               size_t count,
-               size_t add)
+               size_t size/*每个元素大小*/,
+               size_t *allocptr/*ptrptr已申请的大小*/,
+               size_t count/*当前使用大小*/,
+               size_t add/*需要增加的大小*/)
 {
     size_t delta;
 

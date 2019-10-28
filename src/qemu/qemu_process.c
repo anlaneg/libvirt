@@ -6861,10 +6861,13 @@ qemuProcessLaunch(virConnectPtr conn,
                                          vm->def, cmd) < 0)
         goto cleanup;
 
+    //设置logfile为stdout,stderr对应的fd
     virCommandSetOutputFD(cmd, &logfile);
     virCommandSetErrorFD(cmd, &logfile);
     virCommandNonblockingFDs(cmd);
+    //设置cmd对应的pidfile
     virCommandSetPidFile(cmd, priv->pidfile);
+    //指定cmd采用daemon方式运行
     virCommandDaemonize(cmd);
     virCommandRequireHandshake(cmd);
 
@@ -6875,6 +6878,7 @@ qemuProcessLaunch(virConnectPtr conn,
 
     /* wait for qemu process to show up */
     if (rv == 0) {
+        //读取pid文件，获得vm pid号
         if ((rv = virPidFileReadPath(priv->pidfile, &vm->pid)) < 0) {
             virReportSystemError(-rv,
                                  _("Domain %s didn't show up"),

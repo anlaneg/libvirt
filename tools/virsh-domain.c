@@ -8149,6 +8149,7 @@ static const vshCmdOptDef opts_create[] = {
     {.name = NULL}
 };
 
+//创建vm
 static bool
 cmdCreate(vshControl *ctl, const vshCmd *cmd)
 {
@@ -8167,6 +8168,7 @@ cmdCreate(vshControl *ctl, const vshCmd *cmd)
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
 
+    //读取xml文件
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
@@ -8183,6 +8185,7 @@ cmdCreate(vshControl *ctl, const vshCmd *cmd)
     if (nfds)
         dom = virDomainCreateXMLWithFiles(priv->conn, buffer, nfds, fds, flags);
     else
+        //通过xml创建domain
         dom = virDomainCreateXML(priv->conn, buffer, flags);
 
     if (!dom) {
@@ -8243,6 +8246,7 @@ cmdDefine(vshControl *ctl, const vshCmd *cmd)
     if (vshCommandOptBool(cmd, "validate"))
         flags |= VIR_DOMAIN_DEFINE_VALIDATE;
 
+    //读取xml文件到buffer
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
@@ -14206,6 +14210,7 @@ const vshCmdDef domManagementCmds[] = {
      .info = info_create,
      .flags = 0
     },
+    //define虚拟机
     {.name = "define",
      .handler = cmdDefine,
      .opts = opts_define,

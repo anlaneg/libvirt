@@ -95,7 +95,7 @@ struct _virQEMUDriverConfig {
     char *autostartDir;
     char *logDir;
     char *swtpmLogDir;
-    char *stateDir;
+    char *stateDir;//保存状态的目录
     char *swtpmStateDir;
     char *slirpStateDir;
     /* These two directories are ones QEMU processes use (so must match

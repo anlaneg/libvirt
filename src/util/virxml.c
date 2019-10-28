@@ -46,6 +46,7 @@ struct virParserData {
 };
 
 
+//利用xml文档创建一个新的xmlXpathContext(需要调用者进行释放）
 xmlXPathContextPtr
 virXMLXPathContextNew(xmlDocPtr xml)
 {
@@ -681,6 +682,7 @@ virXPathNodeSet(const char *xpath,
         return 0;
     }
 
+    //返回匹配的node数量
     ret = obj->nodesetval->nodeNr;
     if (list != NULL && ret) {
         if (VIR_ALLOC_N(*list, ret) < 0) {

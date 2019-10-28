@@ -172,6 +172,7 @@ virDomainCreateXML(virConnectPtr conn, const char *xmlDesc,
     virCheckNonNullArgGoto(xmlDesc, error);
     virCheckReadOnlyGoto(conn->flags, error);
 
+    //通过xml创建domains
     if (conn->driver->domainCreateXML) {
         virDomainPtr ret;
         ret = conn->driver->domainCreateXML(conn, xmlDesc, flags);

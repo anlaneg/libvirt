@@ -133,7 +133,7 @@ virDomainObjListFindByID(virDomainObjListPtr doms,
     return obj;
 }
 
-
+//通过uuid获取domain
 static virDomainObjPtr
 virDomainObjListFindByUUIDLocked(virDomainObjListPtr doms,
                                  const unsigned char *uuid)
@@ -292,12 +292,14 @@ virDomainObjListAddLocked(virDomainObjListPtr doms,
 
     /* See if a VM with matching UUID already exists */
     if ((vm = virDomainObjListFindByUUIDLocked(doms, def->uuid))) {
+        //domain已存在，如果正在删除，则报错
         if (vm->removing) {
             virReportError(VIR_ERR_OPERATION_FAILED,
                            _("domain '%s' is already being removed"),
                            vm->def->name);
             goto error;
         } else if (STRNEQ(vm->def->name, def->name)) {
+            //uuid相同，但name不同，报错
             /* UUID matches, but if names don't match, refuse it */
             virUUIDFormat(vm->def->uuid, uuidstr);
             virReportError(VIR_ERR_OPERATION_FAILED,
@@ -327,6 +329,7 @@ virDomainObjListAddLocked(virDomainObjListPtr doms,
                               !!(flags & VIR_DOMAIN_OBJ_LIST_ADD_LIVE),
                               oldDef);
     } else {
+        //通过uuid查找不到vm,通过名称查找
         /* UUID does not match, but if a name matches, refuse it */
         if ((vm = virDomainObjListFindByNameLocked(doms, def->name))) {
             virUUIDFormat(vm->def->uuid, uuidstr);
@@ -336,7 +339,7 @@ virDomainObjListAddLocked(virDomainObjListPtr doms,
             goto error;
         }
 
-        //创建domain obj
+        //vm通过uuid及name均不存在，创建domain obj
         if (!(vm = virDomainObjNew(xmlopt)))
             goto error;
         vm->def = def;

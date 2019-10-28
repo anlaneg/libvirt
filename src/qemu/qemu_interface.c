@@ -684,8 +684,8 @@ qemuInterfacePrepareSlirp(virQEMUDriverPtr driver,
 int
 qemuInterfaceOpenVhostNet(virDomainDefPtr def,
                           virDomainNetDefPtr net,
-                          int *vhostfd,
-                          size_t *vhostfdSize)
+                          int *vhostfd/*出参，存储打开的vhostfd*/,
+                          size_t *vhostfdSize/*要打开的vhostfd 数量*/)
 {
     size_t i;
     const char *vhostnet_path = net->backend.vhost;
@@ -727,6 +727,7 @@ qemuInterfaceOpenVhostNet(virDomainDefPtr def,
         return 0;
     }
 
+    //创建*vhostfdSize数量个vhostfd
     for (i = 0; i < *vhostfdSize; i++) {
         vhostfd[i] = open(vhostnet_path, O_RDWR);
 

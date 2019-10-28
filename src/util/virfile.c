@@ -1672,8 +1672,10 @@ virFindFileInPath(const char *file)
      * copy of that path, after validating that it is executable
      */
     if (IS_ABSOLUTE_FILE_NAME(file)) {
+        //绝对路径，直接检查文件是否可执行
         char *ret = NULL;
         if (virFileIsExecutable(file))
+            //文件可执行，strdup一份数据
             ignore_value(VIR_STRDUP_QUIET(ret, file));
         return ret;
     }
@@ -1682,11 +1684,13 @@ virFindFileInPath(const char *file)
      * is no path search - it must exist in the current directory
      */
     if (strchr(file, '/')) {
+        //将相对路径变更为绝对路径
         if (virFileIsExecutable(file))
             ignore_value(virFileAbsPath(file, &path));
         return path;
     }
 
+    //在PATH对应的路径中查找，并返回绝对路径
     /* copy PATH env so we can tweak it */
     origpath = getenv("PATH");
     if (!origpath)

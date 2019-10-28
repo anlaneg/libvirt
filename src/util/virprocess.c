@@ -235,6 +235,7 @@ virProcessAbort(pid_t pid)
 int
 virProcessWait(pid_t pid, int *exitstatus, bool raw)
 {
+    //等待进程退出
     int ret;
     int status;
     g_autofree char *st = NULL;

@@ -606,6 +606,7 @@ virBufferEscape(virBufferPtr buf, char escape, const char *toescape,
 
     len = strlen(str);
     if (strcspn(str, toescape) == len) {
+        //没有esc字符，直接format到buf中
         virBufferAsprintf(buf, format, str);
         return;
     }

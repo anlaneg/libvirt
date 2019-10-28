@@ -937,10 +937,10 @@ main(int argc, char **argv)
                                   getenv("VIRSH_DEFAULT_CONNECT_URI"));
 
     if (!ctl->imode) {
-    		//非交互模式，执行指定的cmd
+    	//非交互模式，执行指定的cmd
         ret = vshCommandRun(ctl, ctl->cmd);
     } else {
-    		//交互模式处理
+    	//交互模式处理
         /* interactive mode */
         if (!ctl->quiet) {
             vshPrint(ctl,

@@ -1735,7 +1735,7 @@ typedef enum {
     VIR_DOMAIN_BOOT_FLOPPY,
     VIR_DOMAIN_BOOT_CDROM,
     VIR_DOMAIN_BOOT_DISK,
-    VIR_DOMAIN_BOOT_NET,
+    VIR_DOMAIN_BOOT_NET,//自网络boot
 
     VIR_DOMAIN_BOOT_LAST
 } virDomainBootOrder;
@@ -1939,8 +1939,8 @@ struct _virDomainOSDef {
     virDomainOsDefFirmware firmware;
     virArch arch;
     char *machine;
-    size_t nBootDevs;
-    int bootDevs[VIR_DOMAIN_BOOT_LAST];
+    size_t nBootDevs;//可boot的设备数目
+    int bootDevs[VIR_DOMAIN_BOOT_LAST];//可boot的设备
     int bootmenu; /* enum virTristateBool */
     unsigned int bm_timeout;
     bool bm_timeout_set;
@@ -2377,9 +2377,9 @@ struct _virDomainDef {
     bool genidRequested;
     bool genidGenerated;
 
-    char *name;
-    char *title;
-    char *description;
+    char *name;/* /domin/name标签指定 */
+    char *title;/* /domin/title 标签指定 */
+    char *description;/* /domin/description 标签指定 */
 
     virDomainBlkiotune blkio;
     virDomainMemtune mem;
@@ -2415,7 +2415,7 @@ struct _virDomainDef {
     virDomainPerfDef perf;
 
     virDomainOSDef os;
-    char *emulator;
+    char *emulator;/*采用那个模拟器*/
     /* Most {caps_,hyperv_,kvm_,}feature options utilize a virTristateSwitch
      * to handle support. A few assign specific data values to the option.
      * See virDomainDefFeaturesCheckABIStability() for details. */
@@ -2449,8 +2449,8 @@ struct _virDomainDef {
     size_t nfss;
     virDomainFSDefPtr *fss;
 
-    size_t nnets;
-    virDomainNetDefPtr *nets;
+    size_t nnets;//网络接口数目
+    virDomainNetDefPtr *nets;//网络接口数组
 
     size_t ninputs;
     virDomainInputDefPtr *inputs;
