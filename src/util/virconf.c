@@ -29,7 +29,6 @@
 #include "virbuffer.h"
 #include "virconf.h"
 #include "virutil.h"
-#include "c-ctype.h"
 #include "virlog.h"
 #include "viralloc.h"
 #include "virfile.h"
@@ -58,14 +57,15 @@ struct _virConfParserCtxt {
 #define CUR (*ctxt->cur)
 #define NEXT if (ctxt->cur < ctxt->end) ctxt->cur++;
 #define IS_EOL(c) (((c) == '\n') || ((c) == '\r'))
+#define IS_BLANK(c) (((c) == ' ') || ((c) == '\t'))
 
 #define SKIP_BLANKS_AND_EOL \
-	/*自当前字符开始遍历，跳过blank,eof，遇到'\n'行号加1*/\
-  do { while ((ctxt->cur < ctxt->end) && (c_isblank(CUR) || IS_EOL(CUR))) { \
+  /*自当前字符开始遍历，跳过blank,eof，遇到'\n'行号加1*/\
+  do { while ((ctxt->cur < ctxt->end) && (IS_BLANK(CUR) || IS_EOL(CUR))) { \
          if (CUR == '\n') ctxt->line++; \
          ctxt->cur++; } } while (0)
 #define SKIP_BLANKS \
-  do { while ((ctxt->cur < ctxt->end) && (c_isblank(CUR))) \
+  do { while ((ctxt->cur < ctxt->end) && (IS_BLANK(CUR))) \
           ctxt->cur++; } while (0)
 
 VIR_ENUM_IMPL(virConf,
@@ -356,11 +356,11 @@ virConfParseLong(virConfParserCtxtPtr ctxt, long long *val)
     } else if (CUR == '+') {
         NEXT;
     }
-    if ((ctxt->cur >= ctxt->end) || (!c_isdigit(CUR))) {
+    if ((ctxt->cur >= ctxt->end) || (!g_ascii_isdigit(CUR))) {
         virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated number"));
         return -1;
     }
-    while ((ctxt->cur < ctxt->end) && (c_isdigit(CUR))) {
+    while ((ctxt->cur < ctxt->end) && (g_ascii_isdigit(CUR))) {
         l = l * 10 + (CUR - '0');
         NEXT;
     }
@@ -393,8 +393,7 @@ virConfParseString(virConfParserCtxtPtr ctxt)
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated string"));
             return NULL;
         }
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
         NEXT;
     } else if ((ctxt->cur + 6 < ctxt->end) &&
                (STRPREFIX(ctxt->cur, "\"\"\""))) {
@@ -414,8 +413,7 @@ virConfParseString(virConfParserCtxtPtr ctxt)
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated string"));
             return NULL;
         }
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
         ctxt->cur += 3;
     } else if (CUR == '"') {
         NEXT;
@@ -426,8 +424,7 @@ virConfParseString(virConfParserCtxtPtr ctxt)
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated string"));
             return NULL;
         }
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
         NEXT;
     } else if (ctxt->conf->flags & VIR_CONF_FLAG_LXC_FORMAT) {
         base = ctxt->cur;
@@ -435,10 +432,9 @@ virConfParseString(virConfParserCtxtPtr ctxt)
         while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR)))
             NEXT;
         /* Reverse to exclude the trailing blanks from the value */
-        while ((ctxt->cur > base) && (c_isblank(CUR)))
+        while ((ctxt->cur > base) && (IS_BLANK(CUR)))
             ctxt->cur--;
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
     }
     return ret;
 }
@@ -520,7 +516,7 @@ virConfParseValue(virConfParserCtxtPtr ctxt)
             virConfFreeList(lst);
             return NULL;
         }
-    } else if (c_isdigit(CUR) || (CUR == '-') || (CUR == '+')) {
+    } else if (g_ascii_isdigit(CUR) || (CUR == '-') || (CUR == '+')) {
         if (ctxt->conf->flags & VIR_CONF_FLAG_VMX_FORMAT) {
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX,
                          _("numbers not allowed in VMX format"));
@@ -562,20 +558,19 @@ virConfParseName(virConfParserCtxtPtr ctxt)
     SKIP_BLANKS;
     base = ctxt->cur;
     /* TODO: probably need encoding support and UTF-8 parsing ! */
-    if (!c_isalpha(CUR) &&
+    if (!g_ascii_isalpha(CUR) &&
         !((ctxt->conf->flags & VIR_CONF_FLAG_VMX_FORMAT) && (CUR == '.'))) {
         virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("expecting a name"));
         return NULL;
     }
     while ((ctxt->cur < ctxt->end) &&
-           (c_isalnum(CUR) || (CUR == '_') ||
+           (g_ascii_isalnum(CUR) || (CUR == '_') ||
             ((ctxt->conf->flags & VIR_CONF_FLAG_VMX_FORMAT) &&
              ((CUR == ':') || (CUR == '.') || (CUR == '-'))) ||
             ((ctxt->conf->flags & VIR_CONF_FLAG_LXC_FORMAT) &&
              (CUR == '.'))))
         NEXT;
-    if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-        return NULL;
+    ret = g_strndup(base, ctxt->cur - base);
     return ret;
 }
 
@@ -601,8 +596,7 @@ virConfParseComment(virConfParserCtxtPtr ctxt)
     //一直移动解析，跳过被注释的字符，直接遇到'\r','\n'
     while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR))) NEXT;
     //ctxt->cur位置为注释结尾，取注释的字符串记在comm中
-    if (VIR_STRNDUP(comm, base, ctxt->cur - base) < 0)
-        return -1;
+    comm = g_strndup(base, ctxt->cur - base);
     //添加注释信息到conf
     if (virConfAddEntry(ctxt->conf, NULL, NULL, comm) == NULL) {
         VIR_FREE(comm);
@@ -686,11 +680,7 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
         NEXT;
         base = ctxt->cur;
         while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR))) NEXT;
-        if (VIR_STRNDUP(comm, base, ctxt->cur - base) < 0) {
-            VIR_FREE(name);
-            virConfFreeValue(value);
-            return -1;
-        }
+        comm = g_strndup(base, ctxt->cur - base);
     }
 
     //添加key,value及注释
@@ -1548,20 +1538,11 @@ virConfLoadConfigPath(const char *name)
 {
     char *path;
     if (geteuid() == 0) {
-        if (virAsprintf(&path, "%s/libvirt/%s",
-                        SYSCONFDIR, name) < 0)
-            return NULL;
+        path = g_strdup_printf("%s/libvirt/%s", SYSCONFDIR, name);
     } else {
-        char *userdir = virGetUserConfigDirectory();
-        if (!userdir)
-            return NULL;
+        g_autofree char *userdir = virGetUserConfigDirectory();
 
-        if (virAsprintf(&path, "%s/%s",
-                        userdir, name) < 0) {
-            VIR_FREE(userdir);
-            return NULL;
-        }
-        VIR_FREE(userdir);
+        path = g_strdup_printf("%s/%s", userdir, name);
     }
 
     return path;

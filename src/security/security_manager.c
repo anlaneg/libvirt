@@ -451,7 +451,7 @@ virSecurityManagerRestoreImageLabel(virSecurityManagerPtr mgr,
  * If @dst is NULL then metadata is removed from @src and not
  * stored anywhere.
  *
- * If @pid is not -1 enther the @pid mount namespace (usually
+ * If @pid is not -1 enter the @pid mount namespace (usually
  * @pid refers to a domain) and perform the move from there. If
  * @pid is -1 then the move is performed from the caller's
  * namespace.
@@ -473,8 +473,7 @@ virSecurityManagerMoveImageMetadata(virSecurityManagerPtr mgr,
         return ret;
     }
 
-    virReportUnsupportedError();
-    return -1;
+    return 0;
 }
 
 
@@ -588,41 +587,6 @@ virSecurityManagerSetHostdevLabel(virSecurityManagerPtr mgr,
         int ret;
         virObjectLock(mgr);
         ret = mgr->drv->domainSetSecurityHostdevLabel(mgr, vm, dev, vroot);
-        virObjectUnlock(mgr);
-        return ret;
-    }
-
-    virReportUnsupportedError();
-    return -1;
-}
-
-
-int
-virSecurityManagerSetSavedStateLabel(virSecurityManagerPtr mgr,
-                                     virDomainDefPtr vm,
-                                     const char *savefile)
-{
-    if (mgr->drv->domainSetSavedStateLabel) {
-        int ret;
-        virObjectLock(mgr);
-        ret = mgr->drv->domainSetSavedStateLabel(mgr, vm, savefile);
-        virObjectUnlock(mgr);
-        return ret;
-    }
-
-    virReportUnsupportedError();
-    return -1;
-}
-
-int
-virSecurityManagerRestoreSavedStateLabel(virSecurityManagerPtr mgr,
-                                         virDomainDefPtr vm,
-                                         const char *savefile)
-{
-    if (mgr->drv->domainRestoreSavedStateLabel) {
-        int ret;
-        virObjectLock(mgr);
-        ret = mgr->drv->domainRestoreSavedStateLabel(mgr, vm, savefile);
         virObjectUnlock(mgr);
         return ret;
     }
@@ -769,7 +733,7 @@ static int virSecurityManagerCheckModel(virSecurityManagerPtr mgr,
     }
 
     virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                   _("Unable to find security driver for model %s"),
+                   _("Security driver model '%s' is not available"),
                    secmodel);
  cleanup:
     VIR_FREE(sec_managers);
@@ -1078,6 +1042,63 @@ virSecurityManagerDomainSetPathLabel(virSecurityManagerPtr mgr,
 
 
 /**
+ * virSecurityManagerDomainSetPathLabelRO:
+ * @mgr: security manager object
+ * @vm: domain definition object
+ * @path: path to label
+ *
+ * This function relabels given @path for read only access, which
+ * is in contrast with virSecurityManagerDomainSetPathLabel() which
+ * gives read write access.
+ *
+ * Returns: 0 on success, -1 on error.
+ */
+int
+virSecurityManagerDomainSetPathLabelRO(virSecurityManagerPtr mgr,
+                                       virDomainDefPtr vm,
+                                       const char *path)
+{
+    if (mgr->drv->domainSetPathLabelRO) {
+        int ret;
+        virObjectLock(mgr);
+        ret = mgr->drv->domainSetPathLabelRO(mgr, vm, path);
+        virObjectUnlock(mgr);
+        return ret;
+    }
+
+    return 0;
+}
+
+/**
+ * virSecurityManagerDomainRestorePathLabel:
+ * @mgr: security manager object
+ * @vm: domain definition object
+ * @path: path to restore labels one
+ *
+ * This function is a counterpart to virSecurityManagerDomainSetPathLabel() and
+ * virSecurityManagerDomainSetPathLabelRO() as it restores any labels set by them.
+ *
+ * Returns: 0 on success, -1 on error.
+ */
+int
+virSecurityManagerDomainRestorePathLabel(virSecurityManagerPtr mgr,
+                                         virDomainDefPtr vm,
+                                         const char *path)
+{
+    if (mgr->drv->domainRestorePathLabel) {
+        int ret;
+        virObjectLock(mgr);
+        ret = mgr->drv->domainRestorePathLabel(mgr, vm, path);
+        virObjectUnlock(mgr);
+        return ret;
+    }
+
+    return 0;
+}
+
+
+
+/**
  * virSecurityManagerSetMemoryLabel:
  * @mgr: security manager object
  * @vm: domain definition object
@@ -1245,12 +1266,6 @@ virSecurityManagerRestoreTPMLabels(virSecurityManagerPtr mgr,
 }
 
 
-struct _virSecurityManagerMetadataLockState {
-    size_t nfds;
-    int *fds;
-};
-
-
 static int
 cmpstringp(const void *p1, const void *p2)
 {
@@ -1278,6 +1293,7 @@ cmpstringp(const void *p1, const void *p2)
  *
  * Lock passed @paths for metadata change. The returned state
  * should be passed to virSecurityManagerMetadataUnlock.
+ * Passed @paths must not be freed until the corresponding unlock call.
  *
  * NOTE: this function is not thread safe (because of usage of
  * POSIX locks).
@@ -1293,9 +1309,11 @@ virSecurityManagerMetadataLock(virSecurityManagerPtr mgr G_GNUC_UNUSED,
     size_t i = 0;
     size_t nfds = 0;
     int *fds = NULL;
+    const char **locked_paths = NULL;
     virSecurityManagerMetadataLockStatePtr ret = NULL;
 
-    if (VIR_ALLOC_N(fds, npaths) < 0)
+    if (VIR_ALLOC_N(fds, npaths) < 0 ||
+        VIR_ALLOC_N(locked_paths, npaths) < 0)
         return NULL;
 
     /* Sort paths to lock in order to avoid deadlocks with other
@@ -1340,9 +1358,16 @@ virSecurityManagerMetadataLock(virSecurityManagerPtr mgr G_GNUC_UNUSED,
         }
 
         if ((fd = open(p, O_RDWR)) < 0) {
+#ifndef WIN32
             if (S_ISSOCK(sb.st_mode)) {
                 /* Sockets can be opened only if there exists the
                  * other side that listens. */
+                continue;
+            }
+#endif /* !WIN32 */
+
+            if (virFileIsSharedFS(p)) {
+                /* Probably a root squashed NFS. */
                 continue;
             }
 
@@ -1372,12 +1397,14 @@ virSecurityManagerMetadataLock(virSecurityManagerPtr mgr G_GNUC_UNUSED,
             break;
         } while (1);
 
+        locked_paths[nfds] = p;
         VIR_APPEND_ELEMENT_COPY_INPLACE(fds, nfds, fd);
     }
 
     if (VIR_ALLOC(ret) < 0)
         goto cleanup;
 
+    ret->paths = g_steal_pointer(&locked_paths);
     ret->fds = g_steal_pointer(&fds);
     ret->nfds = nfds;
     nfds = 0;
@@ -1386,6 +1413,7 @@ virSecurityManagerMetadataLock(virSecurityManagerPtr mgr G_GNUC_UNUSED,
     for (i = nfds; i > 0; i--)
         VIR_FORCE_CLOSE(fds[i - 1]);
     VIR_FREE(fds);
+    VIR_FREE(locked_paths);
     return ret;
 }
 
@@ -1400,22 +1428,23 @@ virSecurityManagerMetadataUnlock(virSecurityManagerPtr mgr G_GNUC_UNUSED,
         return;
 
     for (i = 0; i < (*state)->nfds; i++) {
-        char ebuf[1024];
+        const char *path = (*state)->paths[i];
         int fd = (*state)->fds[i];
 
         /* Technically, unlock is not needed because it will
          * happen on VIR_CLOSE() anyway. But let's play it nice. */
         if (virFileUnlock(fd, METADATA_OFFSET, METADATA_LEN) < 0) {
-            VIR_WARN("Unable to unlock fd %d: %s",
-                     fd, virStrerror(errno, ebuf, sizeof(ebuf)));
+            VIR_WARN("Unable to unlock fd %d path %s: %s",
+                     fd, path, g_strerror(errno));
         }
 
         if (VIR_CLOSE(fd) < 0) {
-            VIR_WARN("Unable to close fd %d: %s",
-                     fd, virStrerror(errno, ebuf, sizeof(ebuf)));
+            VIR_WARN("Unable to close fd %d path %s: %s",
+                     fd, path, g_strerror(errno));
         }
     }
 
     VIR_FREE((*state)->fds);
+    VIR_FREE((*state)->paths);
     VIR_FREE(*state);
 }

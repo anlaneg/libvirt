@@ -22,7 +22,6 @@
 #include <config.h>
 
 #include <dirent.h>
-#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -39,8 +38,9 @@
 #include "virobject.h"
 #include "virstring.h"
 #include "viruuid.h"
-#include "secret_util.h"
+#include "virsecret.h"
 #include "storage_util.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -63,13 +63,13 @@ virStorageBackendISCSIPortal(virStoragePoolSourcePtr source)
         source->hosts[0].port = ISCSI_DEFAULT_TARGET_PORT;
 
     if (strchr(source->hosts[0].name, ':')) {
-        ignore_value(virAsprintf(&portal, "[%s]:%d,1",
+        portal = g_strdup_printf("[%s]:%d,1",
                                  source->hosts[0].name,
-                                 source->hosts[0].port));
+                                 source->hosts[0].port);
     } else {
-        ignore_value(virAsprintf(&portal, "%s:%d,1",
+        portal = g_strdup_printf("%s:%d,1",
                                  source->hosts[0].name,
-                                 source->hosts[0].port));
+                                 source->hosts[0].port);
     }
 
     return portal;
@@ -133,9 +133,8 @@ virStorageBackendISCSIFindLUs(virStoragePoolObjPtr pool,
     uint32_t host;
     g_autofree char *sysfs_path = NULL;
 
-    if (virAsprintf(&sysfs_path,
-                    "/sys/class/iscsi_session/session%s/device", session) < 0)
-        return -1;
+    sysfs_path = g_strdup_printf("/sys/class/iscsi_session/session%s/device",
+                                 session);
 
     if (virStorageBackendISCSIGetHostNumber(sysfs_path, &host) < 0)
         return -1;

@@ -34,6 +34,7 @@
 #include "virstring.h"
 #include "viraccessapicheck.h"
 #include "virinterfaceobj.h"
+#include "virutil.h"
 
 #include "configmake.h"
 
@@ -89,9 +90,16 @@ virNetcfDriverStateDispose(void *obj)
 
 static int
 netcfStateInitialize(bool privileged,
+                     const char *root,
                      virStateInhibitCallback callback G_GNUC_UNUSED,
                      void *opaque G_GNUC_UNUSED)
 {
+    if (root != NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Driver does not support embedded mode"));
+        return -1;
+    }
+
     if (virNetcfDriverStateInitialize() < 0)
         return VIR_DRV_STATE_INIT_ERROR;
 
@@ -101,16 +109,12 @@ netcfStateInitialize(bool privileged,
     driver->privileged = privileged;
 
     if (privileged) {
-        if (virAsprintf(&driver->stateDir,
-                        "%s/libvirt/interface", RUNSTATEDIR) < 0)
-            goto error;
+        driver->stateDir = g_strdup_printf("%s/libvirt/interface", RUNSTATEDIR);
     } else {
         g_autofree char *rundir = NULL;
 
-        if (!(rundir = virGetUserRuntimeDirectory()))
-            goto error;
-        if (virAsprintf(&driver->stateDir, "%s/interface/run", rundir) < 0)
-            goto error;
+        rundir = virGetUserRuntimeDirectory();
+        driver->stateDir = g_strdup_printf("%s/interface/run", rundir);
     }
 
     if (virFileMakePathWithMode(driver->stateDir, S_IRWXU) < 0) {
@@ -144,12 +148,7 @@ netcfStateCleanup(void)
     if (!driver)
         return -1;
 
-    if (virObjectUnref(driver)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Attempt to close netcf state driver "
-                         "with open connections"));
-        return -1;
-    }
+    virObjectUnref(driver);
     driver = NULL;
     return 0;
 }

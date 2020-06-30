@@ -491,7 +491,6 @@ virDomainObjListRename(virDomainObjListPtr doms,
 
 static virDomainObjPtr
 virDomainObjListLoadConfig(virDomainObjListPtr doms,
-                           virCapsPtr caps,
                            virDomainXMLOptionPtr xmlopt,
                            const char *configDir,
                            const char *autostartDir,
@@ -507,7 +506,7 @@ virDomainObjListLoadConfig(virDomainObjListPtr doms,
 
     if ((configFile = virDomainConfigFile(configDir, name)) == NULL)
         goto error;
-    if (!(def = virDomainDefParseFile(configFile, caps, xmlopt, NULL,
+    if (!(def = virDomainDefParseFile(configFile, xmlopt, NULL,
                                       VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                       VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE |
                                       VIR_DOMAIN_DEF_PARSE_ALLOW_POST_PARSE_FAIL)))
@@ -544,7 +543,6 @@ static virDomainObjPtr
 virDomainObjListLoadStatus(virDomainObjListPtr doms,
                            const char *statusDir,
                            const char *name,
-                           virCapsPtr caps,
                            virDomainXMLOptionPtr xmlopt,
                            virDomainLoadConfigNotify notify,
                            void *opaque)
@@ -556,7 +554,7 @@ virDomainObjListLoadStatus(virDomainObjListPtr doms,
     if ((statusFile = virDomainConfigFile(statusDir, name)) == NULL)
         goto error;
 
-    if (!(obj = virDomainObjParseFile(statusFile, caps, xmlopt,
+    if (!(obj = virDomainObjParseFile(statusFile, xmlopt,
                                       VIR_DOMAIN_DEF_PARSE_STATUS |
                                       VIR_DOMAIN_DEF_PARSE_ACTUAL_NET |
                                       VIR_DOMAIN_DEF_PARSE_PCI_ORIG_STATES |
@@ -594,7 +592,6 @@ virDomainObjListLoadAllConfigs(virDomainObjListPtr doms,
                                const char *configDir,
                                const char *autostartDir,
                                bool liveStatus,
-                               virCapsPtr caps,
                                virDomainXMLOptionPtr xmlopt,
                                virDomainLoadConfigNotify notify,
                                void *opaque)
@@ -624,13 +621,11 @@ virDomainObjListLoadAllConfigs(virDomainObjListPtr doms,
             dom = virDomainObjListLoadStatus(doms,
                                              configDir,
                                              entry->d_name,
-                                             caps,
                                              xmlopt,
                                              notify,
                                              opaque);
         else
             dom = virDomainObjListLoadConfig(doms,
-                                             caps,
                                              xmlopt,
                                              configDir,
                                              autostartDir,

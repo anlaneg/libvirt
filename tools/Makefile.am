@@ -17,19 +17,16 @@
 
 AM_CPPFLAGS = \
 	-I$(top_builddir)/include -I$(top_srcdir)/include \
-	-I$(top_builddir)/gnulib/lib -I$(top_srcdir)/gnulib/lib \
 	-I$(top_builddir)/src -I$(top_srcdir)/src \
 	-I$(top_srcdir)/src/util \
 	-I$(top_srcdir) \
 	$(NULL)
 
-# We do not want to accidentally include stuff from gnulib
-# or the main src/ dir or public API dir. Specific files can
+# We do not want to accidentally include stuff from src/
+# dir or public API dir. Specific files can
 # still be included via their path relative to the root if
 # needed
 STANDALONE_CPPFLAGS = -I$(top_srcdir)
-
-WARN_CFLAGS += $(STRICT_FRAME_LIMIT_CFLAGS)
 
 AM_CFLAGS = \
 	$(WARN_CFLAGS) \
@@ -52,26 +49,6 @@ ICON_FILES = \
 	libvirt_win_icon_64x64.ico \
 	virsh_win_icon.rc
 
-PODFILES = \
-	virt-admin.pod \
-	virt-host-validate.pod \
-	virt-login-shell.pod \
-	virt-pki-validate.pod \
-	virt-sanlock-cleanup.pod \
-	virt-xml-validate.pod \
-	virsh.pod \
-	$(NULL)
-
-MANINFILES = \
-	virt-admin.1.in \
-	virt-host-validate.1.in \
-	virt-login-shell.1.in \
-	virt-pki-validate.1.in \
-	virt-sanlock-cleanup.8.in \
-	virt-xml-validate.1.in \
-	virsh.1.in \
-	$(NULL)
-
 EXTRA_DIST = \
 	$(ICON_FILES) \
 	$(conf_DATA) \
@@ -83,8 +60,6 @@ EXTRA_DIST = \
 	virsh-edit.c \
 	bash-completion/vsh \
 	libvirt_recover_xattrs.sh \
-	$(PODFILES) \
-	$(MANINFILES) \
 	$(NULL)
 
 
@@ -98,15 +73,9 @@ conf_DATA =
 bin_SCRIPTS = virt-xml-validate virt-pki-validate
 bin_PROGRAMS = virsh virt-admin
 libexec_SCRIPTS = libvirt-guests.sh
-man1_MANS = \
-		virt-pki-validate.1 \
-		virt-xml-validate.1 \
-		virsh.1 \
-		virt-admin.1
 
 if WITH_SANLOCK
 sbin_SCRIPTS = virt-sanlock-cleanup
-man8_MANS = virt-sanlock-cleanup.8
 DISTCLEANFILES += virt-sanlock-cleanup
 endif WITH_SANLOCK
 
@@ -114,12 +83,10 @@ if WITH_LOGIN_SHELL
 conf_DATA += virt-login-shell.conf
 bin_PROGRAMS += virt-login-shell
 libexec_PROGRAMS = virt-login-shell-helper
-man1_MANS += virt-login-shell.1
 endif WITH_LOGIN_SHELL
 
 if WITH_HOST_VALIDATE
 bin_PROGRAMS += virt-host-validate
-man1_MANS += virt-host-validate.1
 endif WITH_HOST_VALIDATE
 
 virt-xml-validate: virt-xml-validate.in Makefile
@@ -152,7 +119,6 @@ libvirt_shell_la_LIBADD = \
 		$(LIBXML_LIBS) \
 		$(READLINE_LIBS) \
 		$(GLIB_LIBS) \
-		../gnulib/lib/libgnu.la \
 		$(NULL)
 libvirt_shell_la_SOURCES = \
 		vsh.c vsh.h \
@@ -198,7 +164,6 @@ virt_host_validate_LDFLAGS = \
 virt_host_validate_LDADD = \
 		../src/libvirt.la \
 		$(GLIB_LIBS) \
-		../gnulib/lib/libgnu.la \
 		$(NULL)
 
 virt_host_validate_CFLAGS = \
@@ -225,7 +190,7 @@ virt_login_shell_helper_LDADD = \
 		../src/libvirt.la \
 		../src/libvirt-lxc.la \
 		$(GLIB_LIBS) \
-		../gnulib/lib/libgnu.la
+		$(NULL)
 
 virt_login_shell_helper_CFLAGS = \
 		$(AM_CFLAGS) \
@@ -233,6 +198,7 @@ virt_login_shell_helper_CFLAGS = \
 
 virsh_SOURCES = \
 		virsh.c virsh.h \
+		virsh-backup.c virsh-backup.h \
 		virsh-checkpoint.c virsh-checkpoint.h \
 		virsh-completer.c virsh-completer.h \
 		virsh-completer-domain.c virsh-completer-domain.h \
@@ -322,42 +288,6 @@ virsh_win_icon.$(OBJEXT): virsh_win_icon.rc
 	  --output-format coff --output $@
 endif WITH_WIN_ICON
 
-POD2MAN = pod2man -c "Virtualization Support" -r "$(PACKAGE)-$(VERSION)"
-
-%.1.in: %.pod
-	$(AM_V_GEN)$(POD2MAN) $< $@-t1 && \
-	if grep 'POD ERROR' $@-t1; then rm $@-t1; exit 1; fi && \
-	sed \
-		-e 's|SYSCONFDIR|\@sysconfdir\@|g' \
-		-e 's|LOCALSTATEDIR|\@localstatedir\@|g' \
-	< $@-t1 > $@-t2 && \
-	rm -f $@-t1 && \
-	mv $@-t2 $@
-
-%.8.in: %.pod
-	$(AM_V_GEN)$(POD2MAN) --section=8 $< $@-t1 && \
-	if grep 'POD ERROR' $@-t1; then rm $@-t1; exit 1; fi && \
-	sed \
-		-e 's|SYSCONFDIR|\@sysconfdir\@|g' \
-		-e 's|LOCALSTATEDIR|\@localstatedir\@|g' \
-		< $@-t1 > $@-t2 && \
-	rm -f $@-t1 && \
-	mv $@-t2 $@
-
-%.1: %.1.in $(top_srcdir)/configure.ac
-	$(AM_V_GEN)sed \
-		-e 's|[@]sysconfdir[@]|$(sysconfdir)|g' \
-		-e 's|[@]localstatedir[@]|$(localstatedir)|g' \
-		< $< > $@-t && \
-	mv $@-t $@
-
-%.8: %.8.in $(top_srcdir)/configure.ac
-	$(AM_V_GEN)sed \
-		-e 's|[@]sysconfdir[@]|$(sysconfdir)|g' \
-		-e 's|[@]localstatedir[@]|$(localstatedir)|g' \
-		< $< > $@-t && \
-	mv $@-t $@
-
 install-data-local: install-systemd install-nss \
 	install-bash-completion
 
@@ -424,7 +354,7 @@ libvirt-guests.service: libvirt-guests.service.in $(top_builddir)/config.status
 if WITH_BASH_COMPLETION
 install-bash-completion:
 	$(MKDIR_P) "$(DESTDIR)$(BASH_COMPLETIONS_DIR)"
-	$(INSTALL_SCRIPT) $(srcdir)/bash-completion/vsh \
+	$(INSTALL_DATA) $(srcdir)/bash-completion/vsh \
 		"$(DESTDIR)$(BASH_COMPLETIONS_DIR)/vsh"
 	( cd $(DESTDIR)$(BASH_COMPLETIONS_DIR) && \
 		rm -f virsh virt-admin && \
@@ -595,8 +525,5 @@ clean-local:
 
 CLEANFILES += $(bin_SCRIPTS)
 CLEANFILES += *.gcov .libs/*.gcda .libs/*.gcno *.gcno *.gcda *.i *.s
-CLEANFILES += $(man1_MANS) $(man8_MANS)
 
 DISTCLEANFILES += $(BUILT_SOURCES)
-
-MAINTAINERCLEANFILES += $(MANINFILES)

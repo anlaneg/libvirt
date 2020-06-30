@@ -63,6 +63,8 @@ struct testQemuInfo {
     int migrateFd;
     unsigned int flags;
     unsigned int parseFlags;
+    virArch arch;
+    char *schemafile;
 };
 
 virCapsPtr testQemuCapsInit(void);
@@ -71,17 +73,16 @@ virDomainXMLOptionPtr testQemuXMLConfInit(void);
 
 virQEMUCapsPtr qemuTestParseCapabilitiesArch(virArch arch,
                                              const char *capsFile);
-virQEMUCapsPtr qemuTestParseCapabilities(virCapsPtr caps,
-                                         const char *capsFile);
 
 extern virCPUDefPtr cpuDefault;
 extern virCPUDefPtr cpuHaswell;
 extern virCPUDefPtr cpuPower8;
 extern virCPUDefPtr cpuPower9;
 
-void qemuTestSetHostArch(virCapsPtr caps,
-                        virArch arch);
-void qemuTestSetHostCPU(virCapsPtr caps,
+void qemuTestSetHostArch(virQEMUDriverPtr driver,
+                         virArch arch);
+void qemuTestSetHostCPU(virQEMUDriverPtr driver,
+                        virArch arch,
                         virCPUDefPtr cpu);
 
 int qemuTestDriverInit(virQEMUDriver *driver);

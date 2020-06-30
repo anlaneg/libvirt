@@ -36,6 +36,8 @@ typedef struct _virNodeDeviceDriverState virNodeDeviceDriverState;
 typedef virNodeDeviceDriverState *virNodeDeviceDriverStatePtr;
 struct _virNodeDeviceDriverState {
     virMutex lock;
+    virCond initCond;
+    bool initialized;
 
     /* pid file FD, ensures two copies of the driver can't use the same root */
     int lockFD;
@@ -116,3 +118,6 @@ virNodeDeviceObjListExport(virConnectPtr conn,
 void
 virNodeDeviceObjSetSkipUpdateCaps(virNodeDeviceObjPtr obj,
                                   bool skipUpdateCaps);
+virNodeDeviceObjPtr
+virNodeDeviceObjListFindMediatedDeviceByUUID(virNodeDeviceObjListPtr devs,
+                                             const char *uuid);

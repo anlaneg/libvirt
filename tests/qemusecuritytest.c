@@ -45,8 +45,7 @@ prepareObjects(virQEMUDriverPtr driver,
     g_autofree char *domxml = NULL;
     g_autofree char *latestCapsFile = NULL;
 
-    if (virAsprintf(&filename, "%s/qemuxml2argvdata/%s.xml", abs_srcdir, xmlname) < 0)
-        return -1;
+    filename = g_strdup_printf("%s/qemuxml2argvdata/%s.xml", abs_srcdir, xmlname);
 
     if (virTestLoadFile(filename, &domxml) < 0)
         return -1;
@@ -69,7 +68,6 @@ prepareObjects(virQEMUDriverPtr driver,
         return -1;
 
     if (!(vm->def = virDomainDefParseString(domxml,
-                                            driver->caps,
                                             driver->xmlopt,
                                             NULL,
                                             0)))
@@ -113,7 +111,7 @@ testDomain(const void *opaque)
 
     /* Mocking is enabled only when this env variable is set.
      * See mock code for explanation. */
-    if (setenv(ENVVAR, "1", 0) < 0)
+    if (g_setenv(ENVVAR, "1", FALSE) == FALSE)
         return -1;
 
     if (qemuSecuritySetAllLabel(data->driver, vm, NULL, false) < 0)
@@ -126,7 +124,7 @@ testDomain(const void *opaque)
 
     ret = 0;
  cleanup:
-    unsetenv(ENVVAR);
+    g_unsetenv(ENVVAR);
     freePaths();
     return ret;
 }
@@ -148,7 +146,7 @@ mymain(void)
                                                             VIR_SECURITY_MANAGER_PRIVILEGED |
                                                             VIR_SECURITY_MANAGER_DYNAMIC_OWNERSHIP,
                                                             NULL))) {
-        virFilePrintf(stderr, "Cannot initialize DAC security driver");
+        fprintf(stderr, "Cannot initialize DAC security driver");
         ret = -1;
         goto cleanup;
     }
@@ -218,4 +216,5 @@ mymain(void)
     return ret;
 }
 
-VIR_TEST_MAIN(mymain)
+VIR_TEST_MAIN_PRELOAD(mymain,
+                      VIR_TEST_MOCK("domaincaps"))

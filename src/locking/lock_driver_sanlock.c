@@ -31,7 +31,6 @@
 #include <sanlock_resource.h>
 #include <sanlock_admin.h>
 
-#include "dirname.h"
 #include "lock_driver.h"
 #include "virlog.h"
 #include "virerror.h"
@@ -40,6 +39,7 @@
 #include "virfile.h"
 #include "virconf.h"
 #include "virstring.h"
+#include "virutil.h"
 
 #include "configmake.h"
 
@@ -103,7 +103,7 @@ virLockManagerSanlockError(int err,
 #if HAVE_SANLOCK_STRERROR
         *message = g_strdup(sanlock_strerror(err));
 #else
-        ignore_value(virAsprintfQuiet(message, _("sanlock error %d"), err));
+        *message = g_strdup_printf(_("sanlock error %d"), err);
 #endif
         return true;
     } else {
@@ -211,10 +211,8 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
     char *dir = NULL;
     int retries = LOCKSPACE_RETRIES;
 
-    if (virAsprintf(&path, "%s/%s",
-                    driver->autoDiskLeasePath,
-                    VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE) < 0)
-        goto error;
+    path = g_strdup_printf("%s/%s", driver->autoDiskLeasePath,
+                           VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE);
 
     if (virStrcpyStatic(ls.name,
                         VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE) < 0) {
@@ -241,10 +239,7 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
         int perms = 0600;
         VIR_DEBUG("Lockspace %s does not yet exist", path);
 
-        if (!(dir = mdir_name(path))) {
-            virReportOOMError();
-            goto error;
-        }
+        dir = g_path_get_dirname(path);
         if (stat(dir, &st) < 0 || !S_ISDIR(st.st_mode)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Unable to create lockspace %s: parent directory"
@@ -645,9 +640,7 @@ virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
         goto cleanup;
     }
 
-    if (virAsprintf(&path, "%s/%s",
-                    driver->autoDiskLeasePath, res->name) < 0)
-        goto cleanup;
+    path = g_strdup_printf("%s/%s", driver->autoDiskLeasePath, res->name);
     if (virStrcpy(res->disks[0].path, path, SANLK_PATH_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Lease path '%s' exceeds %d characters"),

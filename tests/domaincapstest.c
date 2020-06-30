@@ -54,10 +54,9 @@ fillStringValues(virDomainCapsStringValuesPtr values, ...)
 # include "testutilshostcpus.h"
 
 static int
-fakeHostCPU(virCapsPtr caps,
-            virArch arch)
+fakeHostCPU(virArch arch)
 {
-    virCPUDefPtr cpu;
+    g_autoptr(virCPUDef) cpu = NULL;
 
     if (!(cpu = testUtilsHostCpusGetDefForArch(arch))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -66,7 +65,7 @@ fakeHostCPU(virCapsPtr caps,
         return -1;
     }
 
-    qemuTestSetHostCPU(caps, cpu);
+    qemuTestSetHostCPU(NULL, arch, cpu);
 
     return 0;
 }
@@ -80,28 +79,31 @@ fillQemuCaps(virDomainCapsPtr domCaps,
 {
     int ret = -1;
     char *path = NULL;
-    virCapsPtr caps = NULL;
     virQEMUCapsPtr qemuCaps = NULL;
     virDomainCapsLoaderPtr loader = &domCaps->os.loader;
+    virDomainVirtType virtType;
 
-    if (!(caps = virCapabilitiesNew(domCaps->arch, false, false)) ||
-        fakeHostCPU(caps, domCaps->arch) < 0)
+    if (fakeHostCPU(domCaps->arch) < 0)
         goto cleanup;
 
-    if (virAsprintf(&path, "%s/%s.%s.xml",
-                    TEST_QEMU_CAPS_PATH, name, arch) < 0 ||
-        !(qemuCaps = qemuTestParseCapabilities(caps, path)))
+    path = g_strdup_printf("%s/%s.%s.xml", TEST_QEMU_CAPS_PATH, name, arch);
+    if (!(qemuCaps = qemuTestParseCapabilitiesArch(domCaps->arch, path)))
         goto cleanup;
+
+    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
+        virtType = VIR_DOMAIN_VIRT_KVM;
+    else
+        virtType = VIR_DOMAIN_VIRT_QEMU;
 
     if (machine) {
         VIR_FREE(domCaps->machine);
-        domCaps->machine = g_strdup(virQEMUCapsGetCanonicalMachine(qemuCaps, machine));
+        domCaps->machine = g_strdup(virQEMUCapsGetCanonicalMachine(qemuCaps, virtType, machine));
     }
 
     if (!domCaps->machine)
-        domCaps->machine = g_strdup(virQEMUCapsGetPreferredMachine(qemuCaps));
+        domCaps->machine = g_strdup(virQEMUCapsGetPreferredMachine(qemuCaps, virtType));
 
-    if (virQEMUCapsFillDomainCaps(caps, domCaps, qemuCaps,
+    if (virQEMUCapsFillDomainCaps(qemuCaps, domCaps->arch, domCaps,
                                   false,
                                   cfg->firmwares,
                                   cfg->nfirmwares) < 0)
@@ -129,7 +131,6 @@ fillQemuCaps(virDomainCapsPtr domCaps,
 
     ret = 0;
  cleanup:
-    virObjectUnref(caps);
     virObjectUnref(qemuCaps);
     VIR_FREE(path);
     return ret;
@@ -217,9 +218,7 @@ test_virDomainCapsFormat(const void *opaque)
     char *domCapsXML = NULL;
     int ret = -1;
 
-    if (virAsprintf(&path, "%s/domaincapsdata/%s.xml",
-                    abs_srcdir, data->name) < 0)
-        goto cleanup;
+    path = g_strdup_printf("%s/domaincapsdata/%s.xml", abs_srcdir, data->name);
 
     if (!(domCaps = virDomainCapsNew(data->emulator, data->machine,
                                      virArchFromString(data->arch),
@@ -313,6 +312,8 @@ doTestQemu(const char *inputDir G_GNUC_UNUSED,
            const char *suffix G_GNUC_UNUSED,
            void *opaque)
 {
+    int ret = 0;
+
     if (STREQ(arch, "x86_64")) {
         /* For x86_64 we test three combinations:
          *
@@ -321,13 +322,16 @@ doTestQemu(const char *inputDir G_GNUC_UNUSED,
          *   - TCG with default machine
          */
         if (doTestQemuInternal(version, NULL, arch,
-                               VIR_DOMAIN_VIRT_KVM, opaque) < 0 ||
-            doTestQemuInternal(version, "q35", arch,
-                               VIR_DOMAIN_VIRT_KVM, opaque) < 0 ||
-            doTestQemuInternal(version, NULL, arch,
-                               VIR_DOMAIN_VIRT_QEMU, opaque) < 0) {
-            return -1;
-        }
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0)
+            ret = -1;
+
+        if (doTestQemuInternal(version, "q35", arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0)
+            ret = -1;
+
+        if (doTestQemuInternal(version, NULL, arch,
+                               VIR_DOMAIN_VIRT_QEMU, opaque) < 0)
+            ret = -1;
     } else if (STREQ(arch, "aarch64")) {
         /* For aarch64 we test two combinations:
          *
@@ -335,21 +339,22 @@ doTestQemu(const char *inputDir G_GNUC_UNUSED,
          *   - KVM with virt machine
          */
         if (doTestQemuInternal(version, NULL, arch,
-                               VIR_DOMAIN_VIRT_KVM, opaque) < 0 ||
-            doTestQemuInternal(version, "virt", arch,
-                               VIR_DOMAIN_VIRT_KVM, opaque) < 0) {
-            return -1;
-        }
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0)
+            ret = -1;
+
+        if (doTestQemuInternal(version, "virt", arch,
+                               VIR_DOMAIN_VIRT_KVM, opaque) < 0)
+            ret = -1;
     } else if (STRPREFIX(arch, "riscv")) {
         /* Unfortunately we have to skip RISC-V at the moment */
         return 0;
     } else {
         if (doTestQemuInternal(version, NULL, arch,
                                VIR_DOMAIN_VIRT_KVM, opaque) < 0)
-            return -1;
+            ret = -1;
     }
 
-    return 0;
+    return ret;
 }
 
 #endif
@@ -364,7 +369,7 @@ mymain(void)
 #endif
 
 #if WITH_QEMU
-    virQEMUDriverConfigPtr cfg = virQEMUDriverConfigNew(false);
+    virQEMUDriverConfigPtr cfg = virQEMUDriverConfigNew(false, NULL);
 
     if (!cfg)
         return EXIT_FAILURE;
@@ -401,10 +406,7 @@ mymain(void)
 #define DO_TEST_BHYVE(Name, Emulator, BhyveCaps, Type) \
     do { \
         char *name = NULL; \
-        if (virAsprintf(&name, "bhyve_%s.x86_64", Name) < 0) { \
-             ret = -1; \
-             break; \
-        } \
+        name = g_strdup_printf("bhyve_%s.x86_64", Name); \
         struct testData data = { \
             .name = name, \
             .emulator = Emulator, \
@@ -431,7 +433,7 @@ mymain(void)
                             abs_srcdir "/qemufirmwaredata/home/user/.config/qemu/firmware");
 
     if (testQemuCapsIterate(".xml", doTestQemu, cfg) < 0)
-        return EXIT_FAILURE;
+        ret = -1;
 
     /*
      * Run "tests/qemucapsprobe /path/to/qemu/binary >foo.replies"

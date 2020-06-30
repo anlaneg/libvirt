@@ -1934,20 +1934,12 @@ virDomainQemuMonitorEventNew(int id,
                                  0, id, name, uuid, uuidstr)))
         return NULL;
 
-    /* event is mandatory, details are optional */
-    if (!event)
-        goto error;
-
     ev->event = g_strdup(event);
     ev->seconds = seconds;
     ev->micros = micros;
     ev->details = g_strdup(details);
 
     return (virObjectEventPtr)ev;
-
- error:
-    virObjectUnref(ev);
-    return NULL;
 }
 
 

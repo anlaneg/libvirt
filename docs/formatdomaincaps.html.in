@@ -201,7 +201,12 @@
 &lt;domainCapabilities&gt;
   ...
   &lt;cpu&gt;
-    &lt;mode name='host-passthrough' supported='yes'/&gt;
+    &lt;mode name='host-passthrough' supported='yes'&gt;
+      &lt;enum name='hostPassthroughMigratable'&gt;
+        &lt;value&gt;on&lt;/value&gt;
+        &lt;value&gt;off&lt;/value&gt;
+      &lt;/enum&gt;
+    &lt;/mode&gt;
     &lt;mode name='host-model' supported='yes'&gt;
       &lt;model fallback='allow'&gt;Broadwell&lt;/model&gt;
       &lt;vendor&gt;Intel&lt;/vendor&gt;
@@ -227,7 +232,11 @@
 
     <dl>
       <dt><code>host-passthrough</code></dt>
-      <dd>No mode specific details are provided.</dd>
+      <dd>
+        The <code>hostPassthroughMigratable</code> enum shows possible values
+        of the <code>migratable</code> attribute for the &lt;cpu&gt; element
+        with <code>mode='host-passthrough'</code> in the domain XML.
+      </dd>
 
       <dt><code>host-model</code></dt>
       <dd>
@@ -249,9 +258,11 @@
         The <code>mode</code> element contains a list of supported CPU
         models, each described by a dedicated <code>model</code> element.
         The <code>usable</code> attribute specifies whether the model can
-        be used on the host. A special value <code>unknown</code> indicates
-        libvirt does not have enough information to provide the usability
-        data.
+        be used directly on the host. When usable='no' the corresponding model
+        cannot be used without disabling some features that the CPU of such
+        model is expected to have. A special value <code>unknown</code>
+        indicates libvirt does not have enough information to provide the
+        usability data.
       </dd>
     </dl>
 
@@ -481,6 +492,7 @@
       &lt;enum name='backendModel'&gt;
         &lt;value&gt;random&lt;/value&gt;
         &lt;value&gt;egd&lt;/value&gt;
+        &lt;value&gt;builtin&lt;/value&gt;
       &lt;/enum&gt;
     &lt;/rng&gt;
     ...
@@ -516,6 +528,8 @@
     &lt;/gic&gt;
     &lt;vmcoreinfo supported='yes'/&gt;
     &lt;genid supported='yes'/&gt;
+    &lt;backingStoreInput supported='yes'/&gt;
+    &lt;backup supported='yes'/&gt;
     &lt;sev&gt;
       &lt;cbitpos&gt;47&lt;/cbitpos&gt;
       &lt;reduced-phys-bits&gt;1&lt;/reduced-phys-bits&gt;
@@ -551,6 +565,24 @@
     <h4><a id="elementsgenid">genid</a></h4>
 
     <p>Reports whether the genid feature can be used by the domain.</p>
+
+    <h4><a id="featureBackingStoreInput">backingStoreInput</a></h4>
+
+    <p>Reports whether the hypervisor will obey the &lt;backingStore&gt;
+    elements configured for a &lt;disk&gt; when booting the guest, hotplugging
+    the disk to a running guest, or similar.
+    <span class="since">(Since 5.10)</span>
+    </p>
+
+    <h4><a id="featureBackup">backup</a></h4>
+
+    <p>Reports whether the hypervisor supports the backup, checkpoint, and
+    related features. (<code>virDomainBackupBegin</code>,
+    <code>virDomainCheckpointCreateXML</code> etc). The presence of the
+    <code>backup</code> element even if <code>supported='no'</code> implies that
+    the <code>VIR_DOMAIN_UNDEFINE_CHECKPOINTS_METADATA</code> flag for
+    <code>virDomainUndefine</code> is supported.
+    </p>
 
     <h4><a id="elementsSEV">SEV capabilities</a></h4>
 

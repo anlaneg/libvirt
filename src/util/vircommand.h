@@ -34,8 +34,6 @@ typedef int (*virExecHook)(void *data);
 
 pid_t virFork(void) G_GNUC_WARN_UNUSED_RESULT;
 
-int virRun(const char *const*argv, int *status) G_GNUC_WARN_UNUSED_RESULT;
-
 virCommandPtr virCommandNew(const char *binary) ATTRIBUTE_NONNULL(1);
 
 virCommandPtr virCommandNewArgs(const char *const*args) ATTRIBUTE_NONNULL(1);
@@ -128,8 +126,7 @@ void virCommandAddArgFormat(virCommandPtr cmd,
 
 void virCommandAddArgPair(virCommandPtr cmd,
                           const char *name,
-                          const char *val)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+                          const char *val);
 
 void virCommandAddArgSet(virCommandPtr cmd,
                          const char *const*vals) ATTRIBUTE_NONNULL(2);
@@ -172,6 +169,7 @@ void virCommandWriteArgLog(virCommandPtr cmd,
                            int logfd);
 
 char *virCommandToString(virCommandPtr cmd, bool linebreaks) G_GNUC_WARN_UNUSED_RESULT;
+int virCommandGetArgList(virCommandPtr cmd, char ***args, size_t *nargs);
 
 int virCommandExec(virCommandPtr cmd, gid_t *groups, int ngroups) G_GNUC_WARN_UNUSED_RESULT;
 

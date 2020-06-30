@@ -42,6 +42,7 @@
 #include "virstring.h"
 #include "virlog.h"
 #include "virvhba.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -67,6 +68,7 @@ VIR_ENUM_IMPL(virStoragePoolFormatFileSystem,
               "auto", "ext2", "ext3",
               "ext4", "ufs", "iso9660", "udf",
               "gfs", "gfs2", "vfat", "hfs+", "xfs", "ocfs2",
+              "vmfs",
 );
 
 VIR_ENUM_IMPL(virStoragePoolFormatFileSystemNet,
@@ -343,17 +345,14 @@ int
 virStoragePoolOptionsPoolTypeSetXMLNamespace(int type,
                                              virXMLNamespacePtr ns)
 {
-    int ret = -1;
     virStoragePoolTypeInfoPtr backend = virStoragePoolTypeInfoLookup(type);
 
     if (!backend)
-        goto cleanup;
+        return -1;
 
     backend->poolOptions.ns = *ns;
-    ret = 0;
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -728,7 +727,7 @@ virStorageDefParsePerms(xmlXPathContextPtr ctxt,
 {
     long long val;
     int ret = -1;
-    xmlNodePtr relnode;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     xmlNodePtr node;
     g_autofree char *mode = NULL;
 
@@ -742,7 +741,6 @@ virStorageDefParsePerms(xmlXPathContextPtr ctxt,
         return 0;
     }
 
-    relnode = ctxt->node;
     ctxt->node = node;
 
     if ((mode = virXPathString("string(./mode)", ctxt))) {
@@ -792,7 +790,6 @@ virStorageDefParsePerms(xmlXPathContextPtr ctxt,
 
     ret = 0;
  error:
-    ctxt->node = relnode;
     return ret;
 }
 
@@ -952,11 +949,9 @@ virStoragePoolDefParseXML(xmlXPathContextPtr ctxt)
      * path and permissions */
     if (!(options->flags & VIR_STORAGE_POOL_SOURCE_NETWORK)) {
         if (def->type == VIR_STORAGE_POOL_LOGICAL) {
-            if (virAsprintf(&target_path, "/dev/%s", def->source.name) < 0)
-                return NULL;
+            target_path = g_strdup_printf("/dev/%s", def->source.name);
         } else if (def->type == VIR_STORAGE_POOL_ZFS) {
-            if (virAsprintf(&target_path, "/dev/zvol/%s", def->source.name) < 0)
-                return NULL;
+            target_path = g_strdup_printf("/dev/zvol/%s", def->source.name);
         } else {
             target_path = virXPathString("string(./target/path)", ctxt);
             if (!target_path) {

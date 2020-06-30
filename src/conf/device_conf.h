@@ -25,7 +25,6 @@
 #include <libxml/xpath.h>
 
 #include "internal.h"
-#include "virutil.h"
 #include "virthread.h"
 #include "virbuffer.h"
 #include "virpci.h"
@@ -45,6 +44,7 @@ typedef enum {
     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_MMIO,
     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA,
     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DIMM,
+    VIR_DOMAIN_DEVICE_ADDRESS_TYPE_UNASSIGNED,
 
     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_LAST
 } virDomainDeviceAddressType;

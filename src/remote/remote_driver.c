@@ -43,13 +43,12 @@
 #include "viralloc.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "intprops.h"
 #include "virtypedparam.h"
 #include "viruri.h"
 #include "virauth.h"
 #include "virauthconfig.h"
 #include "virstring.h"
-#include "c-ctype.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_REMOTE
 
@@ -126,9 +125,7 @@ struct private_data {
 
     int counter; /* Serial number for RPC */
 
-#ifdef WITH_GNUTLS
     virNetTLSContextPtr tls;
-#endif
 
     int is_secure;              /* Secure if TLS or SASL or UNIX sockets */
     char *type;                 /* Cached return from remoteType. */
@@ -215,15 +212,17 @@ static int remoteSplitURIScheme(virURIPtr uri,
 
     *driver = *transport = NULL;
 
-    if (VIR_STRNDUP(*driver, uri->scheme, p ? p - uri->scheme : -1) < 0)
-        return -1;
+    if (p)
+        *driver = g_strndup(uri->scheme, p - uri->scheme);
+    else
+        *driver = g_strdup(uri->scheme);
 
     if (p) {
         *transport = g_strdup(p + 1);
 
         p = *transport;
         while (*p) {
-            *p = c_tolower(*p);
+            *p = g_ascii_tolower(*p);
             p++;
         }
     }
@@ -234,6 +233,7 @@ static int remoteSplitURIScheme(virURIPtr uri,
 
 static int
 remoteStateInitialize(bool privileged G_GNUC_UNUSED,
+                      const char *root G_GNUC_UNUSED,
                       virStateInhibitCallback callback G_GNUC_UNUSED,
                       void *opaque G_GNUC_UNUSED)
 {
@@ -778,12 +778,9 @@ remoteGetUNIXSocketHelper(remoteDriverTransport transport,
                            remoteDriverTransportTypeToString(transport));
             return NULL;
         }
-        if (!(userdir = virGetUserRuntimeDirectory()))
-            return NULL;
+        userdir = virGetUserRuntimeDirectory();
 
-        if (virAsprintf(&sockname, "%s/%s-sock",
-                        userdir, sock_prefix) < 0)
-            return NULL;
+        sockname = g_strdup_printf("%s/%s-sock", userdir, sock_prefix);
     } else {
         /* Intentionally do *NOT* use RUNSTATEDIR here. We might
          * be connecting to a remote machine, and cannot assume
@@ -791,11 +788,9 @@ remoteGetUNIXSocketHelper(remoteDriverTransport transport,
          * any machine with /run will have a /var/run symlink.
          * The portable option is to thus use $LOCALSTATEDIR/run
          */
-        if (virAsprintf(&sockname, "%s/run/libvirt/%s-%s",
-                        LOCALSTATEDIR, sock_prefix,
-                        flags & VIR_DRV_OPEN_REMOTE_RO ?
-                        "sock-ro" : "sock") < 0)
-            return NULL;
+        sockname = g_strdup_printf("%s/run/libvirt/%s-%s", LOCALSTATEDIR,
+                                   sock_prefix,
+                                   flags & VIR_DRV_OPEN_REMOTE_RO ? "sock-ro" : "sock");
     }
 
     VIR_DEBUG("Built UNIX sockname %s for transport %s prefix %s flags=0x%x",
@@ -818,9 +813,8 @@ remoteGetUNIXSocket(remoteDriverTransport transport,
     g_autofree char *direct_sock_name = NULL;
     g_autofree char *legacy_sock_name = NULL;
 
-    if (driver &&
-        virAsprintf(&direct_daemon, "virt%sd", driver) < 0)
-        return NULL;
+    if (driver)
+        direct_daemon = g_strdup_printf("virt%sd", driver);
 
     legacy_daemon = g_strdup("libvirtd");
 
@@ -1003,8 +997,7 @@ doRemoteOpen(virConnectPtr conn,
 
     /* Remote server defaults to "localhost" if not specified. */
     if (conn->uri && conn->uri->port != 0) {
-        if (virAsprintf(&port, "%d", conn->uri->port) < 0)
-            goto failed;
+        port = g_strdup_printf("%d", conn->uri->port);
     } else if (transport == REMOTE_DRIVER_TRANSPORT_TLS) {
         port = g_strdup(LIBVIRTD_TLS_PORT);
     } else if (transport == REMOTE_DRIVER_TRANSPORT_TCP) {
@@ -1139,36 +1132,25 @@ doRemoteOpen(virConnectPtr conn,
             virConfGetValueString(conf, "tls_priority", &tls_priority) < 0)
             goto failed;
 
-#ifdef WITH_GNUTLS
         priv->tls = virNetTLSContextNewClientPath(pkipath,
-                                                  geteuid() != 0 ? true : false,
+                                                  geteuid() != 0,
                                                   tls_priority,
                                                   sanity, verify);
         if (!priv->tls)
             goto failed;
         priv->is_secure = 1;
         G_GNUC_FALLTHROUGH;
-#else
-        (void)tls_priority;
-        (void)sanity;
-        (void)verify;
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("GNUTLS support not available in this build"));
-        goto failed;
-#endif
 
     case REMOTE_DRIVER_TRANSPORT_TCP:
         priv->client = virNetClientNewTCP(priv->hostname, port, AF_UNSPEC);
         if (!priv->client)
             goto failed;
 
-#ifdef WITH_GNUTLS
         if (priv->tls) {
             VIR_DEBUG("Starting TLS session");
             if (virNetClientSetTLSSession(priv->client, priv->tls) < 0)
                 goto failed;
         }
-#endif
 
         break;
 
@@ -1395,10 +1377,8 @@ doRemoteOpen(virConnectPtr conn,
     priv->client = NULL;
     virObjectUnref(priv->closeCallback);
     priv->closeCallback = NULL;
-#ifdef WITH_GNUTLS
     virObjectUnref(priv->tls);
     priv->tls = NULL;
-#endif
 
     VIR_FREE(priv->hostname);
     return VIR_DRV_OPEN_ERROR;
@@ -1540,10 +1520,8 @@ doRemoteClose(virConnectPtr conn, struct private_data *priv)
              (xdrproc_t) xdr_void, (char *) NULL) == -1)
         ret = -1;
 
-#ifdef WITH_GNUTLS
     virObjectUnref(priv->tls);
     priv->tls = NULL;
-#endif
 
     virNetClientSetCloseCallback(priv->client,
                                  NULL,
@@ -2242,7 +2220,7 @@ remoteDomainGetVcpuPinInfo(virDomainPtr domain,
         goto done;
     }
 
-    if (INT_MULTIPLY_OVERFLOW(ncpumaps, maplen) ||
+    if (VIR_INT_MULTIPLY_OVERFLOW(ncpumaps, maplen) ||
         ncpumaps * maplen > REMOTE_CPUMAPS_MAX) {
         virReportError(VIR_ERR_RPC,
                        _("vCPU map buffer length exceeds maximum: %d > %d"),
@@ -2411,7 +2389,7 @@ remoteDomainGetVcpus(virDomainPtr domain,
                        maxinfo, REMOTE_VCPUINFO_MAX);
         goto done;
     }
-    if (INT_MULTIPLY_OVERFLOW(maxinfo, maplen) ||
+    if (VIR_INT_MULTIPLY_OVERFLOW(maxinfo, maplen) ||
         maxinfo * maplen > REMOTE_CPUMAPS_MAX) {
         virReportError(VIR_ERR_RPC,
                        _("vCPU map buffer length exceeds maximum: %d > %d"),
@@ -4119,7 +4097,7 @@ static int remoteAuthFillFromConfig(virConnectPtr conn,
     }
 
     for (ninteract = 0; state->interact[ninteract].id != 0; ninteract++) {
-        const char *value = NULL;
+        char *value = NULL;
 
         switch (state->interact[ninteract].id) {
         case SASL_CB_USER:
@@ -4182,20 +4160,18 @@ static int remoteAuthInteract(virConnectPtr conn,
                               struct remoteAuthInteractState *state,
                               virConnectAuthPtr auth)
 {
-    int ret = -1;
-
     VIR_DEBUG("Starting SASL interaction");
     remoteAuthInteractStateClear(state, false);
 
     /* Fills state->interact with any values from the auth config file */
     if (remoteAuthFillFromConfig(conn, state) < 0)
-        goto cleanup;
+        return -1;
 
     /* Populates state->cred for anything not found in the auth config */
     if (remoteAuthMakeCredentials(state->interact, &state->cred, &state->ncred) < 0) {
         virReportError(VIR_ERR_AUTH_FAILED, "%s",
                        _("Failed to make auth credentials"));
-        goto cleanup;
+        return -1;
     }
 
     /* If there was anything not in the auth config, we need to
@@ -4206,13 +4182,13 @@ static int remoteAuthInteract(virConnectPtr conn,
         if (!auth || !auth->cb) {
             virReportError(VIR_ERR_AUTH_FAILED, "%s",
                            _("No authentication callback available"));
-            goto cleanup;
+            return -1;
         }
 
         if ((*(auth->cb))(state->cred, state->ncred, auth->cbdata) < 0) {
             virReportError(VIR_ERR_AUTH_FAILED, "%s",
                            _("Failed to collect auth credentials"));
-            goto cleanup;
+            return -1;
         }
 
         /* Copy user's responses from cred into interact */
@@ -4227,10 +4203,7 @@ static int remoteAuthInteract(virConnectPtr conn,
      * of this method, rather than the end.
      */
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -4283,7 +4256,6 @@ remoteAuthSASL(virConnectPtr conn, struct private_data *priv,
     /* saslcb is now owned by sasl */
     saslcb = NULL;
 
-# ifdef WITH_GNUTLS
     /* Initialize some connection props we care about */
     if (priv->tls) {
         if ((ssf = virNetClientGetTLSKeySize(priv->client)) < 0)
@@ -4295,7 +4267,6 @@ remoteAuthSASL(virConnectPtr conn, struct private_data *priv,
         if (virNetSASLSessionExtKeySize(sasl, ssf) < 0)
             goto cleanup;
     }
-# endif
 
     /* If we've got a secure channel (TLS or UNIX sock), we don't care about SSF */
     /* If we're not secure, then forbid any anonymous or trivially crackable auth */
@@ -8710,6 +8681,9 @@ static virHypervisorDriver hypervisor_driver = {
     .domainCheckpointGetParent = remoteDomainCheckpointGetParent, /* 5.6.0 */
     .domainCheckpointDelete = remoteDomainCheckpointDelete, /* 5.6.0 */
     .domainGetGuestInfo = remoteDomainGetGuestInfo, /* 5.7.0 */
+    .domainAgentSetResponseTimeout = remoteDomainAgentSetResponseTimeout, /* 5.10.0 */
+    .domainBackupBegin = remoteDomainBackupBegin, /* 6.0.0 */
+    .domainBackupGetXMLDesc = remoteDomainBackupGetXMLDesc, /* 6.0.0 */
 };
 
 static virNetworkDriver network_driver = {

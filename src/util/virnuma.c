@@ -46,6 +46,7 @@
 #include "virstring.h"
 #include "virfile.h"
 #include "virhostmem.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -93,7 +94,6 @@ virNumaSetupMemoryPolicy(virDomainNumatuneMemMode mode,
 {
     nodemask_t mask;
     int node = -1;
-    int ret = -1;
     int bit = 0;
     size_t i;
     int maxnode = 0;
@@ -140,7 +140,7 @@ virNumaSetupMemoryPolicy(virDomainNumatuneMemMode mode,
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("NUMA memory tuning in 'preferred' mode "
                                    "only supports single node"));
-            goto cleanup;
+            return -1;
         }
 
         numa_set_bind_policy(0);
@@ -155,10 +155,8 @@ virNumaSetupMemoryPolicy(virDomainNumatuneMemMode mode,
     case VIR_DOMAIN_NUMATUNE_MEM_LAST:
         break;
     }
-    ret = 0;
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 bool
@@ -466,7 +464,6 @@ virNumaGetDistances(int node,
                     int **distances,
                     int *ndistances)
 {
-    int ret = -1;
     int max_node;
     size_t i;
 
@@ -478,10 +475,10 @@ virNumaGetDistances(int node,
     }
 
     if ((max_node = virNumaGetMaxNode()) < 0)
-        goto cleanup;
+        return -1;
 
     if (VIR_ALLOC_N(*distances, max_node + 1) < 0)
-        goto cleanup;
+        return -1;
 
     *ndistances = max_node + 1;
 
@@ -492,9 +489,7 @@ virNumaGetDistances(int node,
         (*distances)[i] = numa_distance(node, i);
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 #else /* !(WITH_NUMACTL && HAVE_NUMA_BITMASK_ISBITSET) */
@@ -538,23 +533,18 @@ virNumaGetHugePageInfoPath(char **path,
                            unsigned int page_size,
                            const char *suffix)
 {
-    int ret;
-
     if (node == -1) {
         /* We are aiming at overall system info */
-        ret = virAsprintf(path,
-                          HUGEPAGES_SYSTEM_PREFIX HUGEPAGES_PREFIX "%ukB/%s",
-                          page_size, NULLSTR_EMPTY(suffix));
+        *path = g_strdup_printf(HUGEPAGES_SYSTEM_PREFIX HUGEPAGES_PREFIX "%ukB/%s",
+                                page_size, NULLSTR_EMPTY(suffix));
     } else {
         /* We are aiming on specific NUMA node */
-        ret = virAsprintf(path,
-                          HUGEPAGES_NUMA_PREFIX "node%d/hugepages/"
-                          HUGEPAGES_PREFIX "%ukB/%s",
-                          node, page_size, NULLSTR_EMPTY(suffix));
+        *path = g_strdup_printf(HUGEPAGES_NUMA_PREFIX "node%d/hugepages/"
+                                HUGEPAGES_PREFIX "%ukB/%s",
+                                node, page_size, NULLSTR_EMPTY(suffix));
     }
 
-    if (ret >= 0 && !virFileExists(*path)) {
-        ret = -1;
+    if (!virFileExists(*path)) {
         if (node != -1) {
             if (!virNumaNodeIsAvailable(node)) {
                 virReportError(VIR_ERR_OPERATION_FAILED,
@@ -570,9 +560,10 @@ virNumaGetHugePageInfoPath(char **path,
                            _("page size %u is not available"),
                            page_size);
         }
+        return -1;
     }
 
-    return ret;
+    return 0;
 }
 
 static int
@@ -582,9 +573,9 @@ virNumaGetHugePageInfoDir(char **path, int node)
         *path = g_strdup(HUGEPAGES_SYSTEM_PREFIX);
         return 0;
     } else {
-        return virAsprintf(path,
-                           HUGEPAGES_NUMA_PREFIX "node%d/hugepages/",
-                           node);
+        *path = g_strdup_printf(HUGEPAGES_NUMA_PREFIX "node%d/hugepages/",
+                                node);
+        return 0;
     }
 }
 
@@ -689,7 +680,6 @@ virNumaGetPageInfo(int node,
                    unsigned long long *page_avail,
                    unsigned long long *page_free)
 {
-    int ret = -1;
     long system_page_size = virGetSystemPageSize();
 
     /* sysconf() returns page size in bytes,
@@ -701,10 +691,10 @@ virNumaGetPageInfo(int node,
          * account. The problem is huge pages cut off regular memory. */
         if (node == -1) {
             if (virHostMemGetInfo(&memsize, &memfree) < 0)
-                goto cleanup;
+                return -1;
         } else {
             if (virNumaGetNodeMemory(node, &memsize, &memfree) < 0)
-                goto cleanup;
+                return -1;
         }
 
         /* see description above */
@@ -717,12 +707,10 @@ virNumaGetPageInfo(int node,
             *page_free = memfree / system_page_size;
     } else {
         if (virNumaGetHugePageInfo(node, page_size, page_avail, page_free) < 0)
-            goto cleanup;
+            return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -930,8 +918,7 @@ virNumaSetPagePoolSize(int node,
      * all the pages we wanted. So do the second read to check.
      */
     VIR_FREE(nr_buf);
-    if (virAsprintf(&nr_buf, "%llu", page_count) < 0)
-        return -1;
+    nr_buf = g_strdup_printf("%llu", page_count);
 
     if (virFileWriteStr(nr_path, nr_buf, 0) < 0) {
         virReportSystemError(errno,

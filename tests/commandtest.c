@@ -23,7 +23,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
+#ifndef WIN32
+# include <sys/wait.h>
+#endif
 #include <fcntl.h>
 
 #include "testutils.h"
@@ -36,17 +38,9 @@
 #include "virthread.h"
 #include "virstring.h"
 #include "virprocess.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
-
-typedef struct _virCommandTestData virCommandTestData;
-typedef virCommandTestData *virCommandTestDataPtr;
-struct _virCommandTestData {
-    virMutex lock;
-    virThread thread;
-    bool quit;
-    bool running;
-};
 
 #ifdef WIN32
 
@@ -58,6 +52,9 @@ main(void)
 
 #else
 
+/* Some UNIX lack it in headers & it doesn't hurt to redeclare */
+extern char **environ;
+
 static int checkoutput(const char *testname,
                        char *prefix)
 {
@@ -67,11 +64,8 @@ static int checkoutput(const char *testname,
     char *actualname = NULL;
     char *actuallog = NULL;
 
-    if (virAsprintf(&expectname, "%s/commanddata/%s.log", abs_srcdir,
-                    testname) < 0)
-        goto cleanup;
-    if (virAsprintf(&actualname, "%s/commandhelper.log", abs_builddir) < 0)
-        goto cleanup;
+    expectname = g_strdup_printf("%s/commanddata/%s.log", abs_srcdir, testname);
+    actualname = g_strdup_printf("%s/commandhelper.log", abs_builddir);
 
     if (virFileReadAll(expectname, 1024*64, &expectlog) < 0) {
         fprintf(stderr, "cannot read %s\n", expectname);
@@ -86,8 +80,7 @@ static int checkoutput(const char *testname,
     if (prefix) {
         char *tmp = NULL;
 
-        if (virAsprintf(&tmp, "%s%s", prefix, expectlog) < 0)
-            goto cleanup;
+        tmp = g_strdup_printf("%s%s", prefix, expectlog);
 
         VIR_FREE(expectlog);
         expectlog = tmp;
@@ -205,8 +198,13 @@ static int test3(const void *unused G_GNUC_UNUSED)
     int newfd1 = dup(STDERR_FILENO);
     int newfd2 = dup(STDERR_FILENO);
     int newfd3 = dup(STDERR_FILENO);
+    struct stat before, after;
     int ret = -1;
 
+    if (fstat(newfd3, &before) < 0) {
+        perror("fstat");
+        goto cleanup;
+    }
     virCommandPassFD(cmd, newfd1, 0);
     virCommandPassFD(cmd, newfd3,
                      VIR_COMMAND_PASS_FD_CLOSE_PARENT);
@@ -217,10 +215,26 @@ static int test3(const void *unused G_GNUC_UNUSED)
     }
 
     if (fcntl(newfd1, F_GETFL) < 0 ||
-        fcntl(newfd2, F_GETFL) < 0 ||
-        fcntl(newfd3, F_GETFL) >= 0) {
-        puts("fds in wrong state");
+        fcntl(newfd2, F_GETFL) < 0) {
+        puts("fds 1/2 were not open");
         goto cleanup;
+    }
+
+    /* We expect newfd3 to be closed, but the
+     * fd might have already been reused by
+     * the event loop. So if it is open, we
+     * check if it matches the stat info we
+     * got earlier
+     */
+    if (fcntl(newfd3, F_GETFL) >= 0 &&
+        fstat(newfd3, &after) >= 0) {
+
+        if (before.st_ino == after.st_ino &&
+            before.st_dev == after.st_dev &&
+            before.st_mode == after.st_mode) {
+            puts("fd 3 should not be open");
+            goto cleanup;
+        }
     }
 
     ret = checkoutput("test3", NULL);
@@ -595,8 +609,7 @@ static int test15(const void *unused G_GNUC_UNUSED)
     char *cwd = NULL;
     int ret = -1;
 
-    if (virAsprintf(&cwd, "%s/commanddata", abs_srcdir) < 0)
-        goto cleanup;
+    cwd = g_strdup_printf("%s/commanddata", abs_srcdir);
     virCommandSetWorkingDirectory(cmd, cwd);
     virCommandSetUmask(cmd, 002);
 
@@ -815,8 +828,7 @@ static int test20(const void *unused G_GNUC_UNUSED)
 
     sigaction(SIGPIPE, &sig_action, NULL);
 
-    if (virAsprintf(&buf, "1\n%100000d\n", 2) < 0)
-        goto cleanup;
+    buf = g_strdup_printf("1\n%100000d\n", 2);
     virCommandSetInputBuffer(cmd, buf);
 
     if (virCommandRun(cmd, NULL) < 0) {
@@ -949,12 +961,11 @@ test23(const void *unused G_GNUC_UNUSED)
     /* Not strictly a virCommand test, but this is the easiest place
      * to test this lower-level interface.  It takes a double fork to
      * test virProcessExitWithStatus.  */
-    int ret = -1;
     int status = -1;
     pid_t pid;
 
     if ((pid = virFork()) < 0)
-        goto cleanup;
+        return -1;
     if (pid == 0) {
         if ((pid = virFork()) < 0)
             _exit(EXIT_FAILURE);
@@ -967,14 +978,14 @@ test23(const void *unused G_GNUC_UNUSED)
     }
 
     if (virProcessWait(pid, &status, true) < 0)
-        goto cleanup;
+        return -1;
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 42) {
         printf("Unexpected status %d\n", status);
-        goto cleanup;
+        return -1;
     }
 
     if ((pid = virFork()) < 0)
-        goto cleanup;
+        return -1;
     if (pid == 0) {
         if ((pid = virFork()) < 0)
             _exit(EXIT_FAILURE);
@@ -989,15 +1000,13 @@ test23(const void *unused G_GNUC_UNUSED)
     }
 
     if (virProcessWait(pid, &status, true) < 0)
-        goto cleanup;
+        return -1;
     if (!WIFSIGNALED(status) || WTERMSIG(status) != SIGKILL) {
         printf("Unexpected status %d\n", status);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 static int test25(const void *unused G_GNUC_UNUSED)
@@ -1011,7 +1020,7 @@ static int test25(const void *unused G_GNUC_UNUSED)
     int ngroups;
     virCommandPtr cmd = virCommandNew("some/nonexistent/binary");
 
-    if (pipe(pipeFD) < 0) {
+    if (virPipeQuiet(pipeFD) < 0) {
         fprintf(stderr, "Unable to create pipe\n");
         goto cleanup;
     }
@@ -1174,15 +1183,12 @@ static int test27(const void *unused G_GNUC_UNUSED)
     buffer2[buflen - 2] = '\n';
     buffer2[buflen - 1] = 0;
 
-    if (virAsprintf(&outexpect, TEST27_OUTEXPECT_TEMP,
-                    buffer0, buffer1, buffer2) < 0 ||
-        virAsprintf(&errexpect, TEST27_ERREXPECT_TEMP,
-                    buffer0, buffer1, buffer2) < 0) {
-        printf("Could not virAsprintf expected output\n");
-        goto cleanup;
-    }
+    outexpect = g_strdup_printf(TEST27_OUTEXPECT_TEMP,
+                                buffer0, buffer1, buffer2);
+    errexpect = g_strdup_printf(TEST27_ERREXPECT_TEMP,
+                                buffer0, buffer1, buffer2);
 
-    if (pipe(pipe1) < 0 || pipe(pipe2) < 0) {
+    if (virPipeQuiet(pipe1) < 0 || virPipeQuiet(pipe2) < 0) {
         printf("Could not create pipe: %s\n", g_strerror(errno));
         goto cleanup;
     }
@@ -1250,43 +1256,55 @@ static int test27(const void *unused G_GNUC_UNUSED)
     return ret;
 }
 
-static void virCommandThreadWorker(void *opaque)
+
+static int
+test28Callback(pid_t pid G_GNUC_UNUSED,
+               void *opaque G_GNUC_UNUSED)
 {
-    virCommandTestDataPtr test = opaque;
+    virReportSystemError(ENODATA, "%s", "some error message");
+    return -1;
+}
 
-    virMutexLock(&test->lock);
 
-    while (!test->quit) {
-        virMutexUnlock(&test->lock);
+static int
+test28(const void *unused G_GNUC_UNUSED)
+{
+    /* Not strictly a virCommand test, but this is the easiest place
+     * to test this lower-level interface. */
+    virErrorPtr err;
+    g_autofree char *msg = g_strdup_printf("some error message: %s", g_strerror(ENODATA));
 
-        if (virEventRunDefaultImpl() < 0) {
-            test->quit = true;
-            break;
-        }
-
-        virMutexLock(&test->lock);
+    if (virProcessRunInFork(test28Callback, NULL) != -1) {
+        fprintf(stderr, "virProcessRunInFork did not fail\n");
+        return -1;
     }
 
-    test->running = false;
+    if (!(err = virGetLastError())) {
+        fprintf(stderr, "Expected error but got nothing\n");
+        return -1;
+    }
 
-    virMutexUnlock(&test->lock);
-    return;
+    if (!(err->code == VIR_ERR_SYSTEM_ERROR &&
+          err->domain == 0 &&
+          STREQ(err->message, msg) &&
+          err->level == VIR_ERR_ERROR &&
+          STREQ(err->str1, "%s") &&
+          STREQ(err->str2, msg) &&
+          err->int1 == ENODATA &&
+          err->int2 == -1)) {
+        fprintf(stderr, "Unexpected error object\n");
+        return -1;
+    }
+
+    return 0;
 }
 
-static void
-virCommandTestFreeTimer(int timer G_GNUC_UNUSED,
-                        void *opaque G_GNUC_UNUSED)
-{
-    /* nothing to be done here */
-}
 
 static int
 mymain(void)
 {
     int ret = 0;
     int fd;
-    virCommandTestDataPtr test = NULL;
-    int timer = -1;
     int virinitret;
 
     if (chdir("/tmp") < 0)
@@ -1345,28 +1363,6 @@ mymain(void)
     if (virinitret < 0)
         return EXIT_FAILURE;
 
-    virEventRegisterDefaultImpl();
-    if (VIR_ALLOC(test) < 0)
-        goto cleanup;
-
-    if (virMutexInit(&test->lock) < 0) {
-        printf("Unable to init mutex: %d\n", errno);
-        goto cleanup;
-    }
-
-    virMutexLock(&test->lock);
-
-    if (virThreadCreate(&test->thread,
-                        true,
-                        virCommandThreadWorker,
-                        test) < 0) {
-        virMutexUnlock(&test->lock);
-        goto cleanup;
-    }
-
-    test->running = true;
-    virMutexUnlock(&test->lock);
-
     environ = (char **)newenv;
 
 # define DO_TEST(NAME) \
@@ -1401,24 +1397,7 @@ mymain(void)
     DO_TEST(test25);
     DO_TEST(test26);
     DO_TEST(test27);
-
-    virMutexLock(&test->lock);
-    if (test->running) {
-        test->quit = true;
-        /* HACK: Add a dummy timeout to break event loop */
-        timer = virEventAddTimeout(0, virCommandTestFreeTimer, NULL, NULL);
-    }
-    virMutexUnlock(&test->lock);
-
- cleanup:
-    if (test->running)
-        virThreadJoin(&test->thread);
-
-    if (timer != -1)
-        virEventRemoveTimeout(timer);
-
-    virMutexDestroy(&test->lock);
-    VIR_FREE(test);
+    DO_TEST(test28);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

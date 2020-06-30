@@ -32,10 +32,24 @@
 
 #include <libxml/xpath.h>
 
+typedef enum {
+    VIR_CAPS_GUEST_FEATURE_TYPE_PAE = 0,
+    VIR_CAPS_GUEST_FEATURE_TYPE_NONPAE,
+    VIR_CAPS_GUEST_FEATURE_TYPE_IA64_BE,
+    VIR_CAPS_GUEST_FEATURE_TYPE_ACPI,
+    VIR_CAPS_GUEST_FEATURE_TYPE_APIC,
+    VIR_CAPS_GUEST_FEATURE_TYPE_CPUSELECTION,
+    VIR_CAPS_GUEST_FEATURE_TYPE_DEVICEBOOT,
+    VIR_CAPS_GUEST_FEATURE_TYPE_DISKSNAPSHOT,
+    VIR_CAPS_GUEST_FEATURE_TYPE_HAP,
+
+    VIR_CAPS_GUEST_FEATURE_TYPE_LAST
+} virCapsGuestFeatureType;
+
 struct _virCapsGuestFeature {
-    char *name;
-    bool defaultOn;
-    bool toggle;
+    bool present;
+    virTristateSwitch defaultOn;
+    virTristateBool toggle;
 };
 
 struct _virCapsGuestMachine {
@@ -68,14 +82,13 @@ struct _virCapsGuestArch {
 struct _virCapsGuest {
     int ostype;
     virCapsGuestArch arch;
-    size_t nfeatures;
-    size_t nfeatures_max;
-    virCapsGuestFeaturePtr *features;
+    virCapsGuestFeature features[VIR_CAPS_GUEST_FEATURE_TYPE_LAST];
 };
 
 struct _virCapsHostNUMACellCPU {
     unsigned int id;
     unsigned int socket_id;
+    unsigned int die_id;
     unsigned int core_id;
     virBitmapPtr siblings;
 };
@@ -99,6 +112,11 @@ struct _virCapsHostNUMACell {
     virCapsHostNUMACellSiblingInfoPtr siblings;
     int npageinfo;
     virCapsHostNUMACellPageInfoPtr pageinfo;
+};
+
+struct _virCapsHostNUMA {
+    gint refs;
+    GPtrArray *cells;
 };
 
 struct _virCapsHostSecModelLabel {
@@ -132,7 +150,7 @@ struct _virCapsHostCache {
 
 struct _virCapsHostMemBWNode {
     unsigned int id;
-    virBitmapPtr cpus;  /* All CPUs that belong to this node*/
+    virBitmapPtr cpus;  /* All CPUs that belong to this node */
     virResctrlInfoMemBWPerNode control;
 };
 
@@ -156,9 +174,8 @@ struct _virCapsHost {
     size_t nmigrateTrans;
     size_t nmigrateTrans_max;
     char **migrateTrans;
-    size_t nnumaCell;
-    size_t nnumaCell_max;
-    virCapsHostNUMACellPtr *numaCell;
+
+    virCapsHostNUMAPtr numa;
 
     virResctrlInfoPtr resctrl;
 
@@ -213,7 +230,11 @@ virCapabilitiesNew(virArch hostarch,
                    bool liveMigrate);
 
 void
-virCapabilitiesFreeNUMAInfo(virCapsPtr caps);
+virCapabilitiesHostNUMAUnref(virCapsHostNUMAPtr caps);
+void
+virCapabilitiesHostNUMARef(virCapsHostNUMAPtr caps);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virCapsHostNUMA, virCapabilitiesHostNUMAUnref);
 
 int
 virCapabilitiesAddHostFeature(virCapsPtr caps,
@@ -227,8 +248,8 @@ int
 virCapabilitiesSetNetPrefix(virCapsPtr caps,
                             const char *prefix);
 
-int
-virCapabilitiesAddHostNUMACell(virCapsPtr caps,
+void
+virCapabilitiesHostNUMAAddCell(virCapsHostNUMAPtr caps,
                                int num,
                                unsigned long long mem,
                                int ncpus,
@@ -237,12 +258,6 @@ virCapabilitiesAddHostNUMACell(virCapsPtr caps,
                                virCapsHostNUMACellSiblingInfoPtr siblings,
                                int npageinfo,
                                virCapsHostNUMACellPageInfoPtr pageinfo);
-
-
-int
-virCapabilitiesSetHostCPU(virCapsPtr caps,
-                          virCPUDefPtr cpu);
-
 
 virCapsGuestMachinePtr *
 virCapabilitiesAllocMachines(const char *const *names,
@@ -271,11 +286,14 @@ virCapabilitiesAddGuestDomain(virCapsGuestPtr guest,
                               int nmachines,
                               virCapsGuestMachinePtr *machines);
 
-virCapsGuestFeaturePtr
+void
 virCapabilitiesAddGuestFeature(virCapsGuestPtr guest,
-                               const char *name,
-                               bool defaultOn,
-                               bool toggle);
+                               virCapsGuestFeatureType feature);
+void
+virCapabilitiesAddGuestFeatureWithToggle(virCapsGuestPtr guest,
+                                         virCapsGuestFeatureType feature,
+                                         bool defaultOn,
+                                         bool toggle);
 
 int
 virCapabilitiesAddStoragePool(virCapsPtr caps,
@@ -294,6 +312,13 @@ virCapabilitiesDomainDataLookup(virCapsPtr caps,
                                 const char *emulator,
                                 const char *machinetype);
 
+bool
+virCapabilitiesDomainSupported(virCapsPtr caps,
+                               int ostype,
+                               virArch arch,
+                               int domaintype);
+
+
 void
 virCapabilitiesClearHostNUMACellCPUTopology(virCapsHostNUMACellCPUPtr cpu,
                                             size_t ncpus);
@@ -301,14 +326,15 @@ virCapabilitiesClearHostNUMACellCPUTopology(virCapsHostNUMACellCPUPtr cpu,
 char *
 virCapabilitiesFormatXML(virCapsPtr caps);
 
-virBitmapPtr virCapabilitiesGetCpusForNodemask(virCapsPtr caps,
-                                               virBitmapPtr nodemask);
+virBitmapPtr virCapabilitiesHostNUMAGetCpus(virCapsHostNUMAPtr caps,
+                                            virBitmapPtr nodemask);
 
 int virCapabilitiesGetNodeInfo(virNodeInfoPtr nodeinfo);
 
 int virCapabilitiesInitPages(virCapsPtr caps);
 
-int virCapabilitiesInitNUMA(virCapsPtr caps);
+virCapsHostNUMAPtr virCapabilitiesHostNUMANew(void);
+virCapsHostNUMAPtr virCapabilitiesHostNUMANewHost(void);
 
 bool virCapsHostCacheBankEquals(virCapsHostCacheBankPtr a,
                                 virCapsHostCacheBankPtr b);

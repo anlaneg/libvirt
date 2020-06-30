@@ -24,6 +24,7 @@
 
 # include <dbus/dbus.h>
 # include <fcntl.h>
+# include <unistd.h>
 
 # define LIBVIRT_VIRSYSTEMDPRIV_H_ALLOW
 # include "virsystemdpriv.h"
@@ -33,7 +34,7 @@
 # include "virlog.h"
 # include "virmock.h"
 # include "rpc/virnetsocket.h"
-# include "intprops.h"
+# include "domain_driver.h"
 # define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("tests.systemdtest");
@@ -236,7 +237,7 @@ static int testCreateNoSystemd(const void *opaque G_GNUC_UNUSED)
     };
     int rv;
 
-    setenv("FAIL_NO_SERVICE", "1", 1);
+    g_setenv("FAIL_NO_SERVICE", "1", TRUE);
 
     if ((rv = virSystemdCreateMachine("demo",
                                       "qemu",
@@ -246,11 +247,11 @@ static int testCreateNoSystemd(const void *opaque G_GNUC_UNUSED)
                                       false,
                                       0, NULL,
                                       NULL, 0)) == 0) {
-        unsetenv("FAIL_NO_SERVICE");
+        g_unsetenv("FAIL_NO_SERVICE");
         fprintf(stderr, "%s", "Unexpected create machine success\n");
         return -1;
     }
-    unsetenv("FAIL_NO_SERVICE");
+    g_unsetenv("FAIL_NO_SERVICE");
 
     if (rv != -2) {
         fprintf(stderr, "%s", "Unexpected create machine error\n");
@@ -270,7 +271,7 @@ static int testCreateSystemdNotRunning(const void *opaque G_GNUC_UNUSED)
     };
     int rv;
 
-    setenv("FAIL_NOT_REGISTERED", "1", 1);
+    g_setenv("FAIL_NOT_REGISTERED", "1", TRUE);
 
     if ((rv = virSystemdCreateMachine("demo",
                                       "qemu",
@@ -280,11 +281,11 @@ static int testCreateSystemdNotRunning(const void *opaque G_GNUC_UNUSED)
                                       false,
                                       0, NULL,
                                       NULL, 0)) == 0) {
-        unsetenv("FAIL_NOT_REGISTERED");
+        g_unsetenv("FAIL_NOT_REGISTERED");
         fprintf(stderr, "%s", "Unexpected create machine success\n");
         return -1;
     }
-    unsetenv("FAIL_NOT_REGISTERED");
+    g_unsetenv("FAIL_NOT_REGISTERED");
 
     if (rv != -2) {
         fprintf(stderr, "%s", "Unexpected create machine error\n");
@@ -304,7 +305,7 @@ static int testCreateBadSystemd(const void *opaque G_GNUC_UNUSED)
     };
     int rv;
 
-    setenv("FAIL_BAD_SERVICE", "1", 1);
+    g_setenv("FAIL_BAD_SERVICE", "1", TRUE);
 
     if ((rv = virSystemdCreateMachine("demo",
                                       "qemu",
@@ -314,11 +315,11 @@ static int testCreateBadSystemd(const void *opaque G_GNUC_UNUSED)
                                       false,
                                       0, NULL,
                                       NULL, 0)) == 0) {
-        unsetenv("FAIL_BAD_SERVICE");
+        g_unsetenv("FAIL_BAD_SERVICE");
         fprintf(stderr, "%s", "Unexpected create machine success\n");
         return -1;
     }
-    unsetenv("FAIL_BAD_SERVICE");
+    g_unsetenv("FAIL_BAD_SERVICE");
 
     if (rv != -1) {
         fprintf(stderr, "%s", "Unexpected create machine error\n");
@@ -379,6 +380,7 @@ testGetMachineName(const void *opaque G_GNUC_UNUSED)
 struct testNameData {
     const char *name;
     const char *expected;
+    const char *root;
     int id;
     bool legacy;
 };
@@ -413,8 +415,8 @@ testMachineName(const void *opaque)
     int ret = -1;
     char *actual = NULL;
 
-    if (!(actual = virDomainGenerateMachineName("qemu", data->id,
-                                                data->name, true)))
+    if (!(actual = virDomainDriverGenerateMachineName("qemu", data->root,
+                                                      data->id, data->name, true)))
         goto cleanup;
 
     if (STRNEQ(actual, data->expected)) {
@@ -445,7 +447,7 @@ static int testPMSupportHelper(const void *opaque)
     const struct testPMSupportData *data = opaque;
 
     for (i = 0; i < 4; i++) {
-        setenv("RESULT_SUPPORT",  results[i], 1);
+        g_setenv("RESULT_SUPPORT",  results[i], TRUE);
         if ((rv = data->tested(&result)) < 0) {
             fprintf(stderr, "%s", "Unexpected canSuspend error\n");
             return -1;
@@ -455,12 +457,12 @@ static int testPMSupportHelper(const void *opaque)
             fprintf(stderr, "Unexpected result for answer '%s'\n", results[i]);
             goto error;
         }
-        unsetenv("RESULT_SUPPORT");
+        g_unsetenv("RESULT_SUPPORT");
     }
 
     return 0;
  error:
-    unsetenv("RESULT_SUPPORT");
+    g_unsetenv("RESULT_SUPPORT");
     return -1;
 }
 
@@ -470,14 +472,14 @@ static int testPMSupportHelperNoSystemd(const void *opaque)
     bool result;
     const struct testPMSupportData *data = opaque;
 
-    setenv("FAIL_NO_SERVICE", "1", 1);
+    g_setenv("FAIL_NO_SERVICE", "1", TRUE);
 
     if ((rv = data->tested(&result)) == 0) {
-        unsetenv("FAIL_NO_SERVICE");
+        g_unsetenv("FAIL_NO_SERVICE");
         fprintf(stderr, "%s", "Unexpected canSuspend success\n");
         return -1;
     }
-    unsetenv("FAIL_NO_SERVICE");
+    g_unsetenv("FAIL_NO_SERVICE");
 
     if (rv != -2) {
         fprintf(stderr, "%s", "Unexpected canSuspend error\n");
@@ -493,14 +495,14 @@ static int testPMSupportSystemdNotRunning(const void *opaque)
     bool result;
     const struct testPMSupportData *data = opaque;
 
-    setenv("FAIL_NOT_REGISTERED", "1", 1);
+    g_setenv("FAIL_NOT_REGISTERED", "1", TRUE);
 
     if ((rv = data->tested(&result)) == 0) {
-        unsetenv("FAIL_NOT_REGISTERED");
+        g_unsetenv("FAIL_NOT_REGISTERED");
         fprintf(stderr, "%s", "Unexpected canSuspend success\n");
         return -1;
     }
-    unsetenv("FAIL_NOT_REGISTERED");
+    g_unsetenv("FAIL_NOT_REGISTERED");
 
     if (rv != -2) {
         fprintf(stderr, "%s", "Unexpected canSuspend error\n");
@@ -548,36 +550,39 @@ testActivation(bool useNames)
     size_t nsockIP;
     int ret = -1;
     size_t i;
-    char nfdstr[INT_BUFSIZE_BOUND(size_t)];
-    char pidstr[INT_BUFSIZE_BOUND(pid_t)];
+    char nfdstr[VIR_INT64_STR_BUFLEN];
+    char pidstr[VIR_INT64_STR_BUFLEN];
     virSystemdActivationMap map[2];
     int *fds = NULL;
     size_t nfds = 0;
     g_autoptr(virSystemdActivation) act = NULL;
     g_auto(virBuffer) names = VIR_BUFFER_INITIALIZER;
+    g_autofree char *demo_socket_path = NULL;
 
     virBufferAddLit(&names, "demo-unix.socket");
 
     if (testActivationCreateFDs(&sockUNIX, &sockIP, &nsockIP) < 0)
         return -1;
 
+    demo_socket_path = virNetSocketGetPath(sockUNIX);
+
     for (i = 0; i < nsockIP; i++)
         virBufferAddLit(&names, ":demo-ip.socket");
 
-    snprintf(nfdstr, sizeof(nfdstr), "%zu", 1 + nsockIP);
-    snprintf(pidstr, sizeof(pidstr), "%lld", (long long)getpid());
+    g_snprintf(nfdstr, sizeof(nfdstr), "%zu", 1 + nsockIP);
+    g_snprintf(pidstr, sizeof(pidstr), "%lld", (long long)getpid());
 
-    setenv("LISTEN_FDS", nfdstr, 1);
-    setenv("LISTEN_PID", pidstr, 1);
+    g_setenv("LISTEN_FDS", nfdstr, TRUE);
+    g_setenv("LISTEN_PID", pidstr, TRUE);
 
     if (useNames)
-        setenv("LISTEN_FDNAMES", virBufferCurrentContent(&names), 1);
+        g_setenv("LISTEN_FDNAMES", virBufferCurrentContent(&names), TRUE);
     else
-        unsetenv("LISTEN_FDNAMES");
+        g_unsetenv("LISTEN_FDNAMES");
 
     map[0].name = "demo-unix.socket";
     map[0].family = AF_UNIX;
-    map[0].path = virNetSocketGetPath(sockUNIX);
+    map[0].path = demo_socket_path;
 
     map[1].name = "demo-ip.socket";
     map[1].family = AF_INET;
@@ -640,7 +645,7 @@ testActivationEmpty(const void *opaque G_GNUC_UNUSED)
 {
     virSystemdActivationPtr act;
 
-    unsetenv("LISTEN_FDS");
+    g_unsetenv("LISTEN_FDS");
 
     if (virSystemdGetActivation(NULL, 0, &act) < 0)
         return -1;
@@ -721,25 +726,34 @@ mymain(void)
 
     TEST_SCOPE_NEW("qemu-3-demo", "machine-qemu\\x2d3\\x2ddemo.scope");
 
-# define TEST_MACHINE(_name, _id, machinename) \
+# define TEST_MACHINE(_name, _root, _id, machinename) \
     do { \
         struct testNameData data = { \
-            .name = _name, .expected = machinename, .id = _id, \
+            .name = _name, .expected = machinename, .root = _root, .id = _id, \
         }; \
         if (virTestRun("Test scopename", testMachineName, &data) < 0) \
             ret = -1; \
     } while (0)
 
-    TEST_MACHINE("demo", 1, "qemu-1-demo");
-    TEST_MACHINE("demo-name", 2, "qemu-2-demo-name");
-    TEST_MACHINE("demo!name", 3, "qemu-3-demoname");
-    TEST_MACHINE(".demo", 4, "qemu-4-.demo");
-    TEST_MACHINE("bull\U0001f4a9", 5, "qemu-5-bull");
-    TEST_MACHINE("demo..name", 6, "qemu-6-demo.name");
-    TEST_MACHINE("12345678901234567890123456789012345678901234567890123456789", 7,
+    TEST_MACHINE("demo", NULL, 1, "qemu-1-demo");
+    TEST_MACHINE("demo-name", NULL, 2, "qemu-2-demo-name");
+    TEST_MACHINE("demo!name", NULL, 3, "qemu-3-demoname");
+    TEST_MACHINE(".demo", NULL, 4, "qemu-4-demo");
+    TEST_MACHINE("bull\U0001f4a9", NULL, 5, "qemu-5-bull");
+    TEST_MACHINE("demo..name", NULL, 6, "qemu-6-demo.name");
+    TEST_MACHINE("12345678901234567890123456789012345678901234567890123456789", NULL, 7,
                  "qemu-7-123456789012345678901234567890123456789012345678901234567");
-    TEST_MACHINE("123456789012345678901234567890123456789012345678901234567890", 8,
+    TEST_MACHINE("123456789012345678901234567890123456789012345678901234567890", NULL, 8,
                  "qemu-8-123456789012345678901234567890123456789012345678901234567");
+    TEST_MACHINE("kstest-network-device-default-httpks_(c9eed63e-981e-48ec-acdc-56b3f8c5f678)",
+                 NULL, 100,
+                 "qemu-100-kstest-network-device-default-httpksc9eed63e-981e-48ec");
+    TEST_MACHINE("kstest-network-device-default-httpks_(c9eed63e-981e-48ec--cdc-56b3f8c5f678)",
+                 NULL, 10,
+                 "qemu-10-kstest-network-device-default-httpksc9eed63e-981e-48ec-c");
+    TEST_MACHINE("demo.-.test.", NULL, 11, "qemu-11-demo.test");
+    TEST_MACHINE("demo", "/tmp/root1", 1, "qemu-embed-0991f456-1-demo");
+    TEST_MACHINE("demo", "/tmp/root2", 1, "qemu-embed-95d47ff5-1-demo");
 
 # define TESTS_PM_SUPPORT_HELPER(name, function) \
     do { \

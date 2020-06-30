@@ -19,13 +19,12 @@
 #include <config.h>
 
 #include <signal.h>
+#include <unistd.h>
 #ifdef HAVE_IFADDRS_H
 # include <ifaddrs.h>
 #endif
-#include <netdb.h>
 
 #include "testutils.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
@@ -191,13 +190,12 @@ testSocketAccept(const void *opaque)
 
     if (!data) {
         virNetSocketPtr usock;
-        tmpdir = mkdtemp(template);
+        tmpdir = g_mkdtemp(template);
         if (tmpdir == NULL) {
             VIR_WARN("Failed to create temporary directory");
             goto cleanup;
         }
-        if (virAsprintf(&path, "%s/test.sock", tmpdir) < 0)
-            goto cleanup;
+        path = g_strdup_printf("%s/test.sock", tmpdir);
 
         if (virNetSocketNewListenUNIX(path, 0700, -1, getegid(), &usock) < 0)
             goto cleanup;
@@ -212,7 +210,7 @@ testSocketAccept(const void *opaque)
 
         cdata.path = path;
     } else {
-        snprintf(portstr, sizeof(portstr), "%d", data->port);
+        g_snprintf(portstr, sizeof(portstr), "%d", data->port);
         if (virNetSocketNewListenTCP(data->lnode, portstr,
                                      AF_UNSPEC,
                                      &lsock, &nlsock) < 0)
@@ -316,13 +314,12 @@ static int testSocketUNIXAddrs(const void *data G_GNUC_UNUSED)
     char *tmpdir;
     char template[] = "/tmp/libvirt_XXXXXX";
 
-    tmpdir = mkdtemp(template);
+    tmpdir = g_mkdtemp(template);
     if (tmpdir == NULL) {
         VIR_WARN("Failed to create temporary directory");
         goto cleanup;
     }
-    if (virAsprintf(&path, "%s/test.sock", tmpdir) < 0)
-        goto cleanup;
+    path = g_strdup_printf("%s/test.sock", tmpdir);
 
     if (virNetSocketNewListenUNIX(path, 0700, -1, getegid(), &lsock) < 0)
         goto cleanup;
@@ -525,7 +522,9 @@ mymain(void)
     int freePort;
 #endif
 
+#ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
     virEventRegisterDefaultImpl();
 

@@ -5,13 +5,16 @@
   <currentMemory unit='KiB'>512288</currentMemory>
   <vcpu placement='static'>1</vcpu>
   <os>
-    <type arch='x86_64' machine='pc-0.12'>hvm</type>
+    <type arch='x86_64' machine='pc-i440fx-2.12'>hvm</type>
     <boot dev='hd'/>
     <bootmenu enable='yes'/>
   </os>
   <features>
     <acpi/>
   </features>
+  <cpu mode='custom' match='exact' check='none'>
+    <model fallback='forbid'>qemu64</model>
+  </cpu>
   <clock offset='utc'/>
   <on_poweroff>destroy</on_poweroff>
   <on_reboot>restart</on_reboot>

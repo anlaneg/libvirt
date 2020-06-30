@@ -123,7 +123,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
     X_QEMU_CAPS_CHARDEV_SPICEVMC, /* newer -chardev spicevmc */
 
     /* 55 */
-    X_QEMU_CAPS_DEVICE_SPICEVMC, /* older -device spicevmc*/
+    X_QEMU_CAPS_DEVICE_SPICEVMC, /* older -device spicevmc */
     QEMU_CAPS_VIRTIO_TX_ALG, /* -device virtio-net-pci,tx=string */
     X_QEMU_CAPS_DEVICE_QXL_VGA, /* primary qxl device named qxl-vga? */
     X_QEMU_CAPS_PCI_MULTIFUNCTION, /* -device multifunction=on|off */
@@ -232,7 +232,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
     X_QEMU_CAPS_DTB, /* -dtb file */
     QEMU_CAPS_SCSI_MEGASAS, /* -device megasas */
     X_QEMU_CAPS_IPV6_MIGRATION, /* -incoming [::] */
-    X_QEMU_CAPS_MACHINE_OPT, /* -machine xxxx*/
+    X_QEMU_CAPS_MACHINE_OPT, /* -machine xxxx */
 
     /* 135 */
     X_QEMU_CAPS_MACHINE_USB_OPT, /* -machine xxx,usb=on/off */
@@ -529,6 +529,53 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
     QEMU_CAPS_DEVICE_RAMFB, /* -device ramfb */
     QEMU_CAPS_MACHINE_PSERIES_CAP_CCF_ASSIST, /* -machine pseries.cap-ccf-assist */
 
+    /* 345 */
+    QEMU_CAPS_ARM_MAX_CPU, /* max-arm-cpu type exists */
+    QEMU_CAPS_BLOCK_FILE_AUTO_READONLY_DYNAMIC, /* the auto-read-only property of block backends for files is dynamic */
+    QEMU_CAPS_SAVEVM_MONITOR_NODES, /* 'savevm' handles monitor-owned nodes properly */
+    QEMU_CAPS_DRIVE_NVME, /* -drive file.driver=nvme */
+    QEMU_CAPS_SMP_DIES, /*  -smp dies= */
+
+    /* 350 */
+    QEMU_CAPS_DEVICE_I8042, /* PS/2 controller */
+    QEMU_CAPS_OBJECT_RNG_BUILTIN, /* -object rng-builtin */
+    QEMU_CAPS_VIRTIO_NET_FAILOVER, /* virtio-net-*.failover */
+    QEMU_CAPS_DEVICE_TPM_SPAPR, /* -device tpm-spapr */
+    QEMU_CAPS_CPU_KVM_NO_ADJVTIME, /* cpu.kvm-no-adjvtime */
+
+    /* 355 */
+    QEMU_CAPS_DEVICE_VHOST_USER_FS, /* -device vhost-user-fs */
+    QEMU_CAPS_QMP_QUERY_NAMED_BLOCK_NODES_FLAT, /* query-named-block-nodes supports the 'flat' option */
+    QEMU_CAPS_BLOCKDEV_SNAPSHOT_ALLOW_WRITE_ONLY, /* blockdev-snapshot has the 'allow-write-only-overlay' feature */
+    QEMU_CAPS_BLOCKDEV_REOPEN, /* 'blockdev-reopen' qmp command is supported */
+    QEMU_CAPS_STORAGE_WERROR, /* virtio-blk,scsi-hd.werror */
+
+    /* 360 */
+    QEMU_CAPS_FSDEV_MULTIDEVS, /* fsdev.multidevs */
+    QEMU_CAPS_VIRTIO_PACKED_QUEUES, /* virtio.packed */
+    QEMU_CAPS_PCIE_ROOT_PORT_HOTPLUG, /* pcie-root-port.hotplug */
+    QEMU_CAPS_AIO_IO_URING, /* -blockdev {...,"aio":"io_uring",...} */
+    QEMU_CAPS_MACHINE_PSERIES_CAP_CFPC, /* -machine pseries.cap-cfpc */
+
+    /* 365 */
+    QEMU_CAPS_MACHINE_PSERIES_CAP_SBBC, /* -machine pseries.cap-sbbc */
+    QEMU_CAPS_MACHINE_PSERIES_CAP_IBS, /* -machine pseries.cap-ibs */
+    QEMU_CAPS_TCG, /* QEMU does support TCG */
+    QEMU_CAPS_VIRTIO_BLK_SCSI_DEFAULT_DISABLED, /* virtio-blk-pci.scsi disabled by default */
+    QEMU_CAPS_SCSI_PVSCSI, /* -device pvscsi */
+
+    /* 370 */
+    QEMU_CAPS_CPU_MIGRATABLE, /* -cpu ...,migratable=on|off */
+    QEMU_CAPS_QUERY_CPU_MODEL_EXPANSION_MIGRATABLE, /* query-cpu-model-expansion supports migratable:false */
+    QEMU_CAPS_FW_CFG, /* -fw_cfg command line option */
+    QEMU_CAPS_MIGRATION_PARAM_BANDWIDTH, /* max-bandwidth field in migrate-set-parameters */
+    QEMU_CAPS_MIGRATION_PARAM_DOWNTIME, /* downtime-limit field in migrate-set-parameters */
+
+    /* 375 */
+    QEMU_CAPS_MIGRATION_PARAM_XBZRLE_CACHE_SIZE, /* xbzrle-cache-size field in migrate-set-parameters */
+    QEMU_CAPS_INTEL_IOMMU_AW_BITS, /* intel-iommu.aw-bits */
+    QEMU_CAPS_DEVICE_SPAPR_TPM_PROXY, /* -device spapr-tpm-proxy */
+
     QEMU_CAPS_LAST /* this must always be the last item */
 } virQEMUCapsFlags;
 
@@ -538,6 +585,7 @@ typedef virQEMUCaps *virQEMUCapsPtr;
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virQEMUCaps, virObjectUnref);
 
 virQEMUCapsPtr virQEMUCapsNew(void);
+virQEMUCapsPtr virQEMUCapsNewBinary(const char *binary);
 
 void virQEMUCapsSet(virQEMUCapsPtr qemuCaps,
                     virQEMUCapsFlags flag) ATTRIBUTE_NONNULL(1);
@@ -549,6 +597,8 @@ void virQEMUCapsClear(virQEMUCapsPtr qemuCaps,
 
 bool virQEMUCapsGet(virQEMUCapsPtr qemuCaps,
                     virQEMUCapsFlags flag);
+
+void virQEMUCapsInitProcessCapsInterlock(virQEMUCapsPtr qemuCaps);
 
 bool virQEMUCapsHasPCIMultiBus(virQEMUCapsPtr qemuCaps,
                                const virDomainDef *def);
@@ -562,17 +612,30 @@ const char *virQEMUCapsGetBinary(virQEMUCapsPtr qemuCaps);
 virArch virQEMUCapsGetArch(virQEMUCapsPtr qemuCaps);
 unsigned int virQEMUCapsGetVersion(virQEMUCapsPtr qemuCaps);
 const char *virQEMUCapsGetPackage(virQEMUCapsPtr qemuCaps);
-virHashTablePtr virQEMUCapsGetDomainCapsCache(virQEMUCapsPtr qemuCaps);
+
+virDomainCapsPtr
+virQEMUCapsGetDomainCapsCache(virQEMUCapsPtr qemuCaps,
+                              const char *machine,
+                              virArch arch,
+                              virDomainVirtType virttype,
+                              virArch hostarch,
+                              bool privileged,
+                              virFirmwarePtr *firmwares,
+                              size_t nfirmwares);
+
 unsigned int virQEMUCapsGetKVMVersion(virQEMUCapsPtr qemuCaps);
 int virQEMUCapsAddCPUDefinitions(virQEMUCapsPtr qemuCaps,
                                  virDomainVirtType type,
                                  const char **name,
                                  size_t count,
                                  virDomainCapsCPUUsable usable);
-virDomainCapsCPUModelsPtr virQEMUCapsGetCPUDefinitions(virQEMUCapsPtr qemuCaps,
-                                                       virDomainVirtType type);
-virDomainCapsCPUModelsPtr virQEMUCapsFetchCPUDefinitions(qemuMonitorPtr mon,
-                                                         virArch arch);
+virDomainCapsCPUModelsPtr virQEMUCapsGetCPUModels(virQEMUCapsPtr qemuCaps,
+                                                  virDomainVirtType type,
+                                                  const char **modelAllowed,
+                                                  const char **modelForbidden);
+int virQEMUCapsFetchCPUModels(qemuMonitorPtr mon,
+                              virArch arch,
+                              virDomainCapsCPUModelsPtr *cpuModels);
 
 typedef enum {
     /* Host CPU definition reported in domain capabilities. */
@@ -593,23 +656,42 @@ int virQEMUCapsGetCPUFeatures(virQEMUCapsPtr qemuCaps,
                               bool migratable,
                               char ***features);
 
+virDomainVirtType virQEMUCapsGetVirtType(virQEMUCapsPtr qemuCaps);
+
+bool virQEMUCapsIsArchSupported(virQEMUCapsPtr qemuCaps,
+                                virArch arch);
+bool virQEMUCapsIsVirtTypeSupported(virQEMUCapsPtr qemuCaps,
+                                    virDomainVirtType virtType);
 bool virQEMUCapsIsCPUModeSupported(virQEMUCapsPtr qemuCaps,
-                                   virCapsPtr caps,
+                                   virArch hostarch,
                                    virDomainVirtType type,
-                                   virCPUMode mode);
+                                   virCPUMode mode,
+                                   const char *machineType);
 const char *virQEMUCapsGetCanonicalMachine(virQEMUCapsPtr qemuCaps,
+                                           virDomainVirtType virtType,
                                            const char *name);
-const char *virQEMUCapsGetDefaultMachine(virQEMUCapsPtr qemuCaps);
+bool virQEMUCapsIsMachineSupported(virQEMUCapsPtr qemuCaps,
+                                   virDomainVirtType virtType,
+                                   const char *canonical_machine)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 int virQEMUCapsGetMachineMaxCpus(virQEMUCapsPtr qemuCaps,
+                                 virDomainVirtType virtType,
                                  const char *name);
 bool virQEMUCapsGetMachineHotplugCpus(virQEMUCapsPtr qemuCaps,
+                                      virDomainVirtType virtType,
                                       const char *name);
-int virQEMUCapsGetMachineTypesCaps(virQEMUCapsPtr qemuCaps,
-                                   size_t *nmachines,
-                                   virCapsGuestMachinePtr **machines);
+const char *virQEMUCapsGetMachineDefaultCPU(virQEMUCapsPtr qemuCaps,
+                                            const char *name,
+                                            virDomainVirtType type);
+bool virQEMUCapsGetMachineNumaMemSupported(virQEMUCapsPtr qemuCaps,
+                                           virDomainVirtType virtType,
+                                           const char *name);
 
 void virQEMUCapsFilterByMachineType(virQEMUCapsPtr qemuCaps,
+                                    virDomainVirtType virtType,
                                     const char *machineType);
+char * virQEMUCapsGetDefaultEmulator(virArch hostarch,
+                                     virArch guestarch);
 
 virFileCachePtr virQEMUCapsCacheNew(const char *libDir,
                                     const char *cacheDir,
@@ -618,6 +700,7 @@ virFileCachePtr virQEMUCapsCacheNew(const char *libDir,
 virQEMUCapsPtr virQEMUCapsCacheLookup(virFileCachePtr cache,
                                       const char *binary);
 virQEMUCapsPtr virQEMUCapsCacheLookupCopy(virFileCachePtr cache,
+                                          virDomainVirtType virtType,
                                           const char *binary,
                                           const char *machineType);
 virQEMUCapsPtr virQEMUCapsCacheLookupByArch(virFileCachePtr cache,
@@ -643,19 +726,17 @@ bool virQEMUCapsSupportsGICVersion(virQEMUCapsPtr qemuCaps,
                                    virDomainVirtType virtType,
                                    virGICVersion version);
 
-bool virQEMUCapsIsMachineSupported(virQEMUCapsPtr qemuCaps,
-                                   const char *canonical_machine);
-
-const char *virQEMUCapsGetPreferredMachine(virQEMUCapsPtr qemuCaps);
+const char *virQEMUCapsGetPreferredMachine(virQEMUCapsPtr qemuCaps,
+                                           virDomainVirtType virtType);
 
 int virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
                                    const char *binary,
                                    virQEMUCapsPtr qemuCaps,
                                    virArch guestarch);
 
-int virQEMUCapsFillDomainCaps(virCapsPtr caps,
+int virQEMUCapsFillDomainCaps(virQEMUCapsPtr qemuCaps,
+                              virArch hostarch,
                               virDomainCapsPtr domCaps,
-                              virQEMUCapsPtr qemuCaps,
                               bool privileged,
                               virFirmwarePtr *firmwares,
                               size_t nfirmwares);
@@ -664,6 +745,7 @@ bool virQEMUCapsGuestIsNative(virArch host,
                               virArch guest);
 
 bool virQEMUCapsCPUFilterFeatures(const char *name,
+                                  virCPUFeaturePolicy policy,
                                   void *opaque);
 
 const char *

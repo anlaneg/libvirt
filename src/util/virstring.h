@@ -22,6 +22,8 @@
 
 #include "internal.h"
 
+#define VIR_INT64_STR_BUFLEN 21
+
 char **virStringSplitCount(const char *string,
                            const char *delim,
                            size_t max_tokens,
@@ -111,7 +113,7 @@ int virStrToDouble(char const *s,
     G_GNUC_WARN_UNUSED_RESULT;
 
 int virDoubleToStr(char **strp, double number)
-    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
+    ATTRIBUTE_NONNULL(1);
 
 void virSkipSpaces(const char **str) ATTRIBUTE_NONNULL(1);
 void virSkipSpacesAndBackslash(const char **str) ATTRIBUTE_NONNULL(1);
@@ -133,125 +135,8 @@ int virStrdup(char **dest, const char *src)
 
 int virStrndup(char **dest, const char *src, ssize_t n)
     G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-int virAsprintfInternal(char **strp, const char *fmt, ...)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_PRINTF(2, 3)
-    G_GNUC_WARN_UNUSED_RESULT;
-int virVasprintfInternal(char **strp, const char *fmt, va_list list)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_PRINTF(2, 0)
-    G_GNUC_WARN_UNUSED_RESULT;
-
-/**
- * VIR_STRDUP:
- * @dst: variable to hold result (char*, not char**)
- * @src: string to duplicate
- *
- * DEPRECATED: use g_strdup instead
- *
- * Duplicate @src string and store it into @dst.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
- */
-#define VIR_STRDUP(dst, src) virStrdup(&(dst), src)
-
-/**
- * VIR_STRDUP_QUIET:
- * @dst: variable to hold result (char*, not char**)
- * @src: string to duplicate
- *
- * DEPRECATED: use g_strdup instead
- *
- * Duplicate @src string and store it into @dst.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
- */
-#define VIR_STRDUP_QUIET(dst, src) VIR_STRDUP(dst, src)
-
-/**
- * VIR_STRNDUP:
- * @dst: variable to hold result (char*, not char**)
- * @src: string to duplicate
- * @n: the maximum number of bytes to copy
- *
- * DEPRECATED: use g_strndup instead
- *
- * Duplicate @src string and store it into @dst. If @src is longer than @n,
- * only @n bytes are copied and terminating null byte '\0' is added. If @n
- * is a negative number, then the whole @src string is copied. That is,
- * VIR_STRDUP(dst, src) and VIR_STRNDUP(dst, src, -1) are equal.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
- */
-#define VIR_STRNDUP(dst, src, n) virStrndup(&(dst), src, n)
-
-/**
- * VIR_STRNDUP_QUIET:
- * @dst: variable to hold result (char*, not char**)
- * @src: string to duplicate
- * @n: the maximum number of bytes to copy
- *
- * DEPRECATED: use g_strndup instead
- *
- * Duplicate @src string and store it into @dst. If @src is longer than @n,
- * only @n bytes are copied and terminating null byte '\0' is added. If @n
- * is a negative number, then the whole @src string is copied. That is,
- * VIR_STRDUP_QUIET(dst, src) and VIR_STRNDUP_QUIET(dst, src, -1) are
- * equal.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 if @src was NULL, 1 if @src was copied, aborts on OOM
- */
-#define VIR_STRNDUP_QUIET(dst, src, n) virStrndup(&(dst), src, n)
 
 size_t virStringListLength(const char * const *strings);
-
-/**
- * virVasprintf
- *
- * Like glibc's vasprintf but aborts on OOM
- *
- * Returns number of bytes printed on success, aborts on OOM
- */
-#define virVasprintf(strp, fmt, list) virVasprintfInternal(strp, fmt, list)
-
-/**
- * virVasprintfQuiet
- *
- * Like glibc's vasprintf but aborts on OOM.
- *
- * Returns number of bytes printed on success, aborts on OOM
- */
-#define virVasprintfQuiet(strp, fmt, list) virVasprintf(strp, fmt, list)
-
-/**
- * virAsprintf:
- * @strp: variable to hold result (char **)
- * @fmt: printf format
- *
- * Like glibc's asprintf but aborts on OOM.
- *
- * Returns number of bytes printed on success, aborts on OOM
- */
-
-#define virAsprintf(strp, ...) virAsprintfInternal(strp, __VA_ARGS__)
-
-/**
- * virAsprintfQuiet:
- * @strp: variable to hold result (char **)
- * @fmt: printf format
- *
- * Like glibc's asprintf but makes sure *strp == NULL on failure.
- *
- * Returns number of bytes printed on success, aborts on OOM
- */
-
-#define virAsprintfQuiet(strp, ...) virAsprintf(strp, __VA_ARGS__)
 
 int virStringSortCompare(const void *a, const void *b);
 int virStringSortRevCompare(const void *a, const void *b);

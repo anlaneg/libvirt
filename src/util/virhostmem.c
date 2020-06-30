@@ -21,9 +21,7 @@
 
 #include <config.h>
 
-#include <sys/utsname.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 
 #if defined(__FreeBSD__) || defined(__APPLE__)
@@ -33,9 +31,13 @@
 # include <sys/resource.h>
 #endif
 
+#ifdef WIN32
+# define WIN32_LEAN_AND_MEAN
+# include <windows.h>
+#endif
+
 #include "viralloc.h"
 #include "virhostmem.h"
-#include "physmem.h"
 #include "virerror.h"
 #include "virarch.h"
 #include "virfile.h"
@@ -142,7 +144,6 @@ virHostMemGetStatsLinux(FILE *meminfo,
                         virNodeMemoryStatsPtr params,
                         int *nparams)
 {
-    int ret = -1;
     size_t i = 0, j = 0, k = 0;
     int found = 0;
     int nr_param;
@@ -169,15 +170,14 @@ virHostMemGetStatsLinux(FILE *meminfo,
     if ((*nparams) == 0) {
         /* Current number of memory stats supported by linux */
         *nparams = nr_param;
-        ret = 0;
-        goto cleanup;
+        return 0;
     }
 
     if ((*nparams) != nr_param) {
         virReportInvalidArg(nparams,
                             _("nparams in %s must be %d"),
                             __FUNCTION__, nr_param);
-        goto cleanup;
+        return -1;
     }
 
     while (fgets(line, sizeof(line), meminfo) != NULL) {
@@ -200,7 +200,7 @@ virHostMemGetStatsLinux(FILE *meminfo,
                 if (p == NULL) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
                                    "%s", _("no prefix found"));
-                    goto cleanup;
+                    return -1;
                 }
                 p++;
             }
@@ -219,7 +219,7 @@ virHostMemGetStatsLinux(FILE *meminfo,
                 if (virStrcpyStatic(param->field, convp->field) < 0) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
                                    "%s", _("Field kernel memory too long for destination"));
-                    goto cleanup;
+                    return -1;
                 }
                 param->value = val;
                 found++;
@@ -233,13 +233,10 @@ virHostMemGetStatsLinux(FILE *meminfo,
     if (found == 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("no available memory line found"));
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 #endif
 
@@ -280,10 +277,8 @@ virHostMemGetStats(int cellNum G_GNUC_UNUSED,
                 return -1;
             }
 
-            if (virAsprintf(&meminfo_path,
-                            SYSFS_SYSTEM_PATH "/node/node%d/meminfo",
-                            cellNum) < 0)
-                return -1;
+            meminfo_path = g_strdup_printf(
+                                           SYSFS_SYSTEM_PATH "/node/node%d/meminfo", cellNum);
         }
         meminfo = fopen(meminfo_path, "r");
 
@@ -318,12 +313,9 @@ virHostMemSetParameterValue(virTypedParameterPtr param)
     char *field = strchr(param->field, '_');
     sa_assert(field);
     field++;
-    if (virAsprintf(&path, "%s/%s",
-                    SYSFS_MEMORY_SHARED_PATH, field) < 0)
-        return -2;
+    path = g_strdup_printf("%s/%s", SYSFS_MEMORY_SHARED_PATH, field);
 
-    if (virAsprintf(&strval, "%u", param->value.ui) == -1)
-        return -2;
+    strval = g_strdup_printf("%u", param->value.ui);
 
     if ((rc = virFileWriteStr(path, strval, 0)) < 0) {
         virReportSystemError(-rc, _("failed to set %s"), param->field);
@@ -346,9 +338,7 @@ virHostMemParametersAreAllSupported(virTypedParameterPtr params,
         char *field = strchr(param->field, '_');
         sa_assert(field);
         field++;
-        if (virAsprintf(&path, "%s/%s",
-                        SYSFS_MEMORY_SHARED_PATH, field) < 0)
-            return false;
+        path = g_strdup_printf("%s/%s", SYSFS_MEMORY_SHARED_PATH, field);
 
         if (!virFileExists(path)) {
             virReportError(VIR_ERR_OPERATION_INVALID,
@@ -412,9 +402,7 @@ virHostMemGetParameterValue(const char *field,
     char *tmp = NULL;
     int rc = -1;
 
-    if (virAsprintf(&path, "%s/%s",
-                    SYSFS_MEMORY_SHARED_PATH, field) < 0)
-        return -1;
+    path = g_strdup_printf("%s/%s", SYSFS_MEMORY_SHARED_PATH, field);
 
     if (!virFileExists(path))
         return -2;
@@ -591,13 +579,151 @@ virHostMemGetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
 }
 
 
+#ifdef WIN32
+/*  MEMORYSTATUSEX is missing from older windows headers, so define
+    a local replacement.  */
+typedef struct
+{
+  DWORD dwLength;
+  DWORD dwMemoryLoad;
+  DWORDLONG ullTotalPhys;
+  DWORDLONG ullAvailPhys;
+  DWORDLONG ullTotalPageFile;
+  DWORDLONG ullAvailPageFile;
+  DWORDLONG ullTotalVirtual;
+  DWORDLONG ullAvailVirtual;
+  DWORDLONG ullAvailExtendedVirtual;
+} lMEMORYSTATUSEX;
+typedef WINBOOL(WINAPI *PFN_MS_EX) (lMEMORYSTATUSEX*);
+#endif /* !WIN32 */
+
+static unsigned long long
+virHostMemGetTotal(void)
+{
+#if defined HAVE_SYSCTLBYNAME
+    /* This works on freebsd & macOS. */
+    unsigned long long physmem = 0;
+    size_t len = sizeof(physmem);
+
+    if (sysctlbyname("hw.physmem", &physmem, &len, NULL, 0) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query memory total"));
+        return 0;
+    }
+
+    return physmem;
+#elif defined _SC_PHYS_PAGES && defined _SC_PAGESIZE
+    /* this works on linux */
+    long long pages;
+    long long pagesize;
+    if ((pages = sysconf(_SC_PHYS_PAGES)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query memory total"));
+        return 0;
+    }
+    if ((pagesize = sysconf(_SC_PAGESIZE)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query memory page size"));
+        return 0;
+    }
+    return (unsigned long long)pages * (unsigned long long)pagesize;
+#elif defined WIN32
+    PFN_MS_EX pfnex;
+    HMODULE h = GetModuleHandle("kernel32.dll");
+
+    if (!h) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to access kernel32.dll"));
+        return 0;
+    }
+
+    /*  Use GlobalMemoryStatusEx if available.  */
+    if ((pfnex = (PFN_MS_EX) GetProcAddress(h, "GlobalMemoryStatusEx"))) {
+        lMEMORYSTATUSEX lms_ex;
+        lms_ex.dwLength = sizeof(lms_ex);
+        if (!pfnex(&lms_ex)) {
+            virReportSystemError(EIO, "%s",
+                                 _("Unable to query memory total"));
+            return 0;
+        }
+        return lms_ex.ullTotalPhys;
+    } else {
+        /*  Fall back to GlobalMemoryStatus which is always available.
+            but returns wrong results for physical memory > 4GB.  */
+        MEMORYSTATUS ms;
+        GlobalMemoryStatus(&ms);
+        return  ms.dwTotalPhys;
+    }
+#endif
+}
+
+
+static unsigned long long
+virHostMemGetAvailable(void)
+{
+#if defined HAVE_SYSCTLBYNAME
+    /* This works on freebsd and macOS */
+    unsigned long long usermem = 0;
+    size_t len = sizeof(usermem);
+
+    if (sysctlbyname("hw.usermem", &usermem, &len, NULL, 0) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query memory available"));
+        return 0;
+    }
+
+    return usermem;
+#elif defined _SC_AVPHYS_PAGES && defined _SC_PAGESIZE
+    /* this works on linux */
+    long long pages;
+    long long pagesize;
+    if ((pages = sysconf(_SC_AVPHYS_PAGES)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query memory available"));
+        return 0;
+    }
+    if ((pagesize = sysconf(_SC_PAGESIZE)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query memory page size"));
+        return 0;
+    }
+    return (unsigned long long)pages * (unsigned long long)pagesize;
+#elif defined WIN32
+    PFN_MS_EX pfnex;
+    HMODULE h = GetModuleHandle("kernel32.dll");
+
+    if (!h) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to access kernel32.dll"));
+        return 0;
+    }
+
+    /*  Use GlobalMemoryStatusEx if available.  */
+    if ((pfnex = (PFN_MS_EX) GetProcAddress(h, "GlobalMemoryStatusEx"))) {
+        lMEMORYSTATUSEX lms_ex;
+        lms_ex.dwLength = sizeof(lms_ex);
+        if (!pfnex(&lms_ex)) {
+            virReportSystemError(EIO, "%s",
+                                 _("Unable to query memory available"));
+            return 0;
+        }
+        return lms_ex.ullAvailPhys;
+    } else {
+        /*  Fall back to GlobalMemoryStatus which is always available.
+            but returns wrong results for physical memory > 4GB  */
+        MEMORYSTATUS ms;
+        GlobalMemoryStatus(&ms);
+        return ms.dwAvailPhys;
+    }
+#endif
+}
+
+
 static int
 virHostMemGetCellsFreeFake(unsigned long long *freeMems,
                            int startCell,
                            int maxCells G_GNUC_UNUSED)
 {
-    double avail = physmem_available();
-
     if (startCell != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("start cell %d out of range (0-%d)"),
@@ -605,13 +731,8 @@ virHostMemGetCellsFreeFake(unsigned long long *freeMems,
         return -1;
     }
 
-    freeMems[0] = (unsigned long long)avail;
-
-    if (!freeMems[0]) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Cannot determine free memory"));
+    if ((freeMems[0] = virHostMemGetAvailable()) == 0)
         return -1;
-    }
 
     return 1;
 }
@@ -620,34 +741,15 @@ static int
 virHostMemGetInfoFake(unsigned long long *mem,
                       unsigned long long *freeMem)
 {
-    int ret = -1;
+    if (mem &&
+        (*mem = virHostMemGetTotal()) == 0)
+        return -1;
 
-    if (mem) {
-        double total = physmem_total();
-        if (!total) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("Cannot determine free memory"));
-            goto cleanup;
-        }
+    if (freeMem &&
+        (*freeMem = virHostMemGetAvailable()) == 0)
+        return -1;
 
-        *mem = (unsigned long long) total;
-    }
-
-    if (freeMem) {
-        double avail = physmem_available();
-
-        if (!avail) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("Cannot determine free memory"));
-            goto cleanup;
-        }
-
-        *freeMem = (unsigned long long) avail;
-    }
-
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -658,7 +760,6 @@ virHostMemGetCellsFree(unsigned long long *freeMems,
 {
     unsigned long long mem;
     int n, lastCell, numCells;
-    int ret = -1;
     int maxCell;
 
     if (!virNumaIsAvailable())
@@ -672,7 +773,7 @@ virHostMemGetCellsFree(unsigned long long *freeMems,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("start cell %d out of range (0-%d)"),
                        startCell, maxCell);
-        goto cleanup;
+        return -1;
     }
     lastCell = startCell + maxCells - 1;
     if (lastCell > maxCell)
@@ -683,10 +784,7 @@ virHostMemGetCellsFree(unsigned long long *freeMems,
 
         freeMems[numCells++] = mem;
     }
-    ret = numCells;
-
- cleanup:
-    return ret;
+    return numCells;
 }
 
 int
@@ -734,7 +832,6 @@ virHostMemGetFreePages(unsigned int npages,
                        unsigned int cellCount,
                        unsigned long long *counts)
 {
-    int ret = -1;
     int cell, lastCell;
     size_t i, ncounts = 0;
 
@@ -745,7 +842,7 @@ virHostMemGetFreePages(unsigned int npages,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("start cell %d out of range (0-%d)"),
                        startCell, lastCell);
-        goto cleanup;
+        return -1;
     }
 
     lastCell = MIN(lastCell, startCell + (int) cellCount - 1);
@@ -756,7 +853,7 @@ virHostMemGetFreePages(unsigned int npages,
             unsigned long long page_free;
 
             if (virNumaGetPageInfo(cell, page_size, 0, NULL, &page_free) < 0)
-                goto cleanup;
+                return -1;
 
             counts[ncounts++] = page_free;
         }
@@ -765,12 +862,10 @@ virHostMemGetFreePages(unsigned int npages,
     if (!ncounts) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("no suitable info found"));
-        goto cleanup;
+        return -1;
     }
 
-    ret = ncounts;
- cleanup:
-    return ret;
+    return ncounts;
 }
 
 int
@@ -781,7 +876,6 @@ virHostMemAllocPages(unsigned int npages,
                      unsigned int cellCount,
                      bool add)
 {
-    int ret = -1;
     int cell, lastCell;
     size_t i, ncounts = 0;
 
@@ -792,7 +886,7 @@ virHostMemAllocPages(unsigned int npages,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("start cell %d out of range (0-%d)"),
                        startCell, lastCell);
-        goto cleanup;
+        return -1;
     }
 
     lastCell = MIN(lastCell, startCell + (int) cellCount - 1);
@@ -803,13 +897,11 @@ virHostMemAllocPages(unsigned int npages,
             unsigned long long page_count = pageCounts[i];
 
             if (virNumaSetPagePoolSize(cell, page_size, page_count, add) < 0)
-                goto cleanup;
+                return -1;
 
             ncounts++;
         }
     }
 
-    ret = ncounts;
- cleanup:
-    return ret;
+    return ncounts;
 }

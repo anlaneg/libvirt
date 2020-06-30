@@ -56,10 +56,10 @@ struct _virHashTable {
     size_t size;//hash表桶数
     size_t nbElems;
     virHashDataFree dataFree;
-    virHashDataFreeSimple dataFreeSimple;
     virHashKeyCode keyCode;
     virHashKeyEqual keyEqual;
     virHashKeyCopy keyCopy;
+    virHashKeyPrintHuman keyPrint;
     virHashKeyFree keyFree;
 };
 
@@ -94,10 +94,16 @@ static bool virHashStrEqual(const void *namea, const void *nameb)
 
 static void *virHashStrCopy(const void *name)
 {
-    char *ret;
-    ret = g_strdup(name);
-    return ret;
+    return g_strdup(name);
 }
+
+
+static char *
+virHashStrPrintHuman(const void *name)
+{
+    return g_strdup(name);
+}
+
 
 static void virHashStrFree(void *name)
 {
@@ -106,7 +112,7 @@ static void virHashStrFree(void *name)
 
 
 void
-virHashValueFree(void *value, const void *name G_GNUC_UNUSED)
+virHashValueFree(void *value)
 {
     VIR_FREE(value);
 }
@@ -130,14 +136,14 @@ virHashComputeKey(const virHashTable *table, const void *name)
  *
  * Create a new virHashTablePtr.
  *
- * Returns the newly created object, or NULL if an error occurred.
+ * Returns the newly created object.
  */
 virHashTablePtr virHashCreateFull(ssize_t size,
                                   virHashDataFree dataFree,
-                                  virHashDataFreeSimple dataFreeSimple,
                                   virHashKeyCode keyCode,
                                   virHashKeyEqual keyEqual,
                                   virHashKeyCopy keyCopy,
+                                  virHashKeyPrintHuman keyPrint,
                                   virHashKeyFree keyFree)
 {
     virHashTablePtr table = NULL;
@@ -145,25 +151,19 @@ virHashTablePtr virHashCreateFull(ssize_t size,
     if (size <= 0)
         size = 256;
 
-    if (VIR_ALLOC(table) < 0)
-        return NULL;
+    table = g_new0(virHashTable, 1);
 
     table->seed = virRandomBits(32);
     table->size = size;
     table->nbElems = 0;
-    if (dataFree)
-        table->dataFree = dataFree;
-    else
-        table->dataFreeSimple = dataFreeSimple;
+    table->dataFree = dataFree;
     table->keyCode = keyCode;
     table->keyEqual = keyEqual;
     table->keyCopy = keyCopy;
+    table->keyPrint = keyPrint;
     table->keyFree = keyFree;
 
-    if (VIR_ALLOC_N(table->table, size) < 0) {
-        VIR_FREE(table);
-        return NULL;
-    }
+    table->table = g_new0(virHashEntryPtr, table->size);
 
     return table;
 }
@@ -175,17 +175,17 @@ virHashTablePtr virHashCreateFull(ssize_t size,
  *
  * Create a new virHashTablePtr.
  *
- * Returns the newly created object, or NULL if an error occurred.
+ * Returns the newly created object.
  */
 virHashTablePtr
-virHashNew(virHashDataFreeSimple dataFree)
+virHashNew(virHashDataFree dataFree)
 {
     return virHashCreateFull(32,
-                             NULL,
                              dataFree,
                              virHashStrCode,
                              virHashStrEqual,
                              virHashStrCopy,
+                             virHashStrPrintHuman,
                              virHashStrFree);
 }
 
@@ -197,16 +197,16 @@ virHashNew(virHashDataFreeSimple dataFree)
  *
  * Create a new virHashTablePtr.
  *
- * Returns the newly created object, or NULL if an error occurred.
+ * Returns the newly created object.
  */
 virHashTablePtr virHashCreate(ssize_t size, virHashDataFree dataFree)
 {
     return virHashCreateFull(size,
                              dataFree,
-                             NULL,
                              virHashStrCode,
                              virHashStrEqual,
                              virHashStrCopy,
+                             virHashStrPrintHuman,
                              virHashStrFree);
 }
 
@@ -324,9 +324,7 @@ virHashFree(virHashTablePtr table)
             virHashEntryPtr next = iter->next;
 
             if (table->dataFree)
-                table->dataFree(iter->payload, iter->name);
-            if (table->dataFreeSimple)
-                table->dataFreeSimple(iter->payload);
+                table->dataFree(iter->payload);
             if (table->keyFree)
                 table->keyFree(iter->name);
             VIR_FREE(iter);
@@ -347,7 +345,6 @@ virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
     size_t key, len = 0;
     virHashEntryPtr entry;
     virHashEntryPtr last = NULL;
-    void *new_name;
 
     if ((table == NULL) || (name == NULL))
         return -1;
@@ -359,14 +356,17 @@ virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
         if (table->keyEqual(entry->name, name)) {
             if (is_update) {
                 if (table->dataFree)
-                    table->dataFree(entry->payload, entry->name);
-                if (table->dataFreeSimple)
-                    table->dataFreeSimple(entry->payload);
+                    table->dataFree(entry->payload);
                 entry->payload = userdata;
                 return 0;
             } else {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Duplicate key"));
+                g_autofree char *keystr = NULL;
+
+                if (table->keyPrint)
+                    keystr = table->keyPrint(name);
+
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Duplicate hash table key '%s'"), NULLSTR(keystr));
                 return -1;
             }
         }
@@ -374,12 +374,8 @@ virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
         len++;
     }
 
-    if (VIR_ALLOC(entry) < 0 || !(new_name = table->keyCopy(name))) {
-        VIR_FREE(entry);
-        return -1;
-    }
-
-    entry->name = new_name;
+    entry = g_new0(virHashEntry, 1);
+    entry->name = table->keyCopy(name);
     entry->payload = userdata;
 
     if (last)
@@ -519,12 +515,9 @@ void *virHashSteal(virHashTablePtr table, const void *name)
     void *data = virHashLookup(table, name);
     if (data) {
         virHashDataFree dataFree = table->dataFree;
-        virHashDataFreeSimple dataFreeSimple = table->dataFreeSimple;
         table->dataFree = NULL;
-        table->dataFreeSimple = NULL;
         virHashRemoveEntry(table, name);
         table->dataFree = dataFree;
-        table->dataFreeSimple = dataFreeSimple;
     }
     return data;
 }
@@ -602,7 +595,7 @@ virHashRemoveEntry(virHashTablePtr table, const void *name)
     for (entry = *nextptr; entry; entry = entry->next) {
         if (table->keyEqual(entry->name, name)) {
             if (table->dataFree)
-                table->dataFree(entry->payload, entry->name);
+                table->dataFree(entry->payload);
             if (table->keyFree)
                 table->keyFree(entry->name);
             *nextptr = entry->next;
@@ -648,15 +641,13 @@ virHashForEach(virHashTablePtr table, virHashIterator iter/*元素遍历回调*/
             ret = iter(entry->payload, entry->name, data);
 
             if (ret < 0)
-                goto cleanup;
+                return ret;
 
             entry = next;
         }
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -693,7 +684,7 @@ virHashRemoveSet(virHashTablePtr table,
             } else {
                 count++;
                 if (table->dataFree)
-                    table->dataFree(entry->payload, entry->name);
+                    table->dataFree(entry->payload);
                 if (table->keyFree)
                     table->keyFree(entry->name);
                 *nextptr = entry->next;

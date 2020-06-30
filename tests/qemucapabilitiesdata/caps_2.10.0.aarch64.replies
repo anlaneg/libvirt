@@ -4895,8 +4895,118 @@
 }
 
 {
-  "execute": "query-machines",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "pcie-root-port"
+  },
   "id": "libvirt-29"
+}
+
+{
+  "return": [
+    {
+      "name": "addr",
+      "description": "Slot and optional function number, example: 06.0 or 06",
+      "type": "int32"
+    },
+    {
+      "name": "power_controller_present",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "aer_log_max",
+      "type": "uint16"
+    },
+    {
+      "name": "x-speed",
+      "description": "2_5/5/8/16",
+      "type": "PCIELinkSpeed"
+    },
+    {
+      "name": "slot",
+      "type": "uint16"
+    },
+    {
+      "name": "x-pcie-lnksta-dllla",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "port",
+      "type": "uint8"
+    },
+    {
+      "name": "mem-reserve",
+      "type": "size"
+    },
+    {
+      "name": "x-pcie-extcap-init",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "pref64-reserve",
+      "type": "size"
+    },
+    {
+      "name": "rombar",
+      "type": "uint32"
+    },
+    {
+      "name": "command_serr_enable",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "romfile",
+      "type": "str"
+    },
+    {
+      "name": "multifunction",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "chassis",
+      "type": "uint8"
+    },
+    {
+      "name": "x-width",
+      "description": "1/2/4/8/12/16/32",
+      "type": "PCIELinkWidth"
+    },
+    {
+      "name": "failover_pair_id",
+      "type": "str"
+    },
+    {
+      "name": "pref32-reserve",
+      "type": "size"
+    },
+    {
+      "name": "bus-reserve",
+      "type": "uint32"
+    },
+    {
+      "name": "x-migrate-msix",
+      "type": "bool"
+    },
+    {
+      "name": "disable-acs",
+      "type": "bool"
+    },
+    {
+      "name": "io-reserve",
+      "type": "size"
+    }
+  ],
+  "id": "libvirt-29"
+}
+
+{
+  "execute": "query-machines",
+  "id": "libvirt-30"
 }
 
 {
@@ -5163,12 +5273,12 @@
       "cpu-max": 1
     }
   ],
-  "id": "libvirt-29"
+  "id": "libvirt-30"
 }
 
 {
   "execute": "query-cpu-definitions",
-  "id": "libvirt-30"
+  "id": "libvirt-31"
 }
 
 {
@@ -5334,34 +5444,34 @@
       "static": false
     }
   ],
-  "id": "libvirt-30"
+  "id": "libvirt-31"
 }
 
 {
   "execute": "query-tpm-models",
-  "id": "libvirt-31"
+  "id": "libvirt-32"
 }
 
 {
   "return": [
   ],
-  "id": "libvirt-31"
+  "id": "libvirt-32"
 }
 
 {
   "execute": "query-tpm-types",
-  "id": "libvirt-32"
+  "id": "libvirt-33"
 }
 
 {
   "return": [
   ],
-  "id": "libvirt-32"
+  "id": "libvirt-33"
 }
 
 {
   "execute": "query-command-line-options",
-  "id": "libvirt-33"
+  "id": "libvirt-34"
 }
 
 {
@@ -6506,12 +6616,12 @@
       "option": "drive"
     }
   ],
-  "id": "libvirt-33"
+  "id": "libvirt-34"
 }
 
 {
   "execute": "query-migrate-capabilities",
-  "id": "libvirt-34"
+  "id": "libvirt-35"
 }
 
 {
@@ -6561,12 +6671,12 @@
       "capability": "return-path"
     }
   ],
-  "id": "libvirt-34"
+  "id": "libvirt-35"
 }
 
 {
   "execute": "query-qmp-schema",
-  "id": "libvirt-35"
+  "id": "libvirt-36"
 }
 
 {
@@ -16289,12 +16399,12 @@
       "meta-type": "object"
     }
   ],
-  "id": "libvirt-35"
+  "id": "libvirt-36"
 }
 
 {
   "execute": "query-gic-capabilities",
-  "id": "libvirt-36"
+  "id": "libvirt-37"
 }
 
 {
@@ -16310,7 +16420,7 @@
       "kernel": true
     }
   ],
-  "id": "libvirt-36"
+  "id": "libvirt-37"
 }
 
 {
@@ -16488,4 +16598,276 @@
     }
   ],
   "id": "libvirt-2"
+}
+
+{
+  "execute": "query-machines",
+  "id": "libvirt-3"
+}
+
+{
+  "return": [
+    {
+      "hotpluggable-cpus": false,
+      "name": "integratorcp",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "nuri",
+      "cpu-max": 2
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "mps2-an511",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "verdex",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "ast2500-evb",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "smdkc210",
+      "cpu-max": 2
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "collie",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "imx25-pdk",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "none",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "spitz",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "realview-pbx-a9",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "realview-eb",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "versatilepb",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "realview-pb-a8",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "virt-2.9",
+      "cpu-max": 255
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "musicpal",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "z2",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "akita",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "virt-2.7",
+      "cpu-max": 255
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "kzm",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "virt-2.8",
+      "cpu-max": 255
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "realview-eb-mpcore",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "sx1",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "sx1-v1",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "virt-2.6",
+      "cpu-max": 255
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "cubieboard",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "highbank",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "raspi2",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "netduino2",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "terrier",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "n810",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "mainstone",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "palmetto-bmc",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "sabrelite",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "midway",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "romulus-bmc",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "cheetah",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "tosa",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "borzoi",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "versatileab",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "lm3s6965evb",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "n800",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "virt-2.10",
+      "cpu-max": 255,
+      "alias": "virt"
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "connex",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "xilinx-zynq-a9",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "xlnx-ep108",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "mps2-an385",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "vexpress-a9",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "vexpress-a15",
+      "cpu-max": 4
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "xlnx-zcu102",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "canon-a1100",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "lm3s811evb",
+      "cpu-max": 1
+    }
+  ],
+  "id": "libvirt-3"
 }

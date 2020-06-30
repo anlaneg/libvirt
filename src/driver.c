@@ -31,6 +31,7 @@
 #include "virmodule.h"
 #include "virstring.h"
 #include "virthread.h"
+#include "virutil.h"
 #include "configmake.h"
 
 VIR_LOG_INIT("driver");
@@ -47,7 +48,7 @@ virDriverLoadModule(const char *name,
                     const char *regfunc,
                     bool required)
 {
-    char *modfile = NULL;
+    g_autofree char *modfile = NULL;
     int ret;
 
     VIR_DEBUG("Module load %s", name);
@@ -61,9 +62,6 @@ virDriverLoadModule(const char *name,
         return -1;
 
     ret = virModuleLoad(modfile, regfunc, required);
-
-    VIR_FREE(modfile);
-
     return ret;
 }
 
@@ -90,8 +88,7 @@ virDriverShouldAutostart(const char *dir,
 
     *autostart = false;
 
-    if (virAsprintf(&path, "%s/autostarted", dir) < 0)
-        return -1;
+    path = g_strdup_printf("%s/autostarted", dir);
 
     if (virFileExists(path)) {
         VIR_DEBUG("Autostart file %s exists, skipping autostart", path);
@@ -152,8 +149,7 @@ virGetConnectGeneric(virThreadLocalPtr threadPtr, const char *name)
         g_autofree char *uri = NULL;
         const char *uriPath = geteuid() == 0 ? "/system" : "/session";
 
-        if (virAsprintf(&uri, "%s://%s", name, uriPath) < 0)
-            return NULL;
+        uri = g_strdup_printf("%s://%s", name, uriPath);
 
         conn = virConnectOpen(uri);
         VIR_DEBUG("Opened new %s connection %p", name, conn);

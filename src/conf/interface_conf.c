@@ -28,6 +28,7 @@
 #include "virxml.h"
 #include "viruuid.h"
 #include "virbuffer.h"
+#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_INTERFACE
 
@@ -261,31 +262,27 @@ static int
 virInterfaceDefParseDhcp(virInterfaceProtocolDefPtr def,
                          xmlNodePtr dhcp, xmlXPathContextPtr ctxt)
 {
-    xmlNodePtr save;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     char *tmp;
     int ret = 0;
 
     def->dhcp = 1;
-    save = ctxt->node;
     ctxt->node = dhcp;
+    def->peerdns = -1;
     /* Not much to do in the current version */
     tmp = virXPathString("string(./@peerdns)", ctxt);
     if (tmp) {
-        if (STREQ(tmp, "yes")) {
-            def->peerdns = 1;
-        } else if (STREQ(tmp, "no")) {
-            def->peerdns = 0;
-        } else {
+        bool state = false;
+        if (virStringParseYesNo(tmp, &state) < 0) {
             virReportError(VIR_ERR_XML_ERROR,
                            _("unknown dhcp peerdns value %s"), tmp);
             ret = -1;
+        } else {
+            def->peerdns = state ? 1 : 0;
         }
         VIR_FREE(tmp);
-    } else {
-        def->peerdns = -1;
     }
 
-    ctxt->node = save;
     return ret;
 }
 
@@ -427,12 +424,10 @@ static int
 virInterfaceDefParseIfAdressing(virInterfaceDefPtr def,
                                 xmlXPathContextPtr ctxt)
 {
-    xmlNodePtr save;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     xmlNodePtr *protoNodes = NULL;
     int nProtoNodes, pp, ret = -1;
     char *tmp;
-
-    save = ctxt->node;
 
     nProtoNodes = virXPathNodeSet("./protocol", ctxt, &protoNodes);
     if (nProtoNodes < 0)
@@ -488,7 +483,6 @@ virInterfaceDefParseIfAdressing(virInterfaceDefPtr def,
 
  error:
     VIR_FREE(protoNodes);
-    ctxt->node = save;
     return ret;
 
 }
@@ -559,7 +553,7 @@ virInterfaceDefParseBondItfs(virInterfaceDefPtr def,
                              xmlXPathContextPtr ctxt)
 {
     xmlNodePtr *interfaces = NULL;
-    xmlNodePtr bond = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     virInterfaceDefPtr itf;
     int nbItf;
     size_t i;
@@ -592,7 +586,6 @@ virInterfaceDefParseBondItfs(virInterfaceDefPtr def,
     ret = 0;
  cleanup:
     VIR_FREE(interfaces);
-    ctxt->node = bond;
     return ret;
 }
 
@@ -699,7 +692,7 @@ virInterfaceDefParseXML(xmlXPathContextPtr ctxt,
     virInterfaceDefPtr def;
     int type;
     char *tmp;
-    xmlNodePtr cur = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     xmlNodePtr lnk;
 
 
@@ -805,11 +798,9 @@ virInterfaceDefParseXML(xmlXPathContextPtr ctxt,
 
     }
 
-    ctxt->node = cur;
     return def;
 
  error:
-    ctxt->node = cur;
     virInterfaceDefFree(def);
     return NULL;
 }
@@ -1070,19 +1061,19 @@ virInterfaceDefDevFormat(virBufferPtr buf,
     if (def == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("virInterfaceDefFormat NULL def"));
-        goto cleanup;
+        return -1;
     }
 
     if ((def->name == NULL) && (def->type != VIR_INTERFACE_TYPE_VLAN)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("virInterfaceDefFormat missing interface name"));
-        goto cleanup;
+        return -1;
     }
 
     if (!(type = virInterfaceTypeToString(def->type))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("unexpected interface type %d"), def->type);
-        goto cleanup;
+        return -1;
     }
 
     virBufferAsprintf(buf, "<interface type='%s' ", type);
@@ -1125,9 +1116,6 @@ virInterfaceDefDevFormat(virBufferPtr buf,
     virBufferAddLit(buf, "</interface>\n");
 
     return 0;
-
- cleanup:
-    return -1;
 }
 
 

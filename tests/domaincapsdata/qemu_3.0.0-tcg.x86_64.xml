@@ -43,6 +43,7 @@
       <feature policy='require' name='la57'/>
       <feature policy='require' name='3dnowext'/>
       <feature policy='require' name='3dnow'/>
+      <feature policy='require' name='npt'/>
       <feature policy='disable' name='vme'/>
       <feature policy='disable' name='fma'/>
       <feature policy='disable' name='avx'/>
@@ -139,7 +140,9 @@
         <value>vmvga</value>
         <value>qxl</value>
         <value>virtio</value>
+        <value>none</value>
         <value>bochs</value>
+        <value>ramfb</value>
       </enum>
     </video>
     <hostdev supported='yes'>
@@ -179,6 +182,8 @@
     <gic supported='no'/>
     <vmcoreinfo supported='yes'/>
     <genid supported='yes'/>
+    <backingStoreInput supported='no'/>
+    <backup supported='no'/>
     <sev supported='no'/>
   </features>
 </domainCapabilities>

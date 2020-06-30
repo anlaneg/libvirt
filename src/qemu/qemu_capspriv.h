@@ -33,12 +33,14 @@ virQEMUCapsNewForBinaryInternal(virArch hostArch,
                                 const char *libDir,
                                 uid_t runUid,
                                 gid_t runGid,
+                                const char *hostCPUSignature,
                                 unsigned int microcodeVersion,
                                 const char *kernelVersion);
 
 int virQEMUCapsLoadCache(virArch hostArch,
                          virQEMUCapsPtr qemuCaps,
-                         const char *filename);
+                         const char *filename,
+                         bool skipInvalidation);
 char *virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps);
 
 int
@@ -95,9 +97,8 @@ virQEMUCapsSetSEVCapabilities(virQEMUCapsPtr qemuCaps,
                               virSEVCapability *capabilities);
 
 int
-virQEMUCapsProbeQMPCPUDefinitions(virQEMUCapsPtr qemuCaps,
-                                  qemuMonitorPtr mon,
-                                  bool tcg);
+virQEMUCapsProbeCPUDefinitionsTest(virQEMUCapsPtr qemuCaps,
+                                   qemuMonitorPtr mon);
 
 void
 virQEMUCapsSetMicrocodeVersion(virQEMUCapsPtr qemuCaps,
@@ -105,3 +106,17 @@ virQEMUCapsSetMicrocodeVersion(virQEMUCapsPtr qemuCaps,
 
 void
 virQEMUCapsStripMachineAliases(virQEMUCapsPtr qemuCaps);
+
+bool
+virQEMUCapsHasMachines(virQEMUCapsPtr qemuCaps);
+
+void
+virQEMUCapsAddMachine(virQEMUCapsPtr qemuCaps,
+                      virDomainVirtType virtType,
+                      const char *name,
+                      const char *alias,
+                      const char *defaultCPU,
+                      int maxCpus,
+                      bool hotplugCpus,
+                      bool isDefault,
+                      bool numaMemSupported);

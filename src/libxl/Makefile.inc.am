@@ -22,8 +22,8 @@ LIBXL_DRIVER_SOURCES = \
 	libxl/libxl_migration.h \
 	$(NULL)
 
-DRIVER_SOURCE_FILES += $(LIBXL_DRIVER_SOURCES)
-STATEFUL_DRIVER_SOURCE_FILES += $(LIBXL_DRIVER_SOURCES)
+DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(LIBXL_DRIVER_SOURCES))
+STATEFUL_DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(LIBXL_DRIVER_SOURCES))
 EXTRA_DIST += \
 	$(LIBXL_DRIVER_SOURCES) \
 	$(NULL)
@@ -35,7 +35,6 @@ libvirt_driver_libxl_la_LIBADD = \
 	libvirt_driver_libxl_impl.la \
 	libvirt.la \
 	$(GLIB_LIBS) \
-	../gnulib/lib/libgnu.la \
 	$(NULL)
 mod_LTLIBRARIES += libvirt_driver_libxl.la
 libvirt_driver_libxl_la_LDFLAGS = $(AM_LDFLAGS_MOD_NOUNDEF)
@@ -44,8 +43,10 @@ libvirt_driver_libxl_impl_la_CFLAGS = \
 	$(LIBXL_CFLAGS) \
 	$(LIBXML_CFLAGS) \
 	-I$(srcdir)/access \
+	-I$(builddir)/access \
 	-I$(srcdir)/conf \
 	-I$(srcdir)/secret \
+	-I$(srcdir)/hypervisor \
 	$(AM_CFLAGS) \
 	$(NULL)
 libvirt_driver_libxl_impl_la_LDFLAGS = $(AM_LDFLAGS)
@@ -63,6 +64,7 @@ augeastest_DATA += libxl/test_virtxend.aug
 CLEANFILES += libxl/virtxend.aug
 
 virtxend_SOURCES = $(REMOTE_DAEMON_SOURCES)
+nodist_virtxend_SOURCES = $(REMOTE_DAEMON_GENERATED)
 virtxend_CFLAGS = \
        $(REMOTE_DAEMON_CFLAGS) \
        -DDAEMON_NAME="\"virtxend\"" \
@@ -70,6 +72,8 @@ virtxend_CFLAGS = \
        $(NULL)
 virtxend_LDFLAGS = $(REMOTE_DAEMON_LD_FLAGS)
 virtxend_LDADD = $(REMOTE_DAEMON_LD_ADD)
+
+SYSCONF_FILES += libxl/virtxend.sysconf
 
 SYSTEMD_UNIT_FILES += \
 	virtxend.service \
@@ -79,6 +83,13 @@ SYSTEMD_UNIT_FILES += \
 	$(NULL)
 SYSTEMD_UNIT_FILES_IN += \
 	libxl/virtxend.service.in \
+	$(NULL)
+
+OPENRC_INIT_FILES += \
+	virtxend.init \
+	$(NULL)
+OPENRC_INIT_FILES_IN += \
+	libxl/virtxend.init.in \
 	$(NULL)
 
 LIBXL_UNIT_COND = ConditionPathExists=/proc/xen/capabilities
@@ -91,6 +102,9 @@ VIRTXEND_UNIT_VARS = \
 	-e 's|[@]service[@]|virtxend|g' \
 	-e 's|[@]sockprefix[@]|virtxend|g' \
 	$(NULL)
+
+virtxend.init: libxl/virtxend.init.in $(top_builddir)/config.status
+	$(AM_V_GEN)$(SED) $(LIBVIRTD_INIT_VARS) $< > $@-t && mv $@-t $@
 
 virtxend.service: libxl/virtxend.service.in $(top_builddir)/config.status
 	$(AM_V_GEN)$(SED) $(VIRTXEND_UNIT_VARS) $< > $@-t && mv $@-t $@

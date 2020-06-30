@@ -43,6 +43,7 @@
       <feature policy='require' name='la57'/>
       <feature policy='require' name='3dnowext'/>
       <feature policy='require' name='3dnow'/>
+      <feature policy='require' name='npt'/>
       <feature policy='disable' name='vme'/>
       <feature policy='disable' name='fma'/>
       <feature policy='disable' name='avx'/>
@@ -57,6 +58,7 @@
       <feature policy='disable' name='osvw'/>
       <feature policy='disable' name='topoext'/>
       <feature policy='disable' name='ibpb'/>
+      <feature policy='disable' name='nrip-save'/>
     </mode>
     <mode name='custom' supported='yes'>
       <model usable='yes'>qemu64</model>
@@ -73,8 +75,10 @@
       <model usable='yes'>athlon</model>
       <model usable='no'>Westmere-IBRS</model>
       <model usable='no'>Westmere</model>
+      <model usable='no'>Skylake-Server-noTSX-IBRS</model>
       <model usable='no'>Skylake-Server-IBRS</model>
       <model usable='no'>Skylake-Server</model>
+      <model usable='no'>Skylake-Client-noTSX-IBRS</model>
       <model usable='no'>Skylake-Client-IBRS</model>
       <model usable='no'>Skylake-Client</model>
       <model usable='no'>SandyBridge-IBRS</model>
@@ -89,7 +93,9 @@
       <model usable='no'>Nehalem</model>
       <model usable='no'>IvyBridge-IBRS</model>
       <model usable='no'>IvyBridge</model>
+      <model usable='no'>Icelake-Server-noTSX</model>
       <model usable='no'>Icelake-Server</model>
+      <model usable='no'>Icelake-Client-noTSX</model>
       <model usable='no'>Icelake-Client</model>
       <model usable='no'>Haswell-noTSX-IBRS</model>
       <model usable='no'>Haswell-noTSX</model>
@@ -97,7 +103,9 @@
       <model usable='no'>Haswell</model>
       <model usable='no'>EPYC-IBPB</model>
       <model usable='no'>EPYC</model>
+      <model usable='no'>Dhyana</model>
       <model usable='yes'>Conroe</model>
+      <model usable='no'>Cascadelake-Server-noTSX</model>
       <model usable='no'>Cascadelake-Server</model>
       <model usable='no'>Broadwell-noTSX-IBRS</model>
       <model usable='no'>Broadwell-noTSX</model>
@@ -142,7 +150,9 @@
         <value>vmvga</value>
         <value>qxl</value>
         <value>virtio</value>
+        <value>none</value>
         <value>bochs</value>
+        <value>ramfb</value>
       </enum>
     </video>
     <hostdev supported='yes'>
@@ -175,6 +185,7 @@
       <enum name='backendModel'>
         <value>random</value>
         <value>egd</value>
+        <value>builtin</value>
       </enum>
     </rng>
   </devices>
@@ -182,6 +193,8 @@
     <gic supported='no'/>
     <vmcoreinfo supported='yes'/>
     <genid supported='yes'/>
+    <backingStoreInput supported='yes'/>
+    <backup supported='no'/>
     <sev supported='no'/>
   </features>
 </domainCapabilities>

@@ -23,7 +23,6 @@
 #include "internal.h"
 #include "virmdev.h"
 #include "virobject.h"
-#include "virutil.h"
 #include "virenum.h"
 
 typedef struct _virPCIDevice virPCIDevice;
@@ -39,11 +38,19 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(virPCIDeviceList, virObjectUnref);
 #define VIR_DOMAIN_DEVICE_ZPCI_MAX_UID UINT16_MAX
 #define VIR_DOMAIN_DEVICE_ZPCI_MAX_FID UINT32_MAX
 
+typedef struct _virZPCIDeviceAddressID virZPCIDeviceAddressID;
 typedef struct _virZPCIDeviceAddress virZPCIDeviceAddress;
 typedef virZPCIDeviceAddress *virZPCIDeviceAddressPtr;
+
+struct _virZPCIDeviceAddressID {
+    unsigned int value;
+    bool isSet;
+};
+
 struct _virZPCIDeviceAddress {
-    unsigned int uid; /* exempt from syntax-check */
-    unsigned int fid;
+    virZPCIDeviceAddressID uid; /* exempt from syntax-check */
+    virZPCIDeviceAddressID fid;
+    /* Don't forget to update virPCIDeviceAddressCopy if needed. */
 };
 
 #define VIR_PCI_DEVICE_ADDRESS_FMT "%04x:%02x:%02x.%d"
@@ -56,6 +63,7 @@ struct _virPCIDeviceAddress {
     int multi; /* virTristateSwitch */
     int extFlags; /* enum virPCIDeviceAddressExtensionFlags */
     virZPCIDeviceAddress zpci;
+    /* Don't forget to update virPCIDeviceAddressCopy if needed. */
 };
 
 typedef enum {
@@ -195,6 +203,7 @@ int virPCIDeviceAddressGetIOMMUGroupAddresses(virPCIDeviceAddressPtr devAddr,
                                               virPCIDeviceAddressPtr **iommuGroupDevices,
                                               size_t *nIommuGroupDevices);
 int virPCIDeviceAddressGetIOMMUGroupNum(virPCIDeviceAddressPtr addr);
+char *virPCIDeviceAddressGetIOMMUGroupDev(const virPCIDeviceAddress *devAddr);
 char *virPCIDeviceGetIOMMUGroupDev(virPCIDevicePtr dev);
 
 int virPCIDeviceIsAssignable(virPCIDevicePtr dev,
@@ -235,14 +244,16 @@ bool virPCIDeviceAddressIsEmpty(const virPCIDeviceAddress *addr);
 
 bool virPCIDeviceAddressEqual(const virPCIDeviceAddress *addr1,
                               const virPCIDeviceAddress *addr2);
+void virPCIDeviceAddressCopy(virPCIDeviceAddressPtr dst,
+                             const virPCIDeviceAddress *src);
 
 char *virPCIDeviceAddressAsString(const virPCIDeviceAddress *addr)
       ATTRIBUTE_NONNULL(1);
 
 int virPCIDeviceAddressParse(char *address, virPCIDeviceAddressPtr bdf);
 
-bool virZPCIDeviceAddressIsValid(virZPCIDeviceAddressPtr zpci);
-bool virZPCIDeviceAddressIsEmpty(const virZPCIDeviceAddress *addr);
+bool virZPCIDeviceAddressIsIncomplete(const virZPCIDeviceAddress *addr);
+bool virZPCIDeviceAddressIsPresent(const virZPCIDeviceAddress *addr);
 
 int virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
                                  int pfNetDevIdx,

@@ -80,7 +80,7 @@ struct _virLXCDriver {
     /* Immutable pointer, Immutable object */
     virDomainXMLOptionPtr xmlopt;
 
-    /* Immutable pointer, lockless APIs*/
+    /* Immutable pointer, lockless APIs */
     virSysinfoDefPtr hostsysinfo;
 
     /* Atomic inc/dec only */
@@ -112,7 +112,7 @@ int virLXCLoadDriverConfig(virLXCDriverConfigPtr cfg,
 virCapsPtr virLXCDriverCapsInit(virLXCDriverPtr driver);
 virCapsPtr virLXCDriverGetCapabilities(virLXCDriverPtr driver,
                                        bool refresh);
-virDomainXMLOptionPtr lxcDomainXMLConfInit(void);
+virDomainXMLOptionPtr lxcDomainXMLConfInit(virLXCDriverPtr driver);
 
 static inline void lxcDriverLock(virLXCDriverPtr driver)
 {

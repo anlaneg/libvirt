@@ -101,9 +101,7 @@ virStorageBackendGlusterOpen(virStoragePoolObjPtr pool)
         return NULL;
 
     ret->volname = g_strdup(name);
-    if (virAsprintf(&ret->dir, "%s%s", dir ? dir : "/",
-                    trailing_slash ? "" : "/") < 0)
-        goto error;
+    ret->dir = g_strdup_printf("%s%s", dir ? dir : "/", trailing_slash ? "" : "/");
 
     /* FIXME: Currently hard-coded to tcp transport; XML needs to be
      * extended to allow alternate transport */
@@ -111,8 +109,7 @@ virStorageBackendGlusterOpen(virStoragePoolObjPtr pool)
         goto error;
     ret->uri->scheme = g_strdup("gluster");
     ret->uri->server = g_strdup(def->source.hosts[0].name);
-    if (virAsprintf(&ret->uri->path, "/%s%s", ret->volname, ret->dir) < 0)
-        goto error;
+    ret->uri->path = g_strdup_printf("/%s%s", ret->volname, ret->dir);
     ret->uri->port = def->source.hosts[0].port;
 
     /* Actually connect to glfs */
@@ -196,15 +193,10 @@ virStorageBackendGlusterSetMetadata(virStorageBackendGlusterStatePtr state,
         vol->name = g_strdup(name);
     }
 
-    if (virAsprintf(&path, "%s%s%s", state->volname, state->dir,
-                    vol->name) < 0)
-        return -1;
+    path = g_strdup_printf("%s%s%s", state->volname, state->dir, vol->name);
 
     tmp = state->uri->path;
-    if (virAsprintf(&state->uri->path, "/%s", path) < 0) {
-        state->uri->path = tmp;
-        return -1;
-    }
+    state->uri->path = g_strdup_printf("/%s", path);
     if (!(vol->target.path = virURIFormat(state->uri))) {
         VIR_FREE(state->uri->path);
         state->uri->path = tmp;
@@ -232,7 +224,6 @@ virStorageBackendGlusterRefreshVol(virStorageBackendGlusterStatePtr state,
     int ret = -1;
     glfs_fd_t *fd = NULL;
     ssize_t len;
-    int backingFormat;
     g_autoptr(virStorageVolDef) vol = NULL;
     g_autoptr(virStorageSource) meta = NULL;
     g_autofree char *header = NULL;
@@ -284,8 +275,7 @@ virStorageBackendGlusterRefreshVol(virStorageBackendGlusterStatePtr state,
         goto cleanup;
 
     if (!(meta = virStorageFileGetMetadataFromBuf(name, header, len,
-                                                  VIR_STORAGE_FILE_AUTO,
-                                                  &backingFormat)))
+                                                  VIR_STORAGE_FILE_AUTO)))
         goto cleanup;
 
     if (meta->backingStoreRaw) {
@@ -294,13 +284,11 @@ virStorageBackendGlusterRefreshVol(virStorageBackendGlusterStatePtr state,
 
         vol->target.backingStore->type = VIR_STORAGE_TYPE_NETWORK;
 
-        vol->target.backingStore->path = meta->backingStoreRaw;
+        vol->target.backingStore->path = g_steal_pointer(&meta->backingStoreRaw);
+        vol->target.backingStore->format = meta->backingStoreRawFormat;
 
-        if (backingFormat < 0)
+        if (vol->target.backingStore->format < 0)
             vol->target.backingStore->format = VIR_STORAGE_FILE_RAW;
-        else
-            vol->target.backingStore->format = backingFormat;
-        meta->backingStoreRaw = NULL;
     }
 
     vol->target.format = meta->format;

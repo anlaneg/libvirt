@@ -17,6 +17,8 @@ QEMU_DRIVER_SOURCES = \
 	qemu/qemu_dbus.h \
 	qemu/qemu_domain.c \
 	qemu/qemu_domain.h \
+	qemu/qemu_domainjob.c \
+	qemu/qemu_domainjob.h \
 	qemu/qemu_domain_address.c \
 	qemu/qemu_domain_address.h \
 	qemu/qemu_cgroup.c \
@@ -29,7 +31,6 @@ QEMU_DRIVER_SOURCES = \
 	qemu/qemu_hostdev.h \
 	qemu/qemu_hotplug.c \
 	qemu/qemu_hotplug.h \
-	qemu/qemu_hotplugpriv.h \
 	qemu/qemu_conf.c \
 	qemu/qemu_conf.h \
 	qemu/qemu_interop_config.c \
@@ -68,13 +69,19 @@ QEMU_DRIVER_SOURCES = \
 	qemu/qemu_vhost_user.h \
 	qemu/qemu_vhost_user_gpu.c \
 	qemu/qemu_vhost_user_gpu.h \
+	qemu/qemu_virtiofs.c \
+	qemu/qemu_virtiofs.h \
 	qemu/qemu_checkpoint.c \
 	qemu/qemu_checkpoint.h \
+	qemu/qemu_backup.c \
+	qemu/qemu_backup.h \
+	qemu/qemu_validate.c \
+	qemu/qemu_validate.h \
 	$(NULL)
 
 
-DRIVER_SOURCE_FILES += $(QEMU_DRIVER_SOURCES)
-STATEFUL_DRIVER_SOURCE_FILES += $(QEMU_DRIVER_SOURCES)
+DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(QEMU_DRIVER_SOURCES))
+STATEFUL_DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(QEMU_DRIVER_SOURCES))
 EXTRA_DIST += $(QEMU_DRIVER_SOURCES)
 
 if WITH_QEMU
@@ -84,7 +91,6 @@ libvirt_driver_qemu_la_LIBADD = \
 	libvirt_driver_qemu_impl.la \
 	libvirt.la \
 	$(GLIB_LIBS) \
-	../gnulib/lib/libgnu.la \
 	$(NULL)
 mod_LTLIBRARIES += libvirt_driver_qemu.la
 libvirt_driver_qemu_la_LDFLAGS = $(AM_LDFLAGS_MOD_NOUNDEF)
@@ -95,8 +101,10 @@ libvirt_driver_qemu_impl_la_CFLAGS = \
 	$(SELINUX_CFLAGS) \
 	$(XDR_CFLAGS) \
 	-I$(srcdir)/access \
+	-I$(builddir)/access \
 	-I$(srcdir)/conf \
 	-I$(srcdir)/secret \
+	-I$(srcdir)/hypervisor \
 	$(AM_CFLAGS) \
 	$(NULL)
 libvirt_driver_qemu_impl_la_LDFLAGS = $(AM_LDFLAGS)
@@ -133,6 +141,7 @@ augeastest_DATA += qemu/test_virtqemud.aug
 CLEANFILES += qemu/virtqemud.aug
 
 virtqemud_SOURCES = $(REMOTE_DAEMON_SOURCES)
+nodist_virtqemud_SOURCES = $(REMOTE_DAEMON_GENERATED)
 virtqemud_CFLAGS = \
        $(REMOTE_DAEMON_CFLAGS) \
        -DDAEMON_NAME="\"virtqemud\"" \
@@ -140,6 +149,8 @@ virtqemud_CFLAGS = \
        $(NULL)
 virtqemud_LDFLAGS = $(REMOTE_DAEMON_LD_FLAGS)
 virtqemud_LDADD = $(REMOTE_DAEMON_LD_ADD)
+
+SYSCONF_FILES += qemu/virtqemud.sysconf
 
 SYSTEMD_UNIT_FILES += \
 	virtqemud.service \
@@ -151,12 +162,22 @@ SYSTEMD_UNIT_FILES_IN += \
 	qemu/virtqemud.service.in \
 	$(NULL)
 
+OPENRC_INIT_FILES += \
+	virtqemud.init \
+	$(NULL)
+OPENRC_INIT_FILES_IN += \
+	qemu/virtqemud.init.in \
+	$(NULL)
+
 VIRTQEMUD_UNIT_VARS = \
 	$(VIRTD_UNIT_VARS) \
 	-e 's|[@]name[@]|Libvirt qemu|g' \
 	-e 's|[@]service[@]|virtqemud|g' \
 	-e 's|[@]sockprefix[@]|virtqemud|g' \
 	$(NULL)
+
+virtqemud.init: qemu/virtqemud.init.in $(top_builddir)/config.status
+	$(AM_V_GEN)$(SED) $(LIBVIRTD_INIT_VARS) $< > $@-t && mv $@-t $@
 
 virtqemud.service: qemu/virtqemud.service.in $(top_builddir)/config.status
 	$(AM_V_GEN)$(SED) $(VIRTQEMUD_UNIT_VARS) $< > $@-t && mv $@-t $@
@@ -230,3 +251,19 @@ EXTRA_DIST += \
 	qemu/THREADS.txt \
 	libvirt_qemu_probes.d \
 	$(NULL)
+
+QEMU_SHIM_SOURCES = qemu/qemu_shim.c
+
+EXTRA_DIST += $(QEMU_SHIM_SOURCES)
+
+if WITH_QEMU
+bin_PROGRAMS += virt-qemu-run
+
+virt_qemu_run_SOURCES = $(QEMU_SHIM_SOURCES)
+
+virt_qemu_run_LDADD = \
+	libvirt.la \
+	$(GLIB_LIBS) \
+	$(NULL)
+virt_qemu_run_LDFLAGS = -export-dynamic
+endif WITH_QEMU

@@ -23,7 +23,6 @@
 #include <libxml/xpath.h>
 
 #include "internal.h"
-#include "virutil.h"
 #include "virbitmap.h"
 #include "virbuffer.h"
 #include "virenum.h"
@@ -88,6 +87,8 @@ size_t virDomainNumaGetNodeCount(virDomainNumaPtr numa);
 bool virDomainNumaNodeDistanceIsUsingDefaults(virDomainNumaPtr numa,
                                               size_t node,
                                               size_t sibling)
+    ATTRIBUTE_NONNULL(1);
+bool virDomainNumaNodesDistancesAreBeingSet(virDomainNumaPtr numa)
     ATTRIBUTE_NONNULL(1);
 size_t virDomainNumaGetNodeDistance(virDomainNumaPtr numa,
                                     size_t node,
@@ -184,3 +185,6 @@ int virDomainNumaDefCPUParseXML(virDomainNumaPtr def, xmlXPathContextPtr ctxt);
 int virDomainNumaDefCPUFormatXML(virBufferPtr buf, virDomainNumaPtr def);
 
 unsigned int virDomainNumaGetCPUCountTotal(virDomainNumaPtr numa);
+
+int virDomainNumaFillCPUsInNode(virDomainNumaPtr numa, size_t node,
+                                unsigned int maxCpus);

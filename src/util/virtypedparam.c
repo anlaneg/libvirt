@@ -25,7 +25,6 @@
 #include <stdarg.h>
 
 #include "viralloc.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "virstring.h"
 
@@ -176,22 +175,22 @@ virTypedParameterToString(virTypedParameterPtr param)
 
     switch (param->type) {
     case VIR_TYPED_PARAM_INT:
-        ignore_value(virAsprintf(&value, "%d", param->value.i));
+        value = g_strdup_printf("%d", param->value.i);
         break;
     case VIR_TYPED_PARAM_UINT:
-        ignore_value(virAsprintf(&value, "%u", param->value.ui));
+        value = g_strdup_printf("%u", param->value.ui);
         break;
     case VIR_TYPED_PARAM_LLONG:
-        ignore_value(virAsprintf(&value, "%lld", param->value.l));
+        value = g_strdup_printf("%lld", param->value.l);
         break;
     case VIR_TYPED_PARAM_ULLONG:
-        ignore_value(virAsprintf(&value, "%llu", param->value.ul));
+        value = g_strdup_printf("%llu", param->value.ul);
         break;
     case VIR_TYPED_PARAM_DOUBLE:
-        ignore_value(virAsprintf(&value, "%g", param->value.d));
+        value = g_strdup_printf("%g", param->value.d);
         break;
     case VIR_TYPED_PARAM_BOOLEAN:
-        ignore_value(virAsprintf(&value, "%d", param->value.b));
+        value = g_strdup_printf("%d", param->value.b);
         break;
     case VIR_TYPED_PARAM_STRING:
         value = g_strdup(param->value.s);
@@ -327,12 +326,12 @@ virTypedParamsReplaceString(virTypedParameterPtr *params,
             virReportError(VIR_ERR_INVALID_ARG,
                            _("Parameter '%s' is not a string"),
                            param->field);
-            goto error;
+            return -1;
         }
         old = param->value.s;
     } else {
         if (VIR_EXPAND_N(*params, n, 1) < 0)
-            goto error;
+            return -1;
         param = *params + n - 1;
     }
 
@@ -342,15 +341,12 @@ virTypedParamsReplaceString(virTypedParameterPtr *params,
                                 VIR_TYPED_PARAM_STRING, str) < 0) {
         param->value.s = old;
         VIR_FREE(str);
-        goto error;
+        return -1;
     }
     VIR_FREE(old);
 
     *nparams = n;
     return 0;
-
- error:
-    return -1;
 }
 
 
@@ -403,12 +399,8 @@ virTypedParamsFilter(virTypedParameterPtr params,
 {
     size_t i, n = 0;
 
-    virCheckNonNullArgGoto(params, error);
-    virCheckNonNullArgGoto(name, error);
-    virCheckNonNullArgGoto(ret, error);
-
     if (VIR_ALLOC_N(*ret, nparams) < 0)
-        goto error;
+        return -1;
 
     for (i = 0; i < nparams; i++) {
         if (STREQ(params[i].field, name)) {
@@ -418,9 +410,6 @@ virTypedParamsFilter(virTypedParameterPtr params,
     }
 
     return n;
-
- error:
-    return -1;
 }
 
 
@@ -764,7 +753,7 @@ virTypedParamSetNameVPrintf(virTypedParameterPtr par,
                             const char *fmt,
                             va_list ap)
 {
-    if (vsnprintf(par->field, VIR_TYPED_PARAM_FIELD_LENGTH, fmt, ap) > VIR_TYPED_PARAM_FIELD_LENGTH) {
+    if (g_vsnprintf(par->field, VIR_TYPED_PARAM_FIELD_LENGTH, fmt, ap) > VIR_TYPED_PARAM_FIELD_LENGTH) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Field name too long"));
         return -1;
     }

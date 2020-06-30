@@ -20,8 +20,6 @@
 
 #include <config.h>
 
-#include <fnmatch.h>
-
 #include "virnetsaslcontext.h"
 #include "virnetmessage.h"
 
@@ -38,7 +36,7 @@ VIR_LOG_INIT("rpc.netsaslcontext");
 struct _virNetSASLContext {
     virObjectLockable parent;
 
-    const char *const*usernameWhitelist;
+    const char *const *usernameACL;
 };
 
 struct _virNetSASLSession {
@@ -123,7 +121,7 @@ virNetSASLContextPtr virNetSASLContextNewClient(void)
     return ctxt;
 }
 
-virNetSASLContextPtr virNetSASLContextNewServer(const char *const*usernameWhitelist)
+virNetSASLContextPtr virNetSASLContextNewServer(const char *const *usernameACL)
 {
     virNetSASLContextPtr ctxt;
 
@@ -134,7 +132,7 @@ virNetSASLContextPtr virNetSASLContextNewServer(const char *const*usernameWhitel
     if (!(ctxt = virObjectLockableNew(virNetSASLContextClass)))
         return NULL;
 
-    ctxt->usernameWhitelist = usernameWhitelist;
+    ctxt->usernameACL = usernameACL;
 
     return ctxt;
 }
@@ -148,30 +146,23 @@ int virNetSASLContextCheckIdentity(virNetSASLContextPtr ctxt,
     virObjectLock(ctxt);
 
     /* If the list is not set, allow any DN. */
-    wildcards = ctxt->usernameWhitelist;
+    wildcards = ctxt->usernameACL;
     if (!wildcards) {
         ret = 1; /* No ACL, allow all */
         goto cleanup;
     }
 
     while (*wildcards) {
-        int rv = fnmatch(*wildcards, identity, 0);
-        if (rv == 0) {
+        if (g_pattern_match_simple(*wildcards, identity)) {
             ret = 1;
             goto cleanup; /* Successful match */
-        }
-        if (rv != FNM_NOMATCH) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Malformed TLS whitelist regular expression '%s'"),
-                           *wildcards);
-            goto cleanup;
         }
 
         wildcards++;
     }
 
     /* Denied */
-    VIR_ERROR(_("SASL client identity '%s' not allowed in whitelist"), identity);
+    VIR_ERROR(_("SASL client identity '%s' not allowed by ACL"), identity);
 
     /* This is the most common error: make it informative. */
     virReportError(VIR_ERR_SYSTEM_ERROR, "%s",

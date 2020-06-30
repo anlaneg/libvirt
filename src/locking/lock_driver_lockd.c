@@ -33,6 +33,7 @@
 #include "lock_protocol.h"
 #include "configmake.h"
 #include "virstring.h"
+#include "virutil.h"
 
 #include "lock_driver_lockd.h"
 
@@ -122,17 +123,11 @@ static char *virLockManagerLockDaemonPath(bool privileged)
     if (privileged) {
         path = g_strdup(RUNSTATEDIR "/libvirt/virtlockd-sock");
     } else {
-        char *rundir = NULL;
+        g_autofree char *rundir = NULL;
 
-        if (!(rundir = virGetUserRuntimeDirectory()))
-            return NULL;
+        rundir = virGetUserRuntimeDirectory();
 
-        if (virAsprintf(&path, "%s/virtlockd-sock", rundir) < 0) {
-            VIR_FREE(rundir);
-            return NULL;
-        }
-
-        VIR_FREE(rundir);
+        path = g_strdup_printf("%s/virtlockd-sock", rundir);
     }
     return path;
 }
@@ -146,7 +141,6 @@ virLockManagerLockDaemonConnectionRegister(virLockManagerPtr lock,
 {
     virLockManagerLockDaemonPrivatePtr priv = lock->privateData;
     virLockSpaceProtocolRegisterArgs args;
-    int rv = -1;
 
     memset(&args, 0, sizeof(args));
 
@@ -163,12 +157,9 @@ virLockManagerLockDaemonConnectionRegister(virLockManagerPtr lock,
                                 0, NULL, NULL, NULL,
                                 (xdrproc_t)xdr_virLockSpaceProtocolRegisterArgs, (char*)&args,
                                 (xdrproc_t)xdr_void, NULL) < 0)
-        goto cleanup;
+        return -1;
 
-    rv = 0;
-
- cleanup:
-    return rv;
+    return 0;
 }
 
 
@@ -179,7 +170,6 @@ virLockManagerLockDaemonConnectionRestrict(virLockManagerPtr lock G_GNUC_UNUSED,
                                            int *counter)
 {
     virLockSpaceProtocolRestrictArgs args;
-    int rv = -1;
 
     memset(&args, 0, sizeof(args));
 
@@ -192,12 +182,9 @@ virLockManagerLockDaemonConnectionRestrict(virLockManagerPtr lock G_GNUC_UNUSED,
                                 0, NULL, NULL, NULL,
                                 (xdrproc_t)xdr_virLockSpaceProtocolRestrictArgs, (char*)&args,
                                 (xdrproc_t)xdr_void, NULL) < 0)
-        goto cleanup;
+        return -1;
 
-    rv = 0;
-
- cleanup:
-    return rv;
+    return 0;
 }
 
 
@@ -577,9 +564,7 @@ static int virLockManagerLockDaemonAddResource(virLockManagerPtr lock,
                            _("Missing path or lockspace for lease resource"));
             goto cleanup;
         }
-        if (virAsprintf(&newLockspace, "%s/%s",
-                        path, lockspace) < 0)
-            goto cleanup;
+        newLockspace = g_strdup_printf("%s/%s", path, lockspace);
         newName = g_strdup(name);
 
     }   break;

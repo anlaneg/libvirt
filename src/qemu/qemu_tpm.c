@@ -40,10 +40,9 @@
 #include "virstring.h"
 #include "virpidfile.h"
 #include "configmake.h"
-#include "dirname.h"
 #include "qemu_tpm.h"
 #include "virtpm.h"
-#include "secret_util.h"
+#include "virsecret.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -78,30 +77,8 @@ qemuTPMCreateEmulatorStoragePath(const char *swtpmStorageDir,
         return NULL;
     }
 
-    ignore_value(virAsprintf(&path, "%s/%s/%s", swtpmStorageDir, uuidstr,
-                             dir));
-
+    path = g_strdup_printf("%s/%s/%s", swtpmStorageDir, uuidstr, dir);
     return path;
-}
-
-
-/*
- * virtTPMGetTPMStorageDir:
- *
- * @storagepath: directory for swtpm's persistent state
- *
- * Derive the 'TPMStorageDir' from the storagepath by searching
- * for the last '/'.
- */
-static char *
-qemuTPMGetTPMStorageDir(const char *storagepath)
-{
-    char *ret = mdir_name(storagepath);
-
-    if (!ret)
-        virReportOOMError();
-
-    return ret;
 }
 
 
@@ -148,14 +125,10 @@ qemuTPMCreateEmulatorStorage(const char *storagepath,
                              uid_t swtpm_user,
                              gid_t swtpm_group)
 {
-    int ret = -1;
-    char *swtpmStorageDir = qemuTPMGetTPMStorageDir(storagepath);
-
-    if (!swtpmStorageDir)
-        return -1;
+    g_autofree char *swtpmStorageDir = g_path_get_dirname(storagepath);
 
     if (qemuTPMEmulatorInitStorage(swtpmStorageDir) < 0)
-        goto cleanup;
+        return -1;
 
     *created = false;
 
@@ -167,30 +140,22 @@ qemuTPMCreateEmulatorStorage(const char *storagepath,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not create directory %s as %u:%d"),
                        storagepath, swtpm_user, swtpm_group);
-        goto cleanup;
+        return -1;
     }
 
     if (virFileChownFiles(storagepath, swtpm_user, swtpm_group) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(swtpmStorageDir);
-
-    return ret;
+    return 0;
 }
 
 
 static void
 qemuTPMDeleteEmulatorStorage(virDomainTPMDefPtr tpm)
 {
-    char *path = qemuTPMGetTPMStorageDir(tpm->data.emulator.storagepath);
+    g_autofree char *path =  g_path_get_dirname(tpm->data.emulator.storagepath);
 
-    if (path) {
-        ignore_value(virFileDeleteTree(path));
-        VIR_FREE(path);
-    }
+    ignore_value(virFileDeleteTree(path));
 }
 
 
@@ -206,12 +171,7 @@ static char *
 qemuTPMCreateEmulatorSocket(const char *swtpmStateDir,
                             const char *shortName)
 {
-    char *path = NULL;
-
-    ignore_value(virAsprintf(&path, "%s/%s-swtpm.sock", swtpmStateDir,
-                             shortName));
-
-    return path;
+    return g_strdup_printf("%s/%s-swtpm.sock", swtpmStateDir, shortName);
 }
 
 
@@ -249,17 +209,11 @@ static char *
 qemuTPMEmulatorCreatePidFilename(const char *swtpmStateDir,
                                  const char *shortName)
 {
-    char *pidfile = NULL;
-    char *devicename = NULL;
+    g_autofree char *devicename = NULL;
 
-    if (virAsprintf(&devicename, "%s-swtpm", shortName) < 0)
-        return NULL;
+    devicename = g_strdup_printf("%s-swtpm", shortName);
 
-    pidfile = virPidFileBuildPath(swtpmStateDir, devicename);
-
-    VIR_FREE(devicename);
-
-    return pidfile;
+    return virPidFileBuildPath(swtpmStateDir, devicename);
 }
 
 
@@ -270,7 +224,7 @@ qemuTPMEmulatorCreatePidFilename(const char *swtpmStateDir,
  * @shortName: short name of the domain
  * @pid: pointer to pid
  *
- * Return -errno upon error, or zero on successful reading of the pidfile.
+ * Return -1 upon error, or zero on successful reading of the pidfile.
  * If the PID was not still alive, zero will be returned, and @pid will be
  * set to -1;
  */
@@ -279,18 +233,16 @@ qemuTPMEmulatorGetPid(const char *swtpmStateDir,
                       const char *shortName,
                       pid_t *pid)
 {
-    int ret;
     g_autofree char *swtpm = virTPMGetSwtpm();
-    char *pidfile = qemuTPMEmulatorCreatePidFilename(swtpmStateDir,
-                                                     shortName);
+    g_autofree char *pidfile = qemuTPMEmulatorCreatePidFilename(swtpmStateDir,
+                                                                shortName);
     if (!pidfile)
-        return -ENOMEM;
+        return -1;
 
-    ret = virPidFileReadPathIfAlive(pidfile, pid, swtpm);
+    if (virPidFileReadPathIfAlive(pidfile, pid, swtpm) < 0)
+        return -1;
 
-    VIR_FREE(pidfile);
-
-    return ret;
+    return 0;
 }
 
 
@@ -320,8 +272,6 @@ qemuTPMEmulatorPrepareHost(virDomainTPMDefPtr tpm,
                            uid_t qemu_user,
                            const char *shortName)
 {
-    int ret = -1;
-
     if (virTPMEmulatorInit() < 0)
         return -1;
 
@@ -332,17 +282,15 @@ qemuTPMEmulatorPrepareHost(virDomainTPMDefPtr tpm,
     /* ... and adjust ownership */
     if (virDirCreate(logDir, 0730, swtpm_user, swtpm_group,
                      VIR_DIR_CREATE_ALLOW_EXIST) < 0)
-        goto cleanup;
+        return -1;
 
     /* create logfile name ... */
-    if (!tpm->data.emulator.logfile &&
-        virAsprintf(&tpm->data.emulator.logfile, "%s/%s-swtpm.log",
-                    logDir, vmname) < 0)
-        goto cleanup;
+    if (!tpm->data.emulator.logfile)
+        tpm->data.emulator.logfile = g_strdup_printf("%s/%s-swtpm.log", logDir, vmname);
 
     if (!virFileExists(tpm->data.emulator.logfile) &&
         virFileTouch(tpm->data.emulator.logfile, 0644) < 0) {
-        goto cleanup;
+        return -1;
     }
 
     /* ... and make sure it can be accessed by swtpm_user */
@@ -350,7 +298,7 @@ qemuTPMEmulatorPrepareHost(virDomainTPMDefPtr tpm,
         virReportSystemError(errno,
                              _("Could not chown on swtpm logfile %s"),
                              tpm->data.emulator.logfile);
-        goto cleanup;
+        return -1;
     }
 
     /*
@@ -362,20 +310,16 @@ qemuTPMEmulatorPrepareHost(virDomainTPMDefPtr tpm,
     */
     if (virDirCreate(swtpmStateDir, 0770, qemu_user, swtpm_group,
                      VIR_DIR_CREATE_ALLOW_EXIST) < 0)
-        goto cleanup;
+        return -1;
 
     /* create the socket filename */
     if (!tpm->data.emulator.source.data.nix.path &&
         !(tpm->data.emulator.source.data.nix.path =
           qemuTPMCreateEmulatorSocket(swtpmStateDir, shortName)))
-        goto cleanup;
+        return -1;
     tpm->data.emulator.source.type = VIR_DOMAIN_CHR_TYPE_UNIX;
 
-    ret = 0;
-
- cleanup:
-
-    return ret;
+    return 0;
 }
 
 /*
@@ -415,11 +359,8 @@ qemuTPMSetupEncryption(const unsigned char *secretuuid,
                                  &secret, &secret_len) < 0)
         goto error;
 
-    if (pipe(pipefd) == -1) {
-        virReportSystemError(errno, "%s",
-                             _("Unable to create pipe"));
+    if (virPipe(pipefd) < 0)
         goto error;
-    }
 
     if (virCommandSetSendBuffer(cmd, pipefd[1], secret, secret_len) < 0)
         goto error;
@@ -470,11 +411,10 @@ qemuTPMEmulatorRunSetup(const char *storagepath,
                         const unsigned char *secretuuid,
                         bool incomingMigration)
 {
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     int exitstatus;
-    int ret = -1;
     char uuid[VIR_UUID_STRING_BUFLEN];
-    char *vmid = NULL;
+    g_autofree char *vmid = NULL;
     g_autofree char *swtpm_setup = virTPMGetSwtpmSetup();
     VIR_AUTOCLOSE pwdfile_fd = -1;
 
@@ -489,11 +429,10 @@ qemuTPMEmulatorRunSetup(const char *storagepath,
 
     cmd = virCommandNew(swtpm_setup);
     if (!cmd)
-        goto cleanup;
+        return -1;
 
     virUUIDFormat(vmuuid, uuid);
-    if (virAsprintf(&vmid, "%s:%s", vmname, uuid) < 0)
-        goto cleanup;
+    vmid = g_strdup_printf("%s:%s", vmname, uuid);
 
     virCommandSetUID(cmd, swtpm_user);
     virCommandSetGID(cmd, swtpm_group);
@@ -515,10 +454,10 @@ qemuTPMEmulatorRunSetup(const char *storagepath,
             virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED,
                 _("%s does not support passing a passphrase using a file "
                   "descriptor"), swtpm_setup);
-            goto cleanup;
+            return -1;
         }
         if ((pwdfile_fd = qemuTPMSetupEncryption(secretuuid, cmd)) < 0)
-            goto cleanup;
+            return -1;
 
         virCommandAddArg(cmd, "--pwdfile-fd");
         virCommandAddArgFormat(cmd, "%d", pwdfile_fd);
@@ -552,16 +491,10 @@ qemuTPMEmulatorRunSetup(const char *storagepath,
                        _("Could not run '%s'. exitstatus: %d; "
                          "Check error log '%s' for details."),
                           swtpm_setup, exitstatus, logfile);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(vmid);
-    virCommandFree(cmd);
-
-    return ret;
+    return 0;
 }
 
 
@@ -594,9 +527,9 @@ qemuTPMEmulatorBuildCommand(virDomainTPMDefPtr tpm,
                             const char *shortName,
                             bool incomingMigration)
 {
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     bool created = false;
-    char *pidfile;
+    g_autofree char *pidfile = NULL;
     g_autofree char *swtpm = virTPMGetSwtpm();
     VIR_AUTOCLOSE pwdfile_fd = -1;
     VIR_AUTOCLOSE migpwdfile_fd = -1;
@@ -657,7 +590,6 @@ qemuTPMEmulatorBuildCommand(virDomainTPMDefPtr tpm,
 
     virCommandAddArg(cmd, "--pid");
     virCommandAddArgFormat(cmd, "file=%s", pidfile);
-    VIR_FREE(pidfile);
 
     if (tpm->data.emulator.hassecretuuid) {
         if (!virTPMSwtpmCapsGet(VIR_TPM_SWTPM_FEATURE_CMDARG_PWD_FD)) {
@@ -687,13 +619,11 @@ qemuTPMEmulatorBuildCommand(virDomainTPMDefPtr tpm,
         migpwdfile_fd = -1;
     }
 
-    return cmd;
+    return g_steal_pointer(&cmd);
 
  error:
     if (created)
         qemuTPMDeleteEmulatorStorage(tpm);
-
-    virCommandFree(cmd);
 
     return NULL;
 }
@@ -711,8 +641,8 @@ qemuTPMEmulatorStop(const char *swtpmStateDir,
                     const char *shortName)
 {
     virCommandPtr cmd;
-    char *pathname;
-    char *errbuf = NULL;
+    g_autofree char *pathname = NULL;
+    g_autofree char *errbuf = NULL;
     g_autofree char *swtpm_ioctl = virTPMGetSwtpmIoctl();
 
     if (!swtpm_ioctl)
@@ -725,11 +655,11 @@ qemuTPMEmulatorStop(const char *swtpmStateDir,
         return;
 
     if (!virFileExists(pathname))
-        goto cleanup;
+        return;
 
     cmd = virCommandNew(swtpm_ioctl);
     if (!cmd)
-        goto cleanup;
+        return;
 
     virCommandAddArgList(cmd, "--unix", pathname, "-s", NULL);
 
@@ -741,10 +671,6 @@ qemuTPMEmulatorStop(const char *swtpmStateDir,
 
     /* clean up the socket */
     unlink(pathname);
-
- cleanup:
-    VIR_FREE(pathname);
-    VIR_FREE(errbuf);
 }
 
 
@@ -752,22 +678,18 @@ int
 qemuExtTPMInitPaths(virQEMUDriverPtr driver,
                     virDomainDefPtr def)
 {
-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-    int ret = 0;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    size_t i;
 
-    switch (def->tpm->type) {
-    case VIR_DOMAIN_TPM_TYPE_EMULATOR:
-        ret = qemuTPMEmulatorInitPaths(def->tpm, cfg->swtpmStorageDir,
-                                       def->uuid);
-        break;
-    case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-    case VIR_DOMAIN_TPM_TYPE_LAST:
-        break;
+    for (i = 0; i < def->ntpms; i++) {
+        if (def->tpms[i]->type != VIR_DOMAIN_TPM_TYPE_EMULATOR)
+            continue;
+
+        return qemuTPMEmulatorInitPaths(def->tpms[i], cfg->swtpmStorageDir,
+                                        def->uuid);
     }
 
-    virObjectUnref(cfg);
-
-    return ret;
+    return 0;
 }
 
 
@@ -775,46 +697,39 @@ int
 qemuExtTPMPrepareHost(virQEMUDriverPtr driver,
                       virDomainDefPtr def)
 {
-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-    int ret = 0;
-    char *shortName = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    g_autofree char *shortName = NULL;
+    size_t i;
 
-    switch (def->tpm->type) {
-    case VIR_DOMAIN_TPM_TYPE_EMULATOR:
+    for (i = 0; i < def->ntpms; i++) {
+        if (def->tpms[i]->type != VIR_DOMAIN_TPM_TYPE_EMULATOR)
+            continue;
+
         shortName = virDomainDefGetShortName(def);
         if (!shortName)
-            goto cleanup;
+            return -1;
 
-        ret = qemuTPMEmulatorPrepareHost(def->tpm, cfg->swtpmLogDir,
-                                         def->name, cfg->swtpm_user,
-                                         cfg->swtpm_group,
-                                         cfg->swtpmStateDir, cfg->user,
-                                         shortName);
-        break;
-    case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-    case VIR_DOMAIN_TPM_TYPE_LAST:
-        break;
+        return qemuTPMEmulatorPrepareHost(def->tpms[i], cfg->swtpmLogDir,
+                                          def->name, cfg->swtpm_user,
+                                          cfg->swtpm_group,
+                                          cfg->swtpmStateDir, cfg->user,
+                                          shortName);
     }
 
- cleanup:
-    VIR_FREE(shortName);
-    virObjectUnref(cfg);
-
-    return ret;
+    return 0;
 }
 
 
 void
 qemuExtTPMCleanupHost(virDomainDefPtr def)
 {
-    switch (def->tpm->type) {
-    case VIR_DOMAIN_TPM_TYPE_EMULATOR:
-        qemuTPMDeleteEmulatorStorage(def->tpm);
-        break;
-    case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-    case VIR_DOMAIN_TPM_TYPE_LAST:
-        /* nothing to do */
-        break;
+    size_t i;
+
+    for (i = 0; i < def->ntpms; i++) {
+        if (def->tpms[i]->type != VIR_DOMAIN_TPM_TYPE_EMULATOR)
+            continue;
+
+        qemuTPMDeleteEmulatorStorage(def->tpms[i]);
     }
 }
 
@@ -833,15 +748,14 @@ qemuExtTPMCleanupHost(virDomainDefPtr def)
 static int
 qemuExtTPMStartEmulator(virQEMUDriverPtr driver,
                         virDomainObjPtr vm,
+                        virDomainTPMDefPtr tpm,
                         bool incomingMigration)
 {
-    int ret = -1;
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     int exitstatus = 0;
-    char *errbuf = NULL;
-    virQEMUDriverConfigPtr cfg;
-    virDomainTPMDefPtr tpm = vm->def->tpm;
-    char *shortName = virDomainDefGetShortName(vm->def);
+    g_autofree char *errbuf = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = NULL;
+    g_autofree char *shortName = virDomainDefGetShortName(vm->def);
     int cmdret = 0, timeout, rc;
     pid_t pid;
 
@@ -859,23 +773,23 @@ qemuExtTPMStartEmulator(virQEMUDriverPtr driver,
                                             cfg->swtpm_group,
                                             cfg->swtpmStateDir, shortName,
                                             incomingMigration)))
-        goto cleanup;
+        return -1;
 
     if (qemuExtDeviceLogCommand(driver, vm, cmd, "TPM Emulator") < 0)
-        goto cleanup;
+        return -1;
 
     virCommandSetErrorBuffer(cmd, &errbuf);
 
     if (qemuSecurityStartTPMEmulator(driver, vm, cmd,
                                      cfg->swtpm_user, cfg->swtpm_group,
                                      &exitstatus, &cmdret) < 0)
-        goto cleanup;
+        return -1;
 
     if (cmdret < 0 || exitstatus != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not start 'swtpm'. exitstatus: %d, "
                          "error: %s"), exitstatus, errbuf);
-        goto cleanup;
+        return -1;
     }
 
     /* check that the swtpm has written its pid into the file */
@@ -894,21 +808,12 @@ qemuExtTPMStartEmulator(virQEMUDriverPtr driver,
     if (timeout <= 0)
         goto error;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(shortName);
-    VIR_FREE(errbuf);
-    virCommandFree(cmd);
-
-    virObjectUnref(cfg);
-
-    return ret;
+    return 0;
 
  error:
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                    _("swtpm failed to start"));
-    goto cleanup;
+    return -1;
 }
 
 
@@ -917,19 +822,17 @@ qemuExtTPMStart(virQEMUDriverPtr driver,
                 virDomainObjPtr vm,
                 bool incomingMigration)
 {
-    int ret = 0;
-    virDomainTPMDefPtr tpm = vm->def->tpm;
+    size_t i;
 
-    switch (tpm->type) {
-    case VIR_DOMAIN_TPM_TYPE_EMULATOR:
-        ret = qemuExtTPMStartEmulator(driver, vm, incomingMigration);
-        break;
-    case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-    case VIR_DOMAIN_TPM_TYPE_LAST:
-        break;
+    for (i = 0; i < vm->def->ntpms; i++) {
+        if (vm->def->tpms[i]->type != VIR_DOMAIN_TPM_TYPE_EMULATOR)
+            continue;
+
+        return qemuExtTPMStartEmulator(driver, vm, vm->def->tpms[i],
+                                       incomingMigration);
     }
 
-    return ret;
+    return 0;
 }
 
 
@@ -937,26 +840,23 @@ void
 qemuExtTPMStop(virQEMUDriverPtr driver,
                virDomainObjPtr vm)
 {
-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-    char *shortName = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    g_autofree char *shortName = NULL;
+    size_t i;
 
-    switch (vm->def->tpm->type) {
-    case VIR_DOMAIN_TPM_TYPE_EMULATOR:
+    for (i = 0; i < vm->def->ntpms; i++) {
+        if (vm->def->tpms[i]->type != VIR_DOMAIN_TPM_TYPE_EMULATOR)
+            continue;
+
         shortName = virDomainDefGetShortName(vm->def);
         if (!shortName)
-            goto cleanup;
+            return;
 
         qemuTPMEmulatorStop(cfg->swtpmStateDir, shortName);
         qemuSecurityCleanupTPMEmulator(driver, vm);
-        break;
-    case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-    case VIR_DOMAIN_TPM_TYPE_LAST:
-        break;
     }
 
- cleanup:
-    VIR_FREE(shortName);
-    virObjectUnref(cfg);
+    return;
 }
 
 
@@ -965,37 +865,28 @@ qemuExtTPMSetupCgroup(virQEMUDriverPtr driver,
                       virDomainDefPtr def,
                       virCgroupPtr cgroup)
 {
-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-    char *pidfile = NULL;
-    char *shortName = NULL;
-    int ret = -1, rc;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    g_autofree char *shortName = NULL;
+    int rc;
     pid_t pid;
+    size_t i;
 
-    switch (def->tpm->type) {
-    case VIR_DOMAIN_TPM_TYPE_EMULATOR:
+    for (i = 0; i < def->ntpms; i++) {
+        if (def->tpms[i]->type != VIR_DOMAIN_TPM_TYPE_EMULATOR)
+            continue;
+
         shortName = virDomainDefGetShortName(def);
         if (!shortName)
-            goto cleanup;
+            return -1;
         rc = qemuTPMEmulatorGetPid(cfg->swtpmStateDir, shortName, &pid);
         if (rc < 0 || (rc == 0 && pid == (pid_t)-1)) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Could not get process id of swtpm"));
-            goto cleanup;
+            return -1;
         }
         if (virCgroupAddProcess(cgroup, pid) < 0)
-            goto cleanup;
-        break;
-    case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-    case VIR_DOMAIN_TPM_TYPE_LAST:
-        break;
+            return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(pidfile);
-    VIR_FREE(shortName);
-    virObjectUnref(cfg);
-
-    return ret;
+    return 0;
 }

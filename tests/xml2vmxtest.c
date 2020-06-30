@@ -74,7 +74,7 @@ testCompareFiles(const char *xml, const char *vmx, int virtualHW_version)
     char *formatted = NULL;
     virDomainDefPtr def = NULL;
 
-    def = virDomainDefParseFile(xml, caps, xmlopt, NULL,
+    def = virDomainDefParseFile(xml, xmlopt, NULL,
                                 VIR_DOMAIN_DEF_PARSE_INACTIVE);
 
     if (def == NULL)
@@ -115,16 +115,13 @@ testCompareHelper(const void *data)
     char *xml = NULL;
     char *vmx = NULL;
 
-    if (virAsprintf(&xml, "%s/xml2vmxdata/xml2vmx-%s.xml", abs_srcdir,
-                    info->input) < 0 ||
-        virAsprintf(&vmx, "%s/xml2vmxdata/xml2vmx-%s.vmx", abs_srcdir,
-                    info->output) < 0) {
-        goto cleanup;
-    }
+    xml = g_strdup_printf("%s/xml2vmxdata/xml2vmx-%s.xml", abs_srcdir,
+                          info->input);
+    vmx = g_strdup_printf("%s/xml2vmxdata/xml2vmx-%s.vmx", abs_srcdir,
+                          info->output);
 
     result = testCompareFiles(xml, vmx, info->virtualHW_version);
 
- cleanup:
     VIR_FREE(xml);
     VIR_FREE(vmx);
 
@@ -169,9 +166,8 @@ testFormatVMXFileName(const char *src, void *opaque G_GNUC_UNUSED)
             directoryAndFileName += strspn(directoryAndFileName, " ");
         }
 
-        if (virAsprintf(&absolutePath, "/vmfs/volumes/%s/%s", datastoreName,
-                        directoryAndFileName) < 0)
-            goto cleanup;
+        absolutePath = g_strdup_printf("/vmfs/volumes/%s/%s", datastoreName,
+                                       directoryAndFileName);
     } else if (STRPREFIX(src, "/")) {
         /* Found absolute path */
         absolutePath = g_strdup(src);
@@ -211,7 +207,7 @@ mymain(void)
     if (caps == NULL)
         return EXIT_FAILURE;
 
-    if (!(xmlopt = virVMXDomainXMLConfInit()))
+    if (!(xmlopt = virVMXDomainXMLConfInit(caps)))
         return EXIT_FAILURE;
 
     ctx.opaque = NULL;

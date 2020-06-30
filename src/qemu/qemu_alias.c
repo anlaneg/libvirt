@@ -25,6 +25,7 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "virstring.h"
+#include "virutil.h"
 
 #define QEMU_DRIVE_HOST_PREFIX "drive-"
 
@@ -114,7 +115,8 @@ qemuAssignDeviceChrAlias(virDomainDefPtr def,
     if (idx == -1 && (idx = qemuGetNextChrDevIndex(def, chr, prefix)) < 0)
         return -1;
 
-    return virAsprintf(&chr->info.alias, "%s%zd", prefix, idx);
+    chr->info.alias = g_strdup_printf("%s%zd", prefix, idx);
+    return 0;
 }
 
 
@@ -141,13 +143,15 @@ qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
              * different naming convention ("pcie.0"), because it is
              * hardcoded that way in qemu.
              */
-            return virAsprintf(&controller->info.alias, "pcie.%d", controller->idx);
+            controller->info.alias = g_strdup_printf("pcie.%d", controller->idx);
+            return 0;
         }
         /* All other PCI controllers use the consistent "pci.%u"
          * (including the hardcoded pci-root controller on
          * multibus-capable qemus).
          */
-        return virAsprintf(&controller->info.alias, "pci.%d", controller->idx);
+        controller->info.alias = g_strdup_printf("pci.%d", controller->idx);
+        return 0;
     } else if (controller->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE) {
         /* for any machine based on e.g. I440FX or G3Beige, the
          * first (and currently only) IDE controller is an integrated
@@ -176,7 +180,8 @@ qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
     /* all other controllers use the default ${type}${index} naming
      * scheme for alias/id.
      */
-    return virAsprintf(&controller->info.alias, "%s%d", prefix, controller->idx);
+    controller->info.alias = g_strdup_printf("%s%d", prefix, controller->idx);
+    return 0;
 }
 
 
@@ -200,23 +205,20 @@ qemuAssignDeviceDiskAlias(virDomainDefPtr def,
 
             if (disk->bus != VIR_DOMAIN_DISK_BUS_SCSI ||
                 controllerModel == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC) {
-                if (virAsprintf(&disk->info.alias, "%s%d-%d-%d", prefix,
-                                disk->info.addr.drive.controller,
-                                disk->info.addr.drive.bus,
-                                disk->info.addr.drive.unit) < 0)
-                    return -1;
+                disk->info.alias = g_strdup_printf("%s%d-%d-%d", prefix,
+                                                   disk->info.addr.drive.controller,
+                                                   disk->info.addr.drive.bus,
+                                                   disk->info.addr.drive.unit);
             } else {
-                if (virAsprintf(&disk->info.alias, "%s%d-%d-%d-%d", prefix,
-                                disk->info.addr.drive.controller,
-                                disk->info.addr.drive.bus,
-                                disk->info.addr.drive.target,
-                                disk->info.addr.drive.unit) < 0)
-                    return -1;
+                disk->info.alias = g_strdup_printf("%s%d-%d-%d-%d", prefix,
+                                                   disk->info.addr.drive.controller,
+                                                   disk->info.addr.drive.bus,
+                                                   disk->info.addr.drive.target,
+                                                   disk->info.addr.drive.unit);
             }
         } else {
             int idx = virDiskNameToIndex(disk->dst);
-            if (virAsprintf(&disk->info.alias, "%s-disk%d", prefix, idx) < 0)
-                return -1;
+            disk->info.alias = g_strdup_printf("%s-disk%d", prefix, idx);
         }
     }
 
@@ -235,17 +237,13 @@ qemuAssignDeviceDiskAlias(virDomainDefPtr def,
             break;
 
         case VIR_DOMAIN_DISK_BUS_VIRTIO:
-            if (virAsprintf(&diskPriv->qomName,
-                            "/machine/peripheral/%s/virtio-backend",
-                            disk->info.alias) < 0)
-                return -1;
+            diskPriv->qomName = g_strdup_printf("/machine/peripheral/%s/virtio-backend",
+                                                disk->info.alias);
             break;
 
         case VIR_DOMAIN_DISK_BUS_USB:
-            if (virAsprintf(&diskPriv->qomName,
-                            "/machine/peripheral/%s/%s.0/legacy[0]",
-                            disk->info.alias, disk->info.alias) < 0)
-                return -1;
+            diskPriv->qomName = g_strdup_printf("/machine/peripheral/%s/%s.0/legacy[0]",
+                                                disk->info.alias, disk->info.alias);
             break;
 
         case VIR_DOMAIN_DISK_BUS_XEN:
@@ -291,8 +289,7 @@ qemuAssignDeviceHostdevAlias(virDomainDefPtr def,
         }
     }
 
-    if (virAsprintf(alias, "hostdev%d", idx) < 0)
-        return -1;
+    *alias = g_strdup_printf("hostdev%d", idx);
 
     return 0;
 }
@@ -327,8 +324,7 @@ qemuAssignDeviceNetAlias(virDomainDefPtr def,
         }
     }
 
-    if (virAsprintf(&net->info.alias, "net%d", idx) < 0)
-        return -1;
+    net->info.alias = g_strdup_printf("net%d", idx);
     return 0;
 }
 
@@ -340,7 +336,8 @@ qemuAssignDeviceFSAlias(virDomainFSDefPtr fss,
     if (fss->info.alias)
         return 0;
 
-    return virAsprintf(&fss->info.alias, "fs%d", idx);
+    fss->info.alias = g_strdup_printf("fs%d", idx);
+    return 0;
 }
 
 
@@ -351,7 +348,8 @@ qemuAssignDeviceSoundAlias(virDomainSoundDefPtr sound,
     if (sound->info.alias)
         return 0;
 
-    return virAsprintf(&sound->info.alias, "sound%d", idx);
+    sound->info.alias = g_strdup_printf("sound%d", idx);
+    return 0;
 }
 
 
@@ -362,7 +360,8 @@ qemuAssignDeviceVideoAlias(virDomainVideoDefPtr video,
     if (video->info.alias)
         return 0;
 
-    return virAsprintf(&video->info.alias, "video%d", idx);
+    video->info.alias = g_strdup_printf("video%d", idx);
+    return 0;
 }
 
 
@@ -373,7 +372,8 @@ qemuAssignDeviceHubAlias(virDomainHubDefPtr hub,
     if (hub->info.alias)
         return 0;
 
-    return virAsprintf(&hub->info.alias, "hub%d", idx);
+    hub->info.alias = g_strdup_printf("hub%d", idx);
+    return 0;
 }
 
 
@@ -384,18 +384,20 @@ qemuAssignDeviceSmartcardAlias(virDomainSmartcardDefPtr smartcard,
     if (smartcard->info.alias)
         return 0;
 
-    return virAsprintf(&smartcard->info.alias, "smartcard%d", idx);
+    smartcard->info.alias = g_strdup_printf("smartcard%d", idx);
+    return 0;
 }
 
 
 static int
-qemuAssingDeviceMemballoonAlias(virDomainMemballoonDefPtr memballoon,
+qemuAssignDeviceMemballoonAlias(virDomainMemballoonDefPtr memballoon,
                                 int idx)
 {
     if (memballoon->info.alias)
         return 0;
 
-    return virAsprintf(&memballoon->info.alias, "balloon%d", idx);
+    memballoon->info.alias = g_strdup_printf("balloon%d", idx);
+    return 0;
 }
 
 
@@ -406,7 +408,8 @@ qemuAssignDeviceTPMAlias(virDomainTPMDefPtr tpm,
     if (tpm->info.alias)
         return 0;
 
-    return virAsprintf(&tpm->info.alias, "tpm%d", idx);
+    tpm->info.alias = g_strdup_printf("tpm%d", idx);
+    return 0;
 }
 
 
@@ -430,8 +433,7 @@ qemuAssignDeviceRedirdevAlias(virDomainDefPtr def,
         }
     }
 
-    if (virAsprintf(&redirdev->info.alias, "redir%d", idx) < 0)
-        return -1;
+    redirdev->info.alias = g_strdup_printf("redir%d", idx);
     return 0;
 }
 
@@ -452,8 +454,7 @@ qemuAssignDeviceRNGAlias(virDomainDefPtr def,
             maxidx = idx + 1;
     }
 
-    if (virAsprintf(&rng->info.alias, "rng%d", maxidx) < 0)
-        return -1;
+    rng->info.alias = g_strdup_printf("rng%d", maxidx);
 
     return 0;
 }
@@ -498,8 +499,7 @@ qemuAssignDeviceMemoryAlias(virDomainDefPtr def,
         maxidx = mem->info.addr.dimm.slot;
     }
 
-    if (virAsprintf(&mem->info.alias, "%s%d", prefix, maxidx) < 0)
-        return -1;
+    mem->info.alias = g_strdup_printf("%s%d", prefix, maxidx);
 
     return 0;
 }
@@ -528,8 +528,7 @@ qemuAssignDeviceShmemAlias(virDomainDefPtr def,
         }
     }
 
-    if (virAsprintf(&shmem->info.alias, "shmem%d", idx) < 0)
-        return -1;
+    shmem->info.alias = g_strdup_printf("shmem%d", idx);
     return 0;
 }
 
@@ -565,8 +564,7 @@ qemuAssignDeviceInputAlias(virDomainDefPtr def,
         }
     }
 
-    if (virAsprintf(&input->info.alias, "input%d", idx) < 0)
-        return -1;
+    input->info.alias = g_strdup_printf("input%d", idx);
 
     return 0;
 }
@@ -664,15 +662,15 @@ qemuAssignDeviceAliases(virDomainDefPtr def, virQEMUCapsPtr qemuCaps)
     }
     if (def->memballoon &&
         def->memballoon->model != VIR_DOMAIN_MEMBALLOON_MODEL_NONE) {
-        if (qemuAssingDeviceMemballoonAlias(def->memballoon, 0) < 0)
+        if (qemuAssignDeviceMemballoonAlias(def->memballoon, 0) < 0)
             return -1;
     }
     for (i = 0; i < def->nrngs; i++) {
         if (qemuAssignDeviceRNGAlias(def, def->rngs[i]) < 0)
             return -1;
     }
-    if (def->tpm) {
-        if (qemuAssignDeviceTPMAlias(def->tpm, 0) < 0)
+    for (i = 0; i < def->ntpms; i++) {
+        if (qemuAssignDeviceTPMAlias(def->tpms[i], i) < 0)
             return -1;
     }
     for (i = 0; i < def->nmems; i++) {
@@ -706,9 +704,7 @@ qemuAliasDiskDriveFromDisk(const virDomainDiskDef *disk)
         return NULL;
     }
 
-    ignore_value(virAsprintf(&ret, "%s%s", QEMU_DRIVE_HOST_PREFIX,
-                             disk->info.alias));
-
+    ret = g_strdup_printf("%s%s", QEMU_DRIVE_HOST_PREFIX, disk->info.alias);
     return ret;
 }
 
@@ -744,9 +740,9 @@ qemuAliasFromHostdev(const virDomainHostdevDef *hostdev)
         return NULL;
     }
 
-    ignore_value(virAsprintf(&ret, "%s-%s",
-                 virDomainDeviceAddressTypeToString(hostdev->info->type),
-                 hostdev->info->alias));
+    ret = g_strdup_printf("%s-%s",
+                          virDomainDeviceAddressTypeToString(hostdev->info->type),
+                          hostdev->info->alias);
     return ret;
 }
 
@@ -768,34 +764,22 @@ qemuDomainGetMasterKeyAlias(void)
 }
 
 
-/* qemuDomainGetSecretAESAlias:
- * @srcalias: Source alias used to generate the secret alias
- * @isLuks: True when we are generating a secret for LUKS encrypt/decrypt
+/* qemuAliasForSecret:
+ * @parentalias: alias of the parent object
+ * @obj: optional sub-object of the parent device the secret is for
  *
- * Generate and return an alias for the encrypted secret
- *
- * Returns NULL or a string containing the alias
+ * Generate alias for a secret object used by @parentalias device or one of
+ * the dependencies of the device described by @obj.
  */
 char *
-qemuDomainGetSecretAESAlias(const char *srcalias,
-                            bool isLuks)
+qemuAliasForSecret(const char *parentalias,
+                   const char *obj)
 {
-    char *alias;
-
-    if (!srcalias) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("encrypted secret alias requires valid source alias"));
-        return NULL;
-    }
-
-    if (isLuks)
-        ignore_value(virAsprintf(&alias, "%s-luks-secret0", srcalias));
+    if (obj)
+        return g_strdup_printf("%s-%s-secret0", parentalias, obj);
     else
-        ignore_value(virAsprintf(&alias, "%s-secret0", srcalias));
-
-    return alias;
+        return g_strdup_printf("%s-secret0", parentalias);
 }
-
 
 /* qemuAliasTLSObjFromSrcAlias
  * @srcAlias: Pointer to a source alias string
@@ -807,7 +791,7 @@ qemuAliasTLSObjFromSrcAlias(const char *srcAlias)
 {
     char *ret;
 
-    ignore_value(virAsprintf(&ret, "obj%s_tls0", srcAlias));
+    ret = g_strdup_printf("obj%s_tls0", srcAlias);
 
     return ret;
 }
@@ -823,7 +807,7 @@ qemuAliasChardevFromDevAlias(const char *devAlias)
 {
     char *ret;
 
-    ignore_value(virAsprintf(&ret, "char%s", devAlias));
+    ret = g_strdup_printf("char%s", devAlias);
 
     return ret;
 }
@@ -841,24 +825,14 @@ qemuDomainGetUnmanagedPRAlias(const char *parentalias)
 {
     char *ret;
 
-    ignore_value(virAsprintf(&ret, "pr-helper-%s", parentalias));
+    ret = g_strdup_printf("pr-helper-%s", parentalias);
 
     return ret;
 }
 
-char *
-qemuAliasDBusVMStateFromId(const char *id)
+
+const char *
+qemuDomainGetDBusVMStateAlias(void)
 {
-    char *ret;
-    size_t i;
-
-    if (virAsprintf(&ret, "dbus-vms-%s", id) < 0)
-        return NULL;
-
-    for (i = 0; ret[i]; i++) {
-        if (ret[i] == ':')
-            ret[i] = '_';
-    }
-
-    return ret;
+    return "dbus-vmstate0";
 }

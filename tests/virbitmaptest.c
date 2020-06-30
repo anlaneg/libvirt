@@ -193,8 +193,7 @@ test4(const void *data G_GNUC_UNUSED)
 
     /* 0. empty set */
 
-    if (!(bitmap = virBitmapNewEmpty()))
-        goto error;
+    bitmap = virBitmapNewEmpty();
 
     if (virBitmapNextSetBit(bitmap, -1) != -1)
         goto error;
@@ -632,11 +631,8 @@ test11(const void *opaque)
 static int
 test12(const void *opaque G_GNUC_UNUSED)
 {
-    virBitmapPtr map = NULL;
+    virBitmapPtr map = virBitmapNewEmpty();
     int ret = -1;
-
-    if (!(map = virBitmapNewEmpty()))
-        return -1;
 
     TEST_MAP(0, "");
 
@@ -682,9 +678,11 @@ test13(const void *opaque G_GNUC_UNUSED)
 
     for (i = 0; i < G_N_ELEMENTS(strings); i++) {
         map = virBitmapNewString(strings[i]);
-        str = virBitmapToString(map, false, true);
+        if (!map)
+            goto cleanup;
 
-        if (!map || !str)
+        str = virBitmapToString(map, false, true);
+        if (!str)
             goto cleanup;
 
         if (STRNEQ(strings[i], str)) {

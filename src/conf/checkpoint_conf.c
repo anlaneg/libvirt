@@ -115,13 +115,10 @@ virDomainCheckpointDiskDefParseXML(xmlNodePtr node,
     return 0;
 }
 
-/* flags is bitwise-or of virDomainCheckpointParseFlags.  If flags
- * does not include VIR_DOMAIN_CHECKPOINT_PARSE_REDEFINE, then caps
- * is ignored.
+/* flags is bitwise-or of virDomainCheckpointParseFlags.
  */
 static virDomainCheckpointDefPtr
 virDomainCheckpointDefParse(xmlXPathContextPtr ctxt,
-                            virCapsPtr caps,
                             virDomainXMLOptionPtr xmlopt,
                             void *parseOpaque,
                             unsigned int flags)
@@ -170,7 +167,7 @@ virDomainCheckpointDefParse(xmlXPathContextPtr ctxt,
                 return NULL;
             }
             def->parent.dom = virDomainDefParseNode(ctxt->node->doc, domainNode,
-                                                    caps, xmlopt, parseOpaque,
+                                                    xmlopt, parseOpaque,
                                                     domainflags);
             if (!def->parent.dom)
                 return NULL;
@@ -201,7 +198,6 @@ virDomainCheckpointDefParse(xmlXPathContextPtr ctxt,
 static virDomainCheckpointDefPtr
 virDomainCheckpointDefParseNode(xmlDocPtr xml,
                                 xmlNodePtr root,
-                                virCapsPtr caps,
                                 virDomainXMLOptionPtr xmlopt,
                                 void *parseOpaque,
                                 unsigned int flags)
@@ -227,12 +223,11 @@ virDomainCheckpointDefParseNode(xmlDocPtr xml,
         return NULL;
 
     ctxt->node = root;
-    return virDomainCheckpointDefParse(ctxt, caps, xmlopt, parseOpaque, flags);
+    return virDomainCheckpointDefParse(ctxt, xmlopt, parseOpaque, flags);
 }
 
 virDomainCheckpointDefPtr
 virDomainCheckpointDefParseString(const char *xmlStr,
-                                  virCapsPtr caps,
                                   virDomainXMLOptionPtr xmlopt,
                                   void *parseOpaque,
                                   unsigned int flags)
@@ -244,7 +239,7 @@ virDomainCheckpointDefParseString(const char *xmlStr,
     if ((xml = virXMLParse(NULL, xmlStr, _("(domain_checkpoint)")))) {
         xmlKeepBlanksDefault(keepBlanksDefault);
         ret = virDomainCheckpointDefParseNode(xml, xmlDocGetRootElement(xml),
-                                              caps, xmlopt, parseOpaque, flags);
+                                              xmlopt, parseOpaque, flags);
         xmlFreeDoc(xml);
     }
     xmlKeepBlanksDefault(keepBlanksDefault);
@@ -446,7 +441,6 @@ virDomainCheckpointDiskDefFormat(virBufferPtr buf,
 static int
 virDomainCheckpointDefFormatInternal(virBufferPtr buf,
                                      virDomainCheckpointDefPtr def,
-                                     virCapsPtr caps,
                                      virDomainXMLOptionPtr xmlopt,
                                      unsigned int flags)
 {
@@ -489,8 +483,8 @@ virDomainCheckpointDefFormatInternal(virBufferPtr buf,
     }
 
     if (!(flags & VIR_DOMAIN_CHECKPOINT_FORMAT_NO_DOMAIN) &&
-        virDomainDefFormatInternal(def->parent.dom, caps, domainflags, buf,
-                                   xmlopt) < 0)
+        virDomainDefFormatInternal(def->parent.dom, xmlopt,
+                                   buf, domainflags) < 0)
         goto error;
 
     virBufferAdjustIndent(buf, -2);
@@ -505,7 +499,6 @@ virDomainCheckpointDefFormatInternal(virBufferPtr buf,
 
 char *
 virDomainCheckpointDefFormat(virDomainCheckpointDefPtr def,
-                             virCapsPtr caps,
                              virDomainXMLOptionPtr xmlopt,
                              unsigned int flags)
 {
@@ -514,7 +507,7 @@ virDomainCheckpointDefFormat(virDomainCheckpointDefPtr def,
     virCheckFlags(VIR_DOMAIN_CHECKPOINT_FORMAT_SECURE |
                   VIR_DOMAIN_CHECKPOINT_FORMAT_NO_DOMAIN |
                   VIR_DOMAIN_CHECKPOINT_FORMAT_SIZE, NULL);
-    if (virDomainCheckpointDefFormatInternal(&buf, def, caps, xmlopt,
+    if (virDomainCheckpointDefFormatInternal(&buf, def, xmlopt,
                                              flags) < 0)
         return NULL;
 
@@ -556,6 +549,10 @@ virDomainCheckpointRedefinePrep(virDomainObjPtr vm,
         if (parent == virDomainCheckpointGetCurrent(vm->checkpoints))
             *update_current = true;
     }
+
+    /* set the first redefined checkpoint as current */
+    if (virDomainCheckpointGetCurrent(vm->checkpoints) == NULL)
+        *update_current = true;
 
     other = virDomainCheckpointFindByName(vm->checkpoints, def->parent.name);
     if (other) {

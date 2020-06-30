@@ -22,15 +22,12 @@
 
 #include <config.h>
 
-#include <regex.h>
 #include <libxl.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 
 #include "internal.h"
 #include "virlog.h"
 #include "virerror.h"
-#include "c-ctype.h"
 #include "datatypes.h"
 #include "virconf.h"
 #include "virfile.h"
@@ -43,13 +40,12 @@
 #include "libxl_conf.h"
 #include "libxl_utils.h"
 #include "virstoragefile.h"
-#include "secret_util.h"
+#include "virsecret.h"
 #include "cpu/cpu.h"
 #include "xen_common.h"
 #include "xen_xl.h"
 #include "virnetdevvportprofile.h"
 #include "virenum.h"
-
 
 #define VIR_FROM_THIS VIR_FROM_LIBXL
 
@@ -162,6 +158,27 @@ libxlMakeDomCreateInfo(libxl_ctx *ctx,
         c_info->type = LIBXL_DOMAIN_TYPE_PV;
     }
 
+#ifdef LIBXL_HAVE_CREATEINFO_PASSTHROUGH
+    if (def->features[VIR_DOMAIN_FEATURE_XEN] == VIR_TRISTATE_SWITCH_ON) {
+        switch ((virTristateSwitch) def->xen_features[VIR_DOMAIN_XEN_PASSTHROUGH]) {
+        case VIR_TRISTATE_SWITCH_ON:
+            if (def->xen_passthrough_mode == VIR_DOMAIN_XEN_PASSTHROUGH_MODE_SYNC_PT)
+                c_info->passthrough = LIBXL_PASSTHROUGH_SYNC_PT;
+            else if (def->xen_passthrough_mode == VIR_DOMAIN_XEN_PASSTHROUGH_MODE_SHARE_PT)
+                c_info->passthrough = LIBXL_PASSTHROUGH_SHARE_PT;
+            else
+                c_info->passthrough = LIBXL_PASSTHROUGH_ENABLED;
+            break;
+        case VIR_TRISTATE_SWITCH_OFF:
+            c_info->passthrough = LIBXL_PASSTHROUGH_DISABLED;
+            break;
+        case VIR_TRISTATE_SWITCH_ABSENT:
+        case VIR_TRISTATE_SWITCH_LAST:
+            break;
+        }
+    }
+#endif
+
     c_info->name = g_strdup(def->name);
 
     if (def->nseclabels &&
@@ -212,8 +229,7 @@ libxlMakeChrdevStr(virDomainChrDefPtr def, char **buf)
 
     case VIR_DOMAIN_CHR_TYPE_FILE:
     case VIR_DOMAIN_CHR_TYPE_PIPE:
-        if (virAsprintf(buf, "%s:%s", type, srcdef->data.file.path) < 0)
-            return -1;
+        *buf = g_strdup_printf("%s:%s", type, srcdef->data.file.path);
         break;
 
     case VIR_DOMAIN_CHR_TYPE_DEV:
@@ -232,12 +248,8 @@ libxlMakeChrdevStr(virDomainChrDefPtr def, char **buf)
         if (bindService == NULL)
             bindService = "0";
 
-        if (virAsprintf(buf, "udp:%s:%s@%s:%s",
-                        connectHost,
-                        srcdef->data.udp.connectService,
-                        bindHost,
-                        bindService) < 0)
-            return -1;
+        *buf = g_strdup_printf("udp:%s:%s@%s:%s", connectHost,
+                               srcdef->data.udp.connectService, bindHost, bindService);
         break;
     }
 
@@ -249,20 +261,15 @@ libxlMakeChrdevStr(virDomainChrDefPtr def, char **buf)
         else
             prefix = "tcp";
 
-        if (virAsprintf(buf, "%s:%s:%s%s",
-                        prefix,
-                        srcdef->data.tcp.host,
-                        srcdef->data.tcp.service,
-                        srcdef->data.tcp.listen ? ",server,nowait" : "") < 0)
-            return -1;
+        *buf = g_strdup_printf("%s:%s:%s%s", prefix, srcdef->data.tcp.host,
+                               srcdef->data.tcp.service,
+                               srcdef->data.tcp.listen ? ",server,nowait" : "");
         break;
     }
 
     case VIR_DOMAIN_CHR_TYPE_UNIX:
-        if (virAsprintf(buf, "unix:%s%s",
-                        srcdef->data.nix.path,
-                        srcdef->data.nix.listen ? ",server,nowait" : "") < 0)
-            return -1;
+        *buf = g_strdup_printf("unix:%s%s", srcdef->data.nix.path,
+                               srcdef->data.nix.listen ? ",server,nowait" : "");
         break;
 
     default:
@@ -373,6 +380,7 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
         case VIR_DOMAIN_TIMER_NAME_HYPERVCLOCK:
         case VIR_DOMAIN_TIMER_NAME_RTC:
         case VIR_DOMAIN_TIMER_NAME_PIT:
+        case VIR_DOMAIN_TIMER_NAME_ARMVTIMER:
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unsupported timer type (name) '%s'"),
                            virDomainTimerNameTypeToString(clock.timers[i]->name));
@@ -393,13 +401,17 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
     b_info->max_memkb = virDomainDefGetMemoryInitial(def);
     b_info->target_memkb = def->mem.cur_balloon;
 
-#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
     for (i = 0; i < def->ncontrollers; i++) {
-        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_XENBUS &&
-            def->controllers[i]->opts.xenbusopts.maxGrantFrames > 0)
-            b_info->max_grant_frames = def->controllers[i]->opts.xenbusopts.maxGrantFrames;
-    }
+        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_XENBUS) {
+            if (def->controllers[i]->opts.xenbusopts.maxEventChannels > 0)
+                b_info->event_channels = def->controllers[i]->opts.xenbusopts.maxEventChannels;
+
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+            if (def->controllers[i]->opts.xenbusopts.maxGrantFrames > 0)
+                b_info->max_grant_frames = def->controllers[i]->opts.xenbusopts.maxGrantFrames;
 #endif
+        }
+    }
 
     if (hvm || pvh) {
         if (caps &&
@@ -409,7 +421,7 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
             char xlCPU[32];
 
             /* enable nested HVM only if global nested_hvm option enable it and
-             * host support it*/
+             * host support it */
             if (ARCH_IS_X86(def->os.arch)) {
                 vmx = virCPUCheckFeature(caps->host.arch, caps->host.cpu, "vmx");
                 svm = virCPUCheckFeature(caps->host.arch, caps->host.cpu, "svm");
@@ -429,12 +441,12 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
                                 continue;
                             }
 
-                            snprintf(xlCPU,
-                                    sizeof(xlCPU),
-                                    "%s=0",
-                                    xenTranslateCPUFeature(
-                                        def->cpu->features[i].name,
-                                        false));
+                            g_snprintf(xlCPU,
+                                       sizeof(xlCPU),
+                                       "%s=0",
+                                       xenTranslateCPUFeature(
+                                           def->cpu->features[i].name,
+                                           false));
                             if (libxl_cpuid_parse_config(&b_info->cpuid, xlCPU)) {
                                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                                         _("unsupported cpu feature '%s'"),
@@ -451,11 +463,11 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
                                 continue;
                             }
 
-                            snprintf(xlCPU,
-                                    sizeof(xlCPU),
-                                    "%s=1",
-                                    xenTranslateCPUFeature(
-                                        def->cpu->features[i].name, false));
+                            g_snprintf(xlCPU,
+                                       sizeof(xlCPU),
+                                       "%s=1",
+                                       xenTranslateCPUFeature(
+                                           def->cpu->features[i].name, false));
                             if (libxl_cpuid_parse_config(&b_info->cpuid, xlCPU)) {
                                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                                         _("unsupported cpu feature '%s'"),
@@ -557,8 +569,7 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
          * future, Xen will support a user-specified firmware path. See
          * http://lists.xenproject.org/archives/html/xen-devel/2016-03/msg01628.html
          */
-        if (def->os.loader &&
-            def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH)
+        if (virDomainDefHasOldStyleUEFI(def))
             b_info->u.hvm.bios = LIBXL_BIOS_TYPE_OVMF;
 
         if (def->emulator) {
@@ -702,6 +713,20 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
             b_info->u.pv.kernel = g_strdup(def->os.kernel);
         }
         b_info->u.pv.ramdisk = g_strdup(def->os.initrd);
+
+        if (def->features[VIR_DOMAIN_FEATURE_XEN] == VIR_TRISTATE_SWITCH_ON) {
+            switch ((virTristateSwitch) def->xen_features[VIR_DOMAIN_XEN_E820_HOST]) {
+                case VIR_TRISTATE_SWITCH_ON:
+                    libxl_defbool_set(&b_info->u.pv.e820_host, true);
+                    break;
+                case VIR_TRISTATE_SWITCH_OFF:
+                    libxl_defbool_set(&b_info->u.pv.e820_host, false);
+                    break;
+                case VIR_TRISTATE_SWITCH_ABSENT:
+                case VIR_TRISTATE_SWITCH_LAST:
+                    break;
+            }
+        }
     }
 
     /* only the 'xen' balloon device model is supported */
@@ -1213,9 +1238,9 @@ libxlMakeNic(virDomainDefPtr def,
     virDomainNetType actual_type = virDomainNetGetActualType(l_nic);
     virNetworkPtr network = NULL;
     virConnectPtr conn = NULL;
-    virNetDevBandwidthPtr actual_bw;
-    virNetDevVPortProfilePtr port_profile;
-    virNetDevVlanPtr virt_vlan;
+    const virNetDevBandwidth *actual_bw;
+    const virNetDevVPortProfile *port_profile;
+    const virNetDevVlan *virt_vlan;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
     size_t i;
     const char *script = NULL;
@@ -1674,7 +1699,8 @@ static int
 libxlGetAutoballoonConf(libxlDriverConfigPtr cfg,
                         virConfPtr conf)
 {
-    regex_t regex;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
     int res;
 
     res = virConfGetValueBool(conf, "autoballoon", &cfg->autoballoon);
@@ -1683,21 +1709,15 @@ libxlGetAutoballoonConf(libxlDriverConfigPtr cfg,
     else if (res == 1)
         return 0;
 
-    if ((res = regcomp(&regex,
-                      "(^| )dom0_mem=((|min:|max:)[0-9]+[bBkKmMgG]?,?)+($| )",
-                       REG_NOSUB | REG_EXTENDED)) != 0) {
-        char error[100];
-        regerror(res, &regex, error, sizeof(error));
+    regex = g_regex_new("(^| )dom0_mem=((|min:|max:)[0-9]+[bBkKmMgG]?,?)+($| )",
+                        0, 0, &err);
+    if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to compile regex %s"),
-                       error);
-
+                       _("Failed to compile regex %s"), err->message);
         return -1;
     }
 
-    res = regexec(&regex, cfg->verInfo->commandline, 0, NULL, 0);
-    regfree(&regex);
-    cfg->autoballoon = res == REG_NOMATCH;
+    cfg->autoballoon = !g_regex_match(regex, cfg->verInfo->commandline, 0, NULL);
     return 0;
 }
 
@@ -1705,8 +1725,6 @@ libxlDriverConfigPtr
 libxlDriverConfigNew(void)
 {
     libxlDriverConfigPtr cfg;
-    char ebuf[1024];
-    unsigned int free_mem;
 
     if (libxlConfigInitialize() < 0)
         return NULL;
@@ -1723,41 +1741,6 @@ libxlDriverConfigNew(void)
     cfg->saveDir = g_strdup(LIBXL_SAVE_DIR);
     cfg->autoDumpDir = g_strdup(LIBXL_DUMP_DIR);
     cfg->channelDir = g_strdup(LIBXL_CHANNEL_DIR);
-
-    if (virFileMakePath(cfg->logDir) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("failed to create log dir '%s': %s"),
-                       cfg->logDir,
-                       virStrerror(errno, ebuf, sizeof(ebuf)));
-        goto error;
-    }
-
-    cfg->logger = libxlLoggerNew(cfg->logDir, virLogGetDefaultPriority());
-    if (!cfg->logger) {
-        VIR_ERROR(_("cannot create logger for libxenlight, disabling driver"));
-        goto error;
-    }
-
-    if (libxl_ctx_alloc(&cfg->ctx, LIBXL_VERSION, 0, (xentoollog_logger *)cfg->logger)) {
-        VIR_ERROR(_("cannot initialize libxenlight context, probably not "
-                    "running in a Xen Dom0, disabling driver"));
-        goto error;
-    }
-
-    if ((cfg->verInfo = libxl_get_version_info(cfg->ctx)) == NULL) {
-        VIR_ERROR(_("cannot version information from libxenlight, "
-                    "disabling driver"));
-        goto error;
-    }
-    cfg->version = (cfg->verInfo->xen_version_major * 1000000) +
-        (cfg->verInfo->xen_version_minor * 1000);
-
-    /* This will fill xenstore info about free and dom0 memory if missing,
-     * should be called before starting first domain */
-    if (libxl_get_free_memory(cfg->ctx, &free_mem)) {
-        VIR_ERROR(_("Unable to configure libxl's memory management parameters"));
-        goto error;
-    }
 
 #ifdef DEFAULT_LOADER_NVRAM
     if (virFirmwareParseList(DEFAULT_LOADER_NVRAM,
@@ -1782,11 +1765,58 @@ libxlDriverConfigNew(void)
         goto error;
     cfg->firmwares[cfg->nfirmwares - 1]->name = g_strdup(LIBXL_FIRMWARE_DIR "/hvmloader");
 
+    /* defaults for keepalive messages */
+    cfg->keepAliveInterval = 5;
+    cfg->keepAliveCount = 5;
+
     return cfg;
 
  error:
     virObjectUnref(cfg);
     return NULL;
+}
+
+int
+libxlDriverConfigInit(libxlDriverConfigPtr cfg)
+{
+    unsigned int free_mem;
+
+    if (virFileMakePath(cfg->logDir) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("failed to create log dir '%s': %s"),
+                       cfg->logDir,
+                       g_strerror(errno));
+        return -1;
+    }
+
+    cfg->logger = libxlLoggerNew(cfg->logDir, virLogGetDefaultPriority());
+    if (!cfg->logger) {
+        VIR_ERROR(_("cannot create logger for libxenlight, disabling driver"));
+        return -1;
+    }
+
+    if (libxl_ctx_alloc(&cfg->ctx, LIBXL_VERSION, 0, (xentoollog_logger *)cfg->logger)) {
+        VIR_ERROR(_("cannot initialize libxenlight context, probably not "
+                    "running in a Xen Dom0, disabling driver"));
+        return -1;
+    }
+
+    if ((cfg->verInfo = libxl_get_version_info(cfg->ctx)) == NULL) {
+        VIR_ERROR(_("cannot version information from libxenlight, "
+                    "disabling driver"));
+        return -1;
+    }
+    cfg->version = (cfg->verInfo->xen_version_major * 1000000) +
+        (cfg->verInfo->xen_version_minor * 1000);
+
+    /* This will fill xenstore info about free and dom0 memory if missing,
+     * should be called before starting first domain */
+    if (libxl_get_free_memory(cfg->ctx, &free_mem)) {
+        VIR_ERROR(_("Unable to configure libxl's memory management parameters"));
+        return -1;
+    }
+
+    return 0;
 }
 
 libxlDriverConfigPtr
@@ -1804,10 +1834,6 @@ int libxlDriverConfigLoadFile(libxlDriverConfigPtr cfg,
                               const char *filename)
 {
     g_autoptr(virConf) conf = NULL;
-
-    /* defaults for keepalive messages */
-    cfg->keepAliveInterval = 5;
-    cfg->keepAliveCount = 5;
 
     /* Check the file is readable before opening it, otherwise
      * libvirt emits an error.
@@ -1876,7 +1902,7 @@ libxlDriverGetDom0MaxmemConf(libxlDriverConfigPtr cfg,
                 char *p = mem_tokens[j] + 4;
                 unsigned long long multiplier = 1;
 
-                while (c_isdigit(*p))
+                while (g_ascii_isdigit(*p))
                     p++;
                 if (virStrToLong_ull(mem_tokens[j] + 4, &p, 10, maxmem) < 0)
                     break;
@@ -1932,11 +1958,12 @@ libxlPrepareChannel(virDomainChrDefPtr channel,
     if (channel->targetType == VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_XEN &&
         channel->source->type == VIR_DOMAIN_CHR_TYPE_UNIX &&
         !channel->source->data.nix.path) {
-        if (virAsprintf(&channel->source->data.nix.path,
-                        "%s/%s-%s", channelDir, domainName,
-                        channel->target.name ? channel->target.name
-                        : "unknown.sock") < 0)
-            return -1;
+        const char *target = channel->target.name;
+        if (!target)
+            target = "unknown.sock";
+        channel->source->data.nix.path = g_strdup_printf("%s/%s-%s", channelDir,
+                                                         domainName,
+                                                         target);
 
         channel->source->data.nix.listen = true;
     }
@@ -2377,6 +2404,7 @@ libxlMakeVideo(virDomainDefPtr def, libxl_domain_config *d_config)
         b_info->video_memkb = def->videos[0]->vram;
     } else {
         libxl_defbool_set(&b_info->u.hvm.nographic, 1);
+        b_info->u.hvm.vga.kind = LIBXL_VGA_INTERFACE_TYPE_NONE;
     }
 
     return 0;
@@ -2399,7 +2427,7 @@ libxlDriverNodeGetInfo(libxlDriverPrivatePtr driver, virNodeInfoPtr info)
 
     if (virStrcpyStatic(info->model, virArchToString(hostarch)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("machine type %s too big for destination"),
+                       _("host arch %s is too big for destination"),
                        virArchToString(hostarch));
         goto cleanup;
     }
@@ -2485,8 +2513,9 @@ libxlBuildDomainConfig(virPortAllocatorRangePtr graphicsports,
 }
 
 virDomainXMLOptionPtr
-libxlCreateXMLConf(void)
+libxlCreateXMLConf(libxlDriverPrivatePtr driver)
 {
+    libxlDomainDefParserConfig.priv = driver;
     return virDomainXMLOptionNew(&libxlDomainDefParserConfig,
                                  &libxlDomainXMLPrivateDataCallbacks,
                                  NULL, NULL, NULL);

@@ -20,12 +20,14 @@
 
 #include <config.h>
 
+#include "bhyve_driver.h"
 #include "bhyve_conf.h"
 #include "bhyve_device.h"
 #include "bhyve_domain.h"
 #include "bhyve_capabilities.h"
 #include "viralloc.h"
 #include "virlog.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_BHYVE
 
@@ -74,11 +76,20 @@ bhyveDomainDefNeedsISAController(virDomainDefPtr def)
 
 static int
 bhyveDomainDefPostParse(virDomainDefPtr def,
-                        virCapsPtr caps G_GNUC_UNUSED,
                         unsigned int parseFlags G_GNUC_UNUSED,
-                        void *opaque G_GNUC_UNUSED,
+                        void *opaque,
                         void *parseOpaque G_GNUC_UNUSED)
 {
+    bhyveConnPtr driver = opaque;
+    g_autoptr(virCaps) caps = bhyveDriverGetCapabilities(driver);
+    if (!caps)
+        return -1;
+
+    if (!virCapabilitiesDomainSupported(caps, def->os.type,
+                                        def->os.arch,
+                                        def->virtType))
+        return -1;
+
     /* Add an implicit PCI root controller */
     if (virDomainDefMaybeAddController(def, VIR_DOMAIN_CONTROLLER_TYPE_PCI, 0,
                                        VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT) < 0)
@@ -122,7 +133,6 @@ bhyveDomainDiskDefAssignAddress(bhyveConnPtr driver,
 static int
 bhyveDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                               const virDomainDef *def,
-                              virCapsPtr caps G_GNUC_UNUSED,
                               unsigned int parseFlags G_GNUC_UNUSED,
                               void *opaque,
                               void *parseOpaque G_GNUC_UNUSED)
@@ -151,12 +161,16 @@ bhyveDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
         }
     }
 
+    if (dev->type == VIR_DOMAIN_DEVICE_VIDEO &&
+        dev->data.video->type == VIR_DOMAIN_VIDEO_TYPE_DEFAULT) {
+        dev->data.video->type = VIR_DOMAIN_VIDEO_TYPE_GOP;
+    }
+
     return 0;
 }
 
 static int
 bhyveDomainDefAssignAddresses(virDomainDef *def,
-                              virCapsPtr caps G_GNUC_UNUSED,
                               unsigned int parseFlags G_GNUC_UNUSED,
                               void *opaque G_GNUC_UNUSED,
                               void *parseOpaque G_GNUC_UNUSED)

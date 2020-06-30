@@ -26,7 +26,6 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "configmake.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "virobject.h"
 #include "virstring.h"
@@ -341,15 +340,8 @@ virNetLibsshCheckHostKey(virNetLibsshSessionPtr sess)
             if (!keyhashstr)
                 return -1;
 
-            if (virAsprintf(&tmp,
-                            _("Accept SSH host key with hash '%s' for "
-                              "host '%s:%d' (%s/%s)?"),
-                            keyhashstr,
-                            sess->hostname, sess->port,
-                            "y", "n") < 0) {
-                ssh_string_free_char(keyhashstr);
-                return -1;
-            }
+            tmp = g_strdup_printf(_("Accept SSH host key with hash '%s' for " "host '%s:%d' (%s/%s)?"),
+                                  keyhashstr, sess->hostname, sess->port, "y", "n");
             askKey.prompt = tmp;
 
             if (sess->cred->cb(&askKey, 1, sess->cred->cbdata)) {
@@ -438,9 +430,7 @@ virNetLibsshAuthenticatePrivkeyCb(const char *prompt,
         goto error;
     }
 
-    if (VIR_STRNDUP(actual_prompt, prompt,
-                    virLengthForPromptString(prompt)) < 0)
-        goto error;
+    actual_prompt = g_strndup(prompt, virLengthForPromptString(prompt));
 
     memset(&retr_passphrase, 0, sizeof(virConnectCredential));
     retr_passphrase.type = cred_type;
@@ -530,10 +520,7 @@ virNetLibsshAuthenticatePrivkey(virNetLibsshSessionPtr sess,
 
     VIR_DEBUG("sess=%p", sess);
 
-    if (virAsprintf(&tmp, "%s.pub", priv->filename) < 0) {
-        err = SSH_AUTH_ERROR;
-        goto error;
-    }
+    tmp = g_strdup_printf("%s.pub", priv->filename);
 
     /* try to open the public part of the private key */
     ret = ssh_pki_import_pubkey_file(tmp, &public_key);
@@ -726,8 +713,7 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
 
                 prompt = virBufferContentAndReset(&prompt_buff);
             } else {
-                if (VIR_STRNDUP(prompt, promptStr, promptStrLen) < 0)
-                    goto prompt_error;
+                prompt = g_strndup(promptStr, promptStrLen);
             }
 
             memset(&retr_passphrase, 0, sizeof(virConnectCredential));
@@ -1096,11 +1082,10 @@ virNetLibsshSessionAuthAddKeyboardAuth(virNetLibsshSessionPtr sess,
 
 }
 
-int
+void
 virNetLibsshSessionSetChannelCommand(virNetLibsshSessionPtr sess,
                                       const char *command)
 {
-    int ret = 0;
     virObjectLock(sess);
 
     VIR_FREE(sess->channelCommand);
@@ -1108,7 +1093,6 @@ virNetLibsshSessionSetChannelCommand(virNetLibsshSessionPtr sess,
     sess->channelCommand = g_strdup(command);
 
     virObjectUnlock(sess);
-    return ret;
 }
 
 int

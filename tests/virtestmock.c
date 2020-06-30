@@ -20,16 +20,11 @@
 
 #include "virmock.h"
 #include <unistd.h>
-#include <sys/types.h>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
-#ifdef HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
 
-#include "internal.h"
+#include "virsocket.h"
 #include "configmake.h"
 #include "virstring.h"
 #include "viralloc.h"
@@ -109,9 +104,8 @@ checkPath(const char *path,
     char *relPath = NULL;
     char *crippledPath = NULL;
 
-    if (path[0] != '/' &&
-        virAsprintfQuiet(&relPath, "./%s", path) < 0)
-        goto error;
+    if (path[0] != '/')
+        relPath = g_strdup_printf("./%s", path);
 
     /* Le sigh. virFileCanonicalizePath() expects @path to exist, otherwise
      * it will return an error. So if we are called over an non-existent
@@ -141,9 +135,6 @@ checkPath(const char *path,
     VIR_FREE(fullPath);
 
     return;
- error:
-    fprintf(stderr, "Out of memory\n");
-    abort();
 }
 
 
@@ -206,7 +197,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
     init_syms();
 
-#ifdef HAVE_SYS_UN_H
+#ifndef WIN32
     if (addrlen == sizeof(struct sockaddr_un)) {
         struct sockaddr_un *tmp = (struct sockaddr_un *) addr;
         if (tmp->sun_family == AF_UNIX)

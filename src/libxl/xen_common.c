@@ -24,8 +24,6 @@
 
 #include <config.h>
 
-#include <regex.h>
-
 #include "internal.h"
 #include "virerror.h"
 #include "virconf.h"
@@ -495,15 +493,12 @@ xenParsePCIList(virConfPtr conf, virDomainDefPtr def)
 
 
 static int
-xenParseCPUFeatures(virConfPtr conf,
-                    virDomainDefPtr def,
-                    virDomainXMLOptionPtr xmlopt)
+xenParseCPU(virConfPtr conf,
+            virDomainDefPtr def,
+            virDomainXMLOptionPtr xmlopt)
 {
     unsigned long count = 0;
     g_autofree char *cpus = NULL;
-    g_autofree char *tsc_mode = NULL;
-    int val = 0;
-    virDomainTimerDefPtr timer;
 
     if (xenConfigGetULong(conf, "vcpus", &count, 1) < 0)
         return -1;
@@ -528,10 +523,21 @@ xenParseCPUFeatures(virConfPtr conf,
     if (cpus && (virBitmapParse(cpus, &def->cpumask, 4096) < 0))
         return -1;
 
-    if (xenConfigGetString(conf, "tsc_mode", &tsc_mode, NULL) < 0)
+    return 0;
+}
+
+
+static int
+xenParseHypervisorFeatures(virConfPtr conf, virDomainDefPtr def)
+{
+    g_autofree char *strval = NULL;
+    virDomainTimerDefPtr timer;
+    int val = 0;
+
+    if (xenConfigGetString(conf, "tsc_mode", &strval, NULL) < 0)
         return -1;
 
-    if (tsc_mode) {
+    if (strval) {
         if (VIR_EXPAND_N(def->clock.timers, def->clock.ntimers, 1) < 0 ||
             VIR_ALLOC(timer) < 0)
             return -1;
@@ -541,40 +547,63 @@ xenParseCPUFeatures(virConfPtr conf,
         timer->tickpolicy = -1;
         timer->mode = VIR_DOMAIN_TIMER_MODE_AUTO;
         timer->track = -1;
-        if (STREQ_NULLABLE(tsc_mode, "always_emulate"))
+        if (STREQ_NULLABLE(strval, "always_emulate"))
             timer->mode = VIR_DOMAIN_TIMER_MODE_EMULATE;
-        else if (STREQ_NULLABLE(tsc_mode, "native"))
+        else if (STREQ_NULLABLE(strval, "native"))
             timer->mode = VIR_DOMAIN_TIMER_MODE_NATIVE;
-        else if (STREQ_NULLABLE(tsc_mode, "native_paravirt"))
+        else if (STREQ_NULLABLE(strval, "native_paravirt"))
             timer->mode = VIR_DOMAIN_TIMER_MODE_PARAVIRT;
 
         def->clock.timers[def->clock.ntimers - 1] = timer;
     }
 
+    if (xenConfigGetString(conf, "passthrough", &strval, NULL) < 0)
+        return -1;
+
+    if (strval) {
+        if (STREQ(strval, "disabled")) {
+            def->features[VIR_DOMAIN_FEATURE_XEN] = VIR_TRISTATE_SWITCH_OFF;
+            def->xen_features[VIR_DOMAIN_XEN_PASSTHROUGH] = VIR_TRISTATE_SWITCH_OFF;
+        } else if (STREQ(strval, "enabled")) {
+            def->features[VIR_DOMAIN_FEATURE_XEN] = VIR_TRISTATE_SWITCH_ON;
+            def->xen_features[VIR_DOMAIN_XEN_PASSTHROUGH] = VIR_TRISTATE_SWITCH_ON;
+        } else if (STREQ(strval, "sync_pt")) {
+            def->features[VIR_DOMAIN_FEATURE_XEN] = VIR_TRISTATE_SWITCH_ON;
+            def->xen_features[VIR_DOMAIN_XEN_PASSTHROUGH] = VIR_TRISTATE_SWITCH_ON;
+            def->xen_passthrough_mode = VIR_DOMAIN_XEN_PASSTHROUGH_MODE_SYNC_PT;
+        } else if (STREQ(strval, "share_pt")) {
+            def->features[VIR_DOMAIN_FEATURE_XEN] = VIR_TRISTATE_SWITCH_ON;
+            def->xen_features[VIR_DOMAIN_XEN_PASSTHROUGH] = VIR_TRISTATE_SWITCH_ON;
+            def->xen_passthrough_mode = VIR_DOMAIN_XEN_PASSTHROUGH_MODE_SHARE_PT;
+        } else {
+            virReportError(VIR_ERR_CONF_SYNTAX,
+                           _("Invalid passthrough mode %s"), strval);
+        }
+    }
+
     if (def->os.type == VIR_DOMAIN_OSTYPE_HVM) {
         if (xenConfigGetBool(conf, "pae", &val, 1) < 0)
             return -1;
-
         else if (val)
             def->features[VIR_DOMAIN_FEATURE_PAE] = VIR_TRISTATE_SWITCH_ON;
+
         if (xenConfigGetBool(conf, "acpi", &val, 1) < 0)
             return -1;
-
         else if (val)
             def->features[VIR_DOMAIN_FEATURE_ACPI] = VIR_TRISTATE_SWITCH_ON;
+
         if (xenConfigGetBool(conf, "apic", &val, 1) < 0)
             return -1;
-
         else if (val)
             def->features[VIR_DOMAIN_FEATURE_APIC] = VIR_TRISTATE_SWITCH_ON;
+
         if (xenConfigGetBool(conf, "hap", &val, 1) < 0)
             return -1;
-
         else if (!val)
             def->features[VIR_DOMAIN_FEATURE_HAP] = VIR_TRISTATE_SWITCH_OFF;
+
         if (xenConfigGetBool(conf, "viridian", &val, 0) < 0)
             return -1;
-
         else if (val)
             def->features[VIR_DOMAIN_FEATURE_VIRIDIAN] = VIR_TRISTATE_SWITCH_ON;
 
@@ -593,6 +622,13 @@ xenParseCPUFeatures(virConfPtr conf,
             timer->track = -1;
 
             def->clock.timers[def->clock.ntimers - 1] = timer;
+        }
+    } else {
+        if (xenConfigGetBool(conf, "e820_host", &val, 0) < 0) {
+            return -1;
+        } else if (val) {
+            def->features[VIR_DOMAIN_FEATURE_XEN] = VIR_TRISTATE_SWITCH_ON;
+            def->xen_features[VIR_DOMAIN_XEN_E820_HOST] = VIR_TRISTATE_SWITCH_ON;
         }
     }
 
@@ -817,15 +853,16 @@ xenParseSxprChar(const char *value,
             goto error;
         }
 
-        if (offset != value &&
-            VIR_STRNDUP(def->source->data.tcp.host, value, offset - value) < 0)
-            goto error;
+        if (offset != value)
+            def->source->data.tcp.host = g_strndup(value, offset - value);
 
         offset2 = strchr(offset, ',');
         offset++;
-        if (VIR_STRNDUP(def->source->data.tcp.service, offset,
-                        offset2 ? offset2 - offset : -1) < 0)
-            goto error;
+        if (offset2)
+            def->source->data.tcp.service = g_strndup(offset,
+                                                      offset2 - offset);
+        else
+            def->source->data.tcp.service = g_strdup(offset);
 
         if (offset2 && strstr(offset2, ",server"))
             def->source->data.tcp.listen = true;
@@ -843,15 +880,14 @@ xenParseSxprChar(const char *value,
             goto error;
         }
 
-        if (offset != value &&
-            VIR_STRNDUP(def->source->data.udp.connectHost, value, offset - value) < 0)
-            goto error;
+        if (offset != value)
+            def->source->data.udp.connectHost = g_strndup(value,
+                                                          offset - value);
 
         offset2 = strchr(offset, '@');
         if (offset2 != NULL) {
-            if (VIR_STRNDUP(def->source->data.udp.connectService,
-                            offset + 1, offset2 - offset - 1) < 0)
-                goto error;
+            def->source->data.udp.connectService = g_strndup(offset + 1,
+                                                             offset2 - offset - 1);
 
             offset3 = strchr(offset2, ':');
             if (offset3 == NULL) {
@@ -860,10 +896,9 @@ xenParseSxprChar(const char *value,
                 goto error;
             }
 
-            if (offset3 > (offset2 + 1) &&
-                VIR_STRNDUP(def->source->data.udp.bindHost,
-                            offset2 + 1, offset3 - offset2 - 1) < 0)
-                goto error;
+            if (offset3 > (offset2 + 1))
+                def->source->data.udp.bindHost = g_strndup(offset2 + 1,
+                                                           offset3 - offset2 - 1);
 
             def->source->data.udp.bindService = g_strdup(offset3 + 1);
         } else {
@@ -875,9 +910,10 @@ xenParseSxprChar(const char *value,
     case VIR_DOMAIN_CHR_TYPE_UNIX:
     {
         const char *offset = strchr(value, ',');
-        if (VIR_STRNDUP(def->source->data.nix.path, value,
-                        offset ? offset - value : -1) < 0)
-            goto error;
+        if (offset)
+            def->source->data.nix.path = g_strndup(value, offset - value);
+        else
+            def->source->data.nix.path = g_strdup(value);
 
         if (offset != NULL &&
             strstr(offset, ",server") != NULL)
@@ -993,8 +1029,7 @@ xenParseVifBridge(virDomainNetDefPtr net, char *bridge)
 
     if ((vlanstr = strchr(bridge, '.'))) {
         /* 'bridge' string contains a bridge name and single vlan tag */
-        if (VIR_STRNDUP(net->data.bridge.brname, bridge, vlanstr - bridge) < 0)
-            return -1;
+        net->data.bridge.brname = g_strndup(bridge, vlanstr - bridge);
 
         vlanstr++;
         if (virStrToLong_ui(vlanstr, NULL, 10, &tag) < 0)
@@ -1060,13 +1095,12 @@ static const char *vif_bytes_per_sec_re = "^[0-9]+[GMK]?[Bb]/s$";
 static int
 xenParseSxprVifRate(const char *rate, unsigned long long *kbytes_per_sec)
 {
-    char *trate = NULL;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
+    g_autofree char *trate = NULL;
     char *p;
-    regex_t rec;
-    int err;
     char *suffix;
     unsigned long long tmp;
-    int ret = -1;
 
     trate = g_strdup(rate);
 
@@ -1074,26 +1108,23 @@ xenParseSxprVifRate(const char *rate, unsigned long long *kbytes_per_sec)
     if (p != NULL)
         *p = 0;
 
-    err = regcomp(&rec, vif_bytes_per_sec_re, REG_EXTENDED|REG_NOSUB);
-    if (err != 0) {
-        char error[100];
-        regerror(err, &rec, error, sizeof(error));
+    regex = g_regex_new(vif_bytes_per_sec_re, 0, 0, &err);
+    if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to compile regular expression '%s': %s"),
-                       vif_bytes_per_sec_re, error);
-        goto cleanup;
+                       _("Failed to compile regex %s"), err->message);
+        return -1;
     }
 
-    if (regexec(&rec, trate, 0, NULL, 0)) {
+    if (!g_regex_match(regex, trate, 0, NULL)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Invalid rate '%s' specified"), rate);
-        goto cleanup;
+        return -1;
     }
 
     if (virStrToLong_ull(rate, &suffix, 10, &tmp)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Failed to parse rate '%s'"), rate);
-        goto cleanup;
+        return -1;
     }
 
     if (*suffix == 'G')
@@ -1105,12 +1136,7 @@ xenParseSxprVifRate(const char *rate, unsigned long long *kbytes_per_sec)
        tmp /= 8;
 
     *kbytes_per_sec = tmp;
-    ret = 0;
-
- cleanup:
-    regfree(&rec);
-    VIR_FREE(trate);
-    return ret;
+    return 0;
 }
 
 
@@ -1165,8 +1191,7 @@ xenParseVif(char *entry, const char *vif_typename)
         } else if (STRPREFIX(key, "script=")) {
             int len = nextkey ? (nextkey - data) : strlen(data);
             VIR_FREE(script);
-            if (VIR_STRNDUP(script, data, len) < 0)
-                return NULL;
+            script = g_strndup(data, len);
         } else if (STRPREFIX(key, "model=")) {
             int len = nextkey ? (nextkey - data) : strlen(data);
             if (virStrncpy(model, data, len, sizeof(model)) < 0) {
@@ -1489,7 +1514,10 @@ xenParseConfigCommon(virConfPtr conf,
     if (xenParseEventsActions(conf, def) < 0)
         return -1;
 
-    if (xenParseCPUFeatures(conf, def, xmlopt) < 0)
+    if (xenParseCPU(conf, def, xmlopt) < 0)
+        return -1;
+
+    if (xenParseHypervisorFeatures(conf, def) < 0)
         return -1;
 
     if (xenParseTimeOffset(conf, def) < 0)
@@ -1675,8 +1703,8 @@ xenFormatNet(virConnectPtr conn,
     switch (net->type) {
     case VIR_DOMAIN_NET_TYPE_BRIDGE:
     {
-        virNetDevVPortProfilePtr port_profile = virDomainNetGetActualVirtPortProfile(net);
-        virNetDevVlanPtr virt_vlan = virDomainNetGetActualVlan(net);
+        const virNetDevVPortProfile *port_profile = virDomainNetGetActualVirtPortProfile(net);
+        const virNetDevVlan *virt_vlan = virDomainNetGetActualVlan(net);
         const char *script = net->script;
         size_t i;
 
@@ -1830,12 +1858,11 @@ xenFormatPCI(virConfPtr conf, virDomainDefPtr def)
             virConfValuePtr val, tmp;
             char *buf;
 
-            if (virAsprintf(&buf, "%04x:%02x:%02x.%x",
-                            def->hostdevs[i]->source.subsys.u.pci.addr.domain,
-                            def->hostdevs[i]->source.subsys.u.pci.addr.bus,
-                            def->hostdevs[i]->source.subsys.u.pci.addr.slot,
-                            def->hostdevs[i]->source.subsys.u.pci.addr.function) < 0)
-                goto error;
+            buf = g_strdup_printf("%04x:%02x:%02x.%x",
+                                  def->hostdevs[i]->source.subsys.u.pci.addr.domain,
+                                  def->hostdevs[i]->source.subsys.u.pci.addr.bus,
+                                  def->hostdevs[i]->source.subsys.u.pci.addr.slot,
+                                  def->hostdevs[i]->source.subsys.u.pci.addr.function);
 
             if (VIR_ALLOC(val) < 0) {
                 VIR_FREE(buf);
@@ -2122,7 +2149,7 @@ xenFormatCPUAllocation(virConfPtr conf, virDomainDefPtr def)
 
 
 static int
-xenFormatCPUFeatures(virConfPtr conf, virDomainDefPtr def)
+xenFormatHypervisorFeatures(virConfPtr conf, virDomainDefPtr def)
 {
     size_t i;
     bool hvm = !!(def->os.type == VIR_DOMAIN_OSTYPE_HVM);
@@ -2152,6 +2179,26 @@ xenFormatCPUFeatures(virConfPtr conf, virDomainDefPtr def)
                             (def->features[VIR_DOMAIN_FEATURE_VIRIDIAN] ==
                              VIR_TRISTATE_SWITCH_ON) ? 1 : 0) < 0)
             return -1;
+    } else {
+        if (def->features[VIR_DOMAIN_FEATURE_XEN] == VIR_TRISTATE_SWITCH_ON) {
+            if (def->xen_features[VIR_DOMAIN_XEN_E820_HOST] == VIR_TRISTATE_SWITCH_ON)
+                if (xenConfigSetInt(conf, "e820_host", 1) < 0)
+                    return -1;
+        }
+    }
+
+    if (def->features[VIR_DOMAIN_FEATURE_XEN] == VIR_TRISTATE_SWITCH_ON) {
+        if (def->xen_features[VIR_DOMAIN_XEN_PASSTHROUGH] == VIR_TRISTATE_SWITCH_ON) {
+            if (def->xen_passthrough_mode == VIR_DOMAIN_XEN_PASSTHROUGH_MODE_SYNC_PT ||
+                def->xen_passthrough_mode == VIR_DOMAIN_XEN_PASSTHROUGH_MODE_SHARE_PT) {
+                if (xenConfigSetString(conf, "passthrough",
+                                       virDomainXenPassthroughModeTypeToString(def->xen_passthrough_mode)) < 0)
+                    return -1;
+            } else {
+                if (xenConfigSetString(conf, "passthrough", "enabled") < 0)
+                    return -1;
+            }
+        }
     }
 
     for (i = 0; i < def->clock.ntimers; i++) {
@@ -2196,6 +2243,7 @@ xenFormatCPUFeatures(virConfPtr conf, virDomainDefPtr def)
         case VIR_DOMAIN_TIMER_NAME_HYPERVCLOCK:
         case VIR_DOMAIN_TIMER_NAME_RTC:
         case VIR_DOMAIN_TIMER_NAME_PIT:
+        case VIR_DOMAIN_TIMER_NAME_ARMVTIMER:
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unsupported timer type (name) '%s'"),
                            virDomainTimerNameTypeToString(def->clock.timers[i]->name));
@@ -2423,7 +2471,7 @@ xenFormatConfigCommon(virConfPtr conf,
     if (xenFormatCPUAllocation(conf, def) < 0)
         return -1;
 
-    if (xenFormatCPUFeatures(conf, def) < 0)
+    if (xenFormatHypervisorFeatures(conf, def) < 0)
         return -1;
 
     if (xenFormatTimeOffset(conf, def) < 0)

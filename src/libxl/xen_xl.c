@@ -83,11 +83,9 @@ static int xenParseCmdline(virConfPtr conf, char **r_cmdline)
             VIR_WARN("ignoring root= and extra= in favour of cmdline=");
     } else {
         if (root && extra) {
-            if (virAsprintf(&cmdline, "root=%s %s", root, extra) < 0)
-                return -1;
+            cmdline = g_strdup_printf("root=%s %s", root, extra);
         } else if (root) {
-            if (virAsprintf(&cmdline, "root=%s", root) < 0)
-                return -1;
+            cmdline = g_strdup_printf("root=%s", root);
         } else if (extra) {
             cmdline = g_strdup(extra);
         }
@@ -179,10 +177,7 @@ xenParseXLOS(virConfPtr conf, virDomainDefPtr def, virCapsPtr caps)
             }
 
             if (!def->cpu) {
-                virCPUDefPtr cpu;
-                if (VIR_ALLOC(cpu) < 0)
-                    return -1;
-
+                virCPUDefPtr cpu = virCPUDefNew();
                 cpu->mode = VIR_CPU_MODE_HOST_PASSTHROUGH;
                 cpu->type = VIR_CPU_TYPE_GUEST;
                 cpu->nfeatures = 0;
@@ -268,8 +263,7 @@ xenParseXLCPUID(virConfPtr conf, virDomainDefPtr def)
         return 0;
 
     if (!def->cpu) {
-        if (VIR_ALLOC(def->cpu) < 0)
-            goto cleanup;
+        def->cpu = virCPUDefNew();
         def->cpu->mode = VIR_CPU_MODE_HOST_PASSTHROUGH;
         def->cpu->type = VIR_CPU_TYPE_GUEST;
         def->cpu->nfeatures = 0;
@@ -447,8 +441,7 @@ xenParseXLVnuma(virConfPtr conf,
     if (!virDomainNumaSetNodeCount(numa, nr_nodes))
         goto cleanup;
 
-    if (VIR_ALLOC(cpu) < 0)
-        goto cleanup;
+    cpu = virCPUDefNew();
 
     list = list->list;
     while (list) {
@@ -604,19 +597,12 @@ xenParseXLVnuma(virConfPtr conf,
 }
 #endif
 
-#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
 static int
-xenParseXLGntLimits(virConfPtr conf, virDomainDefPtr def)
+xenParseXLXenbusLimits(virConfPtr conf, virDomainDefPtr def)
 {
-    unsigned long max_gntframes;
     int ctlr_idx;
     virDomainControllerDefPtr xenbus_ctlr;
-
-    if (xenConfigGetULong(conf, "max_grant_frames", &max_gntframes, 0) < 0)
-        return -1;
-
-    if (max_gntframes <= 0)
-        return 0;
+    unsigned long limit;
 
     ctlr_idx = virDomainControllerFindByType(def, VIR_DOMAIN_CONTROLLER_TYPE_XENBUS);
     if (ctlr_idx == -1)
@@ -627,10 +613,20 @@ xenParseXLGntLimits(virConfPtr conf, virDomainDefPtr def)
     if (xenbus_ctlr == NULL)
         return -1;
 
-    xenbus_ctlr->opts.xenbusopts.maxGrantFrames = max_gntframes;
+    if (xenConfigGetULong(conf, "max_event_channels", &limit, 0) < 0)
+        return -1;
+    if (limit > 0)
+        xenbus_ctlr->opts.xenbusopts.maxEventChannels = limit;
+
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    if (xenConfigGetULong(conf, "max_grant_frames", &limit, 0) < 0)
+        return -1;
+    if (limit > 0)
+        xenbus_ctlr->opts.xenbusopts.maxGrantFrames = limit;
+#endif
+
     return 0;
 }
-#endif
 
 static int
 xenParseXLDiskSrc(virDomainDiskDefPtr disk, char *srcstr)
@@ -1111,13 +1107,11 @@ xenParseXLChannel(virConfPtr conf, virDomainDefPtr def)
                 } else if (STRPREFIX(key, "name=")) {
                     int len = nextkey ? (nextkey - data) : strlen(data);
                     VIR_FREE(name);
-                    if (VIR_STRNDUP(name, data, len) < 0)
-                        goto cleanup;
+                    name = g_strndup(data, len);
                 } else if (STRPREFIX(key, "path=")) {
                     int len = nextkey ? (nextkey - data) : strlen(data);
                     VIR_FREE(path);
-                    if (VIR_STRNDUP(path, data, len) < 0)
-                        goto cleanup;
+                    path = g_strndup(data, len);
                 }
 
                 while (nextkey && (nextkey[0] == ',' ||
@@ -1189,10 +1183,8 @@ xenParseXL(virConfPtr conf,
         goto cleanup;
 #endif
 
-#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
-    if (xenParseXLGntLimits(conf, def) < 0)
+    if (xenParseXLXenbusLimits(conf, def) < 0)
         goto cleanup;
-#endif
 
     if (xenParseXLCPUID(conf, def) < 0)
         goto cleanup;
@@ -1215,7 +1207,7 @@ xenParseXL(virConfPtr conf,
     if (xenParseXLChannel(conf, def) < 0)
         goto cleanup;
 
-    if (virDomainDefPostParse(def, caps, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
+    if (virDomainDefPostParse(def, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
                               xmlopt, NULL) < 0)
         goto cleanup;
 
@@ -1237,11 +1229,9 @@ xenFormatXLOS(virConfPtr conf, virDomainDefPtr def)
         if (xenConfigSetString(conf, "builder", "hvm") < 0)
             return -1;
 
-        if (def->os.loader &&
-            def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH) {
-            if (xenConfigSetString(conf, "bios", "ovmf") < 0)
-                return -1;
-        }
+        if (virDomainDefHasOldStyleUEFI(def) &&
+            xenConfigSetString(conf, "bios", "ovmf") < 0)
+            return -1;
 
         if (def->os.slic_table &&
             xenConfigSetString(conf, "acpi_firmware", def->os.slic_table) < 0)
@@ -1396,10 +1386,7 @@ xenFormatXLCPUID(virConfPtr conf, virDomainDefPtr def)
                 policy = "0";
                 break;
         }
-        if (virAsprintf(&cpuid_pairs[j++], "%s=%s",
-                        feature_name,
-                        policy) < 0)
-            goto cleanup;
+        cpuid_pairs[j++] = g_strdup_printf("%s=%s", feature_name, policy);
     }
     cpuid_pairs[j] = NULL;
 
@@ -1546,23 +1533,31 @@ xenFormatXLDomainVnuma(virConfPtr conf,
 }
 #endif
 
-#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
 static int
-xenFormatXLGntLimits(virConfPtr conf, virDomainDefPtr def)
+xenFormatXLXenbusLimits(virConfPtr conf, virDomainDefPtr def)
 {
     size_t i;
 
     for (i = 0; i < def->ncontrollers; i++) {
-        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_XENBUS &&
-            def->controllers[i]->opts.xenbusopts.maxGrantFrames > 0) {
-            if (xenConfigSetInt(conf, "max_grant_frames",
-                                def->controllers[i]->opts.xenbusopts.maxGrantFrames) < 0)
-                return -1;
+        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_XENBUS) {
+            if (def->controllers[i]->opts.xenbusopts.maxEventChannels > 0) {
+                if (xenConfigSetInt(conf, "max_event_channels",
+                                    def->controllers[i]->opts.xenbusopts.maxEventChannels) < 0)
+                    return -1;
+            }
+
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+            if (def->controllers[i]->opts.xenbusopts.maxGrantFrames > 0) {
+                if (xenConfigSetInt(conf, "max_grant_frames",
+                                    def->controllers[i]->opts.xenbusopts.maxGrantFrames) < 0)
+                    return -1;
+            }
+#endif
         }
     }
+
     return 0;
 }
-#endif
 
 static char *
 xenFormatXLDiskSrcNet(virStorageSourcePtr src)
@@ -1654,6 +1649,7 @@ xenFormatXLDiskSrc(virStorageSourcePtr src, char **srcstr)
         break;
 
     case VIR_STORAGE_TYPE_VOLUME:
+    case VIR_STORAGE_TYPE_NVME:
     case VIR_STORAGE_TYPE_NONE:
     case VIR_STORAGE_TYPE_LAST:
         break;
@@ -2064,10 +2060,9 @@ xenFormatXLUSB(virConfPtr conf,
             virConfValuePtr val, tmp;
             char *buf;
 
-            if (virAsprintf(&buf, "hostbus=%x,hostaddr=%x",
-                            def->hostdevs[i]->source.subsys.u.usb.bus,
-                            def->hostdevs[i]->source.subsys.u.usb.device) < 0)
-                goto error;
+            buf = g_strdup_printf("hostbus=%x,hostaddr=%x",
+                                  def->hostdevs[i]->source.subsys.u.usb.bus,
+                                  def->hostdevs[i]->source.subsys.u.usb.device);
 
             if (VIR_ALLOC(val) < 0) {
                 VIR_FREE(buf);
@@ -2205,10 +2200,8 @@ xenFormatXL(virDomainDefPtr def, virConnectPtr conn)
         return NULL;
 #endif
 
-#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
-    if (xenFormatXLGntLimits(conf, def) < 0)
+    if (xenFormatXLXenbusLimits(conf, def) < 0)
         return NULL;
-#endif
 
     if (xenFormatXLDomainDisks(conf, def) < 0)
         return NULL;

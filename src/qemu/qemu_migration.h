@@ -83,6 +83,7 @@
     VIR_MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT,      VIR_TYPED_PARAM_INT, \
     VIR_MIGRATE_PARAM_BANDWIDTH_POSTCOPY, VIR_TYPED_PARAM_ULLONG, \
     VIR_MIGRATE_PARAM_PARALLEL_CONNECTIONS, VIR_TYPED_PARAM_INT, \
+    VIR_MIGRATE_PARAM_TLS_DESTINATION, VIR_TYPED_PARAM_STRING, \
     NULL
 
 
@@ -204,7 +205,7 @@ int
 qemuMigrationSrcToFile(virQEMUDriverPtr driver,
                        virDomainObjPtr vm,
                        int fd,
-                       const char *compressor,
+                       virCommandPtr compressor,
                        qemuDomainAsyncJob asyncJob)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 

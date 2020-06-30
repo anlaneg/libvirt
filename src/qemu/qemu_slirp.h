@@ -66,15 +66,16 @@ int qemuSlirpStart(qemuSlirpPtr slirp,
                    virDomainObjPtr vm,
                    virQEMUDriverPtr driver,
                    virDomainNetDefPtr net,
-                   bool hot,
                    bool incoming);
 
 void qemuSlirpStop(qemuSlirpPtr slirp,
                    virDomainObjPtr vm,
                    virQEMUDriverPtr driver,
-                   virDomainNetDefPtr net,
-                   bool hot);
+                   virDomainNetDefPtr net);
 
 int qemuSlirpGetFD(qemuSlirpPtr slirp);
+
+int qemuSlirpSetupCgroup(qemuSlirpPtr slirp,
+                         virCgroupPtr cgroup);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuSlirp, qemuSlirpFree);

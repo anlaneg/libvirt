@@ -56,7 +56,7 @@ typedef enum {
     VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT,
     VIR_DOMAIN_SNAPSHOT_LAST
 } virDomainSnapshotState;
-verify((int)VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT == VIR_DOMAIN_LAST);
+G_STATIC_ASSERT((int)VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT == VIR_DOMAIN_LAST);
 
 /* Stores disk-snapshot information */
 typedef struct _virDomainSnapshotDiskDef virDomainSnapshotDiskDef;
@@ -107,14 +107,12 @@ typedef enum {
 unsigned int virDomainSnapshotFormatConvertXMLFlags(unsigned int flags);
 
 virDomainSnapshotDefPtr virDomainSnapshotDefParseString(const char *xmlStr,
-                                                        virCapsPtr caps,
                                                         virDomainXMLOptionPtr xmlopt,
                                                         void *parseOpaque,
                                                         bool *current,
                                                         unsigned int flags);
 virDomainSnapshotDefPtr virDomainSnapshotDefParseNode(xmlDocPtr xml,
                                                       xmlNodePtr root,
-                                                      virCapsPtr caps,
                                                       virDomainXMLOptionPtr xmlopt,
                                                       void *parseOpaque,
                                                       bool *current,
@@ -122,7 +120,6 @@ virDomainSnapshotDefPtr virDomainSnapshotDefParseNode(xmlDocPtr xml,
 virDomainSnapshotDefPtr virDomainSnapshotDefNew(void);
 char *virDomainSnapshotDefFormat(const char *uuidstr,
                                  virDomainSnapshotDefPtr def,
-                                 virCapsPtr caps,
                                  virDomainXMLOptionPtr xmlopt,
                                  unsigned int flags);
 int virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr snapshot,

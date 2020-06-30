@@ -147,6 +147,10 @@ typedef virSecurityModel *virSecurityModelPtr;
  *
  * a virNodeInfo is a structure filled by virNodeGetInfo() and providing
  * the information for the Node.
+ *
+ * Note that the information in this struct is not guaranteed to be an
+ * accurate relection of the system hardware. See the virNodeGetInfo()
+ * API documentation for further guidance.
  */
 
 typedef struct _virNodeInfo virNodeInfo;
@@ -163,7 +167,7 @@ struct _virNodeInfo {
     unsigned int sockets; /* number of CPU sockets per node if nodes > 1,
                              1 in case of unusual NUMA topology */
     unsigned int cores;   /* number of cores per socket, total number of
-                             processors in case of unusual NUMA topology*/
+                             processors in case of unusual NUMA topology */
     unsigned int threads; /* number of threads per core, 1 in case of
                              unusual numa topology */
 };

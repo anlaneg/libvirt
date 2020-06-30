@@ -33,6 +33,19 @@ AC_DEFUN([LIBVIRT_CHECK_EXTERNAL_PROGRAMS], [
   then
     AC_MSG_ERROR("xsltproc is required to build libvirt")
   fi
+
+  dnl Drop the rst2html (aka HTML4) variants once we
+  dnl stop supporting Ubuntu 16.04 (Xenial)
+  AC_PATH_PROGS([RST2HTML], [rst2html5 rst2html5.py rst2html5-3 rst2html rst2html.py rst2html-3], [])
+  if test -z "$RST2HTML"
+  then
+    AC_MSG_ERROR("rst2html5/rst2html is required to build libvirt")
+  fi
+  AC_PATH_PROGS([RST2MAN], [rst2man rst2man.py rst2man-3], [])
+  if test -z "$RST2MAN"
+  then
+    AC_MSG_ERROR("rst2man is required to build libvirt")
+  fi
   AC_PATH_PROG([AUGPARSE], [augparse], [/usr/bin/augparse])
   AC_PROG_MKDIR_P
   AC_PROG_LN_S
@@ -52,6 +65,7 @@ AC_DEFUN([LIBVIRT_CHECK_EXTERNAL_PROGRAMS], [
   AC_PATH_PROG([OVSVSCTL], [ovs-vsctl], [ovs-vsctl], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([SCRUB], [scrub], [scrub], [$LIBVIRT_SBIN_PATH])
   AC_PATH_PROG([ADDR2LINE], [addr2line], [addr2line], [$LIBVIRT_SBIN_PATH])
+  AC_PATH_PROG([MDEVCTL], [mdevctl], [mdevctl], [$LIBVIRT_SBIN_PATH])
 
   AC_DEFINE_UNQUOTED([DMIDECODE], ["$DMIDECODE"],
                      [Location or name of the dmidecode program])
@@ -75,6 +89,8 @@ AC_DEFUN([LIBVIRT_CHECK_EXTERNAL_PROGRAMS], [
                      [Location or name of the scrub program (for wiping algorithms)])
   AC_DEFINE_UNQUOTED([ADDR2LINE], ["$ADDR2LINE"],
                      [Location of addr2line program])
+  AC_DEFINE_UNQUOTED([MDEVCTL], ["$MDEVCTL"],
+                     [Location or name of the mdevctl program])
 
   AC_PATH_PROG([IP_PATH], [ip], [/sbin/ip], [$LIBVIRT_SBIN_PATH])
   AC_DEFINE_UNQUOTED([IP_PATH], ["$IP_PATH"], [path to ip binary])

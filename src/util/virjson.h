@@ -42,7 +42,7 @@ typedef struct _virJSONValue virJSONValue;
 typedef virJSONValue *virJSONValuePtr;
 
 void virJSONValueFree(virJSONValuePtr value);
-void virJSONValueHashFree(void *opaque, const void *name);
+void virJSONValueHashFree(void *opaque);
 
 virJSONType virJSONValueGetType(const virJSONValue *value);
 
@@ -71,6 +71,8 @@ virJSONValuePtr virJSONValueNewArrayFromBitmap(virBitmapPtr bitmap);
 
 int virJSONValueObjectAppend(virJSONValuePtr object, const char *key, virJSONValuePtr value);
 int virJSONValueArrayAppend(virJSONValuePtr object, virJSONValuePtr value);
+int virJSONValueArrayConcat(virJSONValuePtr a,
+                            virJSONValuePtr c);
 
 int virJSONValueObjectHasKey(virJSONValuePtr object, const char *key);
 virJSONValuePtr virJSONValueObjectGet(virJSONValuePtr object, const char *key);
@@ -125,6 +127,8 @@ int virJSONValueObjectGetBoolean(virJSONValuePtr object, const char *key, bool *
 int virJSONValueObjectIsNull(virJSONValuePtr object, const char *key);
 
 int virJSONValueObjectAppendString(virJSONValuePtr object, const char *key, const char *value);
+int virJSONValueObjectAppendStringPrintf(virJSONValuePtr object, const char *key, const char *fmt, ...)
+    G_GNUC_PRINTF(3, 4);
 int virJSONValueObjectPrependString(virJSONValuePtr object, const char *key, const char *value);
 int virJSONValueObjectAppendNumberInt(virJSONValuePtr object, const char *key, int number);
 int virJSONValueObjectAppendNumberUint(virJSONValuePtr object, const char *key, unsigned int number);

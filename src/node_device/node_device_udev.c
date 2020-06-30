@@ -22,9 +22,7 @@
 #include <libudev.h>
 #include <pciaccess.h>
 #include <scsi/scsi.h>
-#include <c-ctype.h>
 
-#include "dirname.h"
 #include "node_device_conf.h"
 #include "node_device_event.h"
 #include "node_device_driver.h"
@@ -42,6 +40,7 @@
 #include "virstring.h"
 #include "virnetdev.h"
 #include "virmdev.h"
+#include "virutil.h"
 
 #include "configmake.h"
 
@@ -307,7 +306,7 @@ udevGenerateDeviceName(struct udev_device *device,
     def->name = virBufferContentAndReset(&buf);
 
     for (i = 0; i < strlen(def->name); i++) {
-        if (!(c_isalnum(*(def->name + i))))
+        if (!(g_ascii_isalnum(*(def->name + i))))
             *(def->name + i) = '_';
     }
 
@@ -603,10 +602,10 @@ udevProcessSCSIHost(struct udev_device *device G_GNUC_UNUSED,
                     virNodeDeviceDefPtr def)
 {
     virNodeDevCapSCSIHostPtr scsi_host = &def->caps->data.scsi_host;
-    char *filename = NULL;
+    g_autofree char *filename = NULL;
     char *str;
 
-    filename = last_component(def->sysfs_path);
+    filename = g_path_get_basename(def->sysfs_path);
 
     if (!(str = STRSKIP(filename, "host")) ||
         virStrToLong_ui(str, NULL, 0, &scsi_host->host) < 0) {
@@ -712,9 +711,10 @@ udevProcessSCSIDevice(struct udev_device *device G_GNUC_UNUSED,
     int ret = -1;
     unsigned int tmp = 0;
     virNodeDevCapSCSIPtr scsi = &def->caps->data.scsi;
-    char *filename = NULL, *p = NULL;
+    g_autofree char *filename = NULL;
+    char *p = NULL;
 
-    filename = last_component(def->sysfs_path);
+    filename = g_path_get_basename(def->sysfs_path);
 
     if (virStrToLong_ui(filename, &p, 10, &scsi->host) < 0 || p == NULL ||
         virStrToLong_ui(p + 1, &p, 10, &scsi->bus) < 0 || p == NULL ||
@@ -1013,7 +1013,6 @@ udevProcessMediatedDevice(struct udev_device *dev,
                           virNodeDeviceDefPtr def)
 {
     int ret = -1;
-    const char *uuidstr = NULL;
     int iommugrp = -1;
     char *linkpath = NULL;
     char *canonicalpath = NULL;
@@ -1025,9 +1024,7 @@ udevProcessMediatedDevice(struct udev_device *dev,
      * it by waiting for the attributes to become available.
      */
 
-    if (virAsprintf(&linkpath, "%s/mdev_type",
-                    udev_device_get_syspath(dev)) < 0)
-        goto cleanup;
+    linkpath = g_strdup_printf("%s/mdev_type", udev_device_get_syspath(dev));
 
     if (virFileWaitForExists(linkpath, 1, 100) < 0) {
         virReportSystemError(errno,
@@ -1041,10 +1038,10 @@ udevProcessMediatedDevice(struct udev_device *dev,
         goto cleanup;
     }
 
-    data->type = g_strdup(last_component(canonicalpath));
+    data->type = g_path_get_basename(canonicalpath);
 
-    uuidstr = udev_device_get_sysname(dev);
-    if ((iommugrp = virMediatedDeviceGetIOMMUGroupNum(uuidstr)) < 0)
+    data->uuid = g_strdup(udev_device_get_sysname(dev));
+    if ((iommugrp = virMediatedDeviceGetIOMMUGroupNum(data->uuid)) < 0)
         goto cleanup;
 
     if (udevGenerateDeviceName(dev, def, NULL) != 0)
@@ -1224,17 +1221,15 @@ udevGetDeviceDetails(struct udev_device *device,
 
 
 static int
-udevRemoveOneDevice(struct udev_device *device)
+udevRemoveOneDeviceSysPath(const char *path)
 {
     virNodeDeviceObjPtr obj = NULL;
     virNodeDeviceDefPtr def;
     virObjectEventPtr event = NULL;
-    const char *name = NULL;
 
-    name = udev_device_get_syspath(device);
-    if (!(obj = virNodeDeviceObjListFindBySysfsPath(driver->devs, name))) {
-        VIR_DEBUG("Failed to find device to remove that has udev name '%s'",
-                  name);
+    if (!(obj = virNodeDeviceObjListFindBySysfsPath(driver->devs, path))) {
+        VIR_DEBUG("Failed to find device to remove that has udev path '%s'",
+                  path);
         return -1;
     }
     def = virNodeDeviceObjGetDef(obj);
@@ -1244,12 +1239,21 @@ udevRemoveOneDevice(struct udev_device *device)
                                            0);
 
     VIR_DEBUG("Removing device '%s' with sysfs path '%s'",
-              def->name, name);
+              def->name, path);
     virNodeDeviceObjListRemove(driver->devs, obj);
-    virObjectUnref(obj);
+    virNodeDeviceObjEndAPI(&obj);
 
     virObjectEventStateQueue(driver->nodeDeviceEventState, event);
     return 0;
+}
+
+
+static int
+udevRemoveOneDevice(struct udev_device *device)
+{
+    const char *path = udev_device_get_syspath(device);
+
+    return udevRemoveOneDeviceSysPath(path);
 }
 
 
@@ -1261,7 +1265,6 @@ udevSetParent(struct udev_device *device,
     const char *parent_sysfs_path = NULL;
     virNodeDeviceObjPtr obj = NULL;
     virNodeDeviceDefPtr objdef;
-    int ret = -1;
 
     parent_device = device;
     do {
@@ -1275,7 +1278,7 @@ udevSetParent(struct udev_device *device,
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not get syspath for parent of '%s'"),
                            udev_device_get_syspath(parent_device));
-            goto cleanup;
+            return -1;
         }
 
         if ((obj = virNodeDeviceObjListFindBySysfsPath(driver->devs,
@@ -1292,10 +1295,7 @@ udevSetParent(struct udev_device *device,
     if (!def->parent)
         def->parent = g_strdup("computer");
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -1397,7 +1397,7 @@ udevProcessDeviceListEntry(struct udev *udev,
  * Do not bother enumerating over subsystems that do not
  * contain interesting devices.
  */
-const char *subsystem_blacklist[] = {
+const char *subsystem_ignored[] = {
     "acpi", "tty", "vc", "i2c",
 };
 
@@ -1406,8 +1406,8 @@ udevEnumerateAddMatches(struct udev_enumerate *udev_enumerate)
 {
     size_t i;
 
-    for (i = 0; i < G_N_ELEMENTS(subsystem_blacklist); i++) {
-        const char *s = subsystem_blacklist[i];
+    for (i = 0; i < G_N_ELEMENTS(subsystem_ignored); i++) {
+        const char *s = subsystem_ignored[i];
         if (udev_enumerate_add_nomatch_subsystem(udev_enumerate, s) < 0) {
             virReportSystemError(errno, "%s", _("failed to add susbsystem filter"));
             return -1;
@@ -1483,6 +1483,7 @@ nodeStateCleanup(void)
         virPidFileRelease(driver->stateDir, "driver", driver->lockFD);
 
     VIR_FREE(driver->stateDir);
+    virCondDestroy(&driver->initCond);
     virMutexDestroy(&driver->lock);
     VIR_FREE(driver);
 
@@ -1503,6 +1504,18 @@ udevHandleOneDevice(struct udev_device *device)
 
     if (STREQ(action, "remove"))
         return udevRemoveOneDevice(device);
+
+    if (STREQ(action, "move")) {
+        const char *devpath_old = udevGetDeviceProperty(device, "DEVPATH_OLD");
+
+        if (devpath_old) {
+            g_autofree char *devpath_old_fixed = g_strdup_printf("/sys%s", devpath_old);
+
+            udevRemoveOneDeviceSysPath(devpath_old_fixed);
+        }
+
+        return udevAddOneDevice(device);
+    }
 
     return 0;
 }
@@ -1750,6 +1763,11 @@ nodeStateInitializeEnumerate(void *opaque)
     if (udevEnumerateDevices(udev) != 0)
         goto error;
 
+    nodeDeviceLock();
+    driver->initialized = true;
+    nodeDeviceUnlock();
+    virCondBroadcast(&driver->initCond);
+
     return;
 
  error:
@@ -1788,12 +1806,19 @@ udevPCITranslateInit(bool privileged G_GNUC_UNUSED)
 
 static int
 nodeStateInitialize(bool privileged,
+                    const char *root,
                     virStateInhibitCallback callback G_GNUC_UNUSED,
                     void *opaque G_GNUC_UNUSED)
 {
     udevEventDataPtr priv = NULL;
     struct udev *udev = NULL;
     virThread enumThread;
+
+    if (root != NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Driver does not support embedded mode"));
+        return -1;
+    }
 
     if (VIR_ALLOC(driver) < 0)
         return VIR_DRV_STATE_INIT_ERROR;
@@ -1805,20 +1830,23 @@ nodeStateInitialize(bool privileged,
         VIR_FREE(driver);
         return VIR_DRV_STATE_INIT_ERROR;
     }
+    if (virCondInit(&driver->initCond) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to initialize condition variable"));
+        virMutexDestroy(&driver->lock);
+        VIR_FREE(driver);
+        return VIR_DRV_STATE_INIT_ERROR;
+    }
 
     driver->privileged = privileged;
 
     if (privileged) {
-        if (virAsprintf(&driver->stateDir,
-                        "%s/libvirt/nodedev", RUNSTATEDIR) < 0)
-            goto cleanup;
+        driver->stateDir = g_strdup_printf("%s/libvirt/nodedev", RUNSTATEDIR);
     } else {
         g_autofree char *rundir = NULL;
 
-        if (!(rundir = virGetUserRuntimeDirectory()))
-            goto cleanup;
-        if (virAsprintf(&driver->stateDir, "%s/nodedev/run", rundir) < 0)
-            goto cleanup;
+        rundir = virGetUserRuntimeDirectory();
+        driver->stateDir = g_strdup_printf("%s/nodedev/run", rundir);
     }
 
     if (virFileMakePathWithMode(driver->stateDir, S_IRWXU) < 0) {
@@ -1850,7 +1878,7 @@ nodeStateInitialize(bool privileged,
 
     virObjectLock(priv);
 
-    priv->udev_monitor = udev_monitor_new_from_netlink(udev, "udev");
+    priv->udev_monitor = udev_monitor_new_from_netlink(udev, "kernel");
     if (!priv->udev_monitor) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("udev_monitor_new_from_netlink returned NULL"));
@@ -1866,7 +1894,8 @@ nodeStateInitialize(bool privileged,
         udev_monitor_set_receive_buffer_size(priv->udev_monitor,
                                              128 * 1024 * 1024);
 
-    if (virThreadCreate(&priv->th, true, udevEventHandleThread, NULL) < 0) {
+    if (virThreadCreateFull(&priv->th, true, udevEventHandleThread,
+                            "udev-event", false, NULL) < 0) {
         virReportSystemError(errno, "%s",
                              _("failed to create udev handler thread"));
         goto unlock;
@@ -1892,8 +1921,8 @@ nodeStateInitialize(bool privileged,
     if (udevSetupSystemDev() != 0)
         goto cleanup;
 
-    if (virThreadCreate(&enumThread, false, nodeStateInitializeEnumerate,
-                        udev) < 0) {
+    if (virThreadCreateFull(&enumThread, false, nodeStateInitializeEnumerate,
+                            "nodedev-init", false, udev) < 0) {
         virReportSystemError(errno, "%s",
                              _("failed to create udev enumerate thread"));
         goto cleanup;

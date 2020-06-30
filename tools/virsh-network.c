@@ -1244,7 +1244,7 @@ virshNetworkEventCallback virshNetworkEventCallbacks[] = {
     { "lifecycle",
       VIR_NETWORK_EVENT_CALLBACK(vshEventLifecyclePrint), },
 };
-verify(VIR_NETWORK_EVENT_ID_LAST == G_N_ELEMENTS(virshNetworkEventCallbacks));
+G_STATIC_ASSERT(VIR_NETWORK_EVENT_ID_LAST == G_N_ELEMENTS(virshNetworkEventCallbacks));
 
 static const vshCmdInfo info_network_event[] = {
     {.name = "help",
@@ -1435,22 +1435,20 @@ cmdNetworkDHCPLeases(vshControl *ctl, const vshCmd *cmd)
         const char *typestr = NULL;
         g_autofree char *cidr_format = NULL;
         virNetworkDHCPLeasePtr lease = leases[i];
-        time_t expirytime_tmp = lease->expirytime;
-        struct tm ts;
-        char expirytime[32];
-        localtime_r(&expirytime_tmp, &ts);
-        strftime(expirytime, sizeof(expirytime), "%Y-%m-%d %H:%M:%S", &ts);
+        g_autoptr(GDateTime) then = g_date_time_new_from_unix_local(lease->expirytime);
+        g_autofree char *thenstr = NULL;
+
+        thenstr = g_date_time_format(then, "%Y-%m-%d %H:%M:%S");
 
         if (lease->type == VIR_IP_ADDR_TYPE_IPV4)
             typestr = "ipv4";
         else if (lease->type == VIR_IP_ADDR_TYPE_IPV6)
             typestr = "ipv6";
 
-        ignore_value(virAsprintf(&cidr_format, "%s/%d",
-                                 lease->ipaddr, lease->prefix));
+        cidr_format = g_strdup_printf("%s/%d", lease->ipaddr, lease->prefix);
 
         if (vshTableRowAppend(table,
-                              expirytime,
+                              thenstr,
                               NULLSTR_MINUS(lease->mac),
                               NULLSTR_MINUS(typestr),
                               NULLSTR_MINUS(cidr_format),

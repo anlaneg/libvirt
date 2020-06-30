@@ -24,8 +24,6 @@
 #include "lxc_conf.h"
 #include "lxc_monitor_dispatch.h"
 
-#include "viralloc.h"
-
 #include "virerror.h"
 #include "virlog.h"
 #include "virthread.h"
@@ -143,7 +141,7 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
                                   virLXCMonitorCallbacksPtr cb)
 {
     virLXCMonitorPtr mon;
-    char *sockpath = NULL;
+    g_autofree char *sockpath = NULL;
 
     if (virLXCMonitorInitialize() < 0)
         return NULL;
@@ -151,9 +149,7 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
     if (!(mon = virObjectLockableNew(virLXCMonitorClass)))
         return NULL;
 
-    if (virAsprintf(&sockpath, "%s/%s.sock",
-                    socketdir, vm->def->name) < 0)
-        goto error;
+    sockpath = g_strdup_printf("%s/%s.sock", socketdir, vm->def->name);
 
     if (!(mon->client = virNetClientNewUNIX(sockpath, false, NULL)))
         goto error;
@@ -182,14 +178,11 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
     mon->vm = virObjectRef(vm);
     memcpy(&mon->cb, cb, sizeof(mon->cb));
 
- cleanup:
-    VIR_FREE(sockpath);
     return mon;
 
  error:
     virObjectUnref(mon);
-    mon = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 

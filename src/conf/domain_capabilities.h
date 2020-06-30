@@ -139,10 +139,13 @@ struct _virDomainCapsCPUModels {
     virDomainCapsCPUModelPtr models;
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainCapsCPUModels, virObjectUnref);
+
 typedef struct _virDomainCapsCPU virDomainCapsCPU;
 typedef virDomainCapsCPU *virDomainCapsCPUPtr;
 struct _virDomainCapsCPU {
     bool hostPassthrough;
+    virDomainCapsEnum hostPassthroughMigratable;
     virCPUDefPtr hostModel;
     virDomainCapsCPUModelsPtr custom;
 };
@@ -156,6 +159,16 @@ struct _virSEVCapability {
     unsigned int reduced_phys_bits;
 };
 
+typedef enum {
+    VIR_DOMAIN_CAPS_FEATURE_IOTHREADS = 0,
+    VIR_DOMAIN_CAPS_FEATURE_VMCOREINFO,
+    VIR_DOMAIN_CAPS_FEATURE_GENID,
+    VIR_DOMAIN_CAPS_FEATURE_BACKING_STORE_INPUT,
+    VIR_DOMAIN_CAPS_FEATURE_BACKUP,
+
+    VIR_DOMAIN_CAPS_FEATURE_LAST
+} virDomainCapsFeature;
+
 struct _virDomainCaps {
     virObjectLockable parent;
 
@@ -166,7 +179,6 @@ struct _virDomainCaps {
 
     /* Some machine specific info */
     int maxvcpus;
-    virTristateBool iothreads;  /* Whether I/O threads are supported or not. */
 
     virDomainCapsOS os;
     virDomainCapsCPU cpu;
@@ -178,10 +190,10 @@ struct _virDomainCaps {
     /* add new domain devices here */
 
     virDomainCapsFeatureGIC gic;
-    virTristateBool vmcoreinfo;
-    virTristateBool genid;
     virSEVCapabilityPtr sev;
     /* add new domain features here */
+
+    virTristateBool features[VIR_DOMAIN_CAPS_FEATURE_LAST];
 };
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainCaps, virObjectUnref);
@@ -194,16 +206,8 @@ virDomainCapsPtr virDomainCapsNew(const char *path,
 
 virDomainCapsCPUModelsPtr virDomainCapsCPUModelsNew(size_t nmodels);
 virDomainCapsCPUModelsPtr virDomainCapsCPUModelsCopy(virDomainCapsCPUModelsPtr old);
-virDomainCapsCPUModelsPtr virDomainCapsCPUModelsFilter(virDomainCapsCPUModelsPtr old,
-                                                       const char **models,
-                                                       const char **blacklist);
-int virDomainCapsCPUModelsAddSteal(virDomainCapsCPUModelsPtr cpuModels,
-                                   char **name,
-                                   virDomainCapsCPUUsable usable,
-                                   char ***blockers);
 int virDomainCapsCPUModelsAdd(virDomainCapsCPUModelsPtr cpuModels,
                               const char *name,
-                              ssize_t nameLen,
                               virDomainCapsCPUUsable usable,
                               char **blockers);
 virDomainCapsCPUModelPtr
@@ -226,9 +230,9 @@ int virDomainCapsEnumSet(virDomainCapsEnumPtr capsEnum,
                          unsigned int *values);
 void virDomainCapsEnumClear(virDomainCapsEnumPtr capsEnum);
 
-char * virDomainCapsFormat(virDomainCapsPtr const caps);
+char * virDomainCapsFormat(const virDomainCaps *caps);
 
-int virDomainCapsDeviceDefValidate(virDomainCapsPtr const caps,
+int virDomainCapsDeviceDefValidate(const virDomainCaps *caps,
                                    const virDomainDeviceDef *dev,
                                    const virDomainDef *def);
 

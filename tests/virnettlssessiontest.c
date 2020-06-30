@@ -19,7 +19,6 @@
 #include <config.h>
 
 #include <fcntl.h>
-#include <sys/socket.h>
 
 #include "testutils.h"
 #include "virnettlshelpers.h"
@@ -29,7 +28,7 @@
 #include "virlog.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "virsocketaddr.h"
+#include "virsocket.h"
 
 #if !defined WIN32 && HAVE_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
 
@@ -239,7 +238,7 @@ mymain(void)
 {
     int ret = 0;
 
-    setenv("GNUTLS_FORCE_FIPS_MODE", "2", 1);
+    g_setenv("GNUTLS_FORCE_FIPS_MODE", "2", TRUE);
 
     testTLSInit(KEYFILE);
 

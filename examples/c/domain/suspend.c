@@ -30,20 +30,6 @@
 
 static int debug;
 
-/* On mingw, there's a header file that poisons the well:
- *
- *
- *  CC       domtop.o
- *domtop.c:40:0: warning: "ERROR" redefined [enabled by default]
- * #define ERROR(...) \
- * ^
- *In file included from /usr/i686-w64-mingw32/sys-root/mingw/include/windows.h:71:0,
- *                 from /usr/i686-w64-mingw32/sys-root/mingw/include/winsock2.h:23,
- *                 from ../../gnulib/lib/unistd.h:48,
- *                 from domtop.c:35:
- * /usr/i686-w64-mingw32/sys-root/mingw/include/wingdi.h:75:0: note: this is the location of the previous definition
- * #define ERROR 0
- */
 #undef ERROR
 #define ERROR(...) \
 do { \
@@ -86,7 +72,6 @@ parse_argv(int argc, char *argv[],
            const char **dom_name,
            unsigned int *seconds)
 {
-    int ret = -1;
     int arg;
     unsigned long val;
     char *p;
@@ -116,12 +101,12 @@ parse_argv(int argc, char *argv[],
             val = strtoul(optarg, &p, 10);
             if (errno || *p || p == optarg) {
                 ERROR("Invalid number: '%s'", optarg);
-                goto cleanup;
+                return -1;
             }
             *seconds = val;
             if (*seconds != val) {
                 ERROR("Integer overflow: %ld", val);
-                goto cleanup;
+                return -1;
             }
             break;
         case ':':
@@ -142,9 +127,7 @@ parse_argv(int argc, char *argv[],
     if (argc > optind)
         *dom_name = argv[optind];
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 static int

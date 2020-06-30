@@ -19,7 +19,6 @@
  */
 #include <config.h>
 
-#include <fnmatch.h>
 #include <getopt.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -67,14 +66,14 @@ static int virLoginShellAllowedUser(virConfPtr conf,
             for (i = 0; i < ngroups; i++) {
                 if (!(gname = virGetGroupName(groups[i])))
                     continue;
-                if (fnmatch(entry, gname, 0) == 0) {
+                if (g_pattern_match_simple(entry, gname)) {
                     ret = 0;
                     goto cleanup;
                 }
                 VIR_FREE(gname);
             }
         } else {
-            if (fnmatch(entry, name, 0) == 0) {
+            if (g_pattern_match_simple(entry, name)) {
                 ret = 0;
                 goto cleanup;
             }
@@ -382,13 +381,13 @@ main(int argc, char **argv)
         }
 
         clearenv();
-        setenv("PATH", "/bin:/usr/bin", 1);
-        setenv("SHELL", shcmd, 1);
-        setenv("USER", name, 1);
-        setenv("LOGNAME", name, 1);
-        setenv("HOME", homedir, 1);
+        g_setenv("PATH", "/bin:/usr/bin", TRUE);
+        g_setenv("SHELL", shcmd, TRUE);
+        g_setenv("USER", name, TRUE);
+        g_setenv("LOGNAME", name, TRUE);
+        g_setenv("HOME", homedir, TRUE);
         if (term)
-            setenv("TERM", term, 1);
+            g_setenv("TERM", term, TRUE);
 
         if (execv(shcmd, (char *const*) shargv) < 0) {
             virReportSystemError(errno, _("Unable to exec shell %s"),

@@ -25,7 +25,6 @@
 
 #include "virerror.h"
 #include "virfile.h"
-#include "c-ctype.h"
 #include "datatypes.h"
 #include "domain_conf.h"
 #include "interface_driver.h"
@@ -36,6 +35,7 @@
 #include "viraccessapicheck.h"
 #include "virinterfaceobj.h"
 #include "virnetdev.h"
+#include "virutil.h"
 
 #include "configmake.h"
 
@@ -567,7 +567,7 @@ udevBridgeScanDirFilter(const struct dirent *entry)
      */
     if (strlen(entry->d_name) >= 5) {
         if (STRPREFIX(entry->d_name, VIR_NET_GENERATED_TAP_PREFIX) &&
-            c_isdigit(entry->d_name[4]))
+            g_ascii_isdigit(entry->d_name[4]))
             return 0;
     }
 
@@ -856,9 +856,7 @@ udevGetIfaceDefBridge(struct udev *udev,
     }
 
     /* Members of the bridge */
-    if (virAsprintf(&member_path, "%s/%s",
-                udev_device_get_syspath(dev), "brif") < 0)
-        goto error;
+    member_path = g_strdup_printf("%s/%s", udev_device_get_syspath(dev), "brif");
 
     /* Get each member of the bridge */
     member_count = scandir(member_path, &member_list,
@@ -920,8 +918,7 @@ udevGetIfaceDefVlan(struct udev *udev G_GNUC_UNUSED,
     const char *dev_prefix = "\nDevice: ";
     int ret = -1;
 
-    if (virAsprintf(&procpath, "/proc/net/vlan/%s", name) < 0)
-        goto cleanup;
+    procpath = g_strdup_printf("/proc/net/vlan/%s", name);
 
     if (virFileReadAll(procpath, BUFSIZ, &buf) < 0)
         goto cleanup;
@@ -935,7 +932,7 @@ udevGetIfaceDefVlan(struct udev *udev G_GNUC_UNUSED,
     vid_pos += strlen(vid_prefix);
 
     if ((vid_len = strspn(vid_pos, "0123456789")) == 0 ||
-        !c_isspace(vid_pos[vid_len])) {
+        !g_ascii_isspace(vid_pos[vid_len])) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("failed to find the VID for the VLAN device '%s'"),
                        name);
@@ -957,12 +954,8 @@ udevGetIfaceDefVlan(struct udev *udev G_GNUC_UNUSED,
         goto cleanup;
     }
 
-    if (VIR_STRNDUP(ifacedef->data.vlan.tag, vid_pos, vid_len) < 0)
-        goto cleanup;
-    if (VIR_STRNDUP(ifacedef->data.vlan.dev_name, dev_pos, dev_len) < 0) {
-        VIR_FREE(ifacedef->data.vlan.tag);
-        goto cleanup;
-    }
+    ifacedef->data.vlan.tag = g_strndup(vid_pos, vid_len);
+    ifacedef->data.vlan.dev_name = g_strndup(dev_pos, dev_len);
 
     ret = 0;
 
@@ -1153,10 +1146,17 @@ udevStateCleanup(void);
 
 static int
 udevStateInitialize(bool privileged,
+                    const char *root,
                     virStateInhibitCallback callback G_GNUC_UNUSED,
                     void *opaque G_GNUC_UNUSED)
 {
     int ret = VIR_DRV_STATE_INIT_ERROR;
+
+    if (root != NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Driver does not support embedded mode"));
+        return -1;
+    }
 
     if (VIR_ALLOC(driver) < 0)
         goto cleanup;
@@ -1164,16 +1164,12 @@ udevStateInitialize(bool privileged,
     driver->lockFD = -1;
 
     if (privileged) {
-        if (virAsprintf(&driver->stateDir,
-                        "%s/libvirt/interface", RUNSTATEDIR) < 0)
-            goto cleanup;
+        driver->stateDir = g_strdup_printf("%s/libvirt/interface", RUNSTATEDIR);
     } else {
         g_autofree char *rundir = NULL;
 
-        if (!(rundir = virGetUserRuntimeDirectory()))
-            goto cleanup;
-        if (virAsprintf(&driver->stateDir, "%s/interface/run", rundir) < 0)
-            goto cleanup;
+        rundir = virGetUserRuntimeDirectory();
+        driver->stateDir = g_strdup_printf("%s/interface/run", rundir);
     }
 
     if (virFileMakePathWithMode(driver->stateDir, S_IRWXU) < 0) {

@@ -48,8 +48,8 @@
 #include "virsecret.h"
 #include "virstring.h"
 #include "viraccessapicheck.h"
-//#include "dirname.h"
 #include "storage_util.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -251,12 +251,19 @@ storageDriverAutostart(void)
  */
 static int
 storageStateInitialize(bool privileged,
+                       const char *root,
                        virStateInhibitCallback callback G_GNUC_UNUSED,
                        void *opaque G_GNUC_UNUSED)
 {
     g_autofree char *configdir = NULL;
     g_autofree char *rundir = NULL;
     bool autostart = true;
+
+    if (root != NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Driver does not support embedded mode"));
+        return -1;
+    }
 
     if (VIR_ALLOC(driver) < 0)
         return VIR_DRV_STATE_INIT_ERROR;
@@ -278,16 +285,10 @@ storageStateInitialize(bool privileged,
     } else {
         configdir = virGetUserConfigDirectory();
         rundir = virGetUserRuntimeDirectory();
-        if (!(configdir && rundir))
-            goto error;
 
-        if ((virAsprintf(&driver->configDir,
-                        "%s/storage", configdir) < 0) ||
-            (virAsprintf(&driver->autostartDir,
-                        "%s/storage/autostart", configdir) < 0) ||
-            (virAsprintf(&driver->stateDir,
-                         "%s/storage/run", rundir) < 0))
-            goto error;
+        driver->configDir = g_strdup_printf("%s/storage", configdir);
+        driver->autostartDir = g_strdup_printf("%s/storage/autostart", configdir);
+        driver->stateDir = g_strdup_printf("%s/storage/run", rundir);
     }
     driver->privileged = privileged;
 
@@ -300,7 +301,7 @@ storageStateInitialize(bool privileged,
 
     if ((driver->lockFD =
          virPidFileAcquire(driver->stateDir, "driver",
-                           true, getpid())) < 0)
+                           false, getpid())) < 0)
         goto error;
 
     if (virStoragePoolObjLoadAllState(driver->pools,
@@ -625,7 +626,6 @@ storageConnectFindStoragePoolSources(virConnectPtr conn,
 {
     int backend_type;
     virStorageBackendPtr backend;
-    char *ret = NULL;
 
     if (virConnectFindStoragePoolSourcesEnsureACL(conn) < 0)
         return NULL;
@@ -634,24 +634,21 @@ storageConnectFindStoragePoolSources(virConnectPtr conn,
     if (backend_type < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("unknown storage pool type %s"), type);
-        goto cleanup;
+        return NULL;
     }
 
     backend = virStorageBackendForType(backend_type);
     if (backend == NULL)
-        goto cleanup;
+        return NULL;
 
     if (!backend->findPoolSources) {
         virReportError(VIR_ERR_NO_SUPPORT,
                        _("pool type '%s' does not support source "
                          "discovery"), type);
-        goto cleanup;
+        return NULL;
     }
 
-    ret = backend->findPoolSources(srcSpec, flags);
-
- cleanup:
-    return ret;
+    return backend->findPoolSources(srcSpec, flags);
 }
 
 
@@ -903,9 +900,8 @@ storagePoolUndefine(virStoragePoolPtr pool)
 
     if (autostartLink && unlink(autostartLink) < 0 &&
         errno != ENOENT && errno != ENOTDIR) {
-        char ebuf[1024];
         VIR_ERROR(_("Failed to delete autostart link '%s': %s"),
-                  autostartLink, virStrerror(errno, ebuf, sizeof(ebuf)));
+                  autostartLink, g_strerror(errno));
     }
 
     event = virStoragePoolEventLifecycleNew(def->name,
@@ -1723,7 +1719,7 @@ storagePoolLookupByTargetPathCallback(virStoragePoolObjPtr obj,
         return false;
 
     def = virStoragePoolObjGetDef(obj);
-    return STREQ(path, def->target.path);
+    return STREQ_NULLABLE(path, def->target.path);
 }
 
 
@@ -1775,25 +1771,22 @@ storageVolDeleteInternal(virStorageBackendPtr backend,
                          bool updateMeta)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(obj);
-    int ret = -1;
 
     if (!backend->deleteVol) {
         virReportError(VIR_ERR_NO_SUPPORT,
                        "%s", _("storage pool does not support vol deletion"));
 
-        goto cleanup;
+        return -1;
     }
 
     if (backend->deleteVol(obj, voldef, flags) < 0)
-        goto cleanup;
+        return -1;
 
     /* The disk backend updated the pool data including removing the
      * voldef from the pool (for both the deleteVol and the createVol
      * failure path. */
-    if (def->type == VIR_STORAGE_POOL_DISK) {
-        ret = 0;
-        goto cleanup;
-    }
+    if (def->type == VIR_STORAGE_POOL_DISK)
+        return 0;
 
     /* Update pool metadata - don't update meta data from error paths
      * in this module since the allocation/available weren't adjusted yet.
@@ -1805,10 +1798,8 @@ storageVolDeleteInternal(virStorageBackendPtr backend,
     }
 
     virStoragePoolObjRemoveVol(obj, voldef);
-    ret = 0;
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -2293,8 +2284,7 @@ virStorageBackendPloopRestoreDesc(char *path)
     g_autofree char *refresh_tool = NULL;
     g_autofree char *desc = NULL;
 
-    if (virAsprintf(&desc, "%s/DiskDescriptor.xml", path) < 0)
-        return -1;
+    desc = g_strdup_printf("%s/DiskDescriptor.xml", path);
 
     if (virFileRemove(desc, 0, 0) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -2376,8 +2366,8 @@ virStorageVolFDStreamCloseCb(virStreamPtr st G_GNUC_UNUSED,
 {
     virThread thread;
 
-    if (virThreadCreate(&thread, false, virStorageVolPoolRefreshThread,
-                        opaque) < 0) {
+    if (virThreadCreateFull(&thread, false, virStorageVolPoolRefreshThread,
+                            "vol-refresh", false, opaque) < 0) {
         /* Not much else can be done */
         VIR_ERROR(_("Failed to create thread to handle pool refresh"));
         goto error;
@@ -2788,13 +2778,13 @@ storageConnectStoragePoolEventRegisterAny(virConnectPtr conn,
     int callbackID = -1;
 
     if (virConnectStoragePoolEventRegisterAnyEnsureACL(conn) < 0)
-        goto cleanup;
+        return -1;
 
     if (virStoragePoolEventStateRegisterID(conn, driver->storageEventState,
                                            pool, eventID, callback,
                                            opaque, freecb, &callbackID) < 0)
         callbackID = -1;
- cleanup:
+
     return callbackID;
 }
 
@@ -2802,20 +2792,15 @@ static int
 storageConnectStoragePoolEventDeregisterAny(virConnectPtr conn,
                                             int callbackID)
 {
-    int ret = -1;
-
     if (virConnectStoragePoolEventDeregisterAnyEnsureACL(conn) < 0)
-        goto cleanup;
+        return -1;
 
     if (virObjectEventStateDeregisterID(conn,
                                         driver->storageEventState,
                                         callbackID, true) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -2844,7 +2829,7 @@ virStoragePoolObjFindPoolByUUID(const unsigned char *uuid)
  *
  * Generate a name for a temporary file using the driver stateDir
  * as a path, the pool name, and the volume name to be used as input
- * for a mkostemp
+ * for mkstemp
  *
  * Returns a string pointer on success, NULL on failure
  */
@@ -2854,11 +2839,8 @@ virStoragePoolObjBuildTempFilePath(virStoragePoolObjPtr obj,
 
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(obj);
-    char *tmp = NULL;
-
-    ignore_value(virAsprintf(&tmp, "%s/%s.%s.secret.XXXXXX",
-                             driver->stateDir, def->name, voldef->name));
-    return tmp;
+    return g_strdup_printf("%s/%s.%s.secret.XXXXXX", driver->stateDir,
+                           def->name, voldef->name);
 }
 
 

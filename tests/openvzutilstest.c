@@ -17,7 +17,8 @@ static int
 testLocateConfFile(int vpsid G_GNUC_UNUSED, char **conffile,
                    const char *ext G_GNUC_UNUSED)
 {
-    return virAsprintf(conffile, "%s/openvzutilstest.conf", abs_srcdir);
+    *conffile = g_strdup_printf("%s/openvzutilstest.conf", abs_srcdir);
+    return 0;
 }
 
 struct testConfigParam {
@@ -40,8 +41,7 @@ testReadConfigParam(const void *data G_GNUC_UNUSED)
     char *conf = NULL;
     char *value = NULL;
 
-    if (virAsprintf(&conf, "%s/openvzutilstest.conf", abs_srcdir) < 0)
-        return -1;
+    conf = g_strdup_printf("%s/openvzutilstest.conf", abs_srcdir);
 
     for (i = 0; i < G_N_ELEMENTS(configParams); ++i) {
         if (openvzReadConfigParam(conf, configParams[i].param,
@@ -98,6 +98,10 @@ testReadNetworkConf(const void *data G_GNUC_UNUSED)
         "    </interface>\n"
         "  </devices>\n"
         "</domain>\n";
+    struct openvz_driver driver = {
+        .xmlopt = openvzXMLOption(&driver),
+        .caps = openvzCapsInit(),
+    };
 
     if (!(def = virDomainDefNew()))
         goto cleanup;
@@ -112,7 +116,7 @@ testReadNetworkConf(const void *data G_GNUC_UNUSED)
         goto cleanup;
     }
 
-    actual = virDomainDefFormat(def, NULL, VIR_DOMAIN_DEF_FORMAT_INACTIVE);
+    actual = virDomainDefFormat(def, driver.xmlopt, VIR_DOMAIN_DEF_FORMAT_INACTIVE);
 
     if (actual == NULL) {
         fprintf(stderr, "ERROR: %s\n", virGetLastErrorMessage());
@@ -127,6 +131,8 @@ testReadNetworkConf(const void *data G_GNUC_UNUSED)
     result = 0;
 
  cleanup:
+    virObjectUnref(driver.xmlopt);
+    virObjectUnref(driver.caps);
     VIR_FREE(actual);
     virDomainDefFree(def);
 

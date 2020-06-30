@@ -34,7 +34,7 @@ void virNetTLSInit(void);
 
 virNetTLSContextPtr virNetTLSContextNewServerPath(const char *pkipath,
                                                   bool tryUserPkiPath,
-                                                  const char *const*x509dnWhitelist,
+                                                  const char *const *x509dnACL,
                                                   const char *priority,
                                                   bool sanityCheckCert,
                                                   bool requireValidCert);
@@ -49,7 +49,7 @@ virNetTLSContextPtr virNetTLSContextNewServer(const char *cacert,
                                               const char *cacrl,
                                               const char *cert,
                                               const char *key,
-                                              const char *const*x509dnWhitelist,
+                                              const char *const *x509dnACL,
                                               const char *priority,
                                               bool sanityCheckCert,
                                               bool requireValidCert);
@@ -61,6 +61,9 @@ virNetTLSContextPtr virNetTLSContextNewClient(const char *cacert,
                                               const char *priority,
                                               bool sanityCheckCert,
                                               bool requireValidCert);
+
+int virNetTLSContextReloadForServer(virNetTLSContextPtr ctxt,
+                                    bool tryUserPkiPath);
 
 int virNetTLSContextCheckCertificate(virNetTLSContextPtr ctxt,
                                      virNetTLSSessionPtr sess);

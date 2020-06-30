@@ -471,7 +471,6 @@ cmdCheckpointInfo(vshControl *ctl,
     virDomainCheckpointPtr checkpoint = NULL;
     const char *name;
     char *parent = NULL;
-    char *xml = NULL;
     xmlDocPtr xmldoc = NULL;
     xmlXPathContextPtr ctxt = NULL;
     bool ret = false;
@@ -518,7 +517,6 @@ cmdCheckpointInfo(vshControl *ctl,
  cleanup:
     xmlXPathFreeContext(ctxt);
     xmlFreeDoc(xmldoc);
-    VIR_FREE(xml);
     VIR_FREE(parent);
     virshDomainCheckpointFree(checkpoint);
     virshDomainFree(dom);
@@ -719,9 +717,8 @@ cmdCheckpointList(vshControl *ctl,
     char *doc = NULL;
     virDomainCheckpointPtr checkpoint = NULL;
     long long creation_longlong;
-    time_t creation_time_t;
-    char timestr[100];
-    struct tm time_info;
+    g_autoptr(GDateTime) then = NULL;
+    g_autofree gchar *thenstr = NULL;
     bool tree = vshCommandOptBool(cmd, "tree");
     bool name = vshCommandOptBool(cmd, "name");
     bool from = vshCommandOptBool(cmd, "from");
@@ -835,21 +832,16 @@ cmdCheckpointList(vshControl *ctl,
         if (virXPathLongLong("string(/domaincheckpoint/creationTime)", ctxt,
                              &creation_longlong) < 0)
             continue;
-        creation_time_t = creation_longlong;
-        if (creation_time_t != creation_longlong) {
-            vshError(ctl, "%s", _("time_t overflow"));
-            continue;
-        }
-        localtime_r(&creation_time_t, &time_info);
-        strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S %z",
-                 &time_info);
+
+        then = g_date_time_new_from_unix_local(creation_longlong);
+        thenstr = g_date_time_format(then, "%Y-%m-%d %H:%M:%S %z");
 
         if (parent) {
-            if (vshTableRowAppend(table, chk_name, timestr,
+            if (vshTableRowAppend(table, chk_name, thenstr,
                                   NULLSTR_EMPTY(parent_chk), NULL) < 0)
                 goto cleanup;
         } else {
-            if (vshTableRowAppend(table, chk_name, timestr, NULL) < 0)
+            if (vshTableRowAppend(table, chk_name, thenstr, NULL) < 0)
                 goto cleanup;
         }
     }

@@ -35,6 +35,7 @@
 #include "virnetdev.h"
 #include "virfile.h"
 #include "virhostdev.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
@@ -97,11 +98,26 @@ qemuHostdevUpdateActiveMediatedDevices(virQEMUDriverPtr driver,
 
 
 int
+qemuHostdevUpdateActiveNVMeDisks(virQEMUDriverPtr driver,
+                                 virDomainDefPtr def)
+{
+    return virHostdevUpdateActiveNVMeDevices(driver->hostdevMgr,
+                                             QEMU_DRIVER_NAME,
+                                             def->name,
+                                             def->disks,
+                                             def->ndisks);
+}
+
+
+int
 qemuHostdevUpdateActiveDomainDevices(virQEMUDriverPtr driver,
                                      virDomainDefPtr def)
 {
-    if (!def->nhostdevs)
+    if (!def->nhostdevs && !def->ndisks)
         return 0;
+
+    if (qemuHostdevUpdateActiveNVMeDisks(driver, def) < 0)
+        return -1;
 
     if (qemuHostdevUpdateActivePCIDevices(driver, def) < 0)
         return -1;
@@ -198,6 +214,28 @@ qemuHostdevPreparePCIDevicesCheckSupport(virDomainHostdevDefPtr *hostdevs,
 }
 
 int
+qemuHostdevPrepareOneNVMeDisk(virQEMUDriverPtr driver,
+                              const char *name,
+                              virStorageSourcePtr src)
+{
+    return virHostdevPrepareOneNVMeDevice(driver->hostdevMgr,
+                                          QEMU_DRIVER_NAME,
+                                          name,
+                                          src);
+}
+
+int
+qemuHostdevPrepareNVMeDisks(virQEMUDriverPtr driver,
+                            const char *name,
+                            virDomainDiskDefPtr *disks,
+                            size_t ndisks)
+{
+    return virHostdevPrepareNVMeDevices(driver->hostdevMgr,
+                                        QEMU_DRIVER_NAME,
+                                        name, disks, ndisks);
+}
+
+int
 qemuHostdevPreparePCIDevices(virQEMUDriverPtr driver,
                              const char *name,
                              const unsigned char *uuid,
@@ -206,17 +244,14 @@ qemuHostdevPreparePCIDevices(virQEMUDriverPtr driver,
                              virQEMUCapsPtr qemuCaps,
                              unsigned int flags)
 {
-    int ret = -1;
     virHostdevManagerPtr hostdev_mgr = driver->hostdevMgr;
 
     if (!qemuHostdevPreparePCIDevicesCheckSupport(hostdevs, nhostdevs, qemuCaps))
-        goto out;
+        return -1;
 
-    ret = virHostdevPreparePCIDevices(hostdev_mgr, QEMU_DRIVER_NAME,
-                                      name, uuid, hostdevs,
-                                      nhostdevs, flags);
- out:
-    return ret;
+    return virHostdevPreparePCIDevices(hostdev_mgr, QEMU_DRIVER_NAME,
+                                       name, uuid, hostdevs,
+                                       nhostdevs, flags);
 }
 
 int
@@ -313,8 +348,11 @@ qemuHostdevPrepareDomainDevices(virQEMUDriverPtr driver,
                                 virQEMUCapsPtr qemuCaps,
                                 unsigned int flags)
 {
-    if (!def->nhostdevs)
+    if (!def->nhostdevs && !def->ndisks)
         return 0;
+
+    if (qemuHostdevPrepareNVMeDisks(driver, def->name, def->disks, def->ndisks) < 0)
+        return -1;
 
     if (qemuHostdevPreparePCIDevices(driver, def->name, def->uuid,
                                      def->hostdevs, def->nhostdevs,
@@ -338,6 +376,28 @@ qemuHostdevPrepareDomainDevices(virQEMUDriverPtr driver,
         return -1;
 
     return 0;
+}
+
+void
+qemuHostdevReAttachOneNVMeDisk(virQEMUDriverPtr driver,
+                               const char *name,
+                               virStorageSourcePtr src)
+{
+    virHostdevReAttachOneNVMeDevice(driver->hostdevMgr,
+                                    QEMU_DRIVER_NAME,
+                                    name,
+                                    src);
+}
+
+void
+qemuHostdevReAttachNVMeDisks(virQEMUDriverPtr driver,
+                             const char *name,
+                             virDomainDiskDefPtr *disks,
+                             size_t ndisks)
+{
+    virHostdevReAttachNVMeDevices(driver->hostdevMgr,
+                                  QEMU_DRIVER_NAME,
+                                  name, disks, ndisks);
 }
 
 void
@@ -419,8 +479,11 @@ void
 qemuHostdevReAttachDomainDevices(virQEMUDriverPtr driver,
                                  virDomainDefPtr def)
 {
-    if (!def->nhostdevs)
+    if (!def->nhostdevs && !def->ndisks)
         return;
+
+    qemuHostdevReAttachNVMeDisks(driver, def->name, def->disks,
+                                 def->ndisks);
 
     qemuHostdevReAttachPCIDevices(driver, def->name, def->hostdevs,
                                   def->nhostdevs);

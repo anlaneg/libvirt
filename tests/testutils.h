@@ -30,18 +30,12 @@
 #define EXIT_AM_SKIP 77 /* tell Automake we're skipping a test */
 #define EXIT_AM_HARDFAIL 99 /* tell Automake that the framework is broken */
 
-/* Work around lack of gnulib support for fprintf %z */
-#ifndef NO_LIBVIRT
-# undef fprintf
-# define fprintf virFilePrintf
-#endif
-
-extern char *progname;
-
 /* Makefile.am provides these two definitions */
 #if !defined(abs_srcdir) || !defined(abs_builddir)
 # error Fix Makefile.am
 #endif
+
+extern virArch virTestHostArch;
 
 int virTestRun(const char *title,
                int (*body)(const void *data),
@@ -51,8 +45,6 @@ char *virTestLoadFilePath(const char *p, ...)
     G_GNUC_NULL_TERMINATED;
 virJSONValuePtr virTestLoadFileJSON(const char *p, ...)
     G_GNUC_NULL_TERMINATED;
-
-int virTestCaptureProgramOutput(const char *const argv[], char **buf, int maxlen);
 
 void virTestClearCommandPath(char *cmdset);
 
@@ -84,6 +76,7 @@ unsigned int virTestGetDebug(void);
 unsigned int virTestGetVerbose(void);
 unsigned int virTestGetExpensive(void);
 unsigned int virTestGetRegenerate(void);
+void virTestPropagateLibvirtError(void);
 
 #define VIR_TEST_DEBUG(fmt, ...) \
     do { \
@@ -118,7 +111,7 @@ int virTestMain(int argc,
 #ifdef __APPLE__
 # define PRELOAD_VAR "DYLD_INSERT_LIBRARIES"
 # define FORCE_FLAT_NAMESPACE \
-            setenv("DYLD_FORCE_FLAT_NAMESPACE", "1", 1);
+            g_setenv("DYLD_FORCE_FLAT_NAMESPACE", "1", TRUE);
 # define MOCK_EXT ".dylib"
 #else
 # define PRELOAD_VAR "LD_PRELOAD"
@@ -126,22 +119,17 @@ int virTestMain(int argc,
 # define MOCK_EXT ".so"
 #endif
 
-#define VIR_TEST_PRELOAD(lib) \
+#define VIR_TEST_PRELOAD(libs) \
     do { \
         const char *preload = getenv(PRELOAD_VAR); \
-        if (preload == NULL || strstr(preload, lib) == NULL) { \
+        if (preload == NULL || strstr(preload, libs) == NULL) { \
             char *newenv; \
-            if (!virFileIsExecutable(lib)) { \
-                perror(lib); \
-                return EXIT_FAILURE; \
-            } \
             if (!preload) { \
-                newenv = (char *) lib; \
-            } else if (virAsprintf(&newenv, "%s:%s", lib, preload) < 0) { \
-                perror("virAsprintf"); \
-                return EXIT_FAILURE; \
+                newenv = (char *) libs; \
+            } else { \
+                newenv = g_strdup_printf("%s:%s", libs, preload); \
             } \
-            setenv(PRELOAD_VAR, newenv, 1); \
+            g_setenv(PRELOAD_VAR, newenv, TRUE); \
             FORCE_FLAT_NAMESPACE \
             execv(argv[0], argv); \
         } \
@@ -155,8 +143,7 @@ int virTestMain(int argc,
 #define VIR_TEST_MOCK(mock) (abs_builddir "/.libs/lib" mock "mock" MOCK_EXT)
 
 virCapsPtr virTestGenericCapsInit(void);
-int virTestCapsBuildNUMATopology(virCapsPtr caps,
-                                 int seq);
+virCapsHostNUMAPtr virTestCapsBuildNUMATopology(int seq);
 virDomainXMLOptionPtr virTestGenericDomainXMLConfInit(void);
 
 typedef enum {

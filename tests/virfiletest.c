@@ -19,6 +19,7 @@
 #include <config.h>
 
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "testutils.h"
 #include "virfile.h"
@@ -133,7 +134,7 @@ makeSparseFile(const off_t offsets[],
     off_t len = 0;
     size_t i;
 
-    if ((fd = mkostemp(path,  O_CLOEXEC|O_RDWR)) < 0)
+    if ((fd = g_mkstemp_full(path, O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)) < 0)
         goto error;
 
     if (unlink(path) < 0)
@@ -325,10 +326,9 @@ testFileIsSharedFSType(const void *opaque G_GNUC_UNUSED)
     bool actual;
     int ret = -1;
 
-    if (virAsprintf(&mtabFile, abs_srcdir "/virfiledata/%s", data->mtabFile) < 0)
-        return -1;
+    mtabFile = g_strdup_printf(abs_srcdir "/virfiledata/%s", data->mtabFile);
 
-    if (setenv("LIBVIRT_MTAB", mtabFile, 1) < 0) {
+    if (g_setenv("LIBVIRT_MTAB", mtabFile, TRUE) == FALSE) {
         fprintf(stderr, "Unable to set env variable\n");
         goto cleanup;
     }
@@ -344,7 +344,7 @@ testFileIsSharedFSType(const void *opaque G_GNUC_UNUSED)
     ret = 0;
  cleanup:
     VIR_FREE(mtabFile);
-    unsetenv("LIBVIRT_MTAB");
+    g_unsetenv("LIBVIRT_MTAB");
     return ret;
 #endif
 }

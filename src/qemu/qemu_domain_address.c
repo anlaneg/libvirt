@@ -35,6 +35,7 @@ VIR_LOG_INIT("qemu.qemu_domain_address");
 #define VIO_ADDR_SCSI 0x2000ul
 #define VIO_ADDR_SERIAL 0x30000000ul
 #define VIO_ADDR_NVRAM 0x3000ul
+#define VIO_ADDR_TPM 0x4000ul
 
 
 /**
@@ -223,7 +224,6 @@ static int
 qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
 {
     size_t i;
-    int ret = -1;
 
     /* Default values match QEMU. See spapr_(llan|vscsi|vty).c */
 
@@ -234,7 +234,7 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
             net->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
 
         if (qemuDomainAssignSpaprVIOAddress(def, &net->info, VIO_ADDR_NET) < 0)
-            goto cleanup;
+            return -1;
     }
 
     for (i = 0; i < def->ncontrollers; i++) {
@@ -246,7 +246,7 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
         }
         if (qemuDomainAssignSpaprVIOAddress(def, &cont->info,
                                             VIO_ADDR_SCSI) < 0) {
-            goto cleanup;
+            return -1;
         }
     }
 
@@ -257,7 +257,7 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
         }
         if (qemuDomainAssignSpaprVIOAddress(def, &def->serials[i]->info,
                                             VIO_ADDR_SERIAL) < 0)
-            goto cleanup;
+            return -1;
     }
 
     if (def->nvram) {
@@ -265,15 +265,23 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
             def->nvram->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
         if (qemuDomainAssignSpaprVIOAddress(def, &def->nvram->info,
                                             VIO_ADDR_NVRAM) < 0)
-            goto cleanup;
+            return -1;
+    }
+
+    for (i = 0; i < def->ntpms; i++) {
+        virDomainTPMDefPtr tpm = def->tpms[i];
+
+        if (tpm->model != VIR_DOMAIN_TPM_MODEL_SPAPR_PROXY &&
+            qemuDomainIsPSeries(def))
+            tpm->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
+        if (qemuDomainAssignSpaprVIOAddress(def, &tpm->info,
+                                            VIO_ADDR_TPM) < 0)
+            return -1;
     }
 
     /* No other devices are currently supported on spapr-vio */
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -575,7 +583,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
                                          virDomainPCIConnectFlags virtioFlags)
 {
     virDomainPCIConnectFlags pciFlags = (VIR_PCI_CONNECT_TYPE_PCI_DEVICE |
-                                         VIR_PCI_CONNECT_HOTPLUGGABLE);
+                                         VIR_PCI_CONNECT_AUTOASSIGN);
 
     switch ((virDomainDeviceType)dev->type) {
     case VIR_DOMAIN_DEVICE_CONTROLLER: {
@@ -676,18 +684,35 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         break;
 
     case VIR_DOMAIN_DEVICE_FS:
-        /* the only type of filesystem so far is virtio-9p-pci */
-        switch ((virDomainFSModel) dev->data.fs->model) {
-        case VIR_DOMAIN_FS_MODEL_VIRTIO_TRANSITIONAL:
-            /* Transitional devices only work in conventional PCI slots */
-            return pciFlags;
-        case VIR_DOMAIN_FS_MODEL_VIRTIO:
-        case VIR_DOMAIN_FS_MODEL_VIRTIO_NON_TRANSITIONAL:
-        case VIR_DOMAIN_FS_MODEL_DEFAULT:
-            return virtioFlags;
-        case VIR_DOMAIN_FS_MODEL_LAST:
+        switch ((virDomainFSDriverType) dev->data.fs->fsdriver) {
+        case VIR_DOMAIN_FS_DRIVER_TYPE_DEFAULT:
+        case VIR_DOMAIN_FS_DRIVER_TYPE_PATH:
+        case VIR_DOMAIN_FS_DRIVER_TYPE_HANDLE:
+            /* these drivers are handled by virtio-9p-pci */
+            switch ((virDomainFSModel) dev->data.fs->model) {
+            case VIR_DOMAIN_FS_MODEL_VIRTIO_TRANSITIONAL:
+                /* Transitional devices only work in conventional PCI slots */
+                return pciFlags;
+            case VIR_DOMAIN_FS_MODEL_VIRTIO:
+            case VIR_DOMAIN_FS_MODEL_VIRTIO_NON_TRANSITIONAL:
+            case VIR_DOMAIN_FS_MODEL_DEFAULT:
+                return virtioFlags;
+            case VIR_DOMAIN_FS_MODEL_LAST:
+                break;
+            }
             break;
+
+        case VIR_DOMAIN_FS_DRIVER_TYPE_VIRTIOFS:
+            /* vhost-user-fs-pci */
+            return virtioFlags;
+
+        case VIR_DOMAIN_FS_DRIVER_TYPE_LOOP:
+        case VIR_DOMAIN_FS_DRIVER_TYPE_NBD:
+        case VIR_DOMAIN_FS_DRIVER_TYPE_PLOOP:
+        case VIR_DOMAIN_FS_DRIVER_TYPE_LAST:
+            return 0;
         }
+
         return 0;
 
     case VIR_DOMAIN_DEVICE_NET: {
@@ -710,6 +735,14 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
             return pciFlags;
 
         if (net->model == VIR_DOMAIN_NET_MODEL_E1000E)
+            return pcieFlags;
+
+        /* the only time model can be "unknown" is for type='hostdev'
+         * or for type='network' where the network is a pool of
+         * hostdev devices. These will always be pcie on the host, and
+         * should be pcie in the guest if it supports pcie.
+         */
+        if (net->model == VIR_DOMAIN_NET_MODEL_UNKNOWN)
             return pcieFlags;
 
         return pciFlags;
@@ -1050,17 +1083,17 @@ qemuDomainFillDevicePCIConnectFlagsIterInit(virDomainDefPtr def,
 
     if (qemuDomainHasPCIeRoot(def)) {
         data->pcieFlags = (VIR_PCI_CONNECT_TYPE_PCIE_DEVICE |
-                           VIR_PCI_CONNECT_HOTPLUGGABLE);
+                           VIR_PCI_CONNECT_AUTOASSIGN);
     } else {
         data->pcieFlags = (VIR_PCI_CONNECT_TYPE_PCI_DEVICE |
-                           VIR_PCI_CONNECT_HOTPLUGGABLE);
+                           VIR_PCI_CONNECT_AUTOASSIGN);
     }
 
     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_PCI_DISABLE_LEGACY)) {
         data->virtioFlags = data->pcieFlags;
     } else {
         data->virtioFlags = (VIR_PCI_CONNECT_TYPE_PCI_DEVICE |
-                             VIR_PCI_CONNECT_HOTPLUGGABLE);
+                             VIR_PCI_CONNECT_AUTOASSIGN);
     }
 }
 
@@ -1240,10 +1273,8 @@ qemuDomainFindUnusedIsolationGroup(virDomainDefPtr def)
  * @dev: device definition
  *
  * Fill isolation group information for a single device.
- *
- * Return: 0 on success, <0 on failure
- * */
-int
+ */
+void
 qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
                                    virDomainDeviceDefPtr dev)
 {
@@ -1261,7 +1292,7 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
         /* Only PCI host devices are subject to isolation */
         if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS ||
             hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI) {
-            goto skip;
+            return;
         }
 
         hostAddr = &hostdev->source.subsys.u.pci.addr;
@@ -1269,7 +1300,7 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
         /* If a non-default isolation has already been assigned to the
          * device, we can avoid looking up the information again */
         if (info->isolationGroup > 0)
-            goto skip;
+            return;
 
         /* The isolation group depends on the IOMMU group assigned by the host */
         tmp = virPCIDeviceAddressGetIOMMUGroupNum(hostAddr);
@@ -1279,7 +1310,7 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
                      "%04x:%02x:%02x.%x, device won't be isolated",
                      hostAddr->domain, hostAddr->bus,
                      hostAddr->slot, hostAddr->function);
-            goto skip;
+            return;
         }
 
         /* The isolation group for a host device is its IOMMU group,
@@ -1305,13 +1336,13 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
          * require us to isolate the guest device, so we can skip them */
         if (iface->type != VIR_DOMAIN_NET_TYPE_NETWORK ||
             virDomainNetResolveActualType(iface) != VIR_DOMAIN_NET_TYPE_HOSTDEV) {
-            goto skip;
+            return;
         }
 
         /* If a non-default isolation has already been assigned to the
          * device, we can avoid looking up the information again */
         if (info->isolationGroup > 0)
-            goto skip;
+            return;
 
         /* Obtain a synthetic isolation group for the device, since at this
          * point in time we don't have access to the IOMMU group of the host
@@ -1323,7 +1354,7 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
                      "configured to use hostdev-backed network '%s', "
                      "device won't be isolated",
                      iface->data.network.name);
-            goto skip;
+            return;
         }
 
         info->isolationGroup = tmp;
@@ -1332,9 +1363,6 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
                   "hostdev-backed network '%s' is %u",
                   iface->data.network.name, info->isolationGroup);
     }
-
- skip:
-    return 0;
 }
 
 
@@ -1356,7 +1384,9 @@ qemuDomainFillDeviceIsolationGroupIter(virDomainDefPtr def,
                                        virDomainDeviceInfoPtr info G_GNUC_UNUSED,
                                        void *opaque G_GNUC_UNUSED)
 {
-    return qemuDomainFillDeviceIsolationGroup(def, dev);
+    qemuDomainFillDeviceIsolationGroup(def, dev);
+
+    return 0;
 }
 
 
@@ -1376,7 +1406,6 @@ static int
 qemuDomainSetupIsolationGroups(virDomainDefPtr def)
 {
     int idx;
-    int ret = -1;
 
     /* Only pSeries guests care about isolation groups at the moment */
     if (!qemuDomainIsPSeries(def))
@@ -1384,7 +1413,7 @@ qemuDomainSetupIsolationGroups(virDomainDefPtr def)
 
     idx = virDomainControllerFind(def, VIR_DOMAIN_CONTROLLER_TYPE_PCI, 0);
     if (idx < 0)
-        goto cleanup;
+        return -1;
 
     /* We want to prevent hostdevs from being plugged into the default PHB:
      * we can make sure that doesn't happen by locking its isolation group */
@@ -1394,13 +1423,10 @@ qemuDomainSetupIsolationGroups(virDomainDefPtr def)
     if (virDomainDeviceInfoIterate(def,
                                    qemuDomainFillDeviceIsolationGroupIter,
                                    NULL) < 0) {
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -1500,7 +1526,6 @@ qemuDomainCollectPCIAddress(virDomainDefPtr def G_GNUC_UNUSED,
                             void *opaque)
 {
     virDomainPCIAddressSetPtr addrs = opaque;
-    int ret = -1;
     virPCIDeviceAddressPtr addr = &info->addr.pci;
 
     if (!virDeviceInfoPCIAddressIsPresent(info) ||
@@ -1577,12 +1602,10 @@ qemuDomainCollectPCIAddress(virDomainDefPtr def G_GNUC_UNUSED,
     if (virDomainPCIAddressReserveAddr(addrs, addr,
                                        info->pciConnectFlags,
                                        info->isolationGroup) < 0) {
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 static int
@@ -1640,6 +1663,7 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
     for (i = 0; i < def->ncontrollers; i++) {
         virDomainControllerDefPtr cont = def->controllers[i];
         size_t idx = cont->idx;
+        bool allowHotplug = false;
 
         if (cont->type != VIR_DOMAIN_CONTROLLER_TYPE_PCI)
             continue;
@@ -1651,7 +1675,10 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
             goto error;
         }
 
-        if (virDomainPCIAddressBusSetModel(&addrs->buses[idx], cont->model) < 0)
+        if (cont->opts.pciopts.hotplug != VIR_TRISTATE_SWITCH_OFF)
+            allowHotplug = true;
+
+        if (virDomainPCIAddressBusSetModel(&addrs->buses[idx], cont->model, allowHotplug) < 0)
             goto error;
 
         /* Forward the information about isolation groups */
@@ -1669,7 +1696,7 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
          * assigning addresses to devices.
          */
         if (virDomainPCIAddressBusSetModel(&addrs->buses[0],
-                                           VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT) < 0)
+                                           VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT, true) < 0)
             goto error;
     }
 
@@ -1691,7 +1718,7 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
         if (addrs->buses[i].model)
             continue;
 
-        if (virDomainPCIAddressBusSetModel(&addrs->buses[i], defaultModel) < 0)
+        if (virDomainPCIAddressBusSetModel(&addrs->buses[i], defaultModel, true) < 0)
             goto error;
 
         VIR_DEBUG("Auto-adding <controller type='pci' model='%s' index='%zu'/>",
@@ -1724,7 +1751,7 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
     virPCIDeviceAddress tmp_addr;
     bool qemuDeviceVideoUsable = virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIDEO_PRIMARY);
     g_autofree char *addrStr = NULL;
-    virDomainPCIConnectFlags flags = (VIR_PCI_CONNECT_HOTPLUGGABLE
+    virDomainPCIConnectFlags flags = (VIR_PCI_CONNECT_AUTOASSIGN
                                       | VIR_PCI_CONNECT_TYPE_PCI_DEVICE);
 
     /* Verify that first IDE and USB controllers (if any) is on the PIIX3, fn 1 */
@@ -2142,7 +2169,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
                 continue;
 
             if (qemuDomainPCIAddressReserveNextAddr(addrs, &cont->info) < 0)
-                goto error;
+                return -1;
         }
     }
 
@@ -2153,7 +2180,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         /* Only support VirtIO-9p-pci so far. If that changes,
          * we might need to skip devices here */
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->fss[i]->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* Network interfaces */
@@ -2170,7 +2197,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         }
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &net->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* Sound cards */
@@ -2188,7 +2215,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         }
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &sound->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* Device controllers (SCSI, USB, but not IDE, FDC or CCID) */
@@ -2210,7 +2237,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
 
         /* First IDE controller lives on the PIIX3 at slot=1, function=1,
-           dealt with earlier on*/
+           dealt with earlier on */
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE &&
             cont->idx == 0)
             continue;
@@ -2257,7 +2284,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
                 if (virDomainPCIAddressReserveAddr(addrs, &addr,
                                                    cont->info.pciConnectFlags,
                                                    cont->info.isolationGroup) < 0) {
-                    goto error;
+                    return -1;
                 }
 
                 cont->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI;
@@ -2268,14 +2295,14 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
                 if (virDomainPCIAddressReserveNextAddr(addrs, &cont->info,
                                                        cont->info.pciConnectFlags,
                                                        addr.function) < 0) {
-                    goto error;
+                    return -1;
                 }
 
                 cont->info.addr.pci.multi = addr.multi;
             }
         } else {
             if (qemuDomainPCIAddressReserveNextAddr(addrs, &cont->info) < 0)
-                 goto error;
+                 return -1;
         }
     }
 
@@ -2303,11 +2330,11 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("virtio disk cannot have an address of type '%s'"),
                            virDomainDeviceAddressTypeToString(def->disks[i]->info.type));
-            goto error;
+            return -1;
         }
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->disks[i]->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* Host PCI devices */
@@ -2324,9 +2351,14 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
         }
 
+        /* do not reserve address for info->type='unassigned' */
+        if (def->hostdevs[i]->info->type ==
+            VIR_DOMAIN_DEVICE_ADDRESS_TYPE_UNASSIGNED)
+            continue;
+
         if (qemuDomainPCIAddressReserveNextAddr(addrs,
                                                 def->hostdevs[i]->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* memballoon. the qemu driver only accepts virtio memballoon devices */
@@ -2334,7 +2366,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         virDeviceInfoPCIAddressIsWanted(&def->memballoon->info)) {
         if (qemuDomainPCIAddressReserveNextAddr(addrs,
                                                 &def->memballoon->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* the qemu driver only accepts virtio rng devices */
@@ -2343,7 +2375,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->rngs[i]->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* A watchdog - check if it is a PCI device */
@@ -2351,7 +2383,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         def->watchdog->model == VIR_DOMAIN_WATCHDOG_MODEL_I6300ESB &&
         virDeviceInfoPCIAddressIsWanted(&def->watchdog->info)) {
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->watchdog->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* Video devices */
@@ -2364,7 +2396,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->videos[i]->info) < 0)
-            goto error;
+            return -1;
     }
 
     /* Shared Memory */
@@ -2373,7 +2405,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->shmems[i]->info) < 0)
-            goto error;
+            return -1;
     }
     for (i = 0; i < def->ninputs; i++) {
         if (def->inputs[i]->bus != VIR_DOMAIN_INPUT_BUS_VIRTIO ||
@@ -2381,7 +2413,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->inputs[i]->info) < 0)
-            goto error;
+            return -1;
     }
     for (i = 0; i < def->nparallels; i++) {
         /* Nada - none are PCI based (yet) */
@@ -2394,7 +2426,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             continue;
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs, &chr->info) < 0)
-            goto error;
+            return -1;
     }
     for (i = 0; i < def->nchannels; i++) {
         /* Nada - none are PCI based (yet) */
@@ -2408,13 +2440,10 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
         if (qemuDomainPCIAddressReserveNextAddr(addrs,
                                                 &def->vsock->info) < 0)
-            goto error;
+            return -1;
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
 
@@ -2659,7 +2688,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
              * domain.
              */
             virDomainDeviceInfo info = {
-                .pciConnectFlags = (VIR_PCI_CONNECT_HOTPLUGGABLE |
+                .pciConnectFlags = (VIR_PCI_CONNECT_AUTOASSIGN |
                                     VIR_PCI_CONNECT_TYPE_PCI_DEVICE),
                 .pciAddrExtFlags = VIR_PCI_ADDRESS_EXTENSION_NONE
             };
@@ -2700,7 +2729,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
             addrs->nbuses > max_idx + 1 &&
             qemuDomainHasPCIeRoot(def)) {
             virDomainDeviceInfo info = {
-                .pciConnectFlags = (VIR_PCI_CONNECT_HOTPLUGGABLE |
+                .pciConnectFlags = (VIR_PCI_CONNECT_AUTOASSIGN |
                                     VIR_PCI_CONNECT_TYPE_PCIE_DEVICE),
                 .pciAddrExtFlags = VIR_PCI_ADDRESS_EXTENSION_NONE
             };

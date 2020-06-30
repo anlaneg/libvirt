@@ -27,6 +27,7 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "storage_conf.h"
+#include "virutil.h"
 
 #include "vbox_common.h"
 #include "vbox_uniformed_api.h"
@@ -410,6 +411,7 @@ vboxStorageVolCreateXML(virStoragePoolPtr pool,
     resultCodeUnion resultCode;
     virStorageVolPtr ret = NULL;
     g_autoptr(virStorageVolDef) def = NULL;
+    g_autofree char *homedir = NULL;
 
     if (!data->vboxObj)
         return ret;
@@ -442,9 +444,10 @@ vboxStorageVolCreateXML(virStoragePoolPtr pool,
     }
 
     /* If target.path isn't given, use default path ~/.VirtualBox/image_name */
-    if (def->target.path == NULL &&
-        virAsprintf(&def->target.path, "%s/.VirtualBox/%s", virGetUserDirectory(), def->name) < 0)
-        goto cleanup;
+    if (!def->target.path) {
+        homedir = virGetUserDirectory();
+        def->target.path = g_strdup_printf("%s/.VirtualBox/%s", homedir, def->name);
+    }
     VBOX_UTF8_TO_UTF16(def->target.path, &hddNameUtf16);
 
     if (!hddFormatUtf16 || !hddNameUtf16)
@@ -877,12 +880,12 @@ virStorageDriverPtr vboxGetStorageDriver(uint32_t uVersion)
     /* Install gVBoxAPI according to the vbox API version.
      * Return -1 for unsupported version.
      */
-    if (uVersion >= 5000000 && uVersion < 5000051) {
-        vbox50InstallUniformedAPI(&gVBoxAPI);
-    } else if (uVersion >= 5000051 && uVersion < 5001051) {
-        vbox51InstallUniformedAPI(&gVBoxAPI);
-    } else if (uVersion >= 5001051 && uVersion < 5002051) {
+    if (uVersion >= 5001051 && uVersion < 5002051) {
         vbox52InstallUniformedAPI(&gVBoxAPI);
+    } else if (uVersion >= 6000000 && uVersion < 6000051) {
+        vbox60InstallUniformedAPI(&gVBoxAPI);
+    } else if (uVersion >= 6000051 && uVersion < 6001051) {
+        vbox61InstallUniformedAPI(&gVBoxAPI);
     } else {
         return NULL;
     }

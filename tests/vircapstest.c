@@ -35,27 +35,22 @@ test_virCapabilitiesGetCpusForNodemask(const void *data G_GNUC_UNUSED)
     const char *nodestr = "3,4,5,6";
     virBitmapPtr nodemask = NULL;
     virBitmapPtr cpumap = NULL;
-    virCapsPtr caps = NULL;
+    g_autoptr(virCapsHostNUMA) caps = NULL;
     int mask_size = 8;
     int ret = -1;
 
-
-    if (!(caps = virCapabilitiesNew(VIR_ARCH_X86_64, false, false)))
-        goto error;
-
-    if (virTestCapsBuildNUMATopology(caps, 3) < 0)
+    if (!(caps = virTestCapsBuildNUMATopology(3)))
         goto error;
 
     if (virBitmapParse(nodestr, &nodemask, mask_size) < 0)
         goto error;
 
-    if (!(cpumap = virCapabilitiesGetCpusForNodemask(caps, nodemask)))
+    if (!(cpumap = virCapabilitiesHostNUMAGetCpus(caps, nodemask)))
         goto error;
 
     ret = 0;
 
  error:
-    virObjectUnref(caps);
     virBitmapFree(nodemask);
     virBitmapFree(cpumap);
     return ret;
@@ -166,10 +161,10 @@ test_virCapsDomainDataLookupQEMU(const void *data G_GNUC_UNUSED)
     /* Checking each parameter individually */
     CAPSCOMP(-1, VIR_ARCH_NONE, VIR_DOMAIN_VIRT_NONE, NULL, NULL,
         VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_X86_64,
-        VIR_DOMAIN_VIRT_QEMU, "/usr/bin/qemu-system-x86_64", "pc-0.11");
+        VIR_DOMAIN_VIRT_QEMU, "/usr/bin/qemu-system-x86_64", "pc");
     CAPSCOMP(VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_NONE, VIR_DOMAIN_VIRT_NONE, NULL, NULL,
         VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_X86_64,
-        VIR_DOMAIN_VIRT_QEMU, "/usr/bin/qemu-system-x86_64", "pc-0.11");
+        VIR_DOMAIN_VIRT_QEMU, "/usr/bin/qemu-system-x86_64", "pc");
     CAPSCOMP(-1, VIR_ARCH_AARCH64, VIR_DOMAIN_VIRT_NONE, NULL, NULL,
         VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_AARCH64,
         VIR_DOMAIN_VIRT_QEMU, "/usr/bin/qemu-system-aarch64", "virt");

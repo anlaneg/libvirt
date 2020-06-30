@@ -59,33 +59,31 @@ virTPMCreateCancelPath(const char *devpath)
     const char *dev;
     const char *prefix[] = {"misc/", "tpm/"};
     size_t i;
-
-    if (devpath) {
-        dev = strrchr(devpath, '/');
-        if (dev) {
-            dev++;
-            for (i = 0; i < G_N_ELEMENTS(prefix); i++) {
-                if (virAsprintf(&path, "/sys/class/%s%s/device/cancel",
-                                prefix[i], dev) < 0)
-                     goto cleanup;
-
-                if (virFileExists(path))
-                    break;
-
-                VIR_FREE(path);
-            }
-            if (!path)
-                path = g_strdup("/dev/null");
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("TPM device path %s is invalid"), devpath);
-        }
-    } else {
+    if (!devpath) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Missing TPM device path"));
+        return NULL;
     }
 
- cleanup:
+    if (!(dev = strrchr(devpath, '/'))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("TPM device path %s is invalid"), devpath);
+        return NULL;
+    }
+
+    dev++;
+    for (i = 0; i < G_N_ELEMENTS(prefix); i++) {
+        path = g_strdup_printf("/sys/class/%s%s/device/cancel", prefix[i],
+                               dev);
+
+        if (virFileExists(path))
+            break;
+
+        VIR_FREE(path);
+    }
+    if (!path)
+        path = g_strdup("/dev/null");
+
     return path;
 }
 
@@ -185,8 +183,7 @@ virTPMExecGetCaps(virCommandPtr cmd,
     if (virCommandRun(cmd, &exitstatus) < 0)
         return NULL;
 
-    if (!(bitmap = virBitmapNewEmpty()))
-        return NULL;
+    bitmap = virBitmapNewEmpty();
 
     /* older version does not support --print-capabilties -- that's fine */
     if (exitstatus != 0) {
@@ -218,16 +215,15 @@ virTPMExecGetCaps(virCommandPtr cmd,
             continue;
 
         if (virBitmapSetBitExpand(bitmap, typ) < 0)
-            goto cleanup;
+            return bitmap;
     }
 
- cleanup:
     return bitmap;
 
  error_bad_json:
     virReportError(VIR_ERR_INTERNAL_ERROR,
                    _("Unexpected JSON format: %s"), outbuf);
-    goto cleanup;
+    return bitmap;
 }
 
 static virBitmapPtr
@@ -294,7 +290,6 @@ virTPMEmulatorInit(void)
         g_autofree char *path = NULL;
         bool findit = *prgs[i].path == NULL;
         struct stat statbuf;
-        char *tmp;
 
         if (!findit) {
             /* has executables changed? */
@@ -307,9 +302,7 @@ virTPMEmulatorInit(void)
         }
 
         if (findit) {
-            tmp = *prgs[i].path;
-            VIR_FREE(tmp);
-            *prgs[i].path = NULL;
+            VIR_FREE(*prgs[i].path);
 
             path = virFindFileInPath(prgs[i].name);
             if (!path) {

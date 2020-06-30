@@ -22,8 +22,6 @@
 
 #include <config.h>
 
-#include <regex.h>
-
 #include "viriscsi.h"
 
 #include "viralloc.h"
@@ -162,8 +160,7 @@ virStorageBackendIQNFound(const char *initiatoriqn,
         if (!(next = strchr(current, ' ')))
             goto error;
 
-        if (VIR_STRNDUP(iface, current, (next - current)) < 0)
-            goto cleanup;
+        iface = g_strndup(current, next - current);
 
         current = next + 1;
 
@@ -213,10 +210,8 @@ virStorageBackendCreateIfaceIQN(const char *initiatoriqn,
     g_autofree char *temp_ifacename = NULL;
     g_autoptr(virCommand) cmd = NULL;
 
-    if (virAsprintf(&temp_ifacename,
-                    "libvirt-iface-%08llx",
-                    (unsigned long long)virRandomBits(32)) < 0)
-        return -1;
+    temp_ifacename = g_strdup_printf("libvirt-iface-%08llx",
+                                     (unsigned long long)virRandomBits(32));
 
     VIR_DEBUG("Attempting to create interface '%s' with IQN '%s'",
               temp_ifacename, initiatoriqn);

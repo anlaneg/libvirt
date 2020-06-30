@@ -390,24 +390,22 @@ int virDomainNumatuneGetMode(virDomainNumaPtr numatune,
                              int cellid,
                              virDomainNumatuneMemMode *mode)
 {
-    int ret = -1;
     virDomainNumatuneMemMode tmp_mode;
 
     if (!numatune)
-        return ret;
+        return -1;
 
     if (virDomainNumatuneNodeSpecified(numatune, cellid))
         tmp_mode = numatune->mem_nodes[cellid].mode;
     else if (numatune->memory.specified)
         tmp_mode = numatune->memory.mode;
     else
-        goto cleanup;
+        return -1;
 
     if (mode)
         *mode = tmp_mode;
-    ret = 0;
- cleanup:
-    return ret;
+
+    return 0;
 }
 
 virBitmapPtr
@@ -498,8 +496,6 @@ virDomainNumatuneSet(virDomainNumaPtr numa,
                      int mode,
                      virBitmapPtr nodeset)
 {
-    int ret = -1;
-
     /* No need to do anything in this case */
     if (mode == -1 && placement == -1 && !nodeset)
         return 0;
@@ -517,7 +513,7 @@ virDomainNumatuneSet(virDomainNumaPtr numa,
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("Unsupported numatune mode '%d'"),
                        mode);
-        goto cleanup;
+        return -1;
     }
 
     if (placement != -1 &&
@@ -525,7 +521,7 @@ virDomainNumatuneSet(virDomainNumaPtr numa,
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("Unsupported numatune placement '%d'"),
                        mode);
-        goto cleanup;
+        return -1;
     }
 
     if (mode != -1)
@@ -534,7 +530,7 @@ virDomainNumatuneSet(virDomainNumaPtr numa,
     if (nodeset) {
         virBitmapFree(numa->memory.nodeset);
         if (!(numa->memory.nodeset = virBitmapNewCopy(nodeset)))
-            goto cleanup;
+            return -1;
         if (placement == -1)
             placement = VIR_DOMAIN_NUMATUNE_PLACEMENT_STATIC;
     }
@@ -551,7 +547,7 @@ virDomainNumatuneSet(virDomainNumaPtr numa,
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("nodeset for NUMA memory tuning must be set "
                          "if 'placement' is 'static'"));
-        goto cleanup;
+        return -1;
     }
 
     /* setting nodeset when placement auto is invalid */
@@ -566,10 +562,7 @@ virDomainNumatuneSet(virDomainNumaPtr numa,
 
     numa->memory.specified = true;
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 static bool
@@ -853,7 +846,7 @@ virDomainNumaDefCPUParseXML(virDomainNumaPtr def,
                             xmlXPathContextPtr ctxt)
 {
     xmlNodePtr *nodes = NULL;
-    xmlNodePtr oldNode = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     char *tmp = NULL;
     int n;
     size_t i, j;
@@ -970,7 +963,6 @@ virDomainNumaDefCPUParseXML(virDomainNumaPtr def,
     ret = 0;
 
  cleanup:
-    ctxt->node = oldNode;
     VIR_FREE(nodes);
     VIR_FREE(tmp);
     return ret;
@@ -1195,6 +1187,25 @@ virDomainNumaNodeDistanceIsUsingDefaults(virDomainNumaPtr numa,
 }
 
 
+bool
+virDomainNumaNodesDistancesAreBeingSet(virDomainNumaPtr numa)
+{
+    size_t ncells = virDomainNumaGetNodeCount(numa);
+    size_t i, j;
+
+    for (i = 0; i < ncells; i++) {
+        for (j = 0; j < ncells; j++) {
+            if (virDomainNumaNodeDistanceIsUsingDefaults(numa, i, j))
+                continue;
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
 size_t
 virDomainNumaGetNodeDistance(virDomainNumaPtr numa,
                              size_t node,
@@ -1360,4 +1371,35 @@ virDomainNumaGetMemorySize(virDomainNumaPtr numa)
         ret += numa->mem_nodes[i].mem;
 
     return ret;
+}
+
+
+int
+virDomainNumaFillCPUsInNode(virDomainNumaPtr numa,
+                            size_t node,
+                            unsigned int maxCpus)
+{
+    g_autoptr(virBitmap) maxCPUsBitmap = virBitmapNew(maxCpus);
+    size_t i;
+
+    if (node >= virDomainNumaGetNodeCount(numa))
+        return -1;
+
+    virBitmapSetAll(maxCPUsBitmap);
+
+    for (i = 0; i < numa->nmem_nodes; i++) {
+        virBitmapPtr nodeCpus = virDomainNumaGetNodeCpumask(numa, i);
+
+        if (i == node)
+            continue;
+
+        virBitmapSubtract(maxCPUsBitmap, nodeCpus);
+    }
+
+    if (!virBitmapEqual(numa->mem_nodes[node].cpumask, maxCPUsBitmap)) {
+        virBitmapFree(numa->mem_nodes[node].cpumask);
+        numa->mem_nodes[node].cpumask = g_steal_pointer(&maxCPUsBitmap);
+    }
+
+    return 0;
 }

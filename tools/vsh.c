@@ -25,7 +25,6 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/time.h>
-#include "c-ctype.h"
 #include <fcntl.h>
 #include <time.h>
 #include <sys/stat.h>
@@ -38,7 +37,6 @@
 #endif
 
 #include "internal.h"
-#include "virerror.h"
 #include "virbuffer.h"
 #include "viralloc.h"
 #include "virfile.h"
@@ -46,11 +44,7 @@
 #include "vircommand.h"
 #include "virtypedparam.h"
 #include "virstring.h"
-
-/* Gnulib doesn't guarantee SA_SIGINFO support.  */
-#ifndef SA_SIGINFO
-# define SA_SIGINFO 0
-#endif
+#include "virutil.h"
 
 #ifdef WITH_READLINE
 /* For autocompletion */
@@ -63,17 +57,6 @@ vshControl *autoCompleteOpaque;
  */
 const vshCmdGrp *cmdGroups;
 const vshCmdDef *cmdSet;
-
-
-/* simple handler for oom conditions */
-static void
-vshErrorOOM(void)
-{
-    fflush(stdout);
-    fputs(_("error: Out of memory\n"), stderr);
-    fflush(stderr);
-    exit(EXIT_FAILURE);
-}
 
 
 double
@@ -360,9 +343,8 @@ vshCmddefCheckInternals(vshControl *ctl,
                          cmd->name);
                 return -1; /* alias options are tracked by the original name */
             }
-            if ((p = strchr(name, '=')) &&
-                VIR_STRNDUP(name, name, p - name) < 0)
-                vshErrorOOM();
+            if ((p = strchr(name, '=')))
+                name = g_strndup(name, p - name);
             for (j = i + 1; cmd->opts[j].name; j++) {
                 if (STREQ(name, cmd->opts[j].name) &&
                     cmd->opts[j].type != VSH_OT_ALIAS)
@@ -723,24 +705,24 @@ vshCmddefHelp(vshControl *ctl, const vshCmdDef *def)
         for (opt = def->opts; opt->name; opt++) {
             switch (opt->type) {
             case VSH_OT_BOOL:
-                snprintf(buf, sizeof(buf), "--%s", opt->name);
+                g_snprintf(buf, sizeof(buf), "--%s", opt->name);
                 break;
             case VSH_OT_INT:
-                snprintf(buf, sizeof(buf),
-                         (opt->flags & VSH_OFLAG_REQ) ? _("[--%s] <number>")
-                         : _("--%s <number>"), opt->name);
+                g_snprintf(buf, sizeof(buf),
+                           (opt->flags & VSH_OFLAG_REQ) ? _("[--%s] <number>")
+                           : _("--%s <number>"), opt->name);
                 break;
             case VSH_OT_STRING:
-                snprintf(buf, sizeof(buf), _("--%s <string>"), opt->name);
+                g_snprintf(buf, sizeof(buf), _("--%s <string>"), opt->name);
                 break;
             case VSH_OT_DATA:
-                snprintf(buf, sizeof(buf), _("[--%s] <string>"),
-                         opt->name);
+                g_snprintf(buf, sizeof(buf), _("[--%s] <string>"),
+                           opt->name);
                 break;
             case VSH_OT_ARGV:
-                snprintf(buf, sizeof(buf),
-                         shortopt ? _("[--%s] <string>") : _("<%s>"),
-                         opt->name);
+                g_snprintf(buf, sizeof(buf),
+                           shortopt ? _("[--%s] <string>") : _("<%s>"),
+                           opt->name);
                 break;
             case VSH_OT_ALIAS:
                 continue;
@@ -1303,11 +1285,10 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
     bool ret = true;
 
     while (cmd) {
-        struct timeval before, after;
+        gint64 before, after;
         bool enable_timing = ctl->timing;
 
-        if (enable_timing)
-            GETTIMEOFDAY(&before);
+        before = g_get_real_time();
 
         if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT) ||
             (hooks && hooks->connHandler && hooks->connHandler(ctl)/*重新连接*/)) {
@@ -1318,8 +1299,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             ret = false;
         }
 
-        if (enable_timing)
-            GETTIMEOFDAY(&after);
+        after = g_get_real_time();
 
         /* try to automatically catch disconnections */
         if (!ret &&
@@ -1339,8 +1319,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             return ret;
 
         if (enable_timing) {
-            double diff_ms = (((after.tv_sec - before.tv_sec) * 1000.0) +
-                              ((after.tv_usec - before.tv_usec) / 1000.0));
+            double diff_ms = (after - before) / 1000.0;
 
             vshPrint(ctl, _("\n(Time: %.3f ms)\n\n"), diff_ms);
         } else {
@@ -1455,7 +1434,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
             } else if (data_only) {
                 goto get_data;
             } else if (tkdata[0] == '-' && tkdata[1] == '-' &&
-                       c_isalnum(tkdata[2])) {
+                       g_ascii_isalnum(tkdata[2])) {
                 char *optstr = strchr(tkdata + 2, '=');
                 size_t opt_index = 0;
 
@@ -1812,28 +1791,27 @@ vshCommandOptTimeoutToMs(vshControl *ctl, const vshCmd *cmd, int *timeout)
 char *
 vshGetTypedParamValue(vshControl *ctl, virTypedParameterPtr item)
 {
-    int ret = 0;
     char *str = NULL;
 
     switch (item->type) {
     case VIR_TYPED_PARAM_INT:
-        ret = virAsprintf(&str, "%d", item->value.i);
+        str = g_strdup_printf("%d", item->value.i);
         break;
 
     case VIR_TYPED_PARAM_UINT:
-        ret = virAsprintf(&str, "%u", item->value.ui);
+        str = g_strdup_printf("%u", item->value.ui);
         break;
 
     case VIR_TYPED_PARAM_LLONG:
-        ret = virAsprintf(&str, "%lld", item->value.l);
+        str = g_strdup_printf("%lld", item->value.l);
         break;
 
     case VIR_TYPED_PARAM_ULLONG:
-        ret = virAsprintf(&str, "%llu", item->value.ul);
+        str = g_strdup_printf("%llu", item->value.ul);
         break;
 
     case VIR_TYPED_PARAM_DOUBLE:
-        ret = virAsprintf(&str, "%f", item->value.d);
+        str = g_strdup_printf("%f", item->value.d);
         break;
 
     case VIR_TYPED_PARAM_BOOLEAN:
@@ -1848,7 +1826,7 @@ vshGetTypedParamValue(vshControl *ctl, virTypedParameterPtr item)
         vshError(ctl, _("unimplemented parameter type %d"), item->type);
     }
 
-    if (ret < 0) {
+    if (!str) {
         vshError(ctl, "%s", _("Out of memory"));
         exit(EXIT_FAILURE);
     }
@@ -1873,11 +1851,7 @@ vshDebug(vshControl *ctl, int level, const char *format, ...)
     va_end(ap);
 
     va_start(ap, format);
-    if (virVasprintf(&str, format, ap) < 0) {
-        /* Skip debug messages on low memory */
-        va_end(ap);
-        return;
-    }
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
     fputs(str, stdout);
     VIR_FREE(str);
@@ -1893,8 +1867,7 @@ vshPrintExtra(vshControl *ctl, const char *format, ...)
         return;
 
     va_start(ap, format);
-    if (virVasprintfQuiet(&str, format, ap) < 0)
-        vshErrorOOM();
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
     fputs(str, stdout);
     VIR_FREE(str);
@@ -1908,8 +1881,7 @@ vshPrint(vshControl *ctl G_GNUC_UNUSED, const char *format, ...)
     char *str;
 
     va_start(ap, format);
-    if (virVasprintfQuiet(&str, format, ap) < 0)
-        vshErrorOOM();
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
     fputs(str, stdout);
     VIR_FREE(str);
@@ -1976,28 +1948,13 @@ vshTTYRestore(vshControl *ctl G_GNUC_UNUSED)
 }
 
 
-#if !defined(WIN32) && !defined(HAVE_CFMAKERAW)
-/* provide fallback in case cfmakeraw isn't available */
-static void
-cfmakeraw(struct termios *attr)
-{
-    attr->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
-                         | INLCR | IGNCR | ICRNL | IXON);
-    attr->c_oflag &= ~OPOST;
-    attr->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-    attr->c_cflag &= ~(CSIZE | PARENB);
-    attr->c_cflag |= CS8;
-}
-#endif /* !WIN32 && !HAVE_CFMAKERAW */
-
-
 int
 vshTTYMakeRaw(vshControl *ctl G_GNUC_UNUSED,
               bool report_errors G_GNUC_UNUSED)
 {
 #ifndef WIN32
     struct termios rawattr = ctl->termattr;
-    char ebuf[1024];
+
 
     if (!ctl->istty) {
         if (report_errors) {
@@ -2013,7 +1970,7 @@ vshTTYMakeRaw(vshControl *ctl G_GNUC_UNUSED,
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &rawattr) < 0) {
         if (report_errors)
             vshError(ctl, _("unable to set tty attributes: %s"),
-                     virStrerror(errno, ebuf, sizeof(ebuf)));
+                     g_strerror(errno));
         return -1;
     }
 #endif
@@ -2041,9 +1998,7 @@ vshError(vshControl *ctl, const char *format, ...)
     fputs(_("error: "), stderr);
 
     va_start(ap, format);
-    /* We can't recursively call vshError on an OOM situation, so ignore
-       failure here. */
-    ignore_value(virVasprintf(&str, format, ap));
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
 
     fprintf(stderr, "%s\n", NULLSTR(str));
@@ -2078,6 +2033,7 @@ vshEventLoop(void *opaque)
 
 /* We want to use SIGINT to cancel a wait; but as signal handlers
  * don't have an opaque argument, we have to use static storage.  */
+#ifndef WIN32
 static int vshEventFd = -1;
 static struct sigaction vshEventOldAction;
 
@@ -2092,6 +2048,7 @@ vshEventInt(int sig G_GNUC_UNUSED,
     if (vshEventFd >= 0)
         ignore_value(safewrite(vshEventFd, &reason, 1));
 }
+#endif /* !WIN32 */
 
 
 /* Event loop handler used to limit length of waiting for any other event. */
@@ -2122,23 +2079,27 @@ vshEventTimeout(int timer G_GNUC_UNUSED,
 int
 vshEventStart(vshControl *ctl, int timeout_ms)
 {
+#ifndef WIN32
     struct sigaction action;
+    assert(vshEventFd == -1);
+#endif /* !WIN32 */
 
     assert(ctl->eventPipe[0] == -1 && ctl->eventPipe[1] == -1 &&
-           vshEventFd == -1 && ctl->eventTimerId >= 0);
-    if (pipe2(ctl->eventPipe, O_CLOEXEC) < 0) {
-        char ebuf[1024];
-
-        vshError(ctl, _("failed to create pipe: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+           ctl->eventTimerId >= 0);
+    if (virPipe(ctl->eventPipe) < 0) {
+        vshSaveLibvirtError();
+        vshReportError(ctl);
         return -1;
     }
+
+#ifndef WIN32
     vshEventFd = ctl->eventPipe[1];
 
     action.sa_sigaction = vshEventInt;
     action.sa_flags = SA_SIGINFO;
     sigemptyset(&action.sa_mask);
     sigaction(SIGINT, &action, &vshEventOldAction);
+#endif /* !WIN32 */
 
     if (timeout_ms)
         virEventUpdateTimeout(ctl->eventTimerId, timeout_ms);
@@ -2183,12 +2144,10 @@ vshEventWait(vshControl *ctl)
     assert(ctl->eventPipe[0] >= 0);
     while ((rv = read(ctl->eventPipe[0], &buf, 1)) < 0 && errno == EINTR);
     if (rv != 1) {
-        char ebuf[1024];
-
         if (!rv)
             errno = EPIPE;
         vshError(ctl, _("failed to determine loop exit status: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+                 g_strerror(errno));
         return -1;
     }
     return buf;
@@ -2205,16 +2164,22 @@ vshEventWait(vshControl *ctl)
 void
 vshEventCleanup(vshControl *ctl)
 {
+#ifndef WIN32
     if (vshEventFd >= 0) {
         sigaction(SIGINT, &vshEventOldAction, NULL);
         vshEventFd = -1;
     }
+#endif /* !WIN32 */
     VIR_FORCE_CLOSE(ctl->eventPipe[0]);
     VIR_FORCE_CLOSE(ctl->eventPipe[1]);
     virEventUpdateTimeout(ctl->eventTimerId, -1);
 }
 
-#define LOGFILE_FLAGS (O_WRONLY | O_APPEND | O_CREAT | O_SYNC)
+#ifdef O_SYNC
+# define LOGFILE_FLAGS (O_WRONLY | O_APPEND | O_CREAT | O_SYNC)
+#else
+# define LOGFILE_FLAGS (O_WRONLY | O_APPEND | O_CREAT)
+#endif
 
 /**
  * vshOpenLogFile:
@@ -2248,8 +2213,8 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
     char *str = NULL;
     size_t len;
     const char *lvl = "";
-    time_t stTime;
-    struct tm stTm;
+    g_autoptr(GDateTime) now = g_date_time_new_now_local();
+    g_autofree gchar *nowstr = NULL;
 
     if (ctl->log_fd == -1)
         return;
@@ -2259,15 +2224,9 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
      *
      * [YYYY.MM.DD HH:MM:SS SIGNATURE PID] LOG_LEVEL message
     */
-    time(&stTime);
-    localtime_r(&stTime, &stTm);
-    virBufferAsprintf(&buf, "[%d.%02d.%02d %02d:%02d:%02d %s %d] ",
-                      (1900 + stTm.tm_year),
-                      (1 + stTm.tm_mon),
-                      stTm.tm_mday,
-                      stTm.tm_hour,
-                      stTm.tm_min,
-                      stTm.tm_sec,
+    nowstr = g_date_time_format(now, "%Y.%m.%d %H:%M:%S");
+    virBufferAsprintf(&buf, "[%s %s %d] ",
+                      nowstr,
                       ctl->progname,
                       (int) getpid());
     switch (log_level) {
@@ -2292,7 +2251,7 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
     }
     virBufferAsprintf(&buf, "%s ", lvl);
     virBufferVasprintf(&buf, msg_format, ap);
-    virBufferTrim(&buf, "\n", -1);
+    virBufferTrim(&buf, "\n");
     virBufferAddChar(&buf, '\n');
 
     str = virBufferContentAndReset(&buf);
@@ -2320,14 +2279,12 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
 void
 vshCloseLogFile(vshControl *ctl)
 {
-	//关闭日志文件
-    char ebuf[1024];
-
+    //关闭日志文件
     /* log file close */
     if (VIR_CLOSE(ctl->log_fd) < 0) {
         vshError(ctl, _("%s: failed to write log file: %s"),
                  ctl->logfile ? ctl->logfile : "?",
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+                 g_strerror(errno));
     }
 
     if (ctl->logfile) {
@@ -2379,7 +2336,7 @@ vshAskReedit(vshControl *ctl, const char *msg, bool relax_avail)
     while (true) {
         vshPrint(ctl, "\r%s %s %s: ", msg, _("Try again?"),
                  relax_avail ? "[y,n,i,f,?]" : "[y,n,f,?]");
-        c = c_tolower(getchar());
+        c = g_ascii_tolower(getchar());
 
         if (c == '?') {
             vshPrintRaw(ctl,
@@ -2431,25 +2388,21 @@ vshEditWriteToTempFile(vshControl *ctl, const char *doc)
     char *ret;
     const char *tmpdir;
     int fd;
-    char ebuf[1024];
 
     tmpdir = getenv("TMPDIR");
     if (!tmpdir) tmpdir = "/tmp";
-    if (virAsprintf(&ret, "%s/virshXXXXXX.xml", tmpdir) < 0) {
-        vshError(ctl, "%s", _("out of memory"));
-        return NULL;
-    }
-    fd = mkostemps(ret, 4, O_CLOEXEC);
+    ret = g_strdup_printf("%s/virshXXXXXX.xml", tmpdir);
+    fd = g_mkstemp_full(ret, O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR);
     if (fd == -1) {
-        vshError(ctl, _("mkostemps: failed to create temporary file: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+        vshError(ctl, _("g_mkstemp_full: failed to create temporary file: %s"),
+                 g_strerror(errno));
         VIR_FREE(ret);
         return NULL;
     }
 
     if (safewrite(fd, doc, strlen(doc)) == -1) {
         vshError(ctl, _("write: %s: failed to write to temporary file: %s"),
-                 ret, virStrerror(errno, ebuf, sizeof(ebuf)));
+                 ret, g_strerror(errno));
         VIR_FORCE_CLOSE(fd);
         unlink(ret);
         VIR_FREE(ret);
@@ -2457,7 +2410,7 @@ vshEditWriteToTempFile(vshControl *ctl, const char *doc)
     }
     if (VIR_CLOSE(fd) < 0) {
         vshError(ctl, _("close: %s: failed to write or close temporary file: %s"),
-                 ret, virStrerror(errno, ebuf, sizeof(ebuf)));
+                 ret, g_strerror(errno));
         unlink(ret);
         VIR_FREE(ret);
         return NULL;
@@ -2527,12 +2480,11 @@ char *
 vshEditReadBackFile(vshControl *ctl, const char *filename)
 {
     char *ret;
-    char ebuf[1024];
 
     if (virFileReadAll(filename, VSH_MAX_XML_FILE, &ret) == -1) {
         vshError(ctl,
                  _("%s: failed to read temporary file: %s"),
-                 filename, virStrerror(errno, ebuf, sizeof(ebuf)));
+                 filename, g_strerror(errno));
         return NULL;
     }
     return ret;
@@ -2553,7 +2505,6 @@ vshTreePrintInternal(vshControl *ctl,
 {
     size_t i;
     int nextlastdev = -1;
-    int ret = -1;
     const char *dev = (lookup)(devid, false, opaque);
 
     /* Print this device, with indent if not at root */
@@ -2587,9 +2538,9 @@ vshTreePrintInternal(vshControl *ctl,
             vshTreePrintInternal(ctl, lookup, opaque,
                                  num_devices, i, nextlastdev,
                                  false, indent) < 0)
-            goto cleanup;
+            return -1;
     }
-    virBufferTrim(indent, "  ", -1);
+    virBufferTrim(indent, "  ");
 
     /* If there was no child device, and we're the last in
      * a list of devices, then print another blank line */
@@ -2597,10 +2548,9 @@ vshTreePrintInternal(vshControl *ctl,
         vshPrint(ctl, "%s\n", virBufferCurrentContent(indent));
 
     if (!root)
-        virBufferTrim(indent, NULL, 2);
-    ret = 0;
- cleanup:
-    return ret;
+        virBufferTrimLen(indent, 2);
+
+    return 0;
 }
 
 int
@@ -2731,7 +2681,7 @@ vshReadlineOptionsGenerator(const char *text,
 
         name_len = strlen(name);
         ret[ret_size] = vshMalloc(NULL, name_len + 3);
-        snprintf(ret[ret_size], name_len + 3,  "--%s", name);
+        g_snprintf(ret[ret_size], name_len + 3,  "--%s", name);
         ret_size++;
         /* Terminate the string list properly. */
         ret[ret_size] = NULL;
@@ -2946,8 +2896,7 @@ vshReadlineInit(vshControl *ctl)
     rl_completer_quote_characters = quote_characters;
     rl_char_is_quoted_p = vshReadlineCharIsQuoted;
 
-    if (virAsprintf(&histsize_env, "%s_HISTSIZE", ctl->env_prefix) < 0)
-        goto cleanup;
+    histsize_env = g_strdup_printf("%s_HISTSIZE", ctl->env_prefix);
 
     /* Limit the total size of the history buffer */
     if ((histsize_str = getenv(histsize_env))) {
@@ -2968,20 +2917,9 @@ vshReadlineInit(vshControl *ctl)
      */
     userdir = virGetUserCacheDirectory();
 
-    if (userdir == NULL) {
-        vshError(ctl, "%s", _("Could not determine home directory"));
-        goto cleanup;
-    }
+    ctl->historydir = g_strdup_printf("%s/%s", userdir, ctl->name);
 
-    if (virAsprintf(&ctl->historydir, "%s/%s", userdir, ctl->name) < 0) {
-        vshError(ctl, "%s", _("Out of memory"));
-        goto cleanup;
-    }
-
-    if (virAsprintf(&ctl->historyfile, "%s/history", ctl->historydir) < 0) {
-        vshError(ctl, "%s", _("Out of memory"));
-        goto cleanup;
-    }
+    ctl->historyfile = g_strdup_printf("%s/history", ctl->historydir);
 
     read_history(ctl->historyfile);
     ret = 0;
@@ -2998,9 +2936,8 @@ vshReadlineDeinit(vshControl *ctl)
     if (ctl->historyfile != NULL) {
         if (virFileMakePathWithMode(ctl->historydir, 0755) < 0 &&
             errno != EEXIST) {
-            char ebuf[1024];
             vshError(ctl, _("Failed to create '%s': %s"),
-                     ctl->historydir, virStrerror(errno, ebuf, sizeof(ebuf)));
+                     ctl->historydir, g_strerror(errno));
         } else {
             write_history(ctl->historyfile);
         }
@@ -3066,8 +3003,7 @@ vshInitDebug(vshControl *ctl)
     char *env = NULL;
 
     if (ctl->debug == VSH_DEBUG_DEFAULT) {
-        if (virAsprintf(&env, "%s_DEBUG", ctl->env_prefix) < 0)
-            return -1;
+        env = g_strdup_printf("%s_DEBUG", ctl->env_prefix);
 
         /* log level not set from commandline, check env variable */
         debugEnv = getenv(env);
@@ -3085,8 +3021,7 @@ vshInitDebug(vshControl *ctl)
     }
 
     if (ctl->logfile == NULL) {
-        if (virAsprintf(&env, "%s_LOG_FILE", ctl->env_prefix) < 0)
-            return -1;
+        env = g_strdup_printf("%s_LOG_FILE", ctl->env_prefix);
 
         /* log file not set from cmdline */
         debugEnv = getenv(env);
@@ -3243,9 +3178,7 @@ bool
 cmdCd(vshControl *ctl, const vshCmd *cmd)
 {
     const char *dir = NULL;
-    char *dir_malloced = NULL;
-    bool ret = true;
-    char ebuf[1024];
+    g_autofree char *dir_malloced = NULL;
 
     if (!ctl->imode) {
         vshError(ctl, "%s", _("cd: command valid only in interactive mode"));
@@ -3259,12 +3192,11 @@ cmdCd(vshControl *ctl, const vshCmd *cmd)
 
     if (chdir(dir) == -1) {
         vshError(ctl, _("cd: %s: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)), dir);
-        ret = false;
+                 g_strerror(errno), dir);
+        return false;
     }
 
-    VIR_FREE(dir_malloced);
-    return ret;
+    return true;
 }
 
 const vshCmdOptDef opts_echo[] = {
@@ -3374,21 +3306,11 @@ const vshCmdInfo info_pwd[] = {
 bool
 cmdPwd(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
-    char *cwd;
-    bool ret = true;
-    char ebuf[1024];
+    g_autofree char *cwd = g_get_current_dir();
 
-    cwd = getcwd(NULL, 0);
-    if (!cwd) {
-        vshError(ctl, _("pwd: cannot get current directory: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
-        ret = false;
-    } else {
-        vshPrint(ctl, _("%s\n"), cwd);
-        VIR_FREE(cwd);
-    }
+    vshPrint(ctl, _("%s\n"), cwd);
 
-    return ret;
+    return true;
 }
 
 const vshCmdInfo info_quit[] = {

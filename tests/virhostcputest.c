@@ -1,6 +1,7 @@
 #include <config.h>
 
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "testutils.h"
 #include "internal.h"
@@ -55,13 +56,11 @@ linuxTestCompareFiles(const char *cpuinfofile,
     }
     VIR_FORCE_FCLOSE(cpuinfo);
 
-    if (virAsprintf(&actualData,
-                    "CPUs: %u/%u, MHz: %u, Nodes: %u, Sockets: %u, "
-                    "Cores: %u, Threads: %u\n",
-                    nodeinfo.cpus, VIR_NODEINFO_MAXCPUS(nodeinfo),
-                    nodeinfo.mhz, nodeinfo.nodes, nodeinfo.sockets,
-                    nodeinfo.cores, nodeinfo.threads) < 0)
-        goto fail;
+    actualData = g_strdup_printf("CPUs: %u/%u, MHz: %u, Nodes: %u, Sockets: %u, "
+                                 "Cores: %u, Threads: %u\n",
+                                 nodeinfo.cpus, VIR_NODEINFO_MAXCPUS(nodeinfo),
+                                 nodeinfo.mhz, nodeinfo.nodes, nodeinfo.sockets,
+                                 nodeinfo.cores, nodeinfo.threads);
 
     if (virTestCompareToFile(actualData, outputfile) < 0)
         goto fail;
@@ -177,20 +176,17 @@ linuxTestHostCPU(const void *opaque)
     struct linuxTestHostCPUData *data = (struct linuxTestHostCPUData *) opaque;
     const char *archStr = virArchToString(data->arch);
 
-    if (virAsprintf(&sysfs_prefix, "%s/virhostcpudata/linux-%s",
-                    abs_srcdir, data->testName) < 0 ||
-        virAsprintf(&cpuinfo, "%s/virhostcpudata/linux-%s-%s.cpuinfo",
-                    abs_srcdir, archStr, data->testName) < 0 ||
-        virAsprintf(&output, "%s/virhostcpudata/linux-%s-%s.expected",
-                    abs_srcdir, archStr, data->testName) < 0) {
-        goto cleanup;
-    }
+    sysfs_prefix = g_strdup_printf("%s/virhostcpudata/linux-%s",
+                                   abs_srcdir, data->testName);
+    cpuinfo = g_strdup_printf("%s/virhostcpudata/linux-%s-%s.cpuinfo",
+                              abs_srcdir, archStr, data->testName);
+    output = g_strdup_printf("%s/virhostcpudata/linux-%s-%s.expected",
+                             abs_srcdir, archStr, data->testName);
 
     virFileWrapperAddPrefix(SYSFS_SYSTEM_PATH, sysfs_prefix);
     result = linuxTestCompareFiles(cpuinfo, data->arch, output);
     virFileWrapperRemovePrefix(SYSFS_SYSTEM_PATH);
 
- cleanup:
     VIR_FREE(cpuinfo);
     VIR_FREE(output);
     VIR_FREE(sysfs_prefix);
@@ -198,9 +194,42 @@ linuxTestHostCPU(const void *opaque)
     return result;
 }
 
+
+static int
+hostCPUSignature(const void *opaque)
+{
+    const struct linuxTestHostCPUData *data = opaque;
+    const char *arch = virArchToString(data->arch);
+    g_autofree char *cpuinfo = NULL;
+    g_autofree char *expected = NULL;
+    g_autofree char *signature = NULL;
+    g_autoptr(FILE) f = NULL;
+
+    cpuinfo = g_strdup_printf("%s/virhostcpudata/linux-%s-%s.cpuinfo",
+                              abs_srcdir, arch, data->testName);
+    expected = g_strdup_printf("%s/virhostcpudata/linux-%s-%s.signature",
+                               abs_srcdir, arch, data->testName);
+
+    if (!(f = fopen(cpuinfo, "r"))) {
+        virReportSystemError(errno,
+                             "Failed to open cpuinfo file '%s'", cpuinfo);
+        return -1;
+    }
+
+    if (virHostCPUReadSignature(data->arch, f, &signature) < 0)
+        return -1;
+
+    if (!signature && !virFileExists(expected))
+        return 0;
+
+    return virTestCompareToFile(signature, expected);
+}
+
+
 struct nodeCPUStatsData {
     const char *name;
     int ncpus;
+    bool shouldFail;
 };
 
 static int
@@ -211,16 +240,27 @@ linuxTestNodeCPUStats(const void *data)
     char *cpustatfile = NULL;
     char *outfile = NULL;
 
-    if (virAsprintf(&cpustatfile, "%s/virhostcpudata/linux-cpustat-%s.stat",
-                    abs_srcdir, testData->name) < 0 ||
-        virAsprintf(&outfile, "%s/virhostcpudata/linux-cpustat-%s.out",
-                    abs_srcdir, testData->name) < 0)
-        goto fail;
+    cpustatfile = g_strdup_printf("%s/virhostcpudata/linux-cpustat-%s.stat",
+                                  abs_srcdir, testData->name);
+    outfile = g_strdup_printf("%s/virhostcpudata/linux-cpustat-%s.out",
+                              abs_srcdir, testData->name);
 
     result = linuxCPUStatsCompareFiles(cpustatfile,
                                        testData->ncpus,
                                        outfile);
- fail:
+    if (result < 0) {
+        if (testData->shouldFail) {
+            /* Expected error */
+            result = 0;
+        }
+    } else {
+        if (testData->shouldFail) {
+            fprintf(stderr, "Expected a failure, got success");
+            result = -1;
+        }
+    }
+
+
     VIR_FREE(cpustatfile);
     VIR_FREE(outfile);
     return result;
@@ -255,23 +295,32 @@ mymain(void)
         /* subcores, invalid configuration */
         {"subcores3", VIR_ARCH_PPC64},
         {"with-frequency", VIR_ARCH_S390X},
+        {"with-die", VIR_ARCH_X86_64},
     };
 
     if (virInitialize() < 0)
         return EXIT_FAILURE;
 
-    for (i = 0; i < G_N_ELEMENTS(nodeData); i++)
+    for (i = 0; i < G_N_ELEMENTS(nodeData); i++) {
+        g_autofree char *sigTest = NULL;
+
         if (virTestRun(nodeData[i].testName, linuxTestHostCPU, &nodeData[i]) != 0)
             ret = -1;
 
-# define DO_TEST_CPU_STATS(name, ncpus) \
+        sigTest = g_strdup_printf("%s CPU signature", nodeData[i].testName);
+        if (virTestRun(sigTest, hostCPUSignature, &nodeData[i]) != 0)
+            ret = -1;
+    }
+
+# define DO_TEST_CPU_STATS(name, ncpus, shouldFail) \
     do { \
-        static struct nodeCPUStatsData data = { name, ncpus }; \
+        static struct nodeCPUStatsData data = { name, ncpus, shouldFail}; \
         if (virTestRun("CPU stats " name, linuxTestNodeCPUStats, &data) < 0) \
             ret = -1; \
     } while (0)
 
-    DO_TEST_CPU_STATS("24cpu", 24);
+    DO_TEST_CPU_STATS("24cpu", 24, false);
+    DO_TEST_CPU_STATS("24cpu", 25, true);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

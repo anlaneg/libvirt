@@ -19,10 +19,11 @@
 #include <config.h>
 
 #include <glib/gprintf.h>
-#include <regex.h>
 #include <locale.h>
+#ifdef HAVE_XLOCALE_H
+# include <xlocale.h>
+#endif
 
-#include "c-ctype.h"
 #include "virstring.h"
 #include "virthread.h"
 #include "viralloc.h"
@@ -91,8 +92,7 @@ virStringSplitCount(const char *string,
             if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
                 goto error;
 
-            if (VIR_STRNDUP(tokens[ntokens], remainder, len) < 0)
-                goto error;
+            tokens[ntokens] = g_strndup(remainder, len);
             ntokens++;
             remainder = tmp + delimlen;
             tmp = strstr(remainder, delim);
@@ -708,64 +708,18 @@ int
 virDoubleToStr(char **strp, double number)
 {
     virLocale oldlocale;
-    int rc;
 
     if (virLocaleSetRaw(&oldlocale) < 0)
         return -1;
 
-    rc = virAsprintf(strp, "%lf", number);
+    *strp = g_strdup_printf("%lf", number);
 
     virLocaleRevert(&oldlocale);
     virLocaleFixupRadix(strp);
 
-    if (rc < 0)
-        return -1;
     return 0;
 }
 
-
-int
-virVasprintfInternal(char **strp,
-                     const char *fmt,
-                     va_list list)
-{
-    char *str = NULL;
-    int ret;
-
-    ret = g_vasprintf(&str, fmt, list);
-
-    /* GLib is supposed to abort() on OOM, but a mistake meant
-     * it did not. Delete this once our min glib is at 2.64.0
-     * which includes the fix:
-     *   https://gitlab.gnome.org/GNOME/glib/merge_requests/1145
-     */
-#if !GLIB_CHECK_VERSION(2, 64, 0)
-    if (!str)
-        abort();
-#endif
-    *strp = str;
-
-    return ret;
-}
-
-int
-virAsprintfInternal(char **strp,
-                    const char *fmt, ...)
-{
-    va_list ap;
-    char *str = NULL;
-    int ret;
-
-    va_start(ap, fmt);
-    ret = g_vasprintf(&str, fmt, ap);
-    va_end(ap);
-
-    if (!*str)
-        abort();
-    *strp = str;
-
-    return ret;
-}
 
 /**
  * virStrncpy:
@@ -842,7 +796,7 @@ virSkipSpaces(const char **str)
 {
     const char *cur = *str;
 
-    while (c_isspace(*cur))
+    while (g_ascii_isspace(*cur))
         cur++;
     *str = cur;
 }
@@ -859,7 +813,7 @@ virSkipSpacesAndBackslash(const char **str)
 {
     const char *cur = *str;
 
-    while (c_isspace(*cur) || *cur == '\\')
+    while (g_ascii_isspace(*cur) || *cur == '\\')
         cur++;
     *str = cur;
 }
@@ -888,7 +842,7 @@ virTrimSpaces(char *str, char **endp)
         end = str + strlen(str);
     else
         end = *endp;
-    while (end > str && c_isspace(end[-1]))
+    while (end > str && g_ascii_isspace(end[-1]))
         end--;
     if (endp) {
         if (!*endp)
@@ -934,55 +888,6 @@ virStringIsEmpty(const char *str)
 
     virSkipSpaces(&str);
     return str[0] == '\0';
-}
-
-/**
- * virStrdup:
- * @dest: where to store duplicated string
- * @src: the source string to duplicate
- *
- * Wrapper over strdup, which aborts on OOM error.
- *
- * Returns: 0 for NULL src, 1 on successful copy, aborts on OOM
- */
-int
-virStrdup(char **dest,
-          const char *src)
-{
-    *dest = NULL;
-    if (!src)
-        return 0;
-    *dest = g_strdup(src);
-
-    return 1;
-}
-
-/**
- * virStrndup:
- * @dest: where to store duplicated string
- * @src: the source string to duplicate
- * @n: how many bytes to copy
- *
- * Wrapper over strndup, which aborts on OOM error.
- *
- * In case @n is smaller than zero, the whole @src string is
- * copied.
- *
- * Returns: 0 for NULL src, 1 on successful copy, aborts on OOM
- */
-int
-virStrndup(char **dest,
-           const char *src,
-           ssize_t n)
-{
-    *dest = NULL;
-    if (!src)
-        return 0;
-    if (n < 0)
-        n = strlen(src);
-    *dest = g_strndup(src, n);
-
-    return 1;
 }
 
 
@@ -1064,29 +969,26 @@ virStringSearch(const char *str,
                 size_t max_matches,
                 char ***matches)
 {
-    regex_t re;
-    regmatch_t rem;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
     size_t nmatches = 0;
     ssize_t ret = -1;
-    int rv = -1;
 
     *matches = NULL;
 
     VIR_DEBUG("search '%s' for '%s'", str, regexp);
 
-    if ((rv = regcomp(&re, regexp, REG_EXTENDED)) != 0) {
-        char error[100];
-        regerror(rv, &re, error, sizeof(error));
+    regex = g_regex_new(regexp, 0, 0, &err);
+    if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Error while compiling regular expression '%s': %s"),
-                       regexp, error);
+                       _("Failed to compile regex %s"), err->message);
         return -1;
     }
 
-    if (re.re_nsub != 1) {
+    if (g_regex_get_capture_count(regex) != 1) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Regular expression '%s' must have exactly 1 match group, not %zu"),
-                       regexp, re.re_nsub);
+                       _("Regular expression '%s' must have exactly 1 match group, not %d"),
+                       regexp, g_regex_get_capture_count(regex));
         goto cleanup;
     }
 
@@ -1097,29 +999,29 @@ virStringSearch(const char *str,
         goto cleanup;
 
     while ((nmatches - 1) < max_matches) {
+        g_autoptr(GMatchInfo) info = NULL;
         char *match;
+        int endpos;
 
-        if (regexec(&re, str, 1, &rem, 0) != 0)
+        if (!g_regex_match(regex, str, 0, &info))
             break;
 
         if (VIR_EXPAND_N(*matches, nmatches, 1) < 0)
             goto cleanup;
 
-        if (VIR_STRNDUP(match, str + rem.rm_so,
-                        rem.rm_eo - rem.rm_so) < 0)
-            goto cleanup;
+        match = g_match_info_fetch(info, 1);
 
         VIR_DEBUG("Got '%s'", match);
 
         (*matches)[nmatches-2] = match;
 
-        str = str + rem.rm_eo;
+        g_match_info_fetch_pos(info, 1, NULL, &endpos);
+        str += endpos;
     }
 
     ret = nmatches - 1; /* don't count the trailing null */
 
  cleanup:
-    regfree(&re);
     if (ret < 0) {
         virStringListFree(*matches);
         *matches = NULL;
@@ -1139,24 +1041,18 @@ bool
 virStringMatch(const char *str,
                const char *regexp)
 {
-    regex_t re;
-    int rv;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
 
     VIR_DEBUG("match '%s' for '%s'", str, regexp);
 
-    if ((rv = regcomp(&re, regexp, REG_EXTENDED | REG_NOSUB)) != 0) {
-        char error[100];
-        regerror(rv, &re, error, sizeof(error));
-        VIR_WARN("error while compiling regular expression '%s': %s",
-                 regexp, error);
+    regex = g_regex_new(regexp, 0, 0, &err);
+    if (!regex) {
+        VIR_WARN("Failed to compile regex %s", err->message);
         return false;
     }
 
-    rv = regexec(&re, str, 0, NULL, 0);
-
-    regfree(&re);
-
-    return rv == 0;
+    return g_regex_match(regex, str, 0, NULL);
 }
 
 /**
@@ -1386,7 +1282,7 @@ virStringToUpper(char **dst, const char *src)
         return -1;
 
     for (i = 0; src[i]; i++) {
-        cap[i] = c_toupper(src[i]);
+        cap[i] = g_ascii_toupper(src[i]);
         if (cap[i] == '-')
             cap[i] = '_';
     }
@@ -1407,7 +1303,7 @@ virStringIsPrintable(const char *str)
     size_t i;
 
     for (i = 0; str[i]; i++)
-        if (!c_isprint(str[i]))
+        if (!g_ascii_isprint(str[i]))
             return false;
 
     return true;
@@ -1426,7 +1322,7 @@ virStringBufferIsPrintable(const uint8_t *buf,
     size_t i;
 
     for (i = 0; i < buflen; i++)
-        if (!c_isprint(buf[i]))
+        if (!g_ascii_isprint(buf[i]))
             return false;
 
     return true;

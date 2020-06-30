@@ -21,17 +21,15 @@
 #include "virnetdevbridge.h"
 #include "virnetdev.h"
 #include "virerror.h"
-#include "virutil.h"
 #include "virfile.h"
 #include "viralloc.h"
 #include "virlog.h"
-#include "intprops.h"
 #include "virstring.h"
+#include "virsocket.h"
 
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <net/if.h>
-#include <netinet/in.h>
+#ifdef HAVE_NET_IF
+# include <net/if.h>
+#endif
 
 #ifdef __linux__
 # if defined(HAVE_LIBNL)
@@ -122,12 +120,10 @@ static int virNetDevBridgeSet(const char *brname,
 {
     g_autofree char *path = NULL;
 
-    if (virAsprintf(&path, SYSFS_NET_DIR "%s/bridge/%s", brname, paramname) < 0)
-        return -1;
+    path = g_strdup_printf(SYSFS_NET_DIR "%s/bridge/%s", brname, paramname);
 
     if (virFileExists(path)) {
-        char valuestr[INT_BUFSIZE_BOUND(value)];
-        snprintf(valuestr, sizeof(valuestr), "%lu", value);
+        g_autofree char *valuestr = g_strdup_printf("%lu", value);
         if (virFileWriteStr(path, valuestr, 0) >= 0)
             return 0;
         VIR_DEBUG("Unable to set bridge %s %s via sysfs", brname, paramname);
@@ -165,13 +161,12 @@ static int virNetDevBridgeGet(const char *brname,
     g_autofree char *path = NULL;
     VIR_AUTOCLOSE fd = -1;
 
-    if (virAsprintf(&path, SYSFS_NET_DIR "%s/bridge/%s", brname, paramname) < 0)
-        return -1;
+    path = g_strdup_printf(SYSFS_NET_DIR "%s/bridge/%s", brname, paramname);
 
     if (virFileExists(path)) {
         g_autofree char *valuestr = NULL;
 
-        if (virFileReadAll(path, INT_BUFSIZE_BOUND(unsigned long),
+        if (virFileReadAll(path, VIR_INT64_STR_BUFLEN,
                            &valuestr) < 0)
             return -1;
 
@@ -217,15 +212,14 @@ virNetDevBridgePortSet(const char *brname,
                        const char *paramname,
                        unsigned long value)
 {
-    char valuestr[INT_BUFSIZE_BOUND(value)];
+    char valuestr[VIR_INT64_STR_BUFLEN];
     int ret = -1;
     g_autofree char *path = NULL;
 
-    snprintf(valuestr, sizeof(valuestr), "%lu", value);
+    g_snprintf(valuestr, sizeof(valuestr), "%lu", value);
 
-    if (virAsprintf(&path, SYSFS_NET_DIR "%s/brif/%s/%s",
-                    brname, ifname, paramname) < 0)
-        return -1;
+    path = g_strdup_printf(SYSFS_NET_DIR "%s/brif/%s/%s", brname, ifname,
+                           paramname);
 
     if (!virFileExists(path))
         errno = EINVAL;
@@ -251,11 +245,10 @@ virNetDevBridgePortGet(const char *brname,
     g_autofree char *path = NULL;
     g_autofree char *valuestr = NULL;
 
-    if (virAsprintf(&path, SYSFS_NET_DIR "%s/brif/%s/%s",
-                    brname, ifname, paramname) < 0)
-        return -1;
+    path = g_strdup_printf(SYSFS_NET_DIR "%s/brif/%s/%s", brname, ifname,
+                           paramname);
 
-    if (virFileReadAll(path, INT_BUFSIZE_BOUND(unsigned long), &valuestr) < 0)
+    if (virFileReadAll(path, VIR_INT64_STR_BUFLEN, &valuestr) < 0)
         return -1;
 
     if (virStrToLong_ul(valuestr, NULL, 10, value) < 0) {
@@ -274,16 +267,13 @@ virNetDevBridgePortGetLearning(const char *brname,
                                const char *ifname,
                                bool *enable)
 {
-    int ret = -1;
     unsigned long value;
 
     if (virNetDevBridgePortGet(brname, ifname, "learning", &value) < 0)
-       goto cleanup;
+       return -1;
 
     *enable = !!value;
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -301,16 +291,13 @@ virNetDevBridgePortGetUnicastFlood(const char *brname,
                                    const char *ifname,
                                    bool *enable)
 {
-    int ret = -1;
     unsigned long value;
 
     if (virNetDevBridgePortGet(brname, ifname, "unicast_flood", &value) < 0)
-       goto cleanup;
+       return -1;
 
     *enable = !!value;
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -320,6 +307,30 @@ virNetDevBridgePortSetUnicastFlood(const char *brname,
                                    bool enable)
 {
     return virNetDevBridgePortSet(brname, ifname, "unicast_flood", enable ? 1 : 0);
+}
+
+
+int
+virNetDevBridgePortGetIsolated(const char *brname,
+                               const char *ifname,
+                               bool *enable)
+{
+    unsigned long value;
+
+    if (virNetDevBridgePortGet(brname, ifname, "isolated", &value) < 0)
+       return -1;
+
+    *enable = !!value;
+    return 0;
+}
+
+
+int
+virNetDevBridgePortSetIsolated(const char *brname,
+                               const char *ifname,
+                               bool enable)
+{
+    return virNetDevBridgePortSet(brname, ifname, "isolated", enable ? 1 : 0);
 }
 
 
@@ -366,6 +377,28 @@ virNetDevBridgePortSetUnicastFlood(const char *brname G_GNUC_UNUSED,
                          _("Unable to set bridge port unicast_flood on this platform"));
     return -1;
 }
+
+
+int
+virNetDevBridgePortGetIsolated(const char *brname G_GNUC_UNUSED,
+                               const char *ifname G_GNUC_UNUSED,
+                               bool *enable G_GNUC_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Unable to get bridge port isolated on this platform"));
+    return -1;
+}
+
+
+int
+virNetDevBridgePortSetIsolated(const char *brname G_GNUC_UNUSED,
+                               const char *ifname G_GNUC_UNUSED,
+                               bool enable G_GNUC_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Unable to set bridge port isolated on this platform"));
+    return -1;
+}
 #endif
 
 
@@ -379,7 +412,8 @@ virNetDevBridgePortSetUnicastFlood(const char *brname G_GNUC_UNUSED,
  */
 #if defined(HAVE_STRUCT_IFREQ) && defined(SIOCBRADDBR)
 static int
-virNetDevBridgeCreateWithIoctl(const char *brname)
+virNetDevBridgeCreateWithIoctl(const char *brname,
+                               const virMacAddr *mac)
 {
     VIR_AUTOCLOSE fd = -1;
 
@@ -392,23 +426,37 @@ virNetDevBridgeCreateWithIoctl(const char *brname)
         return -1;
     }
 
+    if (virNetDevSetMAC(brname, mac) < 0) {
+        virErrorPtr savederr;
+
+        virErrorPreserveLast(&savederr);
+        ignore_value(ioctl(fd, SIOCBRDELBR, brname));
+        virErrorRestore(&savederr);
+        return -1;
+    }
+
     return 0;
 }
 #endif
 
 #if defined(__linux__) && defined(HAVE_LIBNL)
 int
-virNetDevBridgeCreate(const char *brname)
+virNetDevBridgeCreate(const char *brname,
+                      const virMacAddr *mac)
 {
     /* use a netlink RTM_NEWLINK message to create the bridge */
     int error = 0;
+    virNetlinkNewLinkData data = {
+        .mac = mac,
+    };
+
 
     //创建link bridge
-    if (virNetlinkNewLink(brname, "bridge", NULL, &error) < 0) {
+    if (virNetlinkNewLink(brname, "bridge", &data, &error) < 0) {
 # if defined(HAVE_STRUCT_IFREQ) && defined(SIOCBRADDBR)
         if (error == -EOPNOTSUPP) {
             /* fallback to ioctl if netlink doesn't support creating bridges */
-            return virNetDevBridgeCreateWithIoctl(brname);
+            return virNetDevBridgeCreateWithIoctl(brname, mac);
         }
 # endif
         if (error < 0)
@@ -424,15 +472,17 @@ virNetDevBridgeCreate(const char *brname)
 
 #elif defined(HAVE_STRUCT_IFREQ) && defined(SIOCBRADDBR)
 int
-virNetDevBridgeCreate(const char *brname)
+virNetDevBridgeCreate(const char *brname,
+                      const virMacAddr *mac)
 {
-    return virNetDevBridgeCreateWithIoctl(brname);
+    return virNetDevBridgeCreateWithIoctl(brname, mac);
 }
 
 
 #elif defined(HAVE_STRUCT_IFREQ) && defined(SIOCIFCREATE2)
 int
-virNetDevBridgeCreate(const char *brname)
+virNetDevBridgeCreate(const char *brname,
+                      const virMacAddr *mac)
 {
     struct ifreq ifr;
     VIR_AUTOCLOSE s = -1;
@@ -449,10 +499,21 @@ virNetDevBridgeCreate(const char *brname)
     if (virNetDevSetName(ifr.ifr_name, brname) == -1)
         return -1;
 
+    if (virNetDevSetMAC(brname, mac) < 0) {
+        virErrorPtr savederr;
+
+        virErrorPreserveLast(&savederr);
+        ignore_value(virNetDevBridgeDelete(brname));
+        virErrorRestore(&savederr);
+        return -1;
+    }
+
     return 0;
 }
 #else
-int virNetDevBridgeCreate(const char *brname)
+int
+virNetDevBridgeCreate(const char *brname,
+                      const virMacAddr *mac G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS,
                          _("Unable to create bridge %s"), brname);
@@ -864,16 +925,13 @@ int
 virNetDevBridgeGetVlanFiltering(const char *brname,
                                 bool *enable)
 {
-    int ret = -1;
     unsigned long value;
 
     if (virNetDevBridgeGet(brname, "vlan_filtering", &value) < 0)
-        goto cleanup;
+        return -1;
 
     *enable = !!value;
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 

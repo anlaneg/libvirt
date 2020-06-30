@@ -45,45 +45,41 @@ VIR_ENUM_IMPL(virDomainDeviceAddress,
               "virtio-mmio",
               "isa",
               "dimm",
+              "unassigned",
 );
 
 static int
 virZPCIDeviceAddressParseXML(xmlNodePtr node,
                              virPCIDeviceAddressPtr addr)
 {
-    virZPCIDeviceAddress def = { 0 };
-    char *uid;
-    char *fid;
-    int ret = -1;
+    virZPCIDeviceAddress def = { .uid = { 0 }, .fid = { 0 } };
+    g_autofree char *uid = NULL;
+    g_autofree char *fid = NULL;
 
     uid = virXMLPropString(node, "uid");
     fid = virXMLPropString(node, "fid");
 
-    if (uid &&
-        virStrToLong_uip(uid, NULL, 0, &def.uid) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Cannot parse <address> 'uid' attribute"));
-        goto cleanup;
+    if (uid) {
+        if (virStrToLong_uip(uid, NULL, 0, &def.uid.value) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("Cannot parse <address> 'uid' attribute"));
+            return -1;
+        }
+        def.uid.isSet = true;
     }
 
-    if (fid &&
-        virStrToLong_uip(fid, NULL, 0, &def.fid) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Cannot parse <address> 'fid' attribute"));
-        goto cleanup;
+    if (fid) {
+        if (virStrToLong_uip(fid, NULL, 0, &def.fid.value) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("Cannot parse <address> 'fid' attribute"));
+            return -1;
+        }
+        def.fid.isSet = true;
     }
-
-    if (!virZPCIDeviceAddressIsEmpty(&def) &&
-        !virZPCIDeviceAddressIsValid(&def))
-        goto cleanup;
 
     addr->zpci = def;
-    ret = 0;
 
- cleanup:
-    VIR_FREE(uid);
-    VIR_FREE(fid);
-    return ret;
+    return 0;
 }
 
 void
@@ -120,6 +116,7 @@ virDomainDeviceInfoAddressIsEqual(const virDomainDeviceInfo *a,
     /* address types below don't have any specific data */
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_MMIO:
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_UNASSIGNED:
         break;
 
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI:
@@ -193,21 +190,19 @@ virDeviceInfoPCIAddressIsPresent(const virDomainDeviceInfo *info)
            !virPCIDeviceAddressIsEmpty(&info->addr.pci);
 }
 
-
 bool
 virDeviceInfoPCIAddressExtensionIsWanted(const virDomainDeviceInfo *info)
 {
     return (info->addr.pci.extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI) &&
-           virZPCIDeviceAddressIsEmpty(&info->addr.pci.zpci);
+           virZPCIDeviceAddressIsIncomplete(&info->addr.pci.zpci);
 }
 
 bool
 virDeviceInfoPCIAddressExtensionIsPresent(const virDomainDeviceInfo *info)
 {
     return (info->addr.pci.extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI) &&
-           !virZPCIDeviceAddressIsEmpty(&info->addr.pci.zpci);
+           virZPCIDeviceAddressIsPresent(&info->addr.pci.zpci);
 }
-
 
 int
 virPCIDeviceAddressParseXML(xmlNodePtr node,

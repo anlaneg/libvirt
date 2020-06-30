@@ -104,12 +104,6 @@ int virSecurityManagerSetHostdevLabel(virSecurityManagerPtr mgr,
                                       virDomainDefPtr def,
                                       virDomainHostdevDefPtr dev,
                                       const char *vroot);
-int virSecurityManagerSetSavedStateLabel(virSecurityManagerPtr mgr,
-                                         virDomainDefPtr def,
-                                         const char *savefile);
-int virSecurityManagerRestoreSavedStateLabel(virSecurityManagerPtr mgr,
-                                             virDomainDefPtr def,
-                                             const char *savefile);
 int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
                                virDomainDefPtr sec);
 int virSecurityManagerReserveLabel(virSecurityManagerPtr mgr,
@@ -151,6 +145,10 @@ virSecurityManagerPtr* virSecurityManagerGetNested(virSecurityManagerPtr mgr);
 
 typedef enum {
     VIR_SECURITY_DOMAIN_IMAGE_LABEL_BACKING_CHAIN = 1 << 0,
+    /* The VIR_SECURITY_DOMAIN_IMAGE_PARENT_CHAIN_TOP should be set if the
+     * image passed to virSecurityManagerSetImageLabel() is the top parent of
+     * the whole backing chain. */
+    VIR_SECURITY_DOMAIN_IMAGE_PARENT_CHAIN_TOP = 1 << 1,
 } virSecurityDomainImageLabelFlags;
 
 int virSecurityManagerSetImageLabel(virSecurityManagerPtr mgr,
@@ -185,6 +183,15 @@ int virSecurityManagerDomainSetPathLabel(virSecurityManagerPtr mgr,
                                          const char *path,
                                          bool allowSubtree);
 
+int virSecurityManagerDomainSetPathLabelRO(virSecurityManagerPtr mgr,
+                                           virDomainDefPtr vm,
+                                           const char *path);
+
+int virSecurityManagerDomainRestorePathLabel(virSecurityManagerPtr mgr,
+                                             virDomainDefPtr def,
+                                             const char *path);
+
+
 int virSecurityManagerSetChardevLabel(virSecurityManagerPtr mgr,
                                       virDomainDefPtr def,
                                       virDomainChrSourceDefPtr dev_source,
@@ -203,6 +210,12 @@ int virSecurityManagerRestoreTPMLabels(virSecurityManagerPtr mgr,
 
 typedef struct _virSecurityManagerMetadataLockState virSecurityManagerMetadataLockState;
 typedef virSecurityManagerMetadataLockState *virSecurityManagerMetadataLockStatePtr;
+struct _virSecurityManagerMetadataLockState {
+    size_t nfds; /* Captures size of both @fds and @paths */
+    int *fds;
+    const char **paths;
+};
+
 
 virSecurityManagerMetadataLockStatePtr
 virSecurityManagerMetadataLock(virSecurityManagerPtr mgr,

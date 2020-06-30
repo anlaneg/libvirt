@@ -36,7 +36,6 @@
 #include "openwsman.h"
 #include "virstring.h"
 #include "virkeycode.h"
-#include "intprops.h"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -886,6 +885,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 
     /* FIXME: devices section is totally missing */
 
+    /* XXX xmlopts must be non-NULL */
     xml = virDomainDefFormat(def, NULL,
                              virDomainDefFormatConvertXMLFlags(flags));
 
@@ -1338,7 +1338,7 @@ hypervDomainSendKey(virDomainPtr domain, unsigned int codeset,
     Msvm_Keyboard *keyboard = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     hypervInvokeParamsListPtr params = NULL;
-    char keycodeStr[INT_BUFSIZE_BOUND(int)];
+    char keycodeStr[VIR_INT64_STR_BUFLEN];
 
     virCheckFlags(0, -1);
 
@@ -1375,15 +1375,13 @@ hypervDomainSendKey(virDomainPtr domain, unsigned int codeset,
         }
     }
 
-    if (virAsprintf(&selector,
-                "CreationClassName=Msvm_Keyboard&DeviceID=%s&"
-                "SystemCreationClassName=Msvm_ComputerSystem&"
-                "SystemName=%s", keyboard->data.common->DeviceID, uuid_string) < 0)
-        goto cleanup;
+    selector = g_strdup_printf("CreationClassName=Msvm_Keyboard&DeviceID=%s&"
+                               "SystemCreationClassName=Msvm_ComputerSystem&"
+                               "SystemName=%s", keyboard->data.common->DeviceID, uuid_string);
 
     /* press the keys */
     for (i = 0; i < nkeycodes; i++) {
-        snprintf(keycodeStr, sizeof(keycodeStr), "%d", translatedKeycodes[i]);
+        g_snprintf(keycodeStr, sizeof(keycodeStr), "%d", translatedKeycodes[i]);
 
         params = hypervCreateInvokeParamsList(priv, "PressKey", selector,
                 Msvm_Keyboard_WmiInfo);
@@ -1411,7 +1409,7 @@ hypervDomainSendKey(virDomainPtr domain, unsigned int codeset,
 
     /* release the keys */
     for (i = 0; i < nkeycodes; i++) {
-        snprintf(keycodeStr, sizeof(keycodeStr), "%d", translatedKeycodes[i]);
+        g_snprintf(keycodeStr, sizeof(keycodeStr), "%d", translatedKeycodes[i]);
         params = hypervCreateInvokeParamsList(priv, "ReleaseKey", selector,
                 Msvm_Keyboard_WmiInfo);
 
@@ -1461,8 +1459,7 @@ hypervDomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
 
     virCheckFlags(0, -1);
 
-    if (virAsprintf(&memory_str, "%lu", memory_mb) < 0)
-        goto cleanup;
+    memory_str = g_strdup_printf("%lu", memory_mb);
 
     virUUIDFormat(domain->uuid, uuid_string);
 

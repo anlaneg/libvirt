@@ -22,6 +22,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #define LIBVIRT_VIRRESCTRLPRIV_H_ALLOW
 #include "virresctrlpriv.h"
@@ -234,7 +235,7 @@ virResctrlInfoMonFree(virResctrlInfoMonPtr mon)
 }
 
 
-/* virResctrlAlloc and virResctrlMonitor*/
+/* virResctrlAlloc and virResctrlMonitor */
 
 /*
  * virResctrlAlloc and virResctrlMonitor are representing a resource control
@@ -455,7 +456,7 @@ VIR_ONCE_GLOBAL_INIT(virResctrl);
 static int
 virResctrlLockWrite(void)
 {
-    int fd = open(SYSFS_RESCTRL_PATH, O_DIRECTORY | O_CLOEXEC);
+    int fd = open(SYSFS_RESCTRL_PATH, O_RDWR | O_CLOEXEC);
 
     if (fd < 0) {
         virReportSystemError(errno, "%s", _("Cannot open resctrl"));
@@ -871,7 +872,6 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
     virResctrlInfoPerLevelPtr i_level = NULL;
     virResctrlInfoPerTypePtr i_type = NULL;
     size_t i = 0;
-    int ret = -1;
 
     if (virResctrlInfoIsEmpty(resctrl))
         return 0;
@@ -928,14 +928,12 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
         memcpy((*controls)[*ncontrols - 1], &i_type->control, sizeof(i_type->control));
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
  error:
     while (*ncontrols)
         VIR_FREE((*controls)[--*ncontrols]);
     VIR_FREE(*controls);
-    goto cleanup;
+    return -1;
 }
 
 
@@ -1435,7 +1433,7 @@ virResctrlAllocMemoryBandwidthFormat(virResctrlAllocPtr alloc,
         }
     }
 
-    virBufferTrim(buf, ";", 1);
+    virBufferTrim(buf, ";");
     virBufferAddChar(buf, '\n');
     return 0;
 }
@@ -1577,7 +1575,7 @@ virResctrlAllocFormatCache(virResctrlAllocPtr alloc,
                 VIR_FREE(mask_str);
             }
 
-            virBufferTrim(buf, ";", 1);
+            virBufferTrim(buf, ";");
             virBufferAddChar(buf, '\n');
         }
     }
@@ -2310,8 +2308,6 @@ virResctrlDeterminePath(const char *parentpath,
                         const char *prefix,
                         const char *id)
 {
-    char *path = NULL;
-
     if (!id) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Resctrl ID must be set before determining resctrl "
@@ -2319,10 +2315,7 @@ virResctrlDeterminePath(const char *parentpath,
         return NULL;
     }
 
-    if (virAsprintf(&path, "%s/%s-%s", parentpath, prefix, id) < 0)
-        return NULL;
-
-    return path;
+    return g_strdup_printf("%s/%s-%s", parentpath, prefix, id);
 }
 
 
@@ -2416,8 +2409,7 @@ virResctrlAllocCreate(virResctrlInfoPtr resctrl,
     if (!alloc_str)
         goto cleanup;
 
-    if (virAsprintf(&schemata_path, "%s/schemata", alloc->path) < 0)
-        goto cleanup;
+    schemata_path = g_strdup_printf("%s/schemata", alloc->path);
 
     VIR_DEBUG("Writing resctrl schemata '%s' into '%s'", alloc_str, schemata_path);
     if (virFileWriteStr(schemata_path, alloc_str, 0) < 0) {
@@ -2451,11 +2443,9 @@ virResctrlAddPID(const char *path,
         return -1;
     }
 
-    if (virAsprintf(&tasks, "%s/tasks", path) < 0)
-        return -1;
+    tasks = g_strdup_printf("%s/tasks", path);
 
-    if (virAsprintf(&pidstr, "%lld", (long long int) pid) < 0)
-        goto cleanup;
+    pidstr = g_strdup_printf("%lld", (long long int)pid);
 
     if (virFileWriteStr(tasks, pidstr, 0) < 0) {
         virReportSystemError(errno,
@@ -2566,8 +2556,7 @@ virResctrlMonitorDeterminePath(virResctrlMonitorPtr monitor,
         return 0;
     }
 
-    if (virAsprintf(&parentpath, "%s/mon_groups", monitor->alloc->path) < 0)
-        return -1;
+    parentpath = g_strdup_printf("%s/mon_groups", monitor->alloc->path);
 
     monitor->path = virResctrlDeterminePath(parentpath, machinename,
                                             monitor->id);
@@ -2686,7 +2675,7 @@ virResctrlMonitorGetStats(virResctrlMonitorPtr monitor,
     int rv = -1;
     int ret = -1;
     size_t i = 0;
-    unsigned int val = 0;
+    unsigned long long val = 0;
     DIR *dirp = NULL;
     char *datapath = NULL;
     char *filepath = NULL;
@@ -2699,8 +2688,7 @@ virResctrlMonitorGetStats(virResctrlMonitorPtr monitor,
         return -1;
     }
 
-    if (virAsprintf(&datapath, "%s/mon_data", monitor->path) < 0)
-        return -1;
+    datapath = g_strdup_printf("%s/mon_data", monitor->path);
 
     if (virDirOpen(&dirp, datapath) < 0)
         goto cleanup;
@@ -2717,8 +2705,7 @@ virResctrlMonitorGetStats(virResctrlMonitorPtr monitor,
          * "mon_L3_01" are two target directories for a two nodes system
          * with resource utilization data file for each node respectively.
          */
-        if (virAsprintf(&filepath, "%s/%s", datapath, ent->d_name) < 0)
-            goto cleanup;
+        filepath = g_strdup_printf("%s/%s", datapath, ent->d_name);
 
         if (!virFileIsDir(filepath))
             continue;
@@ -2744,8 +2731,8 @@ virResctrlMonitorGetStats(virResctrlMonitorPtr monitor,
             goto cleanup;
 
         for (i = 0; resources[i]; i++) {
-            rv = virFileReadValueUint(&val, "%s/%s/%s", datapath,
-                                      ent->d_name, resources[i]);
+            rv = virFileReadValueUllong(&val, "%s/%s/%s", datapath,
+                                        ent->d_name, resources[i]);
             if (rv == -2) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("File '%s/%s/%s' does not exist."),

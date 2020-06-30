@@ -619,7 +619,7 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
 }
 
 static void
-hashDataFree(void *payload, const void *name G_GNUC_UNUSED)
+hashDataFree(void *payload)
 {
     virNWFilterVarValueFree(payload);
 }
@@ -672,12 +672,9 @@ virNWFilterHashTablePutAll(virHashTablePtr src,
 
     virHashForEach(src, addToTable, &atts);
     if (atts.errOccurred)
-        goto err_exit;
+        return -1;
 
     return 0;
-
- err_exit:
-    return -1;
 }
 
 /* The general purpose function virNWFilterVarValueEqual returns a
@@ -884,8 +881,7 @@ virNWFilterVarAccessParse(const char *varAccess)
 
     if (input[idx] == '\0') {
         /* in the form 'IP', which is equivalent to IP[@0] */
-        if (VIR_STRNDUP(dest->varName, input, idx) < 0)
-            goto err_exit;
+        dest->varName = g_strndup(input, idx);
         dest->accessType = VIR_NWFILTER_VAR_ACCESS_ITERATOR;
         dest->u.iterId = 0;
         return dest;
@@ -898,8 +894,7 @@ virNWFilterVarAccessParse(const char *varAccess)
 
         varNameLen = idx;
 
-        if (VIR_STRNDUP(dest->varName, input, varNameLen) < 0)
-            goto err_exit;
+        dest->varName = g_strndup(input, varNameLen);
 
         input += idx + 1;
         virSkipSpaces(&input);

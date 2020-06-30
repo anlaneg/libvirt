@@ -36,11 +36,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "virutil.h"
 #include "virfile.h"
-#include "c-ctype.h"
 #include "virstring.h"
 #include "virgettext.h"
+#include "virdevmapper.h"
 
 /* we don't need to include the full internal.h just for this */
 #define STREQ(a, b) (strcmp(a, b) == 0)
@@ -87,7 +86,7 @@ int main(int argc, char **argv)
          * path, then append the "p" partition separator. Otherwise, if
          * the path ends with a letter already, then no need for a separator.
          */
-        if (c_isdigit(path[strlen(path)-1]) || devmap_partsep)
+        if (g_ascii_isdigit(path[strlen(path)-1]) || devmap_partsep)
             partsep = "p";
         else
             partsep = "";
@@ -97,7 +96,7 @@ int main(int argc, char **argv)
             return 2;
 
         partsep = *canonical_path &&
-            c_isdigit(canonical_path[strlen(canonical_path)-1]) ? "p" : "";
+            g_ascii_isdigit(canonical_path[strlen(canonical_path)-1]) ? "p" : "";
     }
 
     if ((dev = ped_device_get(path)) == NULL) {

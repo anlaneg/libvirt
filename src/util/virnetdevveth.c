@@ -19,8 +19,6 @@
 
 #include <config.h>
 
-#include <sys/wait.h>
-
 #include "virnetdevveth.h"
 #include "viralloc.h"
 #include "virlog.h"
@@ -28,7 +26,6 @@
 #include "virerror.h"
 #include "virfile.h"
 #include "virstring.h"
-#include "virutil.h"
 #include "virnetdev.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -44,8 +41,7 @@ static int virNetDevVethExists(int devNum)
     int ret;
     g_autofree char *path = NULL;
 
-    if (virAsprintf(&path, SYSFS_NET_DIR "vnet%d/", devNum) < 0)
-        return -1;
+    path = g_strdup_printf(SYSFS_NET_DIR "vnet%d/", devNum);
     ret = virFileExists(path) ? 1 : 0;
     VIR_DEBUG("Checked dev vnet%d usage: %d", devNum, ret);
     return ret;
@@ -129,8 +125,7 @@ int virNetDevVethCreate(char** veth1, char** veth2)
             if ((veth1num = virNetDevVethGetFreeNum(vethNum)) < 0)
                 goto cleanup;
 
-            if (virAsprintf(&veth1auto, "vnet%d", veth1num) < 0)
-                goto cleanup;
+            veth1auto = g_strdup_printf("vnet%d", veth1num);
             vethNum = veth1num + 1;
         }
         if (!*veth2) {
@@ -139,8 +134,7 @@ int virNetDevVethCreate(char** veth1, char** veth2)
             if ((veth2num = virNetDevVethGetFreeNum(vethNum)) < 0)
                 goto cleanup;
 
-            if (virAsprintf(&veth2auto, "vnet%d", veth2num) < 0)
-                goto cleanup;
+            veth2auto = g_strdup_printf("vnet%d", veth2num);
             vethNum = veth2num + 1;
         }
 

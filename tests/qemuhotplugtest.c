@@ -22,8 +22,6 @@
 #include "qemu/qemu_alias.h"
 #include "qemu/qemu_conf.h"
 #include "qemu/qemu_hotplug.h"
-#define LIBVIRT_QEMU_HOTPLUGPRIV_H_ALLOW
-#include "qemu/qemu_hotplugpriv.h"
 #include "qemumonitortestutils.h"
 #include "testutils.h"
 #include "testutilsqemu.h"
@@ -62,17 +60,16 @@ qemuHotplugCreateObjects(virDomainXMLOptionPtr xmlopt,
                          virDomainObjPtr *vm,
                          const char *domxml)
 {
-    int ret = -1;
     qemuDomainObjPrivatePtr priv = NULL;
     const unsigned int parseFlags = 0;
 
     if (!(*vm = virDomainObjNew(xmlopt)))
-        goto cleanup;
+        return -1;
 
     priv = (*vm)->privateData;
 
     if (!(priv->qemuCaps = virQEMUCapsNew()))
-        goto cleanup;
+        return -1;
 
     virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_VIRTIO_SCSI);
     virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_DEVICE_USB_STORAGE);
@@ -82,33 +79,40 @@ qemuHotplugCreateObjects(virDomainXMLOptionPtr xmlopt,
     virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_SCSI_DISK_WWN);
     virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_DEVICE_VFIO_PCI);
     virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_DEVICE_QXL);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_DEVICE_VGA);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_DEVICE_CIRRUS_VGA);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_PIIX_DISABLE_S3);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_PIIX_DISABLE_S4);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_VNC);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_SPICE);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_SPICE_FILE_XFER_DISABLE);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_PR_MANAGER_HELPER);
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_SCSI_BLOCK);
 
     if (qemuTestCapsCacheInsert(driver.qemuCapsCache, priv->qemuCaps) < 0)
-        goto cleanup;
+        return -1;
 
     if (!((*vm)->def = virDomainDefParseString(domxml,
-                                               driver.caps,
                                                driver.xmlopt,
                                                NULL,
                                                parseFlags)))
-        goto cleanup;
+        return -1;
 
     if (qemuDomainAssignAddresses((*vm)->def, priv->qemuCaps,
                                   &driver, *vm, true) < 0) {
-        goto cleanup;
+        return -1;
     }
 
     if (qemuAssignDeviceAliases((*vm)->def, priv->qemuCaps) < 0)
-        goto cleanup;
+        return -1;
 
     (*vm)->def->id = QEMU_HOTPLUG_TEST_DOMAIN_ID;
 
     if (qemuDomainSetPrivatePaths(&driver, *vm) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 static int
@@ -202,7 +206,7 @@ testQemuHotplugCheckResult(virDomainObjPtr vm,
     char *actual;
     int ret;
 
-    actual = virDomainDefFormat(vm->def, driver.caps,
+    actual = virDomainDefFormat(vm->def, driver.xmlopt,
                                 VIR_DOMAIN_DEF_FORMAT_SECURE);
     if (!actual)
         return -1;
@@ -245,15 +249,13 @@ testQemuHotplug(const void *data)
     qemuMonitorTestPtr test_mon = NULL;
     qemuDomainObjPrivatePtr priv = NULL;
 
-    if (virAsprintf(&domain_filename, "%s/qemuhotplugtestdomains/qemuhotplug-%s.xml",
-                    abs_srcdir, test->domain_filename) < 0 ||
-        virAsprintf(&device_filename, "%s/qemuhotplugtestdevices/qemuhotplug-%s.xml",
-                    abs_srcdir, test->device_filename) < 0 ||
-        virAsprintf(&result_filename,
-                    "%s/qemuhotplugtestdomains/qemuhotplug-%s+%s.xml",
-                    abs_srcdir, test->domain_filename,
-                    test->device_filename) < 0)
-        goto cleanup;
+    domain_filename = g_strdup_printf("%s/qemuhotplugtestdomains/qemuhotplug-%s.xml",
+                                      abs_srcdir, test->domain_filename);
+    device_filename = g_strdup_printf("%s/qemuhotplugtestdevices/qemuhotplug-%s.xml",
+                                      abs_srcdir, test->device_filename);
+    result_filename = g_strdup_printf("%s/qemuhotplugtestdomains/qemuhotplug-%s+%s.xml",
+                                      abs_srcdir, test->domain_filename,
+                                      test->device_filename);
 
     if (virTestLoadFile(domain_filename, &domain_xml) < 0 ||
         virTestLoadFile(device_filename, &device_xml) < 0)
@@ -281,7 +283,7 @@ testQemuHotplug(const void *data)
         device_parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE;
 
     if (!(dev = virDomainDeviceDefParse(device_xml, vm->def,
-                                        caps, driver.xmlopt, NULL,
+                                        driver.xmlopt, NULL,
                                         device_parse_flags)))
         goto cleanup;
 
@@ -335,6 +337,8 @@ testQemuHotplug(const void *data)
         ret = testQemuHotplugUpdate(vm, dev);
     }
 
+    virObjectLock(priv->mon);
+
  cleanup:
     VIR_FREE(domain_filename);
     VIR_FREE(device_filename);
@@ -376,6 +380,7 @@ static void
 testQemuHotplugCpuDataFree(struct testQemuHotplugCpuData *data)
 {
     qemuDomainObjPrivatePtr priv;
+    qemuMonitorPtr mon;
 
     if (!data)
         return;
@@ -394,7 +399,11 @@ testQemuHotplugCpuDataFree(struct testQemuHotplugCpuData *data)
         virObjectUnref(data->vm);
     }
 
-    qemuMonitorTestFree(data->mon);
+    if (data->mon) {
+        mon = qemuMonitorTestGetMonitor(data->mon);
+        virObjectLock(mon);
+        qemuMonitorTestFree(data->mon);
+    }
     VIR_FREE(data);
 }
 
@@ -402,6 +411,7 @@ testQemuHotplugCpuDataFree(struct testQemuHotplugCpuData *data)
 static struct testQemuHotplugCpuData *
 testQemuHotplugCpuPrepare(const char *test,
                           bool modern,
+                          bool fail,
                           virHashTablePtr qmpschema)
 {
     qemuDomainObjPrivatePtr priv = NULL;
@@ -409,19 +419,17 @@ testQemuHotplugCpuPrepare(const char *test,
     char *prefix = NULL;
     struct testQemuHotplugCpuData *data = NULL;
 
-    if (virAsprintf(&prefix, "%s/qemuhotplugtestcpus/%s", abs_srcdir, test) < 0)
-        return NULL;
+    prefix = g_strdup_printf("%s/qemuhotplugtestcpus/%s", abs_srcdir, test);
 
     if (VIR_ALLOC(data) < 0)
         goto error;
 
     data->modern = modern;
 
-    if (virAsprintf(&data->file_xml_dom, "%s-domain.xml", prefix) < 0 ||
-        virAsprintf(&data->file_xml_res_live, "%s-result-live.xml", prefix) < 0 ||
-        virAsprintf(&data->file_xml_res_conf, "%s-result-conf.xml", prefix) < 0 ||
-        virAsprintf(&data->file_json_monitor, "%s-monitor.json", prefix) < 0)
-        goto error;
+    data->file_xml_dom = g_strdup_printf("%s-domain.xml", prefix);
+    data->file_xml_res_live = g_strdup_printf("%s-result-live.xml", prefix);
+    data->file_xml_res_conf = g_strdup_printf("%s-result-conf.xml", prefix);
+    data->file_json_monitor = g_strdup_printf("%s-monitor.json", prefix);
 
     if (virTestLoadFile(data->file_xml_dom, &data->xml_dom) < 0)
         goto error;
@@ -434,10 +442,12 @@ testQemuHotplugCpuPrepare(const char *test,
 
     /* create vm->newDef */
     data->vm->persistent = true;
-    if (virDomainObjSetDefTransient(caps, driver.xmlopt, data->vm, NULL) < 0)
+    if (virDomainObjSetDefTransient(driver.xmlopt, data->vm, NULL) < 0)
         goto error;
 
     priv = data->vm->privateData;
+
+    virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_QUERY_CPUS_FAST);
 
     if (data->modern)
         virQEMUCapsSet(priv->qemuCaps, QEMU_CAPS_QUERY_HOTPLUGGABLE_CPUS);
@@ -445,6 +455,12 @@ testQemuHotplugCpuPrepare(const char *test,
     if (!(data->mon = qemuMonitorTestNewFromFileFull(data->file_json_monitor,
                                                      &driver, data->vm, qmpschema)))
         goto error;
+
+    if (fail)
+        qemuMonitorTestAllowUnusedCommands(data->mon);
+
+    if (!data->modern)
+        qemuMonitorTestSkipDeprecatedValidation(data->mon, true);
 
     priv->mon = qemuMonitorTestGetMonitor(data->mon);
     virObjectUnlock(priv->mon);
@@ -472,7 +488,7 @@ testQemuHotplugCpuFinalize(struct testQemuHotplugCpuData *data)
     char *configXML = NULL;
 
     if (data->file_xml_res_live) {
-        if (!(activeXML = virDomainDefFormat(data->vm->def, driver.caps,
+        if (!(activeXML = virDomainDefFormat(data->vm->def, driver.xmlopt,
                                              VIR_DOMAIN_DEF_FORMAT_SECURE)))
             goto cleanup;
 
@@ -481,7 +497,7 @@ testQemuHotplugCpuFinalize(struct testQemuHotplugCpuData *data)
     }
 
     if (data->file_xml_res_conf) {
-        if (!(configXML = virDomainDefFormat(data->vm->newDef, driver.caps,
+        if (!(configXML = virDomainDefFormat(data->vm->newDef, driver.xmlopt,
                                              VIR_DOMAIN_DEF_FORMAT_SECURE |
                                              VIR_DOMAIN_DEF_FORMAT_INACTIVE)))
             goto cleanup;
@@ -519,7 +535,7 @@ testQemuHotplugCpuGroup(const void *opaque)
     int rc;
 
     if (!(data = testQemuHotplugCpuPrepare(params->test, params->modern,
-                                           params->schema)))
+                                           params->fail, params->schema)))
         return -1;
 
     rc = qemuDomainSetVcpusInternal(&driver, data->vm, data->vm->def,
@@ -556,7 +572,7 @@ testQemuHotplugCpuIndividual(const void *opaque)
     int rc;
 
     if (!(data = testQemuHotplugCpuPrepare(params->test, params->modern,
-                                           params->schema)))
+                                           params->fail, params->schema)))
         return -1;
 
     if (virBitmapParse(params->cpumap, &map, 128) < 0)
@@ -595,24 +611,22 @@ mymain(void)
     int ret = 0;
     struct qemuHotplugTestData data = {0};
     struct testQemuHotplugCpuParams cpudata;
-    char *fakerootdir;
+    g_autofree char *fakerootdir = NULL;
+    g_autoptr(virQEMUDriverConfig) cfg = NULL;
 
     fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
-    if (!mkdtemp(fakerootdir)) {
+    if (!g_mkdtemp(fakerootdir)) {
         fprintf(stderr, "Cannot create fakerootdir");
         abort();
     }
 
-    setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, 1);
-
-#if !WITH_YAJL
-    fputs("libvirt not compiled with JSON support, skipping this test\n", stderr);
-    return EXIT_AM_SKIP;
-#endif
+    g_setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, TRUE);
 
     if (qemuTestDriverInit(&driver) < 0)
         return EXIT_FAILURE;
+
+    cfg = virQEMUDriverGetConfig(&driver);
 
     virEventRegisterDefaultImpl();
 
@@ -624,7 +638,7 @@ mymain(void)
     if (!(driver.domainEventState = virObjectEventStateNew()))
         return EXIT_FAILURE;
 
-    if (!(qmpschema = testQEMUSchemaLoad())) {
+    if (!(qmpschema = testQEMUSchemaLoadLatest("x86_64"))) {
         VIR_TEST_VERBOSE("failed to load qapi schema\n");
         return EXIT_FAILURE;
     }
@@ -638,9 +652,12 @@ mymain(void)
         return EXIT_FAILURE;
 
     driver.hostdevMgr = virHostdevManagerGetDefault();
+    if (driver.hostdevMgr == NULL) {
+        VIR_TEST_VERBOSE("Could not initialize HostdevManager - %s\n",
+                         virGetLastErrorMessage());
+        return EXIT_FAILURE;
+    }
 
-    /* wait only 100ms for DEVICE_DELETED event */
-    qemuDomainRemoveDeviceWaitTime = 100;
 
 #define DO_TEST(file, ACTION, dev, fial, kep, ...) \
     do { \
@@ -682,6 +699,7 @@ mymain(void)
     "    }" \
     "}\r\n"
 
+    cfg->spiceTLS = true;
     DO_TEST_UPDATE("graphics-spice", "graphics-spice-nochange", false, false, NULL);
     DO_TEST_UPDATE("graphics-spice-timeout", "graphics-spice-timeout-nochange", false, false,
                    "set_password", QMP_OK, "expire_password", QMP_OK);
@@ -690,6 +708,7 @@ mymain(void)
     DO_TEST_UPDATE("graphics-spice", "graphics-spice-listen", true, false, NULL);
     DO_TEST_UPDATE("graphics-spice-listen-network", "graphics-spice-listen-network-password", false, false,
                    "set_password", QMP_OK, "expire_password", QMP_OK);
+    cfg->spiceTLS = false;
     /* Strange huh? Currently, only graphics can be updated :-P */
     DO_TEST_UPDATE("disk-cdrom", "disk-cdrom-nochange", true, false, NULL);
 
@@ -705,8 +724,7 @@ mymain(void)
                    "human-monitor-command", HMP("OK\\r\\n"),
                    "device_add", QMP_OK);
     DO_TEST_DETACH("base-live", "disk-virtio", true, true,
-                   "device_del", QMP_OK,
-                   "human-monitor-command", HMP(""));
+                   "device_del", QMP_OK);
     DO_TEST_DETACH("base-live", "disk-virtio", false, false,
                    "device_del", QMP_DEVICE_DELETED("virtio-disk4") QMP_OK,
                    "human-monitor-command", HMP(""));
@@ -715,8 +733,7 @@ mymain(void)
                    "human-monitor-command", HMP("OK\\r\\n"),
                    "device_add", QMP_OK);
     DO_TEST_DETACH("base-live", "disk-usb", true, true,
-                   "device_del", QMP_OK,
-                   "human-monitor-command", HMP(""));
+                   "device_del", QMP_OK);
     DO_TEST_DETACH("base-live", "disk-usb", false, false,
                    "device_del", QMP_DEVICE_DELETED("usb-disk16") QMP_OK,
                    "human-monitor-command", HMP(""));
@@ -725,8 +742,7 @@ mymain(void)
                    "human-monitor-command", HMP("OK\\r\\n"),
                    "device_add", QMP_OK);
     DO_TEST_DETACH("base-live", "disk-scsi", true, true,
-                   "device_del", QMP_OK,
-                   "human-monitor-command", HMP(""));
+                   "device_del", QMP_OK);
     DO_TEST_DETACH("base-live", "disk-scsi", false, false,
                    "device_del", QMP_DEVICE_DELETED("scsi0-0-0-5") QMP_OK,
                    "human-monitor-command", HMP(""));
@@ -741,11 +757,21 @@ mymain(void)
                    /* Disk added */
                    "device_add", QMP_OK);
     DO_TEST_DETACH("base-with-scsi-controller-live", "disk-scsi-2", true, true,
-                   "device_del", QMP_OK,
-                   "human-monitor-command", HMP(""));
+                   "device_del", QMP_OK);
     DO_TEST_DETACH("base-with-scsi-controller-live", "disk-scsi-2", false, false,
                    "device_del", QMP_DEVICE_DELETED("scsi3-0-5-6") QMP_OK,
                    "human-monitor-command", HMP(""));
+
+    DO_TEST_ATTACH("base-live", "disk-scsi-multipath", false, true,
+                   "object-add", QMP_OK,
+                   "human-monitor-command", HMP("OK\\r\\n"),
+                   "device_add", QMP_OK);
+    DO_TEST_DETACH("base-live", "disk-scsi-multipath", true, true,
+                   "device_del", QMP_OK);
+    DO_TEST_DETACH("base-live", "disk-scsi-multipath", false, false,
+                   "device_del", QMP_DEVICE_DELETED("scsi0-0-0-0") QMP_OK,
+                   "human-monitor-command", HMP(""),
+                   "object-del", QMP_OK);
 
     DO_TEST_ATTACH("base-live", "qemu-agent", false, true,
                    "chardev-add", QMP_OK,
@@ -867,7 +893,6 @@ mymain(void)
     DO_TEST_CPU_INDIVIDUAL("x86-modern-individual-add", "7", true, true, false);
     DO_TEST_CPU_INDIVIDUAL("x86-modern-individual-add", "6,7", true, true, true);
     DO_TEST_CPU_INDIVIDUAL("x86-modern-individual-add", "7", false, true, true);
-    DO_TEST_CPU_INDIVIDUAL("x86-modern-individual-add", "7", true, false, true);
 
     DO_TEST_CPU_INDIVIDUAL("ppc64-modern-individual", "16-23", true, true, false);
     DO_TEST_CPU_INDIVIDUAL("ppc64-modern-individual", "16-22", true, true, true);
@@ -875,7 +900,6 @@ mymain(void)
 
     if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
         virFileDeleteTree(fakerootdir);
-    VIR_FREE(fakerootdir);
 
     qemuTestDriverFree(&driver);
     virObjectUnref(data.vm);
@@ -883,5 +907,8 @@ mymain(void)
 }
 
 VIR_TEST_MAIN_PRELOAD(mymain,
+                      VIR_TEST_MOCK("virhostdev"),
                       VIR_TEST_MOCK("virpci"),
-                      VIR_TEST_MOCK("virprocess"));
+                      VIR_TEST_MOCK("domaincaps"),
+                      VIR_TEST_MOCK("virprocess"),
+                      VIR_TEST_MOCK("qemuhotplug"));

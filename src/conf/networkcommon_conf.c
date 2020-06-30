@@ -228,7 +228,7 @@ virNetDevIPRouteParseXML(const char *errorDetail,
      */
 
     virNetDevIPRoutePtr def = NULL;
-    xmlNodePtr save;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
     char *family = NULL;
     char *address = NULL, *netmask = NULL;
     char *gateway = NULL;
@@ -237,7 +237,6 @@ virNetDevIPRouteParseXML(const char *errorDetail,
     bool hasPrefix = false;
     bool hasMetric = false;
 
-    save = ctxt->node;
     ctxt->node = node;
 
     /* grab raw data from XML */
@@ -278,7 +277,6 @@ virNetDevIPRouteParseXML(const char *errorDetail,
                                  hasMetric);
 
  cleanup:
-    ctxt->node = save;
     VIR_FREE(family);
     VIR_FREE(address);
     VIR_FREE(netmask);
@@ -290,7 +288,6 @@ int
 virNetDevIPRouteFormat(virBufferPtr buf,
                        const virNetDevIPRoute *def)
 {
-    int result = -1;
     char *addr = NULL;
 
     virBufferAddLit(buf, "<route");
@@ -299,13 +296,13 @@ virNetDevIPRouteFormat(virBufferPtr buf,
         virBufferAsprintf(buf, " family='%s'", def->family);
 
     if (!(addr = virSocketAddrFormat(&def->address)))
-        goto cleanup;
+        return -1;
     virBufferAsprintf(buf, " address='%s'", addr);
     VIR_FREE(addr);
 
     if (VIR_SOCKET_ADDR_VALID(&def->netmask)) {
         if (!(addr = virSocketAddrFormat(&def->netmask)))
-            goto cleanup;
+            return -1;
         virBufferAsprintf(buf, " netmask='%s'", addr);
         VIR_FREE(addr);
     }
@@ -313,7 +310,7 @@ virNetDevIPRouteFormat(virBufferPtr buf,
         virBufferAsprintf(buf, " prefix='%u'", def->prefix);
 
     if (!(addr = virSocketAddrFormat(&def->gateway)))
-        goto cleanup;
+        return -1;
     virBufferAsprintf(buf, " gateway='%s'", addr);
     VIR_FREE(addr);
 
@@ -321,7 +318,5 @@ virNetDevIPRouteFormat(virBufferPtr buf,
         virBufferAsprintf(buf, " metric='%u'", def->metric);
     virBufferAddLit(buf, "/>\n");
 
-    result = 0;
- cleanup:
-    return result;
+    return 0;
 }

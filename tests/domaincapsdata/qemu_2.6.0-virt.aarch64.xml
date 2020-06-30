@@ -27,7 +27,11 @@
     </loader>
   </os>
   <cpu>
-    <mode name='host-passthrough' supported='yes'/>
+    <mode name='host-passthrough' supported='yes'>
+      <enum name='hostPassthroughMigratable'>
+        <value>off</value>
+      </enum>
+    </mode>
     <mode name='host-model' supported='no'/>
     <mode name='custom' supported='yes'>
       <model usable='unknown'>pxa262</model>
@@ -93,6 +97,7 @@
       <enum name='modelType'>
         <value>vga</value>
         <value>virtio</value>
+        <value>none</value>
       </enum>
     </video>
     <hostdev supported='yes'>
@@ -136,6 +141,8 @@
     </gic>
     <vmcoreinfo supported='no'/>
     <genid supported='no'/>
+    <backingStoreInput supported='no'/>
+    <backup supported='no'/>
     <sev supported='no'/>
   </features>
 </domainCapabilities>

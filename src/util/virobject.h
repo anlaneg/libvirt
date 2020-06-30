@@ -24,6 +24,8 @@
 #include "internal.h"
 #include "virthread.h"
 
+#include <glib-object.h>
+
 typedef struct _virClass virClass;
 typedef virClass *virClassPtr;
 
@@ -38,22 +40,11 @@ typedef virObjectRWLockable *virObjectRWLockablePtr;
 
 typedef void (*virObjectDisposeCallback)(void *obj);
 
-/* Most code should not play with the contents of this struct; however,
- * the struct itself is public so that it can be embedded as the first
- * field of a subclassed object.  */
-struct _virObject {
-    /* Ensure correct alignment of this and all subclasses, even on
-     * platforms where 'long long' or function pointers have stricter
-     * requirements than 'void *'.  */
-    union {
-        long long dummy_align1;
-        void (*dummy_align2) (void);
-        struct {
-            unsigned int magic;
-            int refs;
-        } s;
-    } u;
-    virClassPtr klass;
+#define VIR_TYPE_OBJECT vir_object_get_type()
+G_DECLARE_DERIVABLE_TYPE(virObject, vir_object, VIR, OBJECT, GObject);
+
+struct _virObjectClass {
+    GObjectClass parent;
 };
 
 struct _virObjectLockable {
@@ -80,10 +71,10 @@ virClassPtr virClassForObjectRWLockable(void);
  * function or as a macro defined to NULL.
  */
 #define VIR_CLASS_NEW(name, prnt) \
-    verify_expr(offsetof(name, parent) == 0, \
-      (name##Class = virClassNew(prnt, #name, sizeof(name), \
-                                 sizeof(((name *)NULL)->parent), \
-                                 name##Dispose)))
+    (G_STATIC_ASSERT_EXPR(offsetof(name, parent) == 0), \
+     (name##Class = virClassNew(prnt, #name, sizeof(name),\
+                                sizeof(((name *)NULL)->parent), \
+                                name##Dispose)))
 
 virClassPtr
 virClassNew(virClassPtr parent,
@@ -106,10 +97,8 @@ void *
 virObjectNew(virClassPtr klass)
     ATTRIBUTE_NONNULL(1);
 
-bool
+void
 virObjectUnref(void *obj);
-
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(virObject, virObjectUnref);
 
 void *
 virObjectRef(void *obj);
@@ -123,8 +112,7 @@ void
 virObjectFreeCallback(void *opaque);
 
 void
-virObjectFreeHashData(void *opaque,
-                      const void *name);
+virObjectFreeHashData(void *opaque);
 
 void *
 virObjectLockableNew(virClassPtr klass)

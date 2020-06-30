@@ -21,16 +21,10 @@
 
 #include <config.h>
 
-#include <sys/socket.h>
-#ifdef HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
-
 #define LIBVIRT_VIRSYSTEMDPRIV_H_ALLOW
 #include "virsystemdpriv.h"
 
 #include "virsystemd.h"
-#include "viratomic.h"
 #include "virbuffer.h"
 #include "virdbus.h"
 #include "virstring.h"
@@ -159,19 +153,19 @@ virSystemdHasMachined(void)
     int ret;
     int val;
 
-    val = virAtomicIntGet(&virSystemdHasMachinedCachedValue);
+    val = g_atomic_int_get(&virSystemdHasMachinedCachedValue);
     if (val != -1)
         return val;
 
     if ((ret = virDBusIsServiceEnabled("org.freedesktop.machine1")) < 0) {
         if (ret == -2)
-            virAtomicIntSet(&virSystemdHasMachinedCachedValue, -2);
+            g_atomic_int_set(&virSystemdHasMachinedCachedValue, -2);
         return ret;
     }
 
     if ((ret = virDBusIsServiceRegistered("org.freedesktop.systemd1")) == -1)
         return ret;
-    virAtomicIntSet(&virSystemdHasMachinedCachedValue, ret);
+    g_atomic_int_set(&virSystemdHasMachinedCachedValue, ret);
     return ret;
 }
 
@@ -181,21 +175,21 @@ virSystemdHasLogind(void)
     int ret;
     int val;
 
-    val = virAtomicIntGet(&virSystemdHasLogindCachedValue);
+    val = g_atomic_int_get(&virSystemdHasLogindCachedValue);
     if (val != -1)
         return val;
 
     ret = virDBusIsServiceEnabled("org.freedesktop.login1");
     if (ret < 0) {
         if (ret == -2)
-            virAtomicIntSet(&virSystemdHasLogindCachedValue, -2);
+            g_atomic_int_set(&virSystemdHasLogindCachedValue, -2);
         return ret;
     }
 
     if ((ret = virDBusIsServiceRegistered("org.freedesktop.login1")) == -1)
         return ret;
 
-    virAtomicIntSet(&virSystemdHasLogindCachedValue, ret);
+    g_atomic_int_set(&virSystemdHasLogindCachedValue, ret);
     return ret;
 }
 
@@ -295,8 +289,7 @@ int virSystemdCreateMachine(const char *name,
 
     ret = -1;
 
-    if (virAsprintf(&creatorname, "libvirt-%s", drivername) < 0)
-        goto cleanup;
+    creatorname = g_strdup_printf("libvirt-%s", drivername);
 
     if (partition) {
         if (!(slicename = virSystemdMakeSliceName(partition)))
@@ -358,7 +351,7 @@ int virSystemdCreateMachine(const char *name,
      */
 
     VIR_DEBUG("Attempting to create machine via systemd");
-    if (virAtomicIntGet(&hasCreateWithNetwork)) {
+    if (g_atomic_int_get(&hasCreateWithNetwork)) {
         virError error;
         memset(&error, 0, sizeof(error));
 
@@ -392,7 +385,7 @@ int virSystemdCreateMachine(const char *name,
                 VIR_INFO("CreateMachineWithNetwork isn't supported, switching "
                          "to legacy CreateMachine method for systemd-machined");
                 virResetError(&error);
-                virAtomicIntSet(&hasCreateWithNetwork, 0);
+                g_atomic_int_set(&hasCreateWithNetwork, 0);
                 /* Could re-structure without Using goto, but this
                  * avoids another atomic read which would trigger
                  * another memory barrier */
@@ -516,7 +509,7 @@ int virSystemdTerminateMachine(const char *name)
 void
 virSystemdNotifyStartup(void)
 {
-#ifdef HAVE_SYS_UN_H
+#ifndef WIN32
     const char *path;
     const char *msg = "READY=1";
     int fd;
@@ -560,7 +553,7 @@ virSystemdNotifyStartup(void)
         VIR_WARN("Failed to notify systemd");
 
     VIR_FORCE_CLOSE(fd);
-#endif /* HAVE_SYS_UN_H */
+#endif /* !WIN32 */
 }
 
 static int
@@ -620,12 +613,12 @@ int virSystemdCanHybridSleep(bool *result)
 
 
 static void
-virSystemdActivationEntryFree(void *data, const void *name)
+virSystemdActivationEntryFree(void *data)
 {
     virSystemdActivationEntryPtr ent = data;
     size_t i;
 
-    VIR_DEBUG("Closing activation FDs for %s", (const char *)name);
+    VIR_DEBUG("Closing activation FDs");
     for (i = 0; i < ent->nfds; i++) {
         VIR_DEBUG("Closing activation FD %d", ent->fds[i]);
         VIR_FORCE_CLOSE(ent->fds[i]);
@@ -648,7 +641,7 @@ virSystemdActivationAddFD(virSystemdActivationPtr act,
             return -1;
 
         if (VIR_ALLOC_N(ent->fds, 1) < 0) {
-            virSystemdActivationEntryFree(ent, name);
+            virSystemdActivationEntryFree(ent);
             return -1;
         }
 
@@ -656,7 +649,7 @@ virSystemdActivationAddFD(virSystemdActivationPtr act,
 
         VIR_DEBUG("Record first FD %d with name %s", fd, name);
         if (virHashAddEntry(act->fds, name, ent) < 0) {
-            virSystemdActivationEntryFree(ent, name);
+            virSystemdActivationEntryFree(ent);
             return -1;
         }
 
@@ -855,8 +848,8 @@ virSystemdGetListenFDs(void)
         return 0;
     }
 
-    unsetenv("LISTEN_PID");
-    unsetenv("LISTEN_FDS");
+    g_unsetenv("LISTEN_PID");
+    g_unsetenv("LISTEN_FDS");
 
     VIR_DEBUG("Got %u file descriptors", nfds);
 

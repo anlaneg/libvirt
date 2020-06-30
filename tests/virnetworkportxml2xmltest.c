@@ -66,13 +66,11 @@ testCompareXMLToXMLHelper(const void *data)
     int ret = -1;
     char *xml = NULL;
 
-    if (virAsprintf(&xml, "%s/virnetworkportxml2xmldata/%s.xml",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/virnetworkportxml2xmldata/%s.xml", abs_srcdir,
+                          info->name);
 
     ret = testCompareXMLToXMLFiles(xml);
 
- cleanup:
     VIR_FREE(xml);
 
     return ret;
@@ -96,6 +94,7 @@ mymain(void)
     DO_TEST("plug-bridge-mactbl");
     DO_TEST("plug-direct");
     DO_TEST("plug-hostdev-pci");
+    DO_TEST("plug-network");
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

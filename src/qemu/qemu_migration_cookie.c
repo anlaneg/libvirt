@@ -123,7 +123,7 @@ qemuMigrationCookieFree(qemuMigrationCookiePtr mig)
     VIR_FREE(mig->name);
     VIR_FREE(mig->lockState);
     VIR_FREE(mig->lockDriver);
-    VIR_FREE(mig->jobInfo);
+    g_clear_pointer(&mig->jobInfo, qemuDomainJobInfoFree);
     virCPUDefFree(mig->cpu);
     qemuMigrationCookieCapsFree(mig->caps);
     VIR_FREE(mig);
@@ -141,8 +141,7 @@ qemuDomainExtractTLSSubject(const char *certdir)
     int ret;
     size_t subjectlen;
 
-    if (virAsprintf(&certfile, "%s/server-cert.pem", certdir) < 0)
-        goto error;
+    certfile = g_strdup_printf("%s/server-cert.pem", certdir);
 
     if (virFileReadAll(certfile, 8192, &pemdata) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -243,7 +242,7 @@ qemuMigrationCookieNetworkAlloc(virQEMUDriverPtr driver G_GNUC_UNUSED,
 
     for (i = 0; i < def->nnets; i++) {
         virDomainNetDefPtr netptr;
-        virNetDevVPortProfilePtr vport;
+        const virNetDevVPortProfile *vport;
 
         netptr = def->nets[i];
         vport = virDomainNetGetActualVirtPortProfile(netptr);
@@ -455,55 +454,53 @@ qemuMigrationCookieAddNBD(qemuMigrationCookiePtr mig,
                           virDomainObjPtr vm)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    virHashTablePtr stats = NULL;
+    g_autoptr(virHashTable) stats = virHashNew(virHashValueFree);
+    bool blockdev = virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV);
     size_t i;
-    int ret = -1, rc;
+    int rc;
 
     /* It is not a bug if there already is a NBD data */
     qemuMigrationCookieNBDFree(mig->nbd);
 
-    if (VIR_ALLOC(mig->nbd) < 0)
-        return -1;
+    mig->nbd = g_new0(qemuMigrationCookieNBD, 1);
 
-    if (vm->def->ndisks &&
-        VIR_ALLOC_N(mig->nbd->disks, vm->def->ndisks) < 0)
-        return -1;
+    mig->nbd->port = priv->nbdPort;
+    mig->flags |= QEMU_MIGRATION_COOKIE_NBD;
+
+    if (vm->def->ndisks == 0)
+        return 0;
+
+    mig->nbd->disks = g_new0(struct qemuMigrationCookieNBDDisk, vm->def->ndisks);
     mig->nbd->ndisks = 0;
+
+    if (qemuDomainObjEnterMonitorAsync(driver, vm, priv->job.asyncJob) < 0)
+        return -1;
+    if (blockdev)
+        rc = qemuMonitorBlockStatsUpdateCapacityBlockdev(priv->mon, stats);
+    else
+        rc = qemuMonitorBlockStatsUpdateCapacity(priv->mon, stats, false);
+    if (qemuDomainObjExitMonitor(driver, vm) < 0 || rc < 0)
+        return -1;
 
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDiskDefPtr disk = vm->def->disks[i];
         qemuBlockStats *entry;
 
-        if (!stats) {
-            if (!(stats = virHashCreate(10, virHashValueFree)))
-                goto cleanup;
-
-            if (qemuDomainObjEnterMonitorAsync(driver, vm,
-                                               priv->job.asyncJob) < 0)
-                goto cleanup;
-            rc = qemuMonitorBlockStatsUpdateCapacity(priv->mon, stats, false);
-            if (qemuDomainObjExitMonitor(driver, vm) < 0)
-                goto cleanup;
-            if (rc < 0)
-                goto cleanup;
+        if (blockdev) {
+            if (!(entry = virHashLookup(stats, disk->src->nodeformat)))
+                continue;
+        } else {
+            if (!disk->info.alias ||
+                !(entry = virHashLookup(stats, disk->info.alias)))
+                continue;
         }
-
-        if (!disk->info.alias ||
-            !(entry = virHashLookup(stats, disk->info.alias)))
-            continue;
 
         mig->nbd->disks[mig->nbd->ndisks].target = g_strdup(disk->dst);
         mig->nbd->disks[mig->nbd->ndisks].capacity = entry->capacity;
         mig->nbd->ndisks++;
     }
 
-    mig->nbd->port = priv->nbdPort;
-    mig->flags |= QEMU_MIGRATION_COOKIE_NBD;
-
-    ret = 0;
- cleanup:
-    virHashFree(stats);
-    return ret;
+    return 0;
 }
 
 
@@ -516,10 +513,9 @@ qemuMigrationCookieAddStatistics(qemuMigrationCookiePtr mig,
     if (!priv->job.completed)
         return 0;
 
-    if (!mig->jobInfo && VIR_ALLOC(mig->jobInfo) < 0)
-        return -1;
+    g_clear_pointer(&mig->jobInfo, qemuDomainJobInfoFree);
+    mig->jobInfo = qemuDomainJobInfoCopy(priv->job.completed);
 
-    *mig->jobInfo = *priv->job.completed;
     mig->flags |= QEMU_MIGRATION_COOKIE_STATS;
 
     return 0;
@@ -534,6 +530,9 @@ qemuMigrationCookieAddCPU(qemuMigrationCookiePtr mig,
         return 0;
 
     if (!(mig->cpu = virCPUDefCopy(vm->def->cpu)))
+        return -1;
+
+    if (qemuDomainMakeCPUMigratable(mig->cpu) < 0)
         return -1;
 
     mig->flags |= QEMU_MIGRATION_COOKIE_CPU;
@@ -969,14 +968,12 @@ qemuMigrationCookieNetworkXMLParse(xmlXPathContextPtr ctxt)
 
     VIR_FREE(interfaces);
 
- cleanup:
     return optr;
 
  error:
     VIR_FREE(interfaces);
     qemuMigrationCookieNetworkFree(optr);
-    optr = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 
@@ -1051,10 +1048,9 @@ qemuMigrationCookieStatisticsXMLParse(xmlXPathContextPtr ctxt)
     VIR_XPATH_NODE_AUTORESTORE(ctxt);
 
     if (!(ctxt->node = virXPathNode("./statistics", ctxt)))
-        goto cleanup;
+        return NULL;
 
-    if (VIR_ALLOC(jobInfo) < 0)
-        goto cleanup;
+    jobInfo = g_new0(qemuDomainJobInfo, 1);
 
     stats = &jobInfo->stats.mig;
     jobInfo->status = QEMU_DOMAIN_JOB_STATUS_COMPLETED;
@@ -1125,7 +1121,7 @@ qemuMigrationCookieStatisticsXMLParse(xmlXPathContextPtr ctxt)
 
     virXPathInt("string(./" VIR_DOMAIN_JOB_AUTO_CONVERGE_THROTTLE "[1])",
                 ctxt, &stats->cpu_throttle_percentage);
- cleanup:
+
     return jobInfo;
 }
 
@@ -1196,10 +1192,6 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
     xmlNodePtr *nodes = NULL;
     size_t i;
     int n;
-    virCapsPtr caps = NULL;
-
-    if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
-        goto error;
 
     /* We don't store the uuid, name, hostname, or hostuuid
      * values. We just compare them to local data to do some
@@ -1236,19 +1228,17 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
     }
     VIR_FREE(tmp);
 
-    /* Check & forbid "localhost" migration */
     if (!(mig->remoteHostname = virXPathString("string(./hostname[1])", ctxt))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("missing hostname element in migration data"));
         goto error;
     }
-    if (STREQ(mig->remoteHostname, mig->localHostname)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Attempt to migrate guest to the same host %s"),
-                       mig->remoteHostname);
-        goto error;
-    }
+    /* Historically, this is the place where we checked whether remoteHostname
+     * and localHostname are the same. But even if they were, it doesn't mean
+     * the domain is migrating onto the same host. Rely on UUID which can tell
+     * for sure. */
 
+    /* Check & forbid localhost migration */
     if (!(tmp = virXPathString("string(./hostuuid[1])", ctxt))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("missing hostuuid element in migration data"));
@@ -1328,7 +1318,7 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
             goto error;
         }
         mig->persistent = virDomainDefParseNode(doc, nodes[0],
-                                                caps, driver->xmlopt, qemuCaps,
+                                                driver->xmlopt, qemuCaps,
                                                 VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                                 VIR_DOMAIN_DEF_PARSE_ABI_UPDATE_MIGRATION |
                                                 VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
@@ -1367,13 +1357,11 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
         !(mig->caps = qemuMigrationCookieCapsXMLParse(ctxt)))
         goto error;
 
-    virObjectUnref(caps);
     return 0;
 
  error:
     VIR_FREE(tmp);
     VIR_FREE(nodes);
-    virObjectUnref(caps);
     return -1;
 }
 

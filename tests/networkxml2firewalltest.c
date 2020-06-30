@@ -61,7 +61,6 @@ static int testCompareXMLToArgvFiles(const char *xml,
                                      const char *cmdline,
                                      const char *baseargs)
 {
-    char *expectargv = NULL;
     char *actualargv = NULL;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
     virNetworkDefPtr def = NULL;
@@ -94,7 +93,6 @@ static int testCompareXMLToArgvFiles(const char *xml,
 
  cleanup:
     virBufferFreeAndReset(&buf);
-    VIR_FREE(expectargv);
     VIR_FREE(actualargv);
     virNetworkDefFree(def);
     return ret;
@@ -114,15 +112,13 @@ testCompareXMLToIPTablesHelper(const void *data)
     char *xml = NULL;
     char *args = NULL;
 
-    if (virAsprintf(&xml, "%s/networkxml2firewalldata/%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&args, "%s/networkxml2firewalldata/%s-%s.args",
-                    abs_srcdir, info->name, RULESTYPE) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/networkxml2firewalldata/%s.xml",
+                          abs_srcdir, info->name);
+    args = g_strdup_printf("%s/networkxml2firewalldata/%s-%s.args",
+                           abs_srcdir, info->name, RULESTYPE);
 
     result = testCompareXMLToArgvFiles(xml, args, info->baseargs);
 
- cleanup:
     VIR_FREE(xml);
     VIR_FREE(args);
     return result;
@@ -162,29 +158,22 @@ mymain(void)
             return EXIT_AM_SKIP;
         }
 
-        ret = -1;
-        goto cleanup;
+        return EXIT_FAILURE;
     }
 
-    if (virAsprintf(&basefile, "%s/networkxml2firewalldata/base.args",
-                    abs_srcdir) < 0) {
-        ret = -1;
-        goto cleanup;
-    }
+    basefile = g_strdup_printf("%s/networkxml2firewalldata/base.args", abs_srcdir);
 
-    if (virTestLoadFile(basefile, &baseargs) < 0) {
-        ret = -1;
-        goto cleanup;
-    }
+    if (virTestLoadFile(basefile, &baseargs) < 0)
+        return EXIT_FAILURE;
 
     DO_TEST("nat-default");
     DO_TEST("nat-tftp");
     DO_TEST("nat-many-ips");
     DO_TEST("nat-no-dhcp");
     DO_TEST("nat-ipv6");
+    DO_TEST("nat-ipv6-masquerade");
     DO_TEST("route-default");
 
- cleanup:
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

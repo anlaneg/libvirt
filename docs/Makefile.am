@@ -35,6 +35,34 @@ modules = \
 	virterror \
 	$(NULL)
 
+modules_admin = libvirt-admin
+modules_qemu = libvirt-qemu
+modules_lxc = libvirt-lxc
+
+all: vpathhack
+
+# This hack enables us to view the web pages
+# from within the uninstalled build tree
+vpathhack:
+	@for dir in fonts js logos; \
+	do \
+	  test -e $$dir || ln -s $(srcdir)/$$dir $$dir ; \
+	done
+	@for file in $(assets); \
+	do \
+	  test -e $$file || ln -s $(srcdir)/$$file $$file ; \
+	done
+
+clean-local:
+	for dir in fonts js logos; \
+	do \
+	  rm -f $$dir ; \
+	done
+	for file in $(assets); \
+	do \
+	  rm -f $$file ; \
+	done
+
 apihtml = \
   html/index.html \
   $(apihtml_generated)
@@ -43,24 +71,48 @@ apihtml_generated = \
 	$(addprefix html/libvirt-,$(addsuffix .html,$(modules))) \
 	$(NULL)
 
+apiadminhtml = \
+  html/index-admin.html \
+  $(apiadminhtml_generated)
+
+apiadminhtml_generated = \
+	$(addprefix html/libvirt-,$(addsuffix .html,$(modules_admin))) \
+	$(NULL)
+
+apiqemuhtml = \
+  html/index-qemu.html \
+  $(apiqemuhtml_generated)
+
+apiqemuhtml_generated = \
+	$(addprefix html/libvirt-,$(addsuffix .html,$(modules_qemu))) \
+	$(NULL)
+
+apilxchtml = \
+  html/index-lxc.html \
+  $(apilxchtml_generated)
+
+apilxchtml_generated = \
+	$(addprefix html/libvirt-,$(addsuffix .html,$(modules_lxc))) \
+	$(NULL)
+
 apipng = \
   html/left.png \
   html/up.png \
   html/home.png \
   html/right.png
 
-css = \
-  generic.css \
-  libvirt.css \
-  mobile.css \
-  main.css
+apirefdir = $(HTML_DIR)/html
+apiref_DATA = $(apihtml) $(apiadminhtml) $(apiqemuhtml) $(apilxchtml) $(apipng)
 
 javascript = \
   js/main.js \
   $(NULL)
 
+javascriptdir = $(HTML_DIR)/js
+javascript_DATA = $(javascript)
+
 fonts = \
-  fonts/LICENSE.md \
+  fonts/LICENSE.rst \
   fonts/stylesheet.css \
   fonts/overpass-bold-italic.woff \
   fonts/overpass-bold.woff \
@@ -72,6 +124,9 @@ fonts = \
   fonts/overpass-mono-regular.woff \
   fonts/overpass-mono-semibold.woff \
   fonts/overpass-regular.woff
+
+fontsdir = $(HTML_DIR)/fonts
+fonts_DATA = $(fonts)
 
 logofiles = \
   logos/logo-base.svg \
@@ -92,55 +147,194 @@ logofiles = \
   logos/logo-banner-light-256.png \
   logos/logo-banner-light-800.png
 
-png = \
-  32favicon.png \
+logofilesdir = $(HTML_DIR)/logos
+logofiles_DATA = $(logofiles)
+
+assets = \
+  android-chrome-192x192.png \
+  android-chrome-256x256.png \
+  apple-touch-icon.png \
+  architecture.gif \
+  browserconfig.xml \
+  favicon.ico \
+  favicon-16x16.png \
+  favicon-32x32.png \
+  generic.css \
+  libvirt.css \
   libvirt-daemon-arch.png \
   libvirt-driver-arch.png \
   libvirt-object-model.png \
+  libvirt-virConnect-example.png \
+  main.css \
+  manifest.json \
   migration-managed-direct.png \
   migration-managed-p2p.png \
   migration-native.png \
   migration-tunnel.png \
-  migration-unmanaged-direct.png
-
-gif = \
-  architecture.gif \
-  node.gif
-
+  migration-unmanaged-direct.png \
+  mobile.css \
+  mstile-150x150.png \
+  node.gif \
+  $(NULL)
 
 internals_html_in = \
   $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/internals/*.html.in))
-internals_html = $(internals_html_in:%.html.in=%.html)
+internals_rst = \
+  $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/internals/*.rst))
+internals_rst_html_in = \
+  $(internals_rst:%.rst=%.html.in)
+internals_html = \
+  $(internals_html_in:%.html.in=%.html) \
+  $(internals_rst_html_in:%.html.in=%.html)
+
+internalsdir = $(HTML_DIR)/internals
+internals_DATA = $(internals_html)
 
 kbase_html_in = \
   $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/kbase/*.html.in))
-kbase_html = $(kbase_html_in:%.html.in=%.html)
+kbase_rst = \
+  $(patsubst $(srcdir)/%,%,$(wildcard $(srcdir)/kbase/*.rst))
+kbase_rst_html_in = \
+  $(kbase_rst:%.rst=%.html.in)
+kbase_html = \
+  $(kbase_html_in:%.html.in=%.html) \
+  $(kbase_rst_html_in:%.html.in=%.html)
 
-# Generate hvsupport.html and news.html first, since they take one extra step.
+kbasedir = $(HTML_DIR)/kbase
+kbase_DATA = $(kbase_html)
+
+# Sync with src/util/
+KEYCODES = linux osx atset1 atset2 atset3 xtkbd usb win32 qnum
+KEYNAMES = linux osx win32
+
+manpages_rst = \
+  manpages/index.rst \
+  $(NULL)
+manpages1_rst = \
+  manpages/virt-pki-validate.rst \
+  manpages/virt-xml-validate.rst \
+  manpages/virt-admin.rst \
+  manpages/virsh.rst \
+  $(NULL)
+manpages7_rst = \
+  $(KEYCODES:%=manpages/virkeycode-%.rst) \
+  $(KEYNAMES:%=manpages/virkeyname-%.rst) \
+  $(NULL)
+manpages8_rst = $(NULL)
+manpages_rst += \
+  $(manpages1_rst) \
+  $(manpages7_rst) \
+  $(manpages8_rst) \
+  $(NULL)
+if WITH_LIBVIRTD
+manpages8_rst += \
+  manpages/libvirtd.rst \
+  manpages/virtlockd.rst \
+  manpages/virtlogd.rst \
+  $(NULL)
+else ! WITH_LIBVIRTD
+manpages_rst += \
+  manpages/libvirtd.rst \
+  manpages/virtlockd.rst \
+  manpages/virtlogd.rst \
+  $(NULL)
+endif ! WITH_LIBVIRTD
+if WITH_HOST_VALIDATE
+  manpages1_rst += manpages/virt-host-validate.rst
+else ! WITH_HOST_VALIDATE
+  manpages_rst += manpages/virt-host-validate.rst
+endif ! WITH_HOST_VALIDATE
+if WITH_LOGIN_SHELL
+  manpages1_rst += manpages/virt-login-shell.rst
+else ! WITH_LOGIN_SHELL
+  manpages_rst += manpages/virt-login-shell.rst
+endif ! WITH_LOGIN_SHELL
+if WITH_SANLOCK
+  manpages8_rst += manpages/virt-sanlock-cleanup.rst
+else ! WITH_SANLOCK
+  manpages_rst += manpages/virt-sanlock-cleanup.rst
+endif ! WITH_SANLOCK
+if WITH_QEMU
+  manpages1_rst += manpages/virt-qemu-run.rst
+else ! WITH_QEMU
+  manpages_rst += manpages/virt-qemu-run.rst
+endif ! WITH_QEMU
+manpages_rst_html_in = \
+  $(manpages_rst:%.rst=%.html.in)
+manpages_html = \
+  $(manpages_rst_html_in:%.html.in=%.html)
+
+man1_MANS = $(manpages1_rst:%.rst=%.1)
+man7_MANS = $(manpages7_rst:%.rst=%.7)
+man8_MANS = $(manpages8_rst:%.rst=%.8)
+
+%.1: %.rst
+	$(AM_V_GEN)$(MKDIR_P) `dirname $@` && \
+	   grep -v '^\.\. contents::' < $< | \
+	   sed -e 's|SYSCONFDIR|$(sysconfdir)|g' \
+	       -e 's|RUNSTATEDIR|$(runstatedir)|g' | \
+	   $(RST2MAN) --strict > $@ || { rm $@ && exit 1; }
+
+%.7: %.rst
+	$(AM_V_GEN)$(MKDIR_P) `dirname $@` && \
+	   grep -v '^\.\. contents::' < $< | \
+	   sed -e 's|SYSCONFDIR|$(sysconfdir)|g' \
+	       -e 's|RUNSTATEDIR|$(runstatedir)|g' | \
+	   $(RST2MAN) --strict > $@ || { rm $@ && exit 1; }
+
+%.8: %.rst
+	$(AM_V_GEN)$(MKDIR_P) `dirname $@` && \
+	   grep -v '^\.\. contents::' < $< | \
+	   sed -e 's|SYSCONFDIR|$(sysconfdir)|g' \
+	       -e 's|RUNSTATEDIR|$(runstatedir)|g' | \
+	   $(RST2MAN) --strict > $@ || { rm $@ && exit 1; }
+
+manpages/virkeycode-%.rst: $(top_srcdir)/src/keycodemapdb/data/keymaps.csv \
+		$(top_srcdir)/src/keycodemapdb/tools/keymap-gen Makefile.am
+	$(AM_V_GEN)export NAME=`echo $@ | \
+		sed -e 's,manpages/virkeycode-,,' -e 's,\.rst,,'` && \
+		$(MKDIR_P) manpages/ && \
+		$(RUNUTF8) $(PYTHON) $(top_srcdir)/src/keycodemapdb/tools/keymap-gen \
+		code-docs \
+		--lang rst \
+		--title "virkeycode-$$NAME" \
+		--subtitle "Key code values for $$NAME" \
+		$(top_srcdir)/src/keycodemapdb/data/keymaps.csv $$NAME > $@
+
+manpages/virkeyname-%.rst: $(top_srcdir)/src/keycodemapdb/data/keymaps.csv \
+		$(top_srcdir)/src/keycodemapdb/tools/keymap-gen Makefile.am
+	$(AM_V_GEN)export NAME=`echo $@ | \
+		sed -e 's,manpages/virkeyname-,,' -e 's,\.rst,,'` && \
+		$(MKDIR_P) manpages/ && \
+		$(RUNUTF8) $(PYTHON) $(top_srcdir)/src/keycodemapdb/tools/keymap-gen \
+		name-docs \
+		--lang rst \
+		--title "virkeyname-$$NAME" \
+		--subtitle "Key name values for $$NAME" \
+		$(top_srcdir)/src/keycodemapdb/data/keymaps.csv $$NAME > $@
+
+manpagesdir = $(HTML_DIR)/manpages
+manpages_DATA = $(manpages_html)
+
+# Generate hvsupport.html first, since it takes one extra step.
 dot_html_generated_in = \
   hvsupport.html.in \
-  news.html.in
+  $(NULL)
 dot_html_in = \
   $(notdir $(wildcard $(srcdir)/*.html.in))
+dot_rst = \
+  $(notdir $(wildcard $(srcdir)/*.rst))
+dot_rst_html_in = \
+  $(dot_rst:%.rst=%.html.in) \
+  news.html.in \
+  $(NULL)
 dot_html = \
   $(dot_html_generated_in:%.html.in=%.html) \
-  $(dot_html_in:%.html.in=%.html)
+  $(dot_html_in:%.html.in=%.html) \
+  $(dot_rst_html_in:%.html.in=%.html)
 
-xml = \
-  libvirt-api.xml \
-  libvirt-refs.xml
-
-qemu_xml = \
-  libvirt-qemu-api.xml \
-  libvirt-qemu-refs.xml
-
-lxc_xml = \
-  libvirt-lxc-api.xml \
-  libvirt-lxc-refs.xml
-
-admin_xml = \
-  libvirt-admin-api.xml \
-  libvirt-admin-refs.xml
+htmldir = $(HTML_DIR)
+html_DATA = $(assets) $(dot_html)
 
 apidir = $(pkgdatadir)/api
 api_DATA = \
@@ -163,33 +357,37 @@ schemadir = $(pkgdatadir)/schemas
 schema_DATA = $(wildcard $(srcdir)/schemas/*.rng)
 
 EXTRA_DIST= \
-  apibuild.py genaclperms.pl \
   site.xsl subsite.xsl newapi.xsl page.xsl \
   wrapstring.xsl \
-  $(dot_html_in) $(gif) $(apipng) \
-  $(fig) $(png) $(css) \
+  $(dot_html_in) $(dot_rst) $(apipng) \
+  $(fig) $(assets) \
   $(javascript) $(logofiles) \
-  $(internals_html_in) $(fonts) \
-  $(kbase_html_in) \
+  $(internals_html_in) $(internals_rst) $(fonts) \
+  $(kbase_html_in) $(kbase_rst) \
+  $(manpages_rst) \
   aclperms.htmlinc \
-  hvsupport.pl \
   $(schema_DATA)
 
 acl_generated = aclperms.htmlinc
 
 aclperms.htmlinc: $(top_srcdir)/src/access/viraccessperm.h \
-        $(srcdir)/genaclperms.pl Makefile.am
-	$(AM_V_GEN)$(PERL) $(srcdir)/genaclperms.pl $< > $@
+        $(top_srcdir)/scripts/genaclperms.py Makefile.am
+	$(AM_V_GEN)$(RUNUTF8) $(PYTHON) $(top_srcdir)/scripts/genaclperms.py $< > $@
 
 CLEANFILES = \
   $(dot_html) \
   $(apihtml) \
+  $(apiadminhtml) \
+  $(apiqemuhtml) \
+  $(apilxchtml) \
   $(internals_html) \
   $(kbase_html) \
-  $(xml) \
-  $(qemu_xml) \
-  $(lxc_xml) \
-  $(admin_xml) \
+  $(manpages_html) \
+  $(man1_MANS) \
+  $(man7_MANS) \
+  $(manpages7_rst) \
+  $(man8_MANS) \
+  $(api_DATA) \
   $(dot_html_generated_in) \
   aclperms.htmlinc
 
@@ -200,44 +398,42 @@ timestamp="$(shell if test -n "$$SOURCE_DATE_EPOCH"; \
 		     date -u; \
 		   fi)"
 
-all-am: web
-
-api: libvirt-api.xml libvirt-refs.xml
-qemu_api: libvirt-qemu-api.xml libvirt-qemu-refs.xml
-lxc_api: libvirt-lxc-api.xml libvirt-lxc-refs.xml
-admin_api: libvirt-admin-api.xml libvirt-admin-refs.xml
-
-web: $(dot_html) $(internals_html) $(kbase_html) \
-	html/index.html
-
 hvsupport.html: hvsupport.html.in
 
-hvsupport.html.in: $(srcdir)/hvsupport.pl $(api_DATA) \
+hvsupport.html.in: $(top_srcdir)/scripts/hvsupport.py $(api_DATA) \
 		$(top_srcdir)/src/libvirt_public.syms \
 	$(top_srcdir)/src/libvirt_qemu.syms $(top_srcdir)/src/libvirt_lxc.syms \
 	$(top_srcdir)/src/driver.h
-	$(AM_V_GEN)$(PERL) $(srcdir)/hvsupport.pl $(top_srcdir) $(top_builddir) > $@ \
-		|| { rm $@ && exit 1; }
-
-news.html.in: \
-	  $(srcdir)/news.xml \
-	  $(srcdir)/news-html.xsl
-	$(AM_V_GEN)$(XSLTPROC) --nonet \
-	    $(srcdir)/news-html.xsl \
-	    $(srcdir)/news.xml \
-	  >$@ \
-	    || { rm -f $@; exit 1; };
-EXTRA_DIST += \
-	$(srcdir)/news.xml \
-	$(srcdir)/news.rng \
-	$(srcdir)/news-html.xsl
+	$(AM_V_GEN)$(RUNUTF8) $(PYTHON) $(top_srcdir)/scripts/hvsupport.py \
+		$(top_srcdir) $(top_builddir) > $@ || { rm $@ && exit 1; }
 
 %.png: %.fig
 	convert -rotate 90 $< $@
 
+manpages/%.html.in: manpages/%.rst
+	$(AM_V_GEN)$(MKDIR_P) `dirname $@` && \
+	 grep -v '^:Manual ' < $< | \
+	  sed -e 's|SYSCONFDIR|$(sysconfdir)|g' \
+	     -e 's|RUNSTATEDIR|$(runstatedir)|g' | \
+	  $(RST2HTML) --strict > $@ || { rm $@ && exit 1; }
+
+news.html.in: $(top_srcdir)/NEWS.rst
+	$(AM_V_GEN)$(MKDIR_P) `dirname $@` && \
+	  $(RST2HTML) --strict $< > $@ || { rm $@ && exit 1; }
+
+CLEANFILES += news.html.in
+
+%.html.in: %.rst
+	$(AM_V_GEN)$(MKDIR_P) `dirname $@` && \
+	  $(RST2HTML) --strict $< > $@ || { rm $@ && exit 1; }
+
 %.html.tmp: %.html.in site.xsl subsite.xsl page.xsl \
 		$(acl_generated)
 	$(AM_V_GEN)name=`echo $@ | sed -e 's/.tmp//'`; \
+	  genhtmlin=`echo $@ | sed -e 's/.tmp/.in/'`; \
+	  rst=`echo $@ | sed -e 's/.html.tmp/.rst/'`; \
+	  src="$$genhtmlin"; \
+	  test -f "$$genhtmlin" && src="$$rst"; \
 	  dir=`dirname $@` ; \
 	  if test "$$dir" = "."; \
 	  then \
@@ -247,6 +443,8 @@ EXTRA_DIST += \
 	    style=subsite.xsl; \
 	  fi; \
 	  $(XSLTPROC) --stringparam pagename $$name \
+	    --stringparam pagesrc $$src \
+	    --stringparam builddir '$(abs_top_builddir)' \
 	    --stringparam timestamp $(timestamp) --nonet \
 	    $(top_srcdir)/docs/$$style $< > $@ \
 	    || { rm $@ && exit 1; }
@@ -256,36 +454,43 @@ EXTRA_DIST += \
 	  || { rm $@ && exit 1; }
 
 $(apihtml_generated): html/index.html
+$(apiadminhtml_generated): html/index-admin.html
+$(apiqemuhtml_generated): html/index-qemu.html
+$(apilxchtml_generated): html/index-lxc.html
 
 html/index.html: libvirt-api.xml newapi.xsl page.xsl $(APIBUILD_STAMP)
 	$(AM_V_GEN)$(XSLTPROC) --nonet -o ./ \
 	  --stringparam builddir '$(abs_top_builddir)' \
 	  --stringparam timestamp $(timestamp) \
-	  $(srcdir)/newapi.xsl libvirt-api.xml && \
-	  $(XMLLINT) --nonet --noout html/*.html
+	  $(srcdir)/newapi.xsl libvirt-api.xml
+
+html/index-%.html: libvirt-%-api.xml newapi.xsl page.xsl $(APIBUILD_STAMP)
+	$(AM_V_GEN)$(XSLTPROC) --nonet -o ./ \
+	  --stringparam builddir '$(abs_top_builddir)' \
+	  --stringparam timestamp $(timestamp) \
+	  --stringparam indexfile $(@:html/%=%) \
+	  $(srcdir)/newapi.xsl $<
+
+check-html:
+	$(XMLLINT) --nonet --noout html/*.html
+
+check-local: check-html
 
 python_generated_files = \
 		html/libvirt-libvirt-lxc.html \
 		html/libvirt-libvirt-qemu.html \
 		html/libvirt-libvirt-admin.html \
 		html/libvirt-virterror.html \
-		libvirt-api.xml \
-		libvirt-refs.xml \
-		libvirt-lxc-api.xml \
-		libvirt-lxc-refs.xml \
-		libvirt-qemu-api.xml \
-		libvirt-qemu-refs.xml \
-		libvirt-admin-api.xml \
-		libvirt-admin-refs.xml \
+		$(api_DATA) \
 		$(NULL)
 
-APIBUILD=$(srcdir)/apibuild.py
+APIBUILD=$(top_srcdir)/scripts/apibuild.py
 APIBUILD_STAMP=apibuild.py.stamp
 CLEANFILES += $(APIBUILD_STAMP)
 
 $(python_generated_files): $(APIBUILD_STAMP)
 
-$(APIBUILD_STAMP): $(srcdir)/apibuild.py \
+$(APIBUILD_STAMP): $(top_srcdir)/scripts/apibuild.py \
 		$(top_srcdir)/include/libvirt/libvirt.h \
 		$(top_srcdir)/include/libvirt/libvirt-common.h.in \
 		$(top_srcdir)/include/libvirt/libvirt-domain-checkpoint.h \
@@ -325,56 +530,3 @@ $(APIBUILD_STAMP): $(srcdir)/apibuild.py \
 	$(AM_V_GEN)srcdir=$(srcdir) builddir=$(builddir) \
 		$(RUNUTF8) $(PYTHON) $(APIBUILD)
 	touch $@
-
-
-check-local: all
-dist-local: all
-
-rebuild: api qemu_api lxc_api admin_api all
-
-install-data-local:
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)
-	for f in $(css) $(gif) $(png); do \
-	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR); done
-	for f in $(dot_html); do \
-	  $(INSTALL) -m 0644 $$f $(DESTDIR)$(HTML_DIR); done
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/js
-	for f in $(javascript); do \
-	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/js/; done
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/logos
-	for f in $(logofiles); do \
-	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/logos; done
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/html
-	for h in $(apihtml); do \
-	  $(INSTALL) -m 0644 $$h $(DESTDIR)$(HTML_DIR)/html; done
-	for p in $(apipng); do \
-	  $(INSTALL) -m 0644 $(srcdir)/$$p $(DESTDIR)$(HTML_DIR)/html; done
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/internals
-	for f in $(internals_html); do \
-	  $(INSTALL) -m 0644 $$f $(DESTDIR)$(HTML_DIR)/internals; done
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/kbase
-	for f in $(kbase_html); do \
-	  $(INSTALL) -m 0644 $$f $(DESTDIR)$(HTML_DIR)/kbase; done
-	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/fonts
-	for f in $(fonts); do \
-	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/fonts; \
-	done
-
-uninstall-local:
-	for f in $(css) $(dot_html) $(gif) $(png) $(fonts); do \
-	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
-	done
-	for f in $(logofiles); do \
-	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
-	done
-	for f in $(javascript); do \
-	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
-	done
-	for h in $(apihtml); do rm -f $(DESTDIR)$(HTML_DIR)/$$h; done
-	for p in $(apipng); do rm -f $(DESTDIR)$(HTML_DIR)/$$p; done
-	for f in $(internals_html); do \
-	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
-	done
-	for f in $(kbase_html); do \
-	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
-	done

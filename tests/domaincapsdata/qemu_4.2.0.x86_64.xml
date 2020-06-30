@@ -28,7 +28,12 @@
     </loader>
   </os>
   <cpu>
-    <mode name='host-passthrough' supported='yes'/>
+    <mode name='host-passthrough' supported='yes'>
+      <enum name='hostPassthroughMigratable'>
+        <value>on</value>
+        <value>off</value>
+      </enum>
+    </mode>
     <mode name='host-model' supported='yes'>
       <model fallback='forbid'>Skylake-Client-IBRS</model>
       <vendor>Intel</vendor>
@@ -46,6 +51,7 @@
       <feature policy='require' name='pdpe1gb'/>
       <feature policy='require' name='invtsc'/>
       <feature policy='require' name='skip-l1dfl-vmentry'/>
+      <feature policy='require' name='pschange-mc-no'/>
     </mode>
     <mode name='custom' supported='yes'>
       <model usable='yes'>qemu64</model>
@@ -62,8 +68,10 @@
       <model usable='no'>athlon</model>
       <model usable='yes'>Westmere-IBRS</model>
       <model usable='yes'>Westmere</model>
+      <model usable='no'>Skylake-Server-noTSX-IBRS</model>
       <model usable='no'>Skylake-Server-IBRS</model>
       <model usable='no'>Skylake-Server</model>
+      <model usable='yes'>Skylake-Client-noTSX-IBRS</model>
       <model usable='yes'>Skylake-Client-IBRS</model>
       <model usable='yes'>Skylake-Client</model>
       <model usable='yes'>SandyBridge-IBRS</model>
@@ -78,7 +86,9 @@
       <model usable='yes'>Nehalem</model>
       <model usable='yes'>IvyBridge-IBRS</model>
       <model usable='yes'>IvyBridge</model>
+      <model usable='no'>Icelake-Server-noTSX</model>
       <model usable='no'>Icelake-Server</model>
+      <model usable='no'>Icelake-Client-noTSX</model>
       <model usable='no'>Icelake-Client</model>
       <model usable='yes'>Haswell-noTSX-IBRS</model>
       <model usable='yes'>Haswell-noTSX</model>
@@ -86,7 +96,9 @@
       <model usable='yes'>Haswell</model>
       <model usable='no'>EPYC-IBPB</model>
       <model usable='no'>EPYC</model>
+      <model usable='no'>Dhyana</model>
       <model usable='yes'>Conroe</model>
+      <model usable='no'>Cascadelake-Server-noTSX</model>
       <model usable='no'>Cascadelake-Server</model>
       <model usable='yes'>Broadwell-noTSX-IBRS</model>
       <model usable='yes'>Broadwell-noTSX</model>
@@ -131,7 +143,9 @@
         <value>vmvga</value>
         <value>qxl</value>
         <value>virtio</value>
+        <value>none</value>
         <value>bochs</value>
+        <value>ramfb</value>
       </enum>
     </video>
     <hostdev supported='yes'>
@@ -164,6 +178,7 @@
       <enum name='backendModel'>
         <value>random</value>
         <value>egd</value>
+        <value>builtin</value>
       </enum>
     </rng>
   </devices>
@@ -171,6 +186,8 @@
     <gic supported='no'/>
     <vmcoreinfo supported='yes'/>
     <genid supported='yes'/>
+    <backingStoreInput supported='yes'/>
+    <backup supported='no'/>
     <sev supported='no'/>
   </features>
 </domainCapabilities>

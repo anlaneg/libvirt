@@ -58,36 +58,33 @@ virStorageBackendFileSystemNetFindPoolSourcesFunc(char **const groups,
     virNetfsDiscoverState *state = data;
     const char *name, *path;
     virStoragePoolSource *src = NULL;
-    int ret = -1;
 
     path = groups[0];
 
     if (!(name = strrchr(path, '/'))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("invalid netfs path (no /): %s"), path);
-        goto cleanup;
+        return -1;
     }
     name += 1;
     if (*name == '\0') {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("invalid netfs path (ends in /): %s"), path);
-        goto cleanup;
+        return -1;
     }
 
     if (!(src = virStoragePoolSourceListNewSource(&state->list)))
-        goto cleanup;
+        return -1;
 
     if (VIR_ALLOC_N(src->hosts, 1) < 0)
-        goto cleanup;
+        return -1;
     src->nhost = 1;
 
     src->hosts[0].name = g_strdup(state->host);
     src->dir = g_strdup(path);
     src->format = VIR_STORAGE_POOL_NETFS_NFS;
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -258,10 +255,10 @@ virStorageBackendFileSystemIsMounted(virStoragePoolObjPtr pool)
         goto cleanup;
     }
 
-    while ((getmntent_r(mtab, &ent, buf, sizeof(buf))) != NULL) {
-        if (!(src = virStorageBackendFileSystemGetPoolSource(pool)))
-            goto cleanup;
+    if ((src = virStorageBackendFileSystemGetPoolSource(pool)) == NULL)
+        goto cleanup;
 
+    while ((getmntent_r(mtab, &ent, buf, sizeof(buf))) != NULL) {
         /* compare both mount destinations and sources to be sure the mounted
          * FS pool is really the one we're looking for
          */
@@ -273,8 +270,6 @@ virStorageBackendFileSystemIsMounted(virStoragePoolObjPtr pool)
             ret = 1;
             goto cleanup;
         }
-
-        VIR_FREE(src);
     }
 
     ret = 0;

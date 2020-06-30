@@ -24,8 +24,6 @@
 #include "virbuffer.h"
 #include "viralloc.h"
 
-#include <netdb.h>
-
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 /*
@@ -273,7 +271,7 @@ int virSocketAddrResolveService(const char *service)
             port = ntohs(in.sin6_port);
             goto cleanup;
         }
-        tmp++;
+        tmp = tmp->ai_next;
     }
 
     virReportError(VIR_ERR_SYSTEM_ERROR,
@@ -477,9 +475,8 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
      * nicely for UNIX sockets */
     if (addr->data.sa.sa_family == AF_UNIX) {
         if (withService) {
-            if (virAsprintf(&addrstr, VIR_LOOPBACK_IPV4_ADDR"%s0",
-                            separator ? separator : ":") < 0)
-                return NULL;
+            addrstr = g_strdup_printf(VIR_LOOPBACK_IPV4_ADDR "%s0",
+                                      separator ? separator : ":");
         } else {
             addrstr = g_strdup(VIR_LOOPBACK_IPV4_ADDR);
         }
@@ -503,16 +500,12 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
          * a.b.c.d;port or e:f:g:h:i:j:k:l;port, so use square brackets for
          * IPv6 only if no separator is passed to the function
          */
-        if (!separator && VIR_SOCKET_ADDR_FAMILY(addr) == AF_INET6) {
-            if (virAsprintf(&ipv6_host, "[%s]", host) < 0)
-                return NULL;
-        }
+        if (!separator && VIR_SOCKET_ADDR_FAMILY(addr) == AF_INET6)
+            ipv6_host = g_strdup_printf("[%s]", host);
 
-        if (virAsprintf(&addrstr, "%s%s%s",
-                        ipv6_host ? ipv6_host : host,
-                        separator ? separator : ":", port) == -1) {
-            return NULL;
-        }
+        addrstr = g_strdup_printf("%s%s%s",
+                                  ipv6_host ? ipv6_host : host,
+                                  separator ? separator : ":", port);
     } else {
         addrstr = g_strdup(host);
     }
@@ -585,7 +578,6 @@ char *
 virSocketAddrGetPath(virSocketAddrPtr addr G_GNUC_UNUSED)
 {
 #ifndef WIN32
-    char *path = NULL;
     if (addr == NULL) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
                        _("No socket address provided"));
@@ -598,12 +590,7 @@ virSocketAddrGetPath(virSocketAddrPtr addr G_GNUC_UNUSED)
         return NULL;
     }
 
-    if (VIR_STRNDUP(path,
-                    addr->data.un.sun_path,
-                    sizeof(addr->data.un.sun_path)) < 0)
-        return NULL;
-
-    return path;
+    return g_strndup(addr->data.un.sun_path, sizeof(addr->data.un.sun_path));
 #else
     virReportError(VIR_ERR_NO_SUPPORT, "%s",
                    _("UNIX sockets not supported on this platform"));
@@ -1110,27 +1097,24 @@ virSocketAddrPrefixToNetmask(unsigned int prefix,
                              virSocketAddrPtr netmask,
                              int family)
 {
-    int result = -1;
-
     netmask->data.stor.ss_family = AF_UNSPEC; /* assume failure */
 
     if (family == AF_INET) {
         int ip;
 
         if (prefix > 32)
-            goto error;
+            return -1;
 
         ip = prefix ? ~((1 << (32 - prefix)) - 1) : 0;
         netmask->data.inet4.sin_addr.s_addr = htonl(ip);
         netmask->data.stor.ss_family = AF_INET;
         netmask->len = sizeof(struct sockaddr_in);
-        result = 0;
 
     } else if (family == AF_INET6) {
         size_t i = 0;
 
         if (prefix > 128)
-            goto error;
+            return -1;
 
         while (prefix >= 8) {
             /* do as much as possible an entire byte at a time */
@@ -1148,11 +1132,9 @@ virSocketAddrPrefixToNetmask(unsigned int prefix,
         }
         netmask->data.stor.ss_family = AF_INET6;
         netmask->len = sizeof(struct sockaddr_in6);
-        result = 0;
     }
 
- error:
-    return result;
+    return 0;
  }
 
 /**

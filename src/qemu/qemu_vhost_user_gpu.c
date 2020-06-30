@@ -29,7 +29,6 @@
 #include "vircommand.h"
 #include "viralloc.h"
 #include "virlog.h"
-#include "virutil.h"
 #include "virfile.h"
 #include "virstring.h"
 #include "virtime.h"
@@ -47,8 +46,7 @@ qemuVhostUserGPUCreatePidFilename(const char *stateDir,
 {
     g_autofree char *devicename = NULL;
 
-    if (virAsprintf(&devicename, "%s-%s-vhost-user-gpu", shortName, alias) < 0)
-        return NULL;
+    devicename = g_strdup_printf("%s-%s-vhost-user-gpu", shortName, alias);
 
     return virPidFileBuildPath(stateDir, devicename);
 }
@@ -62,7 +60,7 @@ qemuVhostUserGPUCreatePidFilename(const char *stateDir,
  * @alias: video device alias
  * @pid: pointer to pid
  *
- * Return -errno upon error, or zero on successful reading of the pidfile.
+ * Return -1 upon error, or zero on successful reading of the pidfile.
  * If the PID was not still alive, zero will be returned, and @pid will be
  * set to -1;
  */
@@ -75,11 +73,13 @@ qemuVhostUserGPUGetPid(const char *binPath,
 {
     g_autofree char *pidfile = NULL;
 
-    pidfile = qemuVhostUserGPUCreatePidFilename(stateDir, shortName, alias);
-    if (!pidfile)
-        return -ENOMEM;
+    if (!(pidfile = qemuVhostUserGPUCreatePidFilename(stateDir, shortName, alias)))
+        return -1;
 
-    return virPidFileReadPathIfAlive(pidfile, pid, binPath);
+    if (virPidFileReadPathIfAlive(pidfile, pid, binPath) < 0)
+        return -1;
+
+    return 0;
 }
 
 
@@ -222,16 +222,8 @@ void qemuExtVhostUserGPUStop(virQEMUDriverPtr driver,
     }
 
     virErrorPreserveLast(&orig_err);
-    if (virPidFileForceCleanupPath(pidfile) < 0) {
+    if (virPidFileForceCleanupPath(pidfile) < 0)
         VIR_WARN("Unable to kill vhost-user-gpu process");
-    } else {
-        if (unlink(pidfile) < 0 &&
-            errno != ENOENT) {
-            virReportSystemError(errno,
-                                 _("Unable to remove stale pidfile %s"),
-                                 pidfile);
-        }
-    }
     virErrorRestore(&orig_err);
 }
 

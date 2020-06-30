@@ -143,9 +143,8 @@ esxParseVMXFileName(const char *fileName, void *opaque)
 
     if (!strchr(fileName, '/') && !strchr(fileName, '\\')) {
         /* Plain file name, use same directory as for the .vmx file */
-        if (virAsprintf(&result, "%s/%s",
-                        data->datastorePathWithoutFileName, fileName) < 0)
-            goto cleanup;
+        result = g_strdup_printf("%s/%s", data->datastorePathWithoutFileName,
+                                 fileName);
     } else {
         if (esxVI_String_AppendValueToList(&propertyNameList,
                                            "summary.name") < 0 ||
@@ -189,9 +188,7 @@ esxParseVMXFileName(const char *fileName, void *opaque)
                 ++tmp;
             }
 
-            if (virAsprintf(&result, "[%s] %s", datastoreName,
-                            strippedFileName) < 0)
-                goto cleanup;
+            result = g_strdup_printf("[%s] %s", datastoreName, strippedFileName);
 
             break;
         }
@@ -225,9 +222,8 @@ esxParseVMXFileName(const char *fileName, void *opaque)
                 goto cleanup;
             }
 
-            if (virAsprintf(&result, "[%s] %s", datastoreName,
-                            directoryAndFileName) < 0)
-                goto cleanup;
+            result = g_strdup_printf("[%s] %s", datastoreName,
+                                     directoryAndFileName);
         }
 
         /* If it's an absolute path outside of a datastore just use it as is */
@@ -636,9 +632,8 @@ esxConnectToHost(esxPrivate *priv,
                                         conn->uri->server)))
         goto cleanup;
 
-    if (virAsprintf(&url, "%s://%s:%d/sdk", priv->parsedUri->transport,
-                    conn->uri->server, conn->uri->port) < 0)
-        goto cleanup;
+    url = g_strdup_printf("%s://%s:%d/sdk", priv->parsedUri->transport,
+                          conn->uri->server, conn->uri->port);
 
     if (esxVI_Context_Alloc(&priv->host) < 0 ||
         esxVI_Context_Connect(priv->host, url, ipAddress, username, password,
@@ -725,9 +720,8 @@ esxConnectToVCenter(esxPrivate *priv,
     if (!(password = virAuthGetPassword(conn, auth, "esx", username, hostname)))
         goto cleanup;
 
-    if (virAsprintf(&url, "%s://%s:%d/sdk", priv->parsedUri->transport,
-                    hostname, conn->uri->port) < 0)
-        goto cleanup;
+    url = g_strdup_printf("%s://%s:%d/sdk", priv->parsedUri->transport, hostname,
+                          conn->uri->port);
 
     if (esxVI_Context_Alloc(&priv->vCenter) < 0 ||
         esxVI_Context_Connect(priv->vCenter, url, ipAddress, username,
@@ -934,7 +928,7 @@ esxConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     if (!priv->caps)
         goto cleanup;
 
-    if (!(priv->xmlopt = virVMXDomainXMLConfInit()))
+    if (!(priv->xmlopt = virVMXDomainXMLConfInit(priv->caps)))
         goto cleanup;
 
     conn->privateData = priv;
@@ -1161,8 +1155,7 @@ esxConnectGetHostname(virConnectPtr conn)
     if (!domainName || strlen(domainName) < 1) {
         complete = g_strdup(hostName);
     } else {
-        if (virAsprintf(&complete, "%s.%s", hostName, domainName) < 0)
-            goto cleanup;
+        complete = g_strdup_printf("%s.%s", hostName, domainName);
     }
 
  cleanup:
@@ -2636,13 +2629,10 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     data.ctx = priv->primary;
 
     if (!directoryName) {
-        if (virAsprintf(&data.datastorePathWithoutFileName, "[%s]",
-                        datastoreName) < 0)
-            goto cleanup;
+        data.datastorePathWithoutFileName = g_strdup_printf("[%s]", datastoreName);
     } else {
-        if (virAsprintf(&data.datastorePathWithoutFileName, "[%s] %s",
-                        datastoreName, directoryName) < 0)
-            goto cleanup;
+        data.datastorePathWithoutFileName = g_strdup_printf("[%s] %s",
+                                                            datastoreName, directoryName);
     }
 
     ctx.opaque = &data;
@@ -2658,7 +2648,7 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         if (powerState != esxVI_VirtualMachinePowerState_PoweredOff)
             def->id = id;
 
-        xml = virDomainDefFormat(def, priv->caps,
+        xml = virDomainDefFormat(def, priv->xmlopt,
                                  virDomainDefFormatConvertXMLFlags(flags));
     }
 
@@ -2716,7 +2706,7 @@ esxConnectDomainXMLFromNative(virConnectPtr conn, const char *nativeFormat,
     def = virVMXParseConfig(&ctx, priv->xmlopt, priv->caps, nativeConfig);
 
     if (def)
-        xml = virDomainDefFormat(def, priv->caps,
+        xml = virDomainDefFormat(def, priv->xmlopt,
                                  VIR_DOMAIN_DEF_FORMAT_INACTIVE);
 
     virDomainDefFree(def);
@@ -2754,7 +2744,7 @@ esxConnectDomainXMLToNative(virConnectPtr conn, const char *nativeFormat,
     if (virtualHW_version < 0)
         return NULL;
 
-    def = virDomainDefParseString(domainXml, priv->caps, priv->xmlopt,
+    def = virDomainDefParseString(domainXml, priv->xmlopt,
                                   NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE);
 
     if (!def)
@@ -2970,7 +2960,7 @@ esxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
         return NULL;
 
     /* Parse domain XML */
-    def = virDomainDefParseString(xml, priv->caps, priv->xmlopt,
+    def = virDomainDefParseString(xml, priv->xmlopt,
                                   NULL, parse_flags);
 
     if (!def)
@@ -3104,13 +3094,11 @@ esxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
 
     /* Register the domain */
     if (directoryName) {
-        if (virAsprintf(&datastoreRelatedPath, "[%s] %s/%s.vmx", datastoreName,
-                        directoryName, escapedName) < 0)
-            goto cleanup;
+        datastoreRelatedPath = g_strdup_printf("[%s] %s/%s.vmx", datastoreName,
+                                               directoryName, escapedName);
     } else {
-        if (virAsprintf(&datastoreRelatedPath, "[%s] %s.vmx", datastoreName,
-                        escapedName) < 0)
-            goto cleanup;
+        datastoreRelatedPath = g_strdup_printf("[%s] %s.vmx", datastoreName,
+                                               escapedName);
     }
 
     if (esxVI_RegisterVM_Task(priv->primary, priv->primary->datacenter->vmFolder,
@@ -3722,11 +3710,9 @@ esxDomainMigratePrepare(virConnectPtr dconn,
     virCheckFlags(ESX_MIGRATION_FLAGS, -1);
 
     if (!uri_in) {
-        if (virAsprintf(uri_out, "vpxmigr://%s/%s/%s",
-                        priv->vCenter->ipAddress,
-                        priv->vCenter->computeResource->resourcePool->value,
-                        priv->vCenter->hostSystem->_reference->value) < 0)
-            return -1;
+        *uri_out = g_strdup_printf("vpxmigr://%s/%s/%s", priv->vCenter->ipAddress,
+                                   priv->vCenter->computeResource->resourcePool->value,
+                                   priv->vCenter->hostSystem->_reference->value);
     }
 
     return 0;
@@ -4089,7 +4075,7 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
     if (esxVI_EnsureSession(priv->primary) < 0)
         return NULL;
 
-    def = virDomainSnapshotDefParseString(xmlDesc, priv->caps,
+    def = virDomainSnapshotDefParseString(xmlDesc,
                                           priv->xmlopt, NULL, NULL, parse_flags);
 
     if (!def)
@@ -4190,7 +4176,7 @@ esxDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot,
 
     virUUIDFormat(snapshot->domain->uuid, uuid_string);
 
-    xml = virDomainSnapshotDefFormat(uuid_string, &def, priv->caps, priv->xmlopt,
+    xml = virDomainSnapshotDefFormat(uuid_string, &def, priv->xmlopt,
                                      0);
 
  cleanup:

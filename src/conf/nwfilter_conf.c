@@ -42,7 +42,6 @@
 #include "nwfilter_params.h"
 #include "nwfilter_conf.h"
 #include "domain_conf.h"
-#include "c-ctype.h"
 #include "virfile.h"
 #include "virstring.h"
 
@@ -401,8 +400,8 @@ virNWFilterRuleDefAddString(virNWFilterRuleDefPtr nwf,
 {
     char *tmp;
 
-    if (VIR_STRNDUP(tmp, string, maxstrlen) < 0 ||
-        VIR_APPEND_ELEMENT_COPY(nwf->strings, nwf->nstrings, tmp) < 0)
+    tmp = g_strndup(string, maxstrlen);
+    if (VIR_APPEND_ELEMENT_COPY(nwf->strings, nwf->nstrings, tmp) < 0)
         VIR_FREE(tmp);
 
     return tmp;
@@ -775,7 +774,7 @@ parseStringItems(const struct int_map *int_map,
     i = 0;
     while (input[i]) {
         found = false;
-        while (c_isspace(input[i]) || input[i] == sep)
+        while (g_ascii_isspace(input[i]) || input[i] == sep)
             i++;
         if (!input[i])
             break;
@@ -1849,7 +1848,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 
             att_datatypes = att[idx].datatype;
 
-            while (datatype <= DATATYPE_LAST && found == 0 && rc == 0) {
+            while (datatype <= DATATYPE_LAST && !found && rc == 0) {
                 if ((att_datatypes & datatype)) {
 
                     att_datatypes ^= datatype;
@@ -2085,13 +2084,11 @@ virNWFilterIncludeParse(xmlNodePtr cur)
     if (!ret->params)
         goto err_exit;
 
- cleanup:
     return ret;
 
  err_exit:
     virNWFilterIncludeDefFree(ret);
-    ret = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 
@@ -2884,14 +2881,14 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
                     matchShown = MATCH_NO;
                 } else if (matchShown == MATCH_YES) {
                     virBufferAddLit(buf, "/>\n");
-                    typeShown = 0;
+                    typeShown = false;
                     matchShown = MATCH_NONE;
                     continue;
                 }
             } else {
                 if (matchShown == MATCH_NO) {
                     virBufferAddLit(buf, "/>\n");
-                    typeShown = 0;
+                    typeShown = false;
                     matchShown = MATCH_NONE;
                     continue;
                 }
@@ -2906,7 +2903,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
                                  _("formatter for %s %s reported error"),
                                  type,
                                  att[i].name);
-                   goto err_exit;
+                   return;
                }
             } else if ((flags & NWFILTER_ENTRY_ITEM_FLAG_HAS_VAR)) {
                 virBufferAddChar(buf, '$');
@@ -2989,7 +2986,6 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
        virBufferAsprintf(buf,
                          "<%s/>\n", type);
 
- err_exit:
     return;
 }
 

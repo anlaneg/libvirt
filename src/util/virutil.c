@@ -25,23 +25,18 @@
 
 #include <unistd.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <sys/stat.h>
 
-#ifdef MAJOR_IN_MKDEV
-# include <sys/mkdev.h>
-#elif MAJOR_IN_SYSMACROS
+#ifdef WIN32
+# include <conio.h>
+#endif /* WIN32 */
+
+#ifdef __linux__
 # include <sys/sysmacros.h>
 #endif
 
 #include <sys/types.h>
-#include <termios.h>
 
-#if WITH_DEVMAPPER
-# include <libdevmapper.h>
-#endif
-
-#include <netdb.h>
 #ifdef HAVE_GETPWUID_R
 # include <pwd.h>
 # include <grp.h>
@@ -51,33 +46,18 @@
 # include <sys/prctl.h>
 #endif
 
-#ifdef WIN32
-# ifdef HAVE_WINSOCK2_H
-#  include <winsock2.h>
-# endif
-# include <windows.h>
-# include <shlobj.h>
-#endif
-
-#ifdef HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
-
-#include "c-ctype.h"
-#include "mgetgroups.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "virbuffer.h"
 #include "viralloc.h"
-#include "verify.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "nonblocking.h"
 #include "virprocess.h"
 #include "virstring.h"
 #include "virutil.h"
+#include "virsocket.h"
 
-verify(sizeof(gid_t) <= sizeof(unsigned int) &&
+G_STATIC_ASSERT(sizeof(gid_t) <= sizeof(unsigned int) &&
        sizeof(uid_t) <= sizeof(unsigned int));
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -100,6 +80,21 @@ int virSetInherit(int fd, bool inherit)
     return 0;
 }
 
+
+int virSetBlocking(int fd, bool block)
+{
+    int fflags;
+    if ((fflags = fcntl(fd, F_GETFL)) < 0)
+        return -1;
+    if (block)
+        fflags &= ~O_NONBLOCK;
+    else
+        fflags |= O_NONBLOCK;
+    if ((fcntl(fd, F_SETFL, fflags)) < 0)
+        return -1;
+    return 0;
+}
+
 #else /* WIN32 */
 
 int virSetInherit(int fd G_GNUC_UNUSED, bool inherit G_GNUC_UNUSED)
@@ -111,12 +106,18 @@ int virSetInherit(int fd G_GNUC_UNUSED, bool inherit G_GNUC_UNUSED)
     return 0;
 }
 
-#endif /* WIN32 */
-
 int virSetBlocking(int fd, bool blocking)
 {
-    return set_nonblocking_flag(fd, !blocking);
+    unsigned long arg = blocking ? 0 : 1;
+
+    if (ioctlsocket(fd, FIONBIO, &arg) < 0)
+        return -1;
+
+    return 0;
 }
+
+#endif /* WIN32 */
+
 
 int virSetNonBlock(int fd)
 {
@@ -159,21 +160,6 @@ int virSetSockReuseAddr(int fd, bool fatal)
 #endif
 
 
-/* Convert C from hexadecimal character to integer.  */
-int
-virHexToBin(unsigned char c)
-{
-    switch (c) {
-    default: return c - '0';
-    case 'a': case 'A': return 10;
-    case 'b': case 'B': return 11;
-    case 'c': case 'C': return 12;
-    case 'd': case 'D': return 13;
-    case 'e': case 'E': return 14;
-    case 'f': case 'F': return 15;
-    }
-}
-
 /* Scale an integer VALUE in-place by an optional case-insensitive
  * SUFFIX, defaulting to SCALE if suffix is NULL or empty (scale is
  * typically 1 or 1024).  Recognized suffixes include 'b' or 'bytes',
@@ -203,7 +189,7 @@ virScaleInteger(unsigned long long *value, const char *suffix,
         //B的单位量为1024,b的单位量为1000
         if (!suffix[1] || STRCASEEQ(suffix + 1, "iB")) {
             base = 1024;
-        } else if (c_tolower(suffix[1]) == 'b' && !suffix[2]) {
+        } else if (g_ascii_tolower(suffix[1]) == 'b' && !suffix[2]) {
             base = 1000;
         } else {
             virReportError(VIR_ERR_INVALID_ARG,
@@ -213,7 +199,7 @@ virScaleInteger(unsigned long long *value, const char *suffix,
 
         //计算单位量
         scale = 1;
-        switch (c_tolower(*suffix)) {
+        switch (g_ascii_tolower(*suffix)) {
         case 'e':
             scale *= base;
             G_GNUC_FALLTHROUGH;
@@ -397,11 +383,11 @@ int virDiskNameParse(const char *name, int *disk, int *partition)
         }
     }
 
-    if (!ptr || !c_islower(*ptr))
+    if (!ptr || !g_ascii_islower(*ptr))
         return -1;
 
     for (i = 0; *ptr; i++) {
-        if (!c_islower(*ptr))
+        if (!g_ascii_islower(*ptr))
             break;
 
         idx = (idx + (i < 1 ? 0 : 1)) * 26;
@@ -508,17 +494,11 @@ static char *
 virGetHostnameImpl(bool quiet)
 {
     int r;
-    char hostname[HOST_NAME_MAX+1], *result = NULL;
+    const char *hostname;
+    char *result = NULL;
     struct addrinfo hints, *info;
 
-    r = gethostname(hostname, sizeof(hostname));
-    if (r == -1) {
-        if (!quiet)
-            virReportSystemError(errno,
-                                 "%s", _("failed to determine host name"));
-        return NULL;
-    }
-    NUL_TERMINATE(hostname);
+    hostname = g_get_host_name();
 
     if (STRPREFIX(hostname, "localhost") || strchr(hostname, '.')) {
         /* in this case, gethostname returned localhost (meaning we can't
@@ -587,7 +567,37 @@ virGetHostnameQuiet(void)
 char *
 virGetUserDirectory(void)
 {
-    return virGetUserDirectoryByUID(geteuid());
+    return g_strdup(g_get_home_dir());
+}
+
+
+char *virGetUserConfigDirectory(void)
+{
+#ifdef WIN32
+    return g_strdup(g_get_user_config_dir());
+#else
+    return g_build_filename(g_get_user_config_dir(), "libvirt", NULL);
+#endif
+}
+
+
+char *virGetUserCacheDirectory(void)
+{
+#ifdef WIN32
+    return g_strdup(g_get_user_cache_dir());
+#else
+    return g_build_filename(g_get_user_cache_dir(), "libvirt", NULL);
+#endif
+}
+
+
+char *virGetUserRuntimeDirectory(void)
+{
+#ifdef WIN32
+    return g_strdup(g_get_user_runtime_dir());
+#else
+    return g_build_filename(g_get_user_runtime_dir(), "libvirt", NULL);
+#endif
 }
 
 
@@ -741,48 +751,6 @@ char *virGetUserShell(uid_t uid)
 }
 
 
-static char *virGetXDGDirectory(const char *xdgenvname, const char *xdgdefdir)
-{
-    const char *path = getenv(xdgenvname);
-    char *ret = NULL;
-    char *home = NULL;
-
-    if (path && path[0]) {
-        ignore_value(virAsprintf(&ret, "%s/libvirt", path));
-    } else {
-        home = virGetUserDirectory();
-        if (home)
-            ignore_value(virAsprintf(&ret, "%s/%s/libvirt", home, xdgdefdir));
-    }
-
-    VIR_FREE(home);
-    return ret;
-}
-
-char *virGetUserConfigDirectory(void)
-{
-    return virGetXDGDirectory("XDG_CONFIG_HOME", ".config");
-}
-
-char *virGetUserCacheDirectory(void)
-{
-    return virGetXDGDirectory("XDG_CACHE_HOME", ".cache");
-}
-
-char *virGetUserRuntimeDirectory(void)
-{
-    const char *path = getenv("XDG_RUNTIME_DIR");
-
-    if (!path || !path[0]) {
-        return virGetUserCacheDirectory();
-    } else {
-        char *ret;
-
-        ignore_value(virAsprintf(&ret, "%s/libvirt", path));
-        return ret;
-    }
-}
-
 char *virGetUserName(uid_t uid)
 {
     char *ret;
@@ -825,12 +793,11 @@ virGetUserIDByName(const char *name, uid_t *uid, bool missing_ok)
 
     if (!pw) {
         if (rc != 0 && !missing_ok) {
-            char buf[1024];
             /* log the possible error from getpwnam_r. Unfortunately error
              * reporting from this function is bad and we can't really
              * rely on it, so we just report that the user wasn't found */
             VIR_WARN("User record for user '%s' was not found: %s",
-                     name, virStrerror(rc, buf, sizeof(buf)));
+                     name, g_strerror(rc));
         }
 
         ret = 1;
@@ -908,12 +875,11 @@ virGetGroupIDByName(const char *name, gid_t *gid, bool missing_ok)
 
     if (!gr) {
         if (rc != 0 && !missing_ok) {
-            char buf[1024];
             /* log the possible error from getgrnam_r. Unfortunately error
              * reporting from this function is bad and we can't really
              * rely on it, so we just report that the user wasn't found */
             VIR_WARN("Group record for user '%s' was not found: %s",
-                     name, virStrerror(rc, buf, sizeof(buf)));
+                     name, g_strerror(rc));
         }
 
         ret = 1;
@@ -980,6 +946,11 @@ virDoesGroupExist(const char *name)
 }
 
 
+
+/* Work around an incompatibility of OS X 10.11: getgrouplist
+   accepts int *, not gid_t *, and int and gid_t differ in sign.  */
+VIR_WARNINGS_NO_POINTER_SIGN
+
 /* Compute the list of primary and supplementary groups associated
  * with @uid, and including @gid in the list (unless it is -1),
  * storing a malloc'd result into @list. If uid is -1 or doesn't exist in the
@@ -1000,11 +971,28 @@ virGetGroupList(uid_t uid, gid_t gid, gid_t **list)
     /* invalid users have no supplementary groups */
     if (uid != (uid_t)-1 &&
         virGetUserEnt(uid, &user, &primary, NULL, NULL, true) >= 0) {
-        if ((ret = mgetgroups(user, primary, list)) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot get group list for '%s'"), user);
-            ret = -1;
-            goto cleanup;
+        int nallocgrps = 10;
+        gid_t *grps = g_new(gid_t, nallocgrps);
+
+        while (1) {
+            int nprevallocgrps = nallocgrps;
+            int rv;
+
+            rv = getgrouplist(user, primary, grps, &nallocgrps);
+
+            /* Some systems (like Darwin) have a bug where they
+               never increase max_n_groups.  */
+            if (rv < 0 && nprevallocgrps == nallocgrps)
+                nallocgrps *= 2;
+
+            /* either shrinks to actual size, or enlarges to new size */
+            grps = g_renew(gid_t, grps, nallocgrps);
+
+            if (rv >= 0) {
+                ret = rv;
+                *list = grps;
+                break;
+            }
         }
     }
 
@@ -1028,6 +1016,8 @@ virGetGroupList(uid_t uid, gid_t gid, gid_t **list)
     VIR_FREE(user);
     return ret;
 }
+
+VIR_WARNINGS_RESET
 
 
 /* Set the real and effective uid and gid to the given values, as well
@@ -1087,100 +1077,14 @@ virDoesGroupExist(const char *name G_GNUC_UNUSED)
 }
 
 # ifdef WIN32
-/* These methods are adapted from GLib2 under terms of LGPLv2+ */
-static int
-virGetWin32SpecialFolder(int csidl, char **path)
-{
-    char buf[MAX_PATH+1];
-    LPITEMIDLIST pidl = NULL;
-    int ret = 0;
-
-    *path = NULL;
-
-    if (SHGetSpecialFolderLocation(NULL, csidl, &pidl) == S_OK) {
-        if (SHGetPathFromIDList(pidl, buf))
-            *path = g_strdup(buf);
-        CoTaskMemFree(pidl);
-    }
-    return ret;
-}
-
-static int
-virGetWin32DirectoryRoot(char **path)
-{
-    char windowsdir[MAX_PATH];
-
-    *path = NULL;
-
-    if (GetWindowsDirectory(windowsdir, G_N_ELEMENTS(windowsdir))) {
-        const char *tmp;
-        /* Usually X:\Windows, but in terminal server environments
-         * might be an UNC path, AFAIK.
-         */
-        tmp = virFileSkipRoot(windowsdir);
-        if (VIR_FILE_IS_DIR_SEPARATOR(tmp[-1]) &&
-            tmp[-2] != ':')
-            tmp--;
-
-        windowsdir[tmp - windowsdir] = '\0';
-    } else {
-        strcpy(windowsdir, "C:\\");
-    }
-
-    *path = g_strdup(windowsdir);
-    return 0;
-}
-
-
-
 char *
 virGetUserDirectoryByUID(uid_t uid G_GNUC_UNUSED)
 {
     /* Since Windows lacks setuid binaries, and since we already fake
      * geteuid(), we can safely assume that this is only called when
      * querying about the current user */
-    const char *dir;
-    char *ret;
 
-    dir = getenv("HOME");
-
-    /* Only believe HOME if it is an absolute path and exists */
-    if (dir) {
-        if (!virFileIsAbsPath(dir) ||
-            !virFileExists(dir))
-            dir = NULL;
-    }
-
-    /* In case HOME is Unix-style (it happens), convert it to
-     * Windows style.
-     */
-    if (dir) {
-        char *p;
-        while ((p = strchr(dir, '/')) != NULL)
-            *p = '\\';
-    }
-
-    if (!dir)
-        /* USERPROFILE is probably the closest equivalent to $HOME? */
-        dir = getenv("USERPROFILE");
-
-    ret = g_strdup(dir);
-
-    if (!ret &&
-        virGetWin32SpecialFolder(CSIDL_PROFILE, &ret) < 0)
-        return NULL;
-
-    if (!ret &&
-        virGetWin32DirectoryRoot(&ret) < 0)
-        return NULL;
-
-    if (!ret) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Unable to determine home directory"));
-        return NULL;
-    }
-
-    return ret;
+    return g_strdup(g_get_home_dir());
 }
 
 char *
@@ -1190,42 +1094,6 @@ virGetUserShell(uid_t uid G_GNUC_UNUSED)
                    "%s", _("virGetUserShell is not available"));
 
     return NULL;
-}
-
-char *
-virGetUserConfigDirectory(void)
-{
-    char *ret;
-    if (virGetWin32SpecialFolder(CSIDL_LOCAL_APPDATA, &ret) < 0)
-        return NULL;
-
-    if (!ret) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Unable to determine config directory"));
-        return NULL;
-    }
-    return ret;
-}
-
-char *
-virGetUserCacheDirectory(void)
-{
-    char *ret;
-    if (virGetWin32SpecialFolder(CSIDL_INTERNET_CACHE, &ret) < 0)
-        return NULL;
-
-    if (!ret) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Unable to determine config directory"));
-        return NULL;
-    }
-    return ret;
-}
-
-char *
-virGetUserRuntimeDirectory(void)
-{
-    return virGetUserCacheDirectory();
 }
 
 # else /* !HAVE_GETPWUID_R && !WIN32 */
@@ -1243,33 +1111,6 @@ virGetUserShell(uid_t uid G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR,
                    "%s", _("virGetUserShell is not available"));
-
-    return NULL;
-}
-
-char *
-virGetUserConfigDirectory(void)
-{
-    virReportError(VIR_ERR_INTERNAL_ERROR,
-                   "%s", _("virGetUserConfigDirectory is not available"));
-
-    return NULL;
-}
-
-char *
-virGetUserCacheDirectory(void)
-{
-    virReportError(VIR_ERR_INTERNAL_ERROR,
-                   "%s", _("virGetUserCacheDirectory is not available"));
-
-    return NULL;
-}
-
-char *
-virGetUserRuntimeDirectory(void)
-{
-    virReportError(VIR_ERR_INTERNAL_ERROR,
-                   "%s", _("virGetUserRuntimeDirectory is not available"));
 
     return NULL;
 }
@@ -1335,7 +1176,7 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
                      unsigned long long capBits, bool clearExistingCaps)
 {
     size_t i;
-    int capng_ret, ret = -1;
+    int capng_ret;
     bool need_setgid = false;
     bool need_setuid = false;
     bool need_setpcap = false;
@@ -1387,7 +1228,7 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
     if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)) {
         virReportSystemError(errno, "%s",
                              _("prctl failed to set KEEPCAPS"));
-        goto cleanup;
+        return -1;
     }
 
     /* Change to the temp capabilities */
@@ -1405,18 +1246,18 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
         } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("cannot apply process capabilities %d"), capng_ret);
-            goto cleanup;
+            return -1;
         }
     }
 
     if (virSetUIDGID(uid, gid, groups, ngroups) < 0)
-        goto cleanup;
+        return -1;
 
     /* Tell it we are done keeping capabilities */
     if (prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0)) {
         virReportSystemError(errno, "%s",
                              _("prctl failed to reset KEEPCAPS"));
-        goto cleanup;
+        return -1;
     }
 
 # ifdef PR_CAP_AMBIENT
@@ -1434,7 +1275,7 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
                                      _("prctl failed to enable '%s' in the "
                                        "AMBIENT set"),
                                      capstr);
-                goto cleanup;
+                return -1;
             }
         }
     }
@@ -1458,13 +1299,10 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
     if (((capng_ret = capng_apply(CAPNG_SELECT_CAPS)) < 0)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("cannot apply process capabilities %d"), capng_ret);
-        ret = -1;
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 #else
@@ -1502,26 +1340,6 @@ void virWaitForDevices(void)
     ignore_value(virCommandRun(cmd, &exitstatus));
 }
 
-#if WITH_DEVMAPPER
-bool
-virIsDevMapperDevice(const char *dev_name)
-{
-    struct stat buf;
-
-    if (!stat(dev_name, &buf) &&
-        S_ISBLK(buf.st_mode) &&
-        dm_is_dm_major(major(buf.st_rdev)))
-            return true;
-
-    return false;
-}
-#else
-bool virIsDevMapperDevice(const char *dev_name G_GNUC_UNUSED)
-{
-    return false;
-}
-#endif
-
 bool
 virValidateWWN(const char *wwn)
 {
@@ -1532,7 +1350,7 @@ virValidateWWN(const char *wwn)
         p += 2;
 
     for (i = 0; p[i]; i++) {
-        if (!c_isxdigit(p[i]))
+        if (!g_ascii_isxdigit(p[i]))
             break;
     }
 
@@ -1567,9 +1385,10 @@ virGetDeviceID(const char *path, int *maj, int *min)
 #else
 int
 virGetDeviceID(const char *path G_GNUC_UNUSED,
-               int *maj G_GNUC_UNUSED,
-               int *min G_GNUC_UNUSED)
+               int *maj,
+               int *min)
 {
+    *maj = *min = 0;
     return -ENOSYS;
 }
 #endif
@@ -1581,7 +1400,6 @@ virGetUnprivSGIOSysfsPath(const char *path,
                           const char *sysfs_dir)
 {
     int maj, min;
-    char *sysfs_path = NULL;
     int rc;
 
     if ((rc = virGetDeviceID(path, &maj, &min)) < 0) {
@@ -1591,10 +1409,9 @@ virGetUnprivSGIOSysfsPath(const char *path,
         return NULL;
     }
 
-    ignore_value(virAsprintf(&sysfs_path, "%s/%d:%d/queue/unpriv_sgio",
-                             sysfs_dir ? sysfs_dir : SYSFS_DEV_BLOCK_PATH,
-                             maj, min));
-    return sysfs_path;
+    return g_strdup_printf("%s/%d:%d/queue/unpriv_sgio",
+                           sysfs_dir ? sysfs_dir : SYSFS_DEV_BLOCK_PATH, maj,
+                           min);
 }
 
 int
@@ -1616,8 +1433,7 @@ virSetDeviceUnprivSGIO(const char *path,
         goto cleanup;
     }
 
-    if (virAsprintf(&val, "%d", unpriv_sgio) < 0)
-        goto cleanup;
+    val = g_strdup_printf("%d", unpriv_sgio);
 
     if ((rc = virFileWriteStr(sysfs_path, val, 0)) < 0) {
         virReportSystemError(-rc, _("failed to set %s"), sysfs_path);
@@ -1882,10 +1698,284 @@ virHostGetDRMRenderNode(void)
         goto cleanup;
     }
 
-    if (virAsprintf(&ret, "%s/%s", driPath, ent->d_name) < 0)
-        goto cleanup;
+    ret = g_strdup_printf("%s/%s", driPath, ent->d_name);
 
  cleanup:
     VIR_DIR_CLOSE(driDir);
     return ret;
+}
+
+
+static const char *virKernelCmdlineSkipQuote(const char *cmdline,
+                                             bool *is_quoted)
+{
+    if (cmdline[0] == '"') {
+        *is_quoted = !(*is_quoted);
+        cmdline++;
+    }
+    return cmdline;
+}
+
+
+/**
+ * virKernelCmdlineFindEqual:
+ * @cmdline: target kernel command line string
+ * @is_quoted: indicates whether the string begins with quotes
+ * @res: pointer to the position immediately after the parsed parameter,
+ * can be used in subsequent calls to process further parameters until
+ * the end of the string.
+ *
+ * Iterate over the provided kernel command line string while honoring
+ * the kernel quoting rules and returns the index of the equal sign
+ * separating argument and value.
+ *
+ * Returns 0 for the cases where no equal sign is found or the argument
+ * itself begins with the equal sign (both cases indicating that the
+ * argument has no value). Otherwise, returns the index of the equal
+ * sign in the string.
+ */
+static size_t virKernelCmdlineFindEqual(const char *cmdline,
+                                        bool is_quoted,
+                                        const char **res)
+{
+    size_t i;
+    size_t equal_index = 0;
+
+    for (i = 0; cmdline[i]; i++) {
+        if (!(is_quoted) && g_ascii_isspace(cmdline[i]))
+            break;
+        if (equal_index == 0 && cmdline[i] == '=') {
+            equal_index = i;
+            continue;
+        }
+        virKernelCmdlineSkipQuote(cmdline + i, &is_quoted);
+    }
+    *res = cmdline + i;
+    return equal_index;
+}
+
+
+static char* virKernelArgNormalize(const char *arg)
+{
+    return virStringReplace(arg, "_", "-");
+}
+
+
+/**
+ * virKernelCmdlineNextParam:
+ * @cmdline: kernel command line string to be checked for next parameter
+ * @param: pointer to hold retrieved parameter, will be NULL if none found
+ * @val: pointer to hold retrieved value of @param
+ *
+ * Parse the kernel cmdline and store the next parameter in @param
+ * and the value of @param in @val which can be NULL if @param has
+ * no value. In addition returns the address right after @param=@value
+ * for possible further processing.
+ *
+ * Returns a pointer to address right after @param=@val in the
+ * kernel command line, will point to the string's end (NULL)
+ * in case no next parameter is found
+ */
+const char *virKernelCmdlineNextParam(const char *cmdline,
+                                      char **param,
+                                      char **val)
+{
+    const char *next;
+    int equal_index;
+    bool is_quoted = false;
+    *param = NULL;
+    *val = NULL;
+
+    virSkipSpaces(&cmdline);
+    cmdline = virKernelCmdlineSkipQuote(cmdline, &is_quoted);
+    equal_index = virKernelCmdlineFindEqual(cmdline, is_quoted, &next);
+
+    if (next == cmdline)
+        return next;
+
+    /* param has no value */
+    if (equal_index == 0) {
+        if (is_quoted && next[-1] == '"')
+            *param = g_strndup(cmdline, next - cmdline - 1);
+        else
+            *param = g_strndup(cmdline, next - cmdline);
+        return next;
+    }
+
+    *param = g_strndup(cmdline, equal_index);
+
+    if (cmdline[equal_index + 1] == '"') {
+        is_quoted = true;
+        equal_index++;
+    }
+
+    if (is_quoted && next[-1] == '"')
+        *val = g_strndup(cmdline + equal_index + 1,
+                         next - cmdline - equal_index - 2);
+    else
+        *val = g_strndup(cmdline + equal_index + 1,
+                         next - cmdline - equal_index - 1);
+    return next;
+}
+
+
+static bool virKernelCmdlineStrCmp(const char *kernel_val,
+                                   const char *caller_val,
+                                   virKernelCmdlineFlags flags)
+{
+    if (flags & VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX)
+        return STRPREFIX(kernel_val, caller_val);
+    return STREQ(kernel_val, caller_val);
+}
+
+
+/**
+ * virKernelCmdlineMatchParam:
+ * @cmdline: kernel command line string to be checked for @arg
+ * @arg: kernel command line argument
+ * @values: array of possible values to match @arg
+ * @len_values: size of array, it can be 0 meaning a match will be positive if
+ *              the argument has no value.
+ * @flags: bitwise-OR of virKernelCmdlineFlags
+ *
+ * Try to match the provided kernel cmdline string with the provided @arg
+ * and the list @values of possible values according to the matching strategy
+ * defined in @flags.
+ *
+ *
+ * Returns true if a match is found, false otherwise
+ */
+bool virKernelCmdlineMatchParam(const char *cmdline,
+                                const char *arg,
+                                const char **values,
+                                size_t len_values,
+                                virKernelCmdlineFlags flags)
+{
+    bool match = false;
+    size_t i;
+    const char *next = cmdline;
+    g_autofree char *arg_norm = virKernelArgNormalize(arg);
+
+    while (next[0] != '\0') {
+        g_autofree char *kparam = NULL;
+        g_autofree char *kparam_norm = NULL;
+        g_autofree char *kval = NULL;
+
+        next = virKernelCmdlineNextParam(next, &kparam, &kval);
+
+        if (!kparam)
+            break;
+
+        kparam_norm = virKernelArgNormalize(kparam);
+
+        if (STRNEQ(kparam_norm, arg_norm))
+            continue;
+
+        if (!kval) {
+            match = (len_values == 0) ? true : false;
+        } else {
+            match = false;
+            for (i = 0; i < len_values; i++) {
+                if (virKernelCmdlineStrCmp(kval, values[i], flags)) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+
+        if (match && (flags & VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST))
+            break;
+    }
+
+    return match;
+}
+
+
+/*
+ * Get a password from the console input stream.
+ * The caller must free the returned password.
+ *
+ * Returns: the password, or NULL
+ */
+char *virGetPassword(void)
+{
+#ifdef WIN32
+    GString *pw = g_string_new("");
+
+    while (1) {
+        char c = _getch();
+        if (c == '\r')
+            break;
+
+        g_string_append_c(pw, c);
+    }
+
+    return g_string_free(pw, FALSE);
+#else /* !WIN32 */
+    return g_strdup(getpass(""));
+#endif /* ! WIN32 */
+}
+
+
+static int
+virPipeImpl(int fds[2], bool nonblock, bool errreport)
+{
+#ifdef HAVE_PIPE2
+    int flags = O_CLOEXEC;
+    if (nonblock)
+        flags |= O_NONBLOCK;
+    int rv = pipe2(fds, flags);
+#else /* !HAVE_PIPE2 */
+# ifdef WIN32
+    int rv = _pipe(fds, 4096, _O_BINARY);
+# else /* !WIN32 */
+    int rv = pipe(fds);
+# endif /* !WIN32 */
+#endif /* !HAVE_PIPE2 */
+
+    if (rv < 0) {
+        if (errreport)
+            virReportSystemError(errno, "%s",
+                                 _("Unable to create pipes"));
+        return rv;
+    }
+
+#ifndef HAVE_PIPE2
+    if (nonblock) {
+        if (virSetNonBlock(fds[0]) < 0 ||
+            virSetNonBlock(fds[1]) < 0) {
+            if (errreport)
+                virReportSystemError(errno, "%s",
+                                     _("Unable to set pipes to non-blocking"));
+            virReportSystemError(errno, "%s",
+                                 _("Unable to create pipes"));
+            VIR_FORCE_CLOSE(fds[0]);
+            VIR_FORCE_CLOSE(fds[1]);
+            return -1;
+        }
+    }
+#endif /* !HAVE_PIPE2 */
+
+    return 0;
+}
+
+
+int
+virPipe(int fds[2])
+{
+    return virPipeImpl(fds, false, true);
+}
+
+
+int
+virPipeQuiet(int fds[2])
+{
+    return virPipeImpl(fds, false, false);
+}
+
+
+int
+virPipeNonBlock(int fds[2])
+{
+    return virPipeImpl(fds, true, true);
 }

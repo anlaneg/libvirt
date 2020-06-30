@@ -76,7 +76,7 @@ struct _virQEMUDriverConfig {
     virObject parent;
 
     //各driver对应的uri
-    const char *uri;
+    char *uri;
 
     uid_t user;
     gid_t group;
@@ -98,6 +98,7 @@ struct _virQEMUDriverConfig {
     char *stateDir;//保存状态的目录
     char *swtpmStateDir;
     char *slirpStateDir;
+    char *dbusStateDir;
     /* These two directories are ones QEMU processes use (so must match
      * the QEMU user/group */
     char *libDir;
@@ -156,13 +157,13 @@ struct _virQEMUDriverConfig {
     char *bridgeHelperName;
     char *prHelperName;
     char *slirpHelperName;
+    char *dbusDaemonName;
 
     bool macFilter;
 
     bool relaxedACS;
     bool vncAllowHostAudio;
     bool nogfxAllowHostAudio;
-    bool clearEmulatorCapabilities;
     bool setProcessName;
 
     unsigned int maxProcesses;
@@ -204,6 +205,7 @@ struct _virQEMUDriverConfig {
     virFirmwarePtr *firmwares;
     size_t nfirmwares;
     unsigned int glusterDebugLevel;
+    bool virtiofsdDebug;
 
     char *memoryBackingDir;
 
@@ -242,8 +244,9 @@ struct _virQEMUDriver {
     /* Atomic inc/dec only */
     unsigned int nactive;
 
-    /* Immutable value */
+    /* Immutable values */
     bool privileged;
+    char *embeddedRoot;
 
     /* Immutable pointers. Caller must provide locking */
     virStateInhibitCallback inhibitCallback;
@@ -263,6 +266,19 @@ struct _virQEMUDriver {
      * lockless access thereafter
      */
     virCapsPtr caps;
+
+    /* Lazy initialized on first use, immutable thereafter.
+     * Require lock to get the pointer & do optional initialization
+     */
+    virCapsHostNUMAPtr hostnuma;
+
+    /* Lazy initialized on first use, immutable thereafter.
+     * Require lock to get the pointer & do optional initialization
+     */
+    virCPUDefPtr hostcpu;
+
+    /* Immutable value */
+    virArch hostarch;
 
     /* Immutable pointer, Immutable object */
     virDomainXMLOptionPtr xmlopt;
@@ -290,7 +306,7 @@ struct _virQEMUDriver {
     /* Immutable pointer, immutable object */
     virPortAllocatorRangePtr migrationPorts;
 
-    /* Immutable pointer, lockless APIs*/
+    /* Immutable pointer, lockless APIs */
     virSysinfoDefPtr hostsysinfo;
 
     /* Immutable pointer. lockless access */
@@ -303,7 +319,8 @@ struct _virQEMUDriver {
     virHashAtomicPtr migrationErrors;
 };
 
-virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged);
+virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged,
+                                              const char *root);
 
 int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
                                 const char *filename,
@@ -316,8 +333,9 @@ int
 virQEMUDriverConfigSetDefaults(virQEMUDriverConfigPtr cfg);
 
 virQEMUDriverConfigPtr virQEMUDriverGetConfig(virQEMUDriverPtr driver);
-bool virQEMUDriverIsPrivileged(virQEMUDriverPtr driver);
 
+virCapsHostNUMAPtr virQEMUDriverGetHostNUMACaps(virQEMUDriverPtr driver);
+virCPUDefPtr virQEMUDriverGetHostCPU(virQEMUDriverPtr driver);
 virCapsPtr virQEMUDriverCreateCapabilities(virQEMUDriverPtr driver);
 virCapsPtr virQEMUDriverGetCapabilities(virQEMUDriverPtr driver,
                                         bool refresh);
@@ -340,7 +358,7 @@ bool qemuSharedDeviceEntryDomainExists(qemuSharedDeviceEntryPtr entry,
 char *qemuGetSharedDeviceKey(const char *disk_path)
     ATTRIBUTE_NONNULL(1);
 
-void qemuSharedDeviceEntryFree(void *payload, const void *name);
+void qemuSharedDeviceEntryFree(void *payload);
 
 int qemuAddSharedDisk(virQEMUDriverPtr driver,
                       virDomainDiskDefPtr disk,
@@ -365,25 +383,26 @@ int qemuRemoveSharedDisk(virQEMUDriverPtr driver,
 int qemuSetUnprivSGIO(virDomainDeviceDefPtr dev);
 
 int qemuDriverAllocateID(virQEMUDriverPtr driver);
-virDomainXMLOptionPtr virQEMUDriverCreateXMLConf(virQEMUDriverPtr driver);
+virDomainXMLOptionPtr virQEMUDriverCreateXMLConf(virQEMUDriverPtr driver,
+                                                 const char *defsecmodel);
 
 int qemuTranslateSnapshotDiskSourcePool(virDomainSnapshotDiskDefPtr def);
 
-char * qemuGetBaseHugepagePath(virHugeTLBFSPtr hugepage);
-char * qemuGetDomainHugepagePath(const virDomainDef *def,
+char * qemuGetBaseHugepagePath(virQEMUDriverPtr driver,
+                               virHugeTLBFSPtr hugepage);
+char * qemuGetDomainHugepagePath(virQEMUDriverPtr driver,
+                                 const virDomainDef *def,
                                  virHugeTLBFSPtr hugepage);
 
-int qemuGetDomainHupageMemPath(const virDomainDef *def,
-                               virQEMUDriverConfigPtr cfg,
+int qemuGetDomainHupageMemPath(virQEMUDriverPtr driver,
+                               const virDomainDef *def,
                                unsigned long long pagesize,
                                char **memPath);
 
-int qemuGetMemoryBackingBasePath(virQEMUDriverConfigPtr cfg,
-                                 char **path);
-int qemuGetMemoryBackingDomainPath(const virDomainDef *def,
-                                   virQEMUDriverConfigPtr cfg,
+int qemuGetMemoryBackingDomainPath(virQEMUDriverPtr driver,
+                                   const virDomainDef *def,
                                    char **path);
-int qemuGetMemoryBackingPath(const virDomainDef *def,
-                             virQEMUDriverConfigPtr cfg,
+int qemuGetMemoryBackingPath(virQEMUDriverPtr driver,
+                             const virDomainDef *def,
                              const char *alias,
                              char **memPath);

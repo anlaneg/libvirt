@@ -1051,6 +1051,20 @@ typedef enum {
  */
 # define VIR_MIGRATE_PARAM_PARALLEL_CONNECTIONS     "parallel.connections"
 
+/**
+ * VIR_MIGRATE_PARAM_TLS_DESTINATION:
+ *
+ * virDomainMigrate* params field: override the destination host name used for
+ * TLS verification. As VIR_TYPED_PARAM_STRING.
+ *
+ * Normally the TLS certificate from the destination host must match the host's
+ * name for TLS verification to succeed. When the certificate does not match
+ * the destination hostname and the expected certificate's hostname is known,
+ * this parameter can be used to pass this expected hostname when starting
+ * the migration.
+ */
+# define VIR_MIGRATE_PARAM_TLS_DESTINATION          "tls.destination"
+
 /* Domain migration. */
 virDomainPtr virDomainMigrate (virDomainPtr domain, virConnectPtr dconn,
                                unsigned long flags, const char *dname,
@@ -1414,7 +1428,7 @@ char *                  virDomainGetSchedulerType(virDomainPtr domain,
 # define VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS "device_write_bytes_sec"
 
 
-/* Set Blkio tunables for the domain*/
+/* Set Blkio tunables for the domain */
 int     virDomainSetBlkioParameters(virDomainPtr domain,
                                     virTypedParameterPtr params,
                                     int nparams, unsigned int flags);
@@ -1422,7 +1436,7 @@ int     virDomainGetBlkioParameters(virDomainPtr domain,
                                     virTypedParameterPtr params,
                                     int *nparams, unsigned int flags);
 
-/* Manage memory parameters.  */
+/* Manage memory parameters. */
 
 /**
  * VIR_DOMAIN_MEMORY_PARAM_UNLIMITED:
@@ -1469,7 +1483,7 @@ int     virDomainGetBlkioParameters(virDomainPtr domain,
 
 # define VIR_DOMAIN_MEMORY_SWAP_HARD_LIMIT "swap_hard_limit"
 
-/* Set memory tunables for the domain*/
+/* Set memory tunables for the domain */
 int     virDomainSetMemoryParameters(virDomainPtr domain,
                                      virTypedParameterPtr params,
                                      int nparams, unsigned int flags);
@@ -1553,6 +1567,12 @@ int                     virDomainSetMemoryStatsPeriod (virDomainPtr domain,
 int                     virDomainGetMaxVcpus    (virDomainPtr domain);
 int                     virDomainGetSecurityLabel (virDomainPtr domain,
                                                    virSecurityLabelPtr seclabel);
+
+typedef enum {
+    VIR_DOMAIN_GET_HOSTNAME_LEASE = (1 << 0), /* Parse DHCP lease file */
+    VIR_DOMAIN_GET_HOSTNAME_AGENT = (1 << 1), /* Query qemu guest agent */
+} virDomainGetHostnameFlags;
+
 char *                  virDomainGetHostname    (virDomainPtr domain,
                                                  unsigned int flags);
 int                     virDomainGetSecurityLabelList (virDomainPtr domain,
@@ -1748,7 +1768,7 @@ struct _virDomainBlockInfo {
                                     * holes, similar to 'du') */
     unsigned long long physical;   /* host physical size in bytes of
                                     * the image container (last
-                                    * offset, similar to 'ls')*/
+                                    * offset, similar to 'ls') */
 };
 
 int                     virDomainGetBlockInfo(virDomainPtr dom,
@@ -2146,6 +2166,7 @@ typedef enum {
     VIR_DOMAIN_STATS_BLOCK = (1 << 5), /* return domain block info */
     VIR_DOMAIN_STATS_PERF = (1 << 6), /* return domain perf event info */
     VIR_DOMAIN_STATS_IOTHREAD = (1 << 7), /* return iothread poll info */
+    VIR_DOMAIN_STATS_MEMORY = (1 << 8), /* return domain memory info */
 } virDomainStatsTypes;
 
 typedef enum {
@@ -2445,6 +2466,9 @@ typedef enum {
     /* Active Block Commit (virDomainBlockCommit with flags), job
      * exists as long as sync is active */
     VIR_DOMAIN_BLOCK_JOB_TYPE_ACTIVE_COMMIT = 4,
+
+    /* Backup (virDomainBackupBegin) */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_BACKUP = 5,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_BLOCK_JOB_TYPE_LAST
@@ -3151,6 +3175,7 @@ typedef enum {
  */
 typedef enum {
     VIR_DOMAIN_EVENT_CRASHED_PANICKED = 0, /* Guest was panicked */
+    VIR_DOMAIN_EVENT_CRASHED_CRASHLOADED = 1, /* Guest was crashloaded */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_CRASHED_LAST
@@ -3246,6 +3271,8 @@ struct _virDomainJobInfo {
 typedef enum {
     VIR_DOMAIN_JOB_STATS_COMPLETED = 1 << 0, /* return stats of a recently
                                               * completed job */
+    VIR_DOMAIN_JOB_STATS_KEEP_COMPLETED = 1 << 1, /* don't remove completed
+                                                     stats when reading them */
 } virDomainGetJobStatsFlags;
 
 int virDomainGetJobInfo(virDomainPtr dom,
@@ -3267,6 +3294,7 @@ typedef enum {
     VIR_DOMAIN_JOB_OPERATION_SNAPSHOT = 6,
     VIR_DOMAIN_JOB_OPERATION_SNAPSHOT_REVERT = 7,
     VIR_DOMAIN_JOB_OPERATION_DUMP = 8,
+    VIR_DOMAIN_JOB_OPERATION_BACKUP = 9,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_JOB_OPERATION_LAST
@@ -3576,6 +3604,36 @@ typedef enum {
  */
 # define VIR_DOMAIN_JOB_AUTO_CONVERGE_THROTTLE  "auto_converge_throttle"
 
+/**
+ * VIR_DOMAIN_JOB_SUCCESS:
+ *
+ * virDomainGetJobStats field: Present only in statistics for a completed job.
+ * Successful completion of the job as VIR_TYPED_PARAM_BOOLEAN.
+ */
+# define VIR_DOMAIN_JOB_SUCCESS "success"
+
+/**
+ * VIR_DOMAIN_JOB_ERRMSG:
+ *
+ * virDomainGetJobStats field: Present only in statistics for a completed job.
+ * Optional error message for a failed job.
+ */
+# define VIR_DOMAIN_JOB_ERRMSG "errmsg"
+
+
+/**
+ * VIR_DOMAIN_JOB_DISK_TEMP_USED:
+ * virDomainGetJobStats field: current usage of temporary disk space for the
+ * job in bytes as VIR_TYPED_PARAM_ULLONG.
+ */
+# define VIR_DOMAIN_JOB_DISK_TEMP_USED "disk_temp_used"
+
+/**
+ * VIR_DOMAIN_JOB_DISK_TEMP_TOTAL:
+ * virDomainGetJobStats field: possible total temporary disk space for the
+ * job in bytes as VIR_TYPED_PARAM_ULLONG.
+ */
+# define VIR_DOMAIN_JOB_DISK_TEMP_TOTAL "disk_temp_total"
 
 /**
  * virConnectDomainEventGenericCallback:
@@ -4106,8 +4164,10 @@ typedef void (*virConnectDomainEventMigrationIterationCallback)(virConnectPtr co
  * @nparams: size of the params array
  * @opaque: application specific data
  *
- * This callback occurs when a job (such as migration) running on the domain
- * is completed. The params array will contain statistics of the just completed
+ * This callback occurs when a job (such as migration or backup) running on
+ * the domain is completed.
+ *
+ * The params array will contain statistics of the just completed
  * job as virDomainGetJobStats would return. The callback must not free @params
  * (the array will be freed once the callback finishes).
  *
@@ -4915,5 +4975,28 @@ int virDomainGetGuestInfo(virDomainPtr domain,
                           virTypedParameterPtr *params,
                           int *nparams,
                           unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_BLOCK = -2,
+    VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_DEFAULT = -1,
+    VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_NOWAIT = 0,
+} virDomainAgentResponseTimeoutValues;
+
+int virDomainAgentSetResponseTimeout(virDomainPtr domain,
+                                     int timeout,
+                                     unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_BACKUP_BEGIN_REUSE_EXTERNAL = (1 << 0), /* reuse separately
+                                                          provided images */
+} virDomainBackupBeginFlags;
+
+int virDomainBackupBegin(virDomainPtr domain,
+                         const char *backupXML,
+                         const char *checkpointXML,
+                         unsigned int flags);
+
+char *virDomainBackupGetXMLDesc(virDomainPtr domain,
+                                unsigned int flags);
 
 #endif /* LIBVIRT_DOMAIN_H */

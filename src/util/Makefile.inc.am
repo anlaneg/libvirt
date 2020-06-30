@@ -11,8 +11,6 @@ UTIL_SOURCES = \
 	util/virarch.h \
 	util/virarptable.c \
 	util/virarptable.h \
-	util/viratomic.c \
-	util/viratomic.h \
 	util/viraudit.c \
 	util/viraudit.h \
 	util/virauth.c \
@@ -21,6 +19,8 @@ UTIL_SOURCES = \
 	util/virauthconfig.h \
 	util/virbitmap.c \
 	util/virbitmap.h \
+	util/virbpf.c \
+	util/virbpf.h \
 	util/virbuffer.c \
 	util/virbuffer.h \
 	util/virperf.c \
@@ -33,8 +33,8 @@ UTIL_SOURCES = \
 	util/vircgroupv1.h \
 	util/vircgroupv2.c \
 	util/vircgroupv2.h \
-	util/virclosecallbacks.c \
-	util/virclosecallbacks.h \
+	util/vircgroupv2devices.c \
+	util/vircgroupv2devices.h \
 	util/vircommand.c \
 	util/vircommand.h \
 	util/vircommandpriv.h \
@@ -42,6 +42,8 @@ UTIL_SOURCES = \
 	util/virconf.h \
 	util/vircrypto.c \
 	util/vircrypto.h \
+	util/virdaemon.c \
+	util/virdaemon.h \
 	util/virdbus.c \
 	util/virdbus.h \
 	util/virdbuspriv.h \
@@ -59,8 +61,12 @@ UTIL_SOURCES = \
 	util/virerrorpriv.h \
 	util/virevent.c \
 	util/virevent.h \
-	util/vireventpoll.c \
-	util/vireventpoll.h \
+	util/vireventglib.c \
+	util/vireventglib.h \
+	util/vireventglibwatch.c \
+	util/vireventglibwatch.h \
+	util/vireventthread.c \
+	util/vireventthread.h \
 	util/virfcp.c \
 	util/virfcp.h \
 	util/virfdstream.c \
@@ -88,8 +94,6 @@ UTIL_SOURCES = \
 	util/virhostcpu.c \
 	util/virhostcpu.h \
 	util/virhostcpupriv.h \
-	util/virhostdev.c \
-	util/virhostdev.h \
 	util/virhostmem.c \
 	util/virhostmem.h \
 	util/virhostuptime.c \
@@ -106,8 +110,6 @@ UTIL_SOURCES = \
 	util/virjson.h \
 	util/virkeycode.c \
 	util/virkeycode.h \
-	util/virkeyfile.c \
-	util/virkeyfile.h \
 	util/virlease.c \
 	util/virlease.h \
 	util/virlockspace.c \
@@ -146,6 +148,8 @@ UTIL_SOURCES = \
 	util/virnetlink.h \
 	util/virnodesuspend.c \
 	util/virnodesuspend.h \
+	util/virnvme.c \
+	util/virnvme.h \
 	util/virkmod.c \
 	util/virkmod.h \
 	util/virnuma.c \
@@ -182,6 +186,8 @@ UTIL_SOURCES = \
 	util/virseclabel.h \
 	util/virsecret.c \
 	util/virsecret.h \
+	util/virsocket.c \
+	util/virsocket.h \
 	util/virsocketaddr.c \
 	util/virsocketaddr.h \
 	util/virstorageencryption.c \
@@ -238,7 +244,7 @@ EXTRA_DIST += \
 	$(srcdir)/keycodemapdb/tools/keymap-gen \
 	$(NULL)
 
-
+# Sync with docs/
 KEYCODES = linux osx atset1 atset2 atset3 xtkbd usb win32 qnum
 KEYNAMES = linux osx win32
 
@@ -247,16 +253,8 @@ KEYTABLES = \
 	$(KEYNAMES:%=util/virkeynametable_%.h) \
 	$(NULL)
 
-KEYPODS = $(KEYCODES:%=util/virkeycode-%.pod) \
-	  $(KEYNAMES:%=util/virkeyname-%.pod)
-KEYMANS = $(KEYPODS:%.pod=%.7)
-
-man7_MANS += $(KEYMANS)
-
-UTIL_SOURCES += $(KEYTABLES)
 BUILT_SOURCES += $(KEYTABLES)
-MAINTAINERCLEANFILES += $(KEYTABLES)
-CLEANFILES += $(KEYMANS) $(KEYPODS)
+CLEANFILES += $(KEYTABLES)
 
 UTIL_IO_HELPER_SOURCES = util/iohelper.c
 
@@ -265,6 +263,9 @@ libvirt_la_LIBADD = $(libvirt_la_BUILT_LIBADD)
 libvirt_la_BUILT_LIBADD += libvirt_util.la
 libvirt_util_la_SOURCES = \
 	$(UTIL_SOURCES) \
+	$(NULL)
+nodist_libvirt_util_la_SOURCES = \
+	$(KEYTABLES) \
 	$(NULL)
 libvirt_util_la_CFLAGS = \
 	$(CAPNG_CFLAGS) \
@@ -281,6 +282,7 @@ libvirt_util_la_CFLAGS = \
 	$(NULL)
 libvirt_util_la_LIBADD = \
 	-lm \
+	$(OPENPTY_LIBS) \
 	$(CAPNG_LIBS) \
 	$(YAJL_LIBS) \
 	$(LIBNL_LIBS) \
@@ -304,7 +306,7 @@ util/virkeycodetable_%.h: $(srcdir)/keycodemapdb/data/keymaps.csv \
 					      -e 's,\.h,,'` && \
 		$(MKDIR_P) util/ && \
 		$(RUNUTF8) $(PYTHON) $(srcdir)/keycodemapdb/tools/keymap-gen \
-			--lang stdc --varname virKeyCodeTable_$$NAME code-table \
+			code-table --lang stdc --varname virKeyCodeTable_$$NAME \
 			$(srcdir)/keycodemapdb/data/keymaps.csv $$NAME > $@-tmp && \
 		mv $@-tmp $@ || rm -f $@-tmp
 
@@ -314,40 +316,6 @@ util/virkeynametable_%.h: $(srcdir)/keycodemapdb/data/keymaps.csv \
 					      -e 's,\.h,,'` && \
 		$(MKDIR_P) util/ && \
 		$(RUNUTF8) $(PYTHON) $(srcdir)/keycodemapdb/tools/keymap-gen \
-			--lang stdc --varname virKeyNameTable_$$NAME name-table \
+			name-table --lang stdc --varname virKeyNameTable_$$NAME \
 			$(srcdir)/keycodemapdb/data/keymaps.csv $$NAME > $@-tmp && \
 		mv $@-tmp $@ || rm -f $@-tmp
-
-util/virkeycode-%.pod: $(srcdir)/keycodemapdb/data/keymaps.csv \
-			$(srcdir)/keycodemapdb/tools/keymap-gen Makefile.am
-	$(AM_V_GEN)export NAME=`echo $@ | sed -e 's,util/virkeycode-,,' \
-					      -e 's,\.pod,,'` && \
-		$(MKDIR_P) util/ && \
-		$(RUNUTF8) $(PYTHON) $(srcdir)/keycodemapdb/tools/keymap-gen \
-		--lang pod \
-		--varname "virkeycode-$$NAME - Key code values for $$NAME" \
-		code-docs \
-		$(srcdir)/keycodemapdb/data/keymaps.csv $$NAME > \
-			$@-tmp && mv $@-tmp $@ || rm $@-tmp
-
-util/virkeyname-%.pod: $(srcdir)/keycodemapdb/data/keymaps.csv \
-			$(srcdir)/keycodemapdb/tools/keymap-gen Makefile.am
-	$(AM_V_GEN)export NAME=`echo $@ | sed -e 's,util/virkeyname-,,' \
-					      -e 's,\.pod,,'` && \
-		$(MKDIR_P) util/ && \
-		$(RUNUTF8) $(PYTHON) $(srcdir)/keycodemapdb/tools/keymap-gen \
-		--lang pod \
-		--varname "virkeyname-$$NAME - Key name values for $$NAME" \
-		name-docs \
-		$(srcdir)/keycodemapdb/data/keymaps.csv $$NAME > \
-			$@-tmp && mv $@-tmp $@ || rm $@-tmp
-
-util/virkey%.7: util/virkey%.pod
-	$(AM_V_GEN)$(POD2MAN) --section=7 $< $@-t1 && \
-	if grep 'POD ERROR' $@-t1; then rm $@-t1; exit 1; fi && \
-	sed \
-		-e 's|SYSCONFDIR|\@sysconfdir\@|g' \
-		-e 's|LOCALSTATEDIR|\@localstatedir\@|g' \
-		< $@-t1 > $@-t2 && \
-	rm -f $@-t1 && \
-	mv $@-t2 $@

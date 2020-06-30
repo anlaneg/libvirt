@@ -22,7 +22,6 @@
 #include <config.h>
 #include <unistd.h>
 
-#include "dirname.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "storage_backend_disk.h"
@@ -30,8 +29,10 @@
 #include "viralloc.h"
 #include "vircommand.h"
 #include "virfile.h"
+#include "virutil.h"
 #include "configmake.h"
 #include "virstring.h"
+#include "virdevmapper.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -531,6 +532,25 @@ virStorageBackendDiskBuildPool(virStoragePoolObjPtr pool,
 }
 
 
+/**
+ * Wipe the existing partition table
+ */
+static int
+virStorageBackendDiskDeletePool(virStoragePoolObjPtr pool,
+                                unsigned int flags)
+{
+    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+
+    virCheckFlags(0, -1);
+
+    if (virStorageBackendZeroPartitionTable(def->source.devices[0].path,
+                                            1024 * 1024) < 0)
+        return -1;
+
+    return 0;
+}
+
+
 struct virStorageVolNumData {
     int count;
 };
@@ -605,17 +625,14 @@ virStorageBackendDiskPartFormat(virStoragePoolObjPtr pool,
             /* XXX Only support one extended partition */
             switch (virStorageBackendDiskPartTypeToCreate(pool)) {
             case VIR_STORAGE_VOL_DISK_TYPE_PRIMARY:
-                if (virAsprintf(partFormat, "primary %s", partedFormat) < 0)
-                    return -1;
+                *partFormat = g_strdup_printf("primary %s", partedFormat);
                 break;
             case VIR_STORAGE_VOL_DISK_TYPE_LOGICAL:
                 /* make sure we have an extended partition */
                 if (virStoragePoolObjSearchVolume(pool,
                                                   virStorageVolPartFindExtended,
                                                   NULL)) {
-                    if (virAsprintf(partFormat, "logical %s",
-                                    partedFormat) < 0)
-                        return -1;
+                    *partFormat = g_strdup_printf("logical %s", partedFormat);
                 } else {
                     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                                    _("no extended partition found and no "
@@ -761,10 +778,10 @@ virStorageBackendDiskDeleteVol(virStoragePoolObjPtr pool,
                                unsigned int flags)
 {
     char *part_num = NULL;
-    char *dev_name;
+    g_autofree char *dev_name = NULL;
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
     char *src_path = def->source.devices[0].path;
-    char *srcname = last_component(src_path);
+    g_autofree char *srcname = g_path_get_basename(src_path);
     bool isDevMapperDevice;
     g_autofree char *devpath = NULL;
     g_autoptr(virCommand) cmd = NULL;
@@ -784,7 +801,7 @@ virStorageBackendDiskDeleteVol(virStoragePoolObjPtr pool,
      *     in both places */
     isDevMapperDevice = virIsDevMapperDevice(vol->target.path);
     if (isDevMapperDevice) {
-        dev_name = last_component(vol->target.path);
+        dev_name = g_path_get_basename(vol->target.path);
     } else {
         if (virFileResolveLink(vol->target.path, &devpath) < 0) {
             virReportSystemError(errno,
@@ -792,7 +809,7 @@ virStorageBackendDiskDeleteVol(virStoragePoolObjPtr pool,
                                  vol->target.path);
             return -1;
         }
-        dev_name = last_component(devpath);
+        dev_name = g_path_get_basename(devpath);
     }
 
     VIR_DEBUG("dev_name=%s, srcname=%s", dev_name, srcname);
@@ -957,6 +974,7 @@ virStorageBackend virStorageBackendDisk = {
     .startPool = virStorageBackendDiskStartPool,
     .buildPool = virStorageBackendDiskBuildPool,
     .refreshPool = virStorageBackendDiskRefreshPool,
+    .deletePool = virStorageBackendDiskDeletePool,
 
     .createVol = virStorageBackendDiskCreateVol,
     .deleteVol = virStorageBackendDiskDeleteVol,

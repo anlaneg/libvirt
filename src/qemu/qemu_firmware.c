@@ -20,8 +20,6 @@
 
 #include <config.h>
 
-#include <fnmatch.h>
-
 #include "qemu_firmware.h"
 #include "qemu_interop_config.h"
 #include "configmake.h"
@@ -653,8 +651,7 @@ qemuFirmwareInterfaceFormat(virJSONValuePtr doc,
     g_autoptr(virJSONValue) interfacesJSON = NULL;
     size_t i;
 
-    if (!(interfacesJSON = virJSONValueNewArray()))
-        return -1;
+    interfacesJSON = virJSONValueNewArray();
 
     for (i = 0; i < fw->ninterfaces; i++) {
         if (virJSONValueArrayAppendString(interfacesJSON,
@@ -675,11 +672,8 @@ qemuFirmwareInterfaceFormat(virJSONValuePtr doc,
 static virJSONValuePtr
 qemuFirmwareFlashFileFormat(qemuFirmwareFlashFile flash)
 {
-    g_autoptr(virJSONValue) json = NULL;
+    g_autoptr(virJSONValue) json = virJSONValueNewObject();
     virJSONValuePtr ret;
-
-    if (!(json = virJSONValueNewObject()))
-        return NULL;
 
     if (virJSONValueObjectAppendString(json,
                                        "filename",
@@ -757,10 +751,7 @@ static int
 qemuFirmwareMappingFormat(virJSONValuePtr doc,
                           qemuFirmwarePtr fw)
 {
-    g_autoptr(virJSONValue) mapping = NULL;
-
-    if (!(mapping = virJSONValueNewObject()))
-        return -1;
+    g_autoptr(virJSONValue) mapping = virJSONValueNewObject();
 
     if (virJSONValueObjectAppendString(mapping,
                                        "device",
@@ -801,25 +792,20 @@ qemuFirmwareTargetFormat(virJSONValuePtr doc,
     g_autoptr(virJSONValue) targetsJSON = NULL;
     size_t i;
 
-    if (!(targetsJSON = virJSONValueNewArray()))
-        return -1;
+    targetsJSON = virJSONValueNewArray();
 
     for (i = 0; i < fw->ntargets; i++) {
         qemuFirmwareTargetPtr t = fw->targets[i];
-        g_autoptr(virJSONValue) target = NULL;
+        g_autoptr(virJSONValue) target = virJSONValueNewObject();
         g_autoptr(virJSONValue) machines = NULL;
         size_t j;
-
-        if (!(target = virJSONValueNewObject()))
-            return -1;
 
         if (virJSONValueObjectAppendString(target,
                                            "architecture",
                                            virQEMUCapsArchToString(t->architecture)) < 0)
             return -1;
 
-        if (!(machines = virJSONValueNewArray()))
-            return -1;
+        machines = virJSONValueNewArray();
 
         for (j = 0; j < t->nmachines; j++) {
             if (virJSONValueArrayAppendString(machines,
@@ -853,8 +839,7 @@ qemuFirmwareFeatureFormat(virJSONValuePtr doc,
     g_autoptr(virJSONValue) featuresJSON = NULL;
     size_t i;
 
-    if (!(featuresJSON = virJSONValueNewArray()))
-        return -1;
+    featuresJSON = virJSONValueNewArray();
 
     for (i = 0; i < fw->nfeatures; i++) {
         if (virJSONValueArrayAppendString(featuresJSON,
@@ -875,12 +860,9 @@ qemuFirmwareFeatureFormat(virJSONValuePtr doc,
 char *
 qemuFirmwareFormat(qemuFirmwarePtr fw)
 {
-    g_autoptr(virJSONValue) doc = NULL;
+    g_autoptr(virJSONValue) doc = virJSONValueNewObject();
 
     if (!fw)
-        return NULL;
-
-    if (!(doc = virJSONValueNewObject()))
         return NULL;
 
     if (qemuFirmwareInterfaceFormat(doc, fw) < 0)
@@ -921,12 +903,29 @@ qemuFirmwareMatchesMachineArch(const qemuFirmware *fw,
             continue;
 
         for (j = 0; j < fw->targets[i]->nmachines; j++) {
-            if (fnmatch(fw->targets[i]->machines[j], machine, 0) == 0)
+            if (g_pattern_match_simple(fw->targets[i]->machines[j], machine))
                 return true;
         }
     }
 
     return false;
+}
+
+
+static qemuFirmwareOSInterface
+qemuFirmwareOSInterfaceTypeFromOsDefFirmware(int fw)
+{
+    switch (fw) {
+    case VIR_DOMAIN_OS_DEF_FIRMWARE_BIOS:
+        return QEMU_FIRMWARE_OS_INTERFACE_BIOS;
+    case VIR_DOMAIN_OS_DEF_FIRMWARE_EFI:
+        return QEMU_FIRMWARE_OS_INTERFACE_UEFI;
+    case VIR_DOMAIN_OS_DEF_FIRMWARE_NONE:
+    case VIR_DOMAIN_OS_DEF_FIRMWARE_LAST:
+        break;
+    }
+
+    return QEMU_FIRMWARE_OS_INTERFACE_NONE;
 }
 
 
@@ -936,16 +935,31 @@ qemuFirmwareMatchDomain(const virDomainDef *def,
                         const char *path)
 {
     size_t i;
+    qemuFirmwareOSInterface want;
     bool supportsS3 = false;
     bool supportsS4 = false;
     bool requiresSMM = false;
     bool supportsSEV = false;
 
+    want = qemuFirmwareOSInterfaceTypeFromOsDefFirmware(def->os.firmware);
+
+    if (want == QEMU_FIRMWARE_OS_INTERFACE_NONE &&
+        def->os.loader) {
+        want = qemuFirmwareOSInterfaceTypeFromOsDefFirmware(def->os.loader->type);
+
+        if (fw->mapping.device != QEMU_FIRMWARE_DEVICE_FLASH ||
+            STRNEQ(def->os.loader->path, fw->mapping.data.flash.executable.filename)) {
+            VIR_DEBUG("Not matching FW interface %s or loader "
+                      "path '%s' for user provided path '%s'",
+                      qemuFirmwareDeviceTypeToString(fw->mapping.device),
+                      fw->mapping.data.flash.executable.filename,
+                      def->os.loader->path);
+            return false;
+        }
+    }
+
     for (i = 0; i < fw->ninterfaces; i++) {
-        if ((def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_BIOS &&
-             fw->interfaces[i] == QEMU_FIRMWARE_OS_INTERFACE_BIOS) ||
-            (def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_EFI &&
-             fw->interfaces[i] == QEMU_FIRMWARE_OS_INTERFACE_UEFI))
+        if (fw->interfaces[i] == want)
             break;
     }
 
@@ -1056,8 +1070,7 @@ qemuFirmwareEnableFeatures(virQEMUDriverPtr driver,
         VIR_FREE(def->os.loader->templt);
         def->os.loader->templt = g_strdup(flash->nvram_template.filename);
 
-        if (qemuDomainNVRAMPathGenerate(cfg, def) < 0)
-            return -1;
+        qemuDomainNVRAMPathGenerate(cfg, def);
 
         VIR_DEBUG("decided on firmware '%s' varstore template '%s'",
                   def->os.loader->path,
@@ -1205,28 +1218,43 @@ qemuFirmwareFetchParsedConfigs(bool privileged,
 
 int
 qemuFirmwareFillDomain(virQEMUDriverPtr driver,
-                       virDomainObjPtr vm,
+                       virDomainDefPtr def,
                        unsigned int flags)
 {
     VIR_AUTOSTRINGLIST paths = NULL;
     qemuFirmwarePtr *firmwares = NULL;
     ssize_t nfirmwares = 0;
     const qemuFirmware *theone = NULL;
+    bool needResult = true;
     size_t i;
     int ret = -1;
 
     if (!(flags & VIR_QEMU_PROCESS_START_NEW))
         return 0;
 
-    if (vm->def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_NONE)
-        return 0;
+    /* Fill in FW paths if either os.firmware is enabled, or
+     * loader path was provided with no nvram varstore. */
+    if (def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_NONE) {
+        /* This is horrific check, but loosely said, if UEFI
+         * image was provided by the old method (by specifying
+         * its path in domain XML) but no template for NVRAM was
+         * specified and the varstore doesn't exist ... */
+        if (!virDomainDefHasOldStyleROUEFI(def) ||
+            def->os.loader->templt ||
+            virFileExists(def->os.loader->nvram))
+            return 0;
+
+        /* ... then we want to consult JSON FW descriptors first,
+         * but we don't want to fail if we haven't found a match. */
+        needResult = false;
+    }
 
     if ((nfirmwares = qemuFirmwareFetchParsedConfigs(driver->privileged,
                                                      &firmwares, &paths)) < 0)
         return -1;
 
     for (i = 0; i < nfirmwares; i++) {
-        if (qemuFirmwareMatchDomain(vm->def, firmwares[i], paths[i])) {
+        if (qemuFirmwareMatchDomain(def, firmwares[i], paths[i])) {
             theone = firmwares[i];
             VIR_DEBUG("Found matching firmware (description path '%s')",
                       paths[i]);
@@ -1235,9 +1263,16 @@ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
     }
 
     if (!theone) {
-        virReportError(VIR_ERR_OPERATION_FAILED,
-                       _("Unable to find any firmware to satisfy '%s'"),
-                       virDomainOsDefFirmwareTypeToString(vm->def->os.firmware));
+        if (needResult) {
+            virReportError(VIR_ERR_OPERATION_FAILED,
+                           _("Unable to find any firmware to satisfy '%s'"),
+                           virDomainOsDefFirmwareTypeToString(def->os.firmware));
+        } else {
+            VIR_DEBUG("Unable to find NVRAM template for '%s', "
+                      "falling back to old style",
+                      NULLSTR(def->os.loader ? def->os.loader->path : NULL));
+            ret = 0;
+        }
         goto cleanup;
     }
 
@@ -1246,10 +1281,10 @@ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
      * likely that admin/FW manufacturer messed up. */
     qemuFirmwareSanityCheck(theone, paths[i]);
 
-    if (qemuFirmwareEnableFeatures(driver, vm->def, theone) < 0)
+    if (qemuFirmwareEnableFeatures(driver, def, theone) < 0)
         goto cleanup;
 
-    vm->def->os.firmware = VIR_DOMAIN_OS_DEF_FIRMWARE_NONE;
+    def->os.firmware = VIR_DOMAIN_OS_DEF_FIRMWARE_NONE;
 
     ret = 0;
  cleanup:

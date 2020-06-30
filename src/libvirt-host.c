@@ -51,7 +51,7 @@ VIR_LOG_INIT("libvirt.host");
 int
 virConnectRef(virConnectPtr conn)
 {
-    VIR_DEBUG("conn=%p refs=%d", conn, conn ? conn->parent.parent.u.s.refs : 0);
+    VIR_DEBUG("conn=%p", conn);
 
     virResetLastError();
 
@@ -398,6 +398,22 @@ virConnectGetMaxVcpus(virConnectPtr conn,
  * @info: pointer to a virNodeInfo structure allocated by the user
  *
  * Extract hardware information about the node.
+ *
+ * Use of this API is strongly discouraged as the information provided
+ * is not guaranteed to be accurate on all hardware platforms.
+ *
+ * The mHZ value merely reflects the speed that the first CPU in the
+ * machine is currently running at. This speed may vary across CPUs
+ * and changes continually as the host OS throttles.
+ *
+ * The nodes/sockets/cores/threads data is potentially inaccurate as
+ * it assumes a symmetric installation. If one NUMA node has more
+ * sockets populated that another NUMA node this information will be
+ * wrong. It is also not able to report about CPU dies.
+ *
+ * Applications are recommended to use the virConnectGetCapabilities()
+ * call instead, which provides all the information except CPU mHZ,
+ * in a more accurate representation.
  *
  * Returns 0 in case of success and -1 in case of failure.
  */
@@ -910,7 +926,7 @@ virNodeGetCellsFreeMemory(virConnectPtr conn, unsigned long long *freeMems,
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(freeMems, error);
+    virCheckNonNullArrayArgGoto(freeMems, maxCells, error);
     virCheckPositiveArgGoto(maxCells, error);
     virCheckNonNegativeArgGoto(startCell, error);
 

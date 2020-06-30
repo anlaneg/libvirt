@@ -47,7 +47,7 @@ testQemuCommandBuildFromJSON(const void *opaque)
         return -1;
     }
 
-    if (virQEMUBuildCommandLineJSON(val, &buf, data->arrayfunc) < 0) {
+    if (virQEMUBuildCommandLineJSON(val, &buf, NULL, false, data->arrayfunc) < 0) {
         fprintf(stderr,
                 "\nvirQEMUBuildCommandlineJSON failed process JSON:\n%s\n",
                 data->props);
@@ -75,11 +75,6 @@ mymain(void)
 {
     int ret = 0;
     testQemuCommandBuildObjectFromJSONData data1;
-
-#if !WITH_YAJL
-    fputs("libvirt not compiled with JSON support, skipping this test\n", stderr);
-    return EXIT_AM_SKIP;
-#endif
 
     virTestCounterReset("testQemuCommandBuildFromJSON");
 

@@ -26,7 +26,6 @@
 #include "virerror.h"
 #include "virconf.h"
 #include "viralloc.h"
-#include "verify.h"
 #include "xenxs_private.h"
 #include "xen_xm.h"
 #include "domain_conf.h"
@@ -90,11 +89,9 @@ xenParseXMOS(virConfPtr conf, virDomainDefPtr def)
             return -1;
 
         if (root && extra) {
-            if (virAsprintf(&def->os.cmdline, "root=%s %s", root, extra) < 0)
-                return -1;
+            def->os.cmdline = g_strdup_printf("root=%s %s", root, extra);
         } else if (root) {
-            if (virAsprintf(&def->os.cmdline, "root=%s", root) < 0)
-                return -1;
+            def->os.cmdline = g_strdup_printf("root=%s", root);
         } else if (extra) {
             def->os.cmdline = g_strdup(extra);
         }
@@ -125,7 +122,7 @@ xenParseXMDisk(char *entry, int hvm)
      * The DEST-DEVICE is optionally post-fixed with disk type
      */
 
-    /* Extract the source file path*/
+    /* Extract the source file path */
     if (!(offset = strchr(head, ',')))
         goto error;
 
@@ -133,8 +130,7 @@ xenParseXMDisk(char *entry, int hvm)
         /* No source file given, eg CDROM with no media */
         ignore_value(virDomainDiskSetSource(disk, NULL));
     } else {
-        if (VIR_STRNDUP(tmp, head, offset - head) < 0)
-            goto error;
+        tmp = g_strndup(head, offset - head);
 
         if (virDomainDiskSetSource(disk, tmp) < 0) {
             VIR_FREE(tmp);
@@ -170,8 +166,7 @@ xenParseXMDisk(char *entry, int hvm)
         /* The main type  phy:, file:, tap: ... */
         if ((tmp = strchr(src, ':')) != NULL) {
             len = tmp - src;
-            if (VIR_STRNDUP(tmp, src, len) < 0)
-                goto error;
+            tmp = g_strndup(src, len);
 
             if (virDomainDiskSetDriver(disk, tmp) < 0) {
                 VIR_FREE(tmp);
@@ -195,8 +190,7 @@ xenParseXMDisk(char *entry, int hvm)
                 goto error;
             len = tmp - src;
 
-            if (VIR_STRNDUP(driverType, src, len) < 0)
-                goto error;
+            driverType = g_strndup(src, len);
 
             if (STREQ(driverType, "aio"))
                 virDomainDiskSetFormat(disk, VIR_STORAGE_FILE_RAW);
@@ -469,7 +463,7 @@ xenParseXM(virConfPtr conf,
     if (xenParseXMInputDevs(conf, def) < 0)
          goto cleanup;
 
-    if (virDomainDefPostParse(def, caps, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
+    if (virDomainDefPostParse(def, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
                               xmlopt, NULL) < 0)
         goto cleanup;
 
@@ -586,7 +580,7 @@ xenFormatXMInputDevs(virConfPtr conf, virDomainDefPtr def)
 
 /* Computing the vcpu_avail bitmask works because MAX_VIRT_CPUS is
    either 32, or 64 on a platform where long is big enough.  */
-verify(MAX_VIRT_CPUS <= sizeof(1UL) * CHAR_BIT);
+G_STATIC_ASSERT(MAX_VIRT_CPUS <= sizeof(1UL) * CHAR_BIT);
 
 /*
  * Convert a virDomainDef object into an XM config record.

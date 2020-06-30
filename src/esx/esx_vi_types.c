@@ -1473,24 +1473,13 @@ int
 esxVI_DateTime_ConvertToCalendarTime(esxVI_DateTime *dateTime,
                                      long long *secondsSinceEpoch)
 {
-    char value[64] = "";
     char *tmp;
-    struct tm tm;
-    int milliseconds;
-    char sign;
-    int tz_hours;
-    int tz_minutes;
-    int tz_offset = 0;
+    g_autoptr(GDateTime) then = NULL;
+    g_autoptr(GTimeZone) tz = NULL;
+    int year, mon, mday, hour, min, sec, milliseconds;
 
     if (!dateTime || !secondsSinceEpoch) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
-        return -1;
-    }
-
-    if (virStrcpyStatic(value, dateTime->value) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("xsd:dateTime value '%s' too long for destination"),
-                       dateTime->value);
         return -1;
     }
 
@@ -1502,14 +1491,23 @@ esxVI_DateTime_ConvertToCalendarTime(esxVI_DateTime *dateTime,
      *
      * map negative years to 0, since the base for time_t is the year 1970.
      */
-    if (*value == '-') {
+    if (dateTime->value[0] == '-') {
         *secondsSinceEpoch = 0;
         return 0;
     }
 
-    tmp = strptime(value, "%Y-%m-%dT%H:%M:%S", &tm);
-
-    if (!tmp) {
+    if (/* year */
+        virStrToLong_i(dateTime->value, &tmp, 10, &year) < 0 || *tmp != '-' ||
+        /* month */
+        virStrToLong_i(tmp+1, &tmp, 10, &mon) < 0 || *tmp != '-' ||
+        /* day */
+        virStrToLong_i(tmp+1, &tmp, 10, &mday) < 0 || *tmp != 'T' ||
+        /* hour */
+        virStrToLong_i(tmp+1, &tmp, 10, &hour) < 0 || *tmp != ':' ||
+        /* minute */
+        virStrToLong_i(tmp+1, &tmp, 10, &min) < 0 || *tmp != ':' ||
+        /* second */
+        virStrToLong_i(tmp+1, &tmp, 10, &sec) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("xsd:dateTime value '%s' has unexpected format"),
                        dateTime->value);
@@ -1528,29 +1526,17 @@ esxVI_DateTime_ConvertToCalendarTime(esxVI_DateTime *dateTime,
 
         /* parse timezone offset if present. if missing assume UTC */
         if (*tmp == '+' || *tmp == '-') {
-            sign = *tmp;
-
-            if (virStrToLong_i(tmp + 1, &tmp, 10, &tz_hours) < 0 ||
-                *tmp != ':' ||
-                virStrToLong_i(tmp + 1, NULL, 10, &tz_minutes) < 0) {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("xsd:dateTime value '%s' has unexpected format"),
-                               dateTime->value);
-                return -1;
-            }
-
-            tz_offset = tz_hours * 60 * 60 + tz_minutes * 60;
-
-            if (sign == '-')
-                tz_offset = -tz_offset;
+            tz = g_time_zone_new(tmp);
         } else if (STREQ(tmp, "Z")) {
-            /* Z refers to UTC. tz_offset is already initialized to zero */
+            tz = g_time_zone_new_utc();
         } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("xsd:dateTime value '%s' has unexpected format"),
                            dateTime->value);
             return -1;
         }
+    } else {
+        tz = g_time_zone_new_utc();
     }
 
     /*
@@ -1561,7 +1547,8 @@ esxVI_DateTime_ConvertToCalendarTime(esxVI_DateTime *dateTime,
      * handling all the possible over- and underflows when trying to apply
      * it to the tm struct.
      */
-    *secondsSinceEpoch = timegm(&tm) - tz_offset;
+    then = g_date_time_new(tz, year, mon, mday, hour, min, sec);
+    *secondsSinceEpoch = (long long)g_date_time_to_unix(then);
 
     return 0;
 }

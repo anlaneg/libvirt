@@ -23,7 +23,9 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <termios.h>
+#ifndef WIN32
+# include <termios.h>
+#endif
 
 #include "internal.h"
 #include "virerror.h"
@@ -31,7 +33,6 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-#define GETTIMEOFDAY(T) gettimeofday(T, NULL)
 #define VSH_MAX_XML_FILE (10*1024*1024)
 #define VSH_MATCH(FLAG) (flags & (FLAG))
 

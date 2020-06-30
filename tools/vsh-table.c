@@ -25,7 +25,6 @@
 #include <stddef.h>
 #include <wchar.h>
 #include <wctype.h>
-#include "c-ctype.h"
 
 #include "viralloc.h"
 #include "virbuffer.h"
@@ -226,8 +225,8 @@ vshTableSafeEncode(const char *s, size_t *width)
 
     while (p && *p) {
         if ((*p == '\\' && *(p + 1) == 'x') ||
-            c_iscntrl(*p)) {
-            snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
+            g_ascii_iscntrl(*p)) {
+            g_snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
             buf += HEX_ENCODE_LENGTH;
             *width += HEX_ENCODE_LENGTH;
             p++;
@@ -244,8 +243,8 @@ vshTableSafeEncode(const char *s, size_t *width)
                  * Not valid multibyte sequence -- maybe it's
                  * printable char according to the current locales.
                  */
-                if (!c_isprint(*p)) {
-                    snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
+                if (!g_ascii_isprint(*p)) {
+                    g_snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
                     buf += HEX_ENCODE_LENGTH;
                     *width += HEX_ENCODE_LENGTH;
                 } else {
@@ -255,14 +254,14 @@ vshTableSafeEncode(const char *s, size_t *width)
             } else if (!iswprint(wc)) {
                 size_t i;
                 for (i = 0; i < len; i++) {
-                    snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", p[i]);
+                    g_snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", p[i]);
                     buf += HEX_ENCODE_LENGTH;
                     *width += HEX_ENCODE_LENGTH;
                 }
             } else {
                 memcpy(buf, p, len);
                 buf += len;
-                *width += wcwidth(wc);
+                *width += g_unichar_iszerowidth(wc) ? 0 : (g_unichar_iswide(wc) ? 2 : 1);
             }
             p += len;
         }

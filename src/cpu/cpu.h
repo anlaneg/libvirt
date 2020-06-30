@@ -27,6 +27,7 @@
 #include "cpu_conf.h"
 #include "cpu_x86_data.h"
 #include "cpu_ppc64_data.h"
+#include "cpu_arm_data.h"
 
 
 typedef struct _virCPUData virCPUData;
@@ -36,6 +37,7 @@ struct _virCPUData {
     union {
         virCPUx86Data x86;
         virCPUppc64Data ppc64;
+        virCPUarmData arm;
         /* generic driver needs no data */
     } data;
 };
@@ -182,6 +184,7 @@ virCPUDataNew(virArch arch);
 
 void
 virCPUDataFree(virCPUDataPtr data);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virCPUData, virCPUDataFree);
 
 bool
 virCPUGetHostIsSupported(virArch arch);
@@ -193,7 +196,7 @@ virCPUGetHost(virArch arch,
               virDomainCapsCPUModelsPtr models);
 
 virCPUDefPtr
-virCPUProbeHost(virArch arch);
+virCPUProbeHost(virArch arch) G_GNUC_NO_INLINE;
 
 virCPUDefPtr
 virCPUBaseline(virArch arch,
@@ -264,6 +267,9 @@ virCPUValidateFeatures(virArch arch,
 int
 virCPUDataAddFeature(virCPUDataPtr cpuData,
                      const char *name);
+
+bool
+virCPUArchIsSupported(virArch arch);
 
 /* virCPUDataFormat and virCPUDataParse are implemented for unit tests only and
  * have no real-life usage

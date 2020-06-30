@@ -89,6 +89,7 @@ static inline void virForceCloseHelper(int *fd)
  */
 #define VIR_AUTOCLOSE __attribute__((cleanup(virForceCloseHelper))) int
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(FILE, fclose);
 
 /* Opaque type for managing a wrapper around a fd.  */
 struct _virFileWrapperFd;
@@ -176,9 +177,6 @@ int virFileResolveAllLinks(const char *linkpath,
 int virFileIsLink(const char *linkpath)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-int virFileReadLink(const char *linkpath, char **resultpath)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
-
 char *virFindFileInPath(const char *file);
 
 char *virFileFindResource(const char *filename,
@@ -212,6 +210,7 @@ enum {
     VIR_FILE_SHFS_CEPH = (1 << 6),
     VIR_FILE_SHFS_GPFS = (1 << 7),
     VIR_FILE_SHFS_QB = (1 << 8),
+    VIR_FILE_SHFS_ACFS = (1 << 9),
 };
 
 int virFileIsSharedFSType(const char *path, int fstypes) ATTRIBUTE_NONNULL(1);
@@ -280,31 +279,8 @@ char *virFileBuildPath(const char *dir,
                        const char *ext) G_GNUC_WARN_UNUSED_RESULT;
 
 
-#ifdef WIN32
-/* On Win32, the canonical directory separator is the backslash, and
- * the search path separator is the semicolon. Note that also the
- * (forward) slash works as directory separator.
- */
-# define VIR_FILE_DIR_SEPARATOR '\\'
-# define VIR_FILE_DIR_SEPARATOR_S "\\"
-# define VIR_FILE_IS_DIR_SEPARATOR(c) ((c) == VIR_FILE_DIR_SEPARATOR || (c) == '/')
-# define VIR_FILE_PATH_SEPARATOR ';'
-# define VIR_FILE_PATH_SEPARATOR_S ";"
-
-#else  /* !WIN32 */
-
-# define VIR_FILE_DIR_SEPARATOR '/'
-# define VIR_FILE_DIR_SEPARATOR_S "/"
-# define VIR_FILE_IS_DIR_SEPARATOR(c) ((c) == VIR_FILE_DIR_SEPARATOR)
-# define VIR_FILE_PATH_SEPARATOR ':'
-# define VIR_FILE_PATH_SEPARATOR_S ":"
-
-#endif /* !WIN32 */
-
-bool virFileIsAbsPath(const char *path);
 int virFileAbsPath(const char *path,
                    char **abspath) G_GNUC_WARN_UNUSED_RESULT;
-const char *virFileSkipRoot(const char *path);
 void virFileRemoveLastComponent(char *path);
 
 int virFileOpenTty(int *ttymaster,
@@ -317,9 +293,6 @@ char *virFileFindMountPoint(const char *type);
 #define virBuildPath(path, ...) \
     virBuildPathInternal(path, __VA_ARGS__, NULL)
 int virBuildPathInternal(char **path, ...) G_GNUC_NULL_TERMINATED;
-
-int virFilePrintf(FILE *fp, const char *msg, ...)
-    G_GNUC_PRINTF(2, 3);
 
 typedef struct _virHugeTLBFS virHugeTLBFS;
 typedef virHugeTLBFS *virHugeTLBFSPtr;
@@ -363,6 +336,8 @@ int virFileReadValueInt(int *value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
 int virFileReadValueUint(unsigned int *value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
+int virFileReadValueUllong(unsigned long long *value, const char *format, ...)
+ G_GNUC_PRINTF(2, 3);
 int virFileReadValueBitmap(virBitmapPtr *value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
 int virFileReadValueScaledInt(unsigned long long *value, const char *format, ...)
@@ -397,3 +372,5 @@ int virFileSetXAttr(const char *path,
 int virFileRemoveXAttr(const char *path,
                        const char *name)
     G_GNUC_NO_INLINE;
+
+int virFileDataSync(int fd);

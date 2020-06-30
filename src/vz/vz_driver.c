@@ -30,7 +30,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <pwd.h>
-#include <sys/wait.h>
 #include <sys/time.h>
 #include <sys/statvfs.h>
 
@@ -49,6 +48,7 @@
 #include "virhostmem.h"
 #include "virhostcpu.h"
 #include "viraccessapicheck.h"
+#include "virutil.h"
 
 #include "vz_driver.h"
 #include "vz_utils.h"
@@ -116,13 +116,13 @@ vzBuildCapabilities(void)
                                    false, false)) == NULL)
         return NULL;
 
-    if (virCapabilitiesInitNUMA(caps) < 0)
+    if (!(caps->host.numa = virCapabilitiesHostNUMANewHost()))
         goto error;
 
     if (virCapabilitiesInitCaches(caps) < 0)
         goto error;
 
-    verify(G_N_ELEMENTS(archs) == G_N_ELEMENTS(emulators));
+    G_STATIC_ASSERT(G_N_ELEMENTS(archs) == G_N_ELEMENTS(emulators));
 
     for (i = 0; i < G_N_ELEMENTS(ostypes); i++)
         for (j = 0; j < G_N_ELEMENTS(archs); j++)
@@ -241,11 +241,16 @@ vzDomainDefAddDefaultInputDevices(virDomainDefPtr def)
 
 static int
 vzDomainDefPostParse(virDomainDefPtr def,
-                     virCapsPtr caps G_GNUC_UNUSED,
                      unsigned int parseFlags G_GNUC_UNUSED,
-                     void *opaque G_GNUC_UNUSED,
+                     void *opaque,
                      void *parseOpaque G_GNUC_UNUSED)
 {
+    vzDriverPtr driver = opaque;
+    if (!virCapabilitiesDomainSupported(driver->caps, def->os.type,
+                                        def->os.arch,
+                                        def->virtType))
+        return -1;
+
     if (vzDomainDefAddDefaultInputDevices(def) < 0)
         return -1;
 
@@ -254,7 +259,6 @@ vzDomainDefPostParse(virDomainDefPtr def,
 
 static int
 vzDomainDefValidate(const virDomainDef *def,
-                    virCapsPtr caps G_GNUC_UNUSED,
                     void *opaque)
 {
     if (vzCheckUnsupportedControllers(def, opaque) < 0)
@@ -266,7 +270,6 @@ vzDomainDefValidate(const virDomainDef *def,
 static int
 vzDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                            const virDomainDef *def,
-                           virCapsPtr caps G_GNUC_UNUSED,
                            unsigned int parseFlags G_GNUC_UNUSED,
                            void *opaque G_GNUC_UNUSED,
                            void *parseOpaque G_GNUC_UNUSED)
@@ -278,16 +281,26 @@ vzDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
         def->os.type == VIR_DOMAIN_OSTYPE_HVM)
         dev->data.net->model = VIR_DOMAIN_NET_MODEL_E1000;
 
+    if (dev->type == VIR_DOMAIN_DEVICE_VIDEO &&
+        dev->data.video->type == VIR_DOMAIN_VIDEO_TYPE_DEFAULT) {
+        if (def->os.type == VIR_DOMAIN_OSTYPE_HVM)
+            dev->data.video->type = VIR_DOMAIN_VIDEO_TYPE_VGA;
+        else
+            dev->data.video->type = VIR_DOMAIN_VIDEO_TYPE_PARALLELS;
+    }
+
     return 0;
 }
 
 static int
 vzDomainDeviceDefValidate(const virDomainDeviceDef *dev,
                           const virDomainDef *def,
-                          void *opaque G_GNUC_UNUSED)
+                          void *opaque)
 {
+    vzDriverPtr driver = opaque;
+
     if (dev->type == VIR_DOMAIN_DEVICE_DISK)
-        return vzCheckUnsupportedDisk(def, dev->data.disk, opaque);
+        return vzCheckUnsupportedDisk(def, dev->data.disk, &driver->vzCaps);
     else if (dev->type == VIR_DOMAIN_DEVICE_GRAPHICS)
         return vzCheckUnsupportedGraphics(dev->data.graphics);
 
@@ -318,7 +331,7 @@ vzDriverObjNew(void)
     if (!(driver = virObjectLockableNew(vzDriverClass)))
         return NULL;
 
-    vzDomainDefParserConfig.priv = &driver->vzCaps;
+    vzDomainDefParserConfig.priv = driver;
 
     if (!(driver->caps = vzBuildCapabilities()) ||
         !(driver->xmlopt = virDomainXMLOptionNew(&vzDomainDefParserConfig,
@@ -336,7 +349,7 @@ vzDriverObjNew(void)
     ignore_value(prlsdkLoadDomains(driver));
 
     /* As far as waitDomainJob finally calls virReportErrorHelper
-     * and we are not going to report it, reset it expicitly*/
+     * and we are not going to report it, reset it explicitly */
     virResetLastError();
 
     return driver;
@@ -713,6 +726,7 @@ static char *
 vzDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 {
     vzConnPtr privconn = domain->conn->privateData;
+    vzDriverPtr driver = privconn->driver;
     virDomainDefPtr def;
     virDomainObjPtr dom;
     char *ret = NULL;
@@ -728,7 +742,7 @@ vzDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     def = (flags & VIR_DOMAIN_XML_INACTIVE) &&
         dom->newDef ? dom->newDef : dom->def;
 
-    ret = virDomainDefFormat(def, privconn->driver->caps, flags);
+    ret = virDomainDefFormat(def, driver->xmlopt, flags);
 
  cleanup:
     virDomainObjEndAPI(&dom);
@@ -787,7 +801,7 @@ vzDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
     if (flags & VIR_DOMAIN_DEFINE_VALIDATE)
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
-    if ((def = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
+    if ((def = virDomainDefParseString(xml, driver->xmlopt,
                                        NULL, parse_flags)) == NULL)
         goto cleanup;
 
@@ -1491,7 +1505,7 @@ static int vzDomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
     if (virDomainAttachDeviceFlagsEnsureACL(domain->conn, dom->def, flags) < 0)
         goto cleanup;
 
-    dev = virDomainDeviceDefParse(xml, dom->def, driver->caps,
+    dev = virDomainDeviceDefParse(xml, dom->def,
                                   driver->xmlopt, NULL, VIR_DOMAIN_XML_INACTIVE);
     if (dev == NULL)
         goto cleanup;
@@ -1547,7 +1561,7 @@ static int vzDomainDetachDeviceFlags(virDomainPtr domain, const char *xml,
     if (virDomainDetachDeviceFlagsEnsureACL(domain->conn, dom->def, flags) < 0)
         goto cleanup;
 
-    dev = virDomainDeviceDefParse(xml, dom->def, driver->caps,
+    dev = virDomainDeviceDefParse(xml, dom->def,
                                   driver->xmlopt, NULL,
                                   VIR_DOMAIN_XML_INACTIVE |
                                   VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
@@ -1639,7 +1653,7 @@ static int vzDomainUpdateDeviceFlags(virDomainPtr domain,
     if (vzCheckConfigUpdateFlags(dom, &flags) < 0)
         goto cleanup;
 
-    if (!(dev = virDomainDeviceDefParse(xml, dom->def, driver->caps,
+    if (!(dev = virDomainDeviceDefParse(xml, dom->def,
                                         driver->xmlopt, NULL,
                                         VIR_DOMAIN_XML_INACTIVE)))
         goto cleanup;
@@ -2260,7 +2274,6 @@ vzDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot, unsigned int flags)
     virUUIDFormat(snapshot->domain->uuid, uuidstr);
 
     xml = virDomainSnapshotDefFormat(uuidstr, virDomainSnapshotObjGetDef(snap),
-                                     privconn->driver->caps,
                                      privconn->driver->xmlopt,
                                      virDomainSnapshotFormatConvertXMLFlags(flags));
 
@@ -2591,7 +2604,7 @@ vzDomainSnapshotCreateXML(virDomainPtr domain,
     if (flags & VIR_DOMAIN_SNAPSHOT_CREATE_VALIDATE)
         parse_flags |= VIR_DOMAIN_SNAPSHOT_PARSE_VALIDATE;
 
-    if (!(def = virDomainSnapshotDefParseString(xmlDesc, driver->caps,
+    if (!(def = virDomainSnapshotDefParseString(xmlDesc,
                                                 driver->xmlopt, NULL, NULL,
                                                 parse_flags)))
         goto cleanup;
@@ -2872,7 +2885,7 @@ vzDomainMigrateBeginStep(virDomainObjPtr dom,
                      | VZ_MIGRATION_COOKIE_DOMAIN_NAME) < 0)
         return NULL;
 
-    return virDomainDefFormat(dom->def, driver->caps,
+    return virDomainDefFormat(dom->def, driver->xmlopt,
                               VIR_DOMAIN_XML_MIGRATABLE);
 }
 
@@ -2935,8 +2948,7 @@ vzMigrationCreateURI(void)
         goto cleanup;
     }
 
-    if (virAsprintf(&uri, "vzmigr://%s", hostname) < 0)
-        goto cleanup;
+    uri = g_strdup_printf("vzmigr://%s", hostname);
 
  cleanup:
     VIR_FREE(hostname);
@@ -2988,7 +3000,7 @@ vzDomainMigratePrepare3Params(virConnectPtr conn,
                      | VZ_MIGRATION_COOKIE_DOMAIN_NAME) < 0)
         goto cleanup;
 
-    if (!(def = virDomainDefParseString(dom_xml, driver->caps, driver->xmlopt,
+    if (!(def = virDomainDefParseString(dom_xml, driver->xmlopt,
                                         NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto cleanup;
@@ -3454,8 +3466,8 @@ vzDomainGetJobStats(virDomainPtr domain,
 #define VZ_ADD_STAT_PARAM_UUL(group, field, counter) \
 do { \
     if (stat.field != -1) { \
-        snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, \
-                 group ".%zu." counter, i); \
+        g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, \
+                   group ".%zu." counter, i); \
         if (virTypedParamsAddULLong(&record->params, \
                                     &record->nparams, \
                                     maxparams, \
@@ -3491,8 +3503,8 @@ vzDomainGetBlockStats(virDomainObjPtr dom,
                                 IS_CT(dom->def)) < 0)
             return -1;
 
-        snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
-                 "block.%zu.name", i);
+        g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
+                   "block.%zu.name", i);
         if (virTypedParamsAddString(&record->params,
                                     &record->nparams,
                                     maxparams,
@@ -3501,8 +3513,8 @@ vzDomainGetBlockStats(virDomainObjPtr dom,
             return -1;
 
         if (virStorageSourceIsLocalStorage(disk->src) && disk->src->path) {
-            snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
-                     "block.%zu.path", i);
+            g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
+                       "block.%zu.path", i);
             if (virTypedParamsAddString(&record->params,
                                         &record->nparams,
                                         maxparams,
@@ -3517,8 +3529,8 @@ vzDomainGetBlockStats(virDomainObjPtr dom,
         VZ_ADD_STAT_PARAM_UUL("block", wr_bytes, "wr.bytes");
 
         if (disk->device == VIR_DOMAIN_DISK_DEVICE_DISK) {
-            snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
-                     "block.%zu.capacity", i);
+            g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
+                       "block.%zu.capacity", i);
             if (virTypedParamsAddULLong(&record->params,
                                         &record->nparams,
                                         maxparams,
@@ -3556,7 +3568,7 @@ vzDomainGetNetStats(virDomainObjPtr dom,
                               &stat) < 0)
             return -1;
 
-        snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "net.%zu.name", i);
+        g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "net.%zu.name", i);
         if (virTypedParamsAddString(&record->params,
                                     &record->nparams,
                                     maxparams,
@@ -3601,7 +3613,7 @@ vzDomainGetVCPUStats(virDomainObjPtr dom,
                                                  VIR_VCPU_OFFLINE;
         unsigned long long time;
 
-        snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "vcpu.%zu.state", i);
+        g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "vcpu.%zu.state", i);
         if (virTypedParamsAddInt(&record->params,
                                  &record->nparams,
                                  maxparams,
@@ -3612,7 +3624,7 @@ vzDomainGetVCPUStats(virDomainObjPtr dom,
         if (prlsdkGetVcpuStats(privdom->stats, i, &time) < 0)
             return -1;
 
-        snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "vcpu.%zu.time", i);
+        g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "vcpu.%zu.time", i);
         if (virTypedParamsAddULLong(&record->params,
                                     &record->nparams,
                                     maxparams,
@@ -4090,11 +4102,18 @@ vzStateCleanup(void)
 
 static int
 vzStateInitialize(bool privileged,
+                  const char *root,
                   virStateInhibitCallback callback G_GNUC_UNUSED,
                   void *opaque G_GNUC_UNUSED)
 {
     if (!privileged)
         return VIR_DRV_STATE_INIT_SKIPPED;
+
+    if (root != NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Driver does not support embedded mode"));
+        return -1;
+    }
 
     vz_driver_privileged = privileged;
 
@@ -4132,7 +4151,7 @@ static virStateDriver vzStateDriver = {
     .stateCleanup = vzStateCleanup,
 };
 
-/* Parallels domain type backward compatibility*/
+/* Parallels domain type backward compatibility */
 static virHypervisorDriver parallelsHypervisorDriver;
 static virConnectDriver parallelsConnectDriver = {
     .localOnly = true,

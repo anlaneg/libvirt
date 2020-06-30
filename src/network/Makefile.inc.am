@@ -16,8 +16,10 @@ NETWORK_LEASES_HELPER_SOURCES = \
 	network/leaseshelper.c \
 	$(NULL)
 
-DRIVER_SOURCE_FILES += $(NETWORK_DRIVER_SOURCES)
-STATEFUL_DRIVER_SOURCE_FILES += $(NETWORK_DRIVER_SOURCES)
+DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(NETWORK_DRIVER_SOURCES))
+STATEFUL_DRIVER_SOURCE_FILES += \
+	$(addprefix $(srcdir)/,$(NETWORK_DRIVER_SOURCES))
+
 EXTRA_DIST += \
 	$(NETWORK_DRIVER_SOURCES) \
 	$(NETWORK_DRIVER_PLATFORM_INC) \
@@ -33,7 +35,6 @@ libvirt_driver_network_la_LIBADD = \
 	libvirt_driver_network_impl.la \
 	libvirt.la \
 	$(GLIB_LIBS) \
-	../gnulib/lib/libgnu.la \
 	$(LIBNL_LIBS) \
 	$(DBUS_LIBS) \
 	$(NULL)
@@ -44,6 +45,7 @@ libvirt_driver_network_impl_la_CFLAGS = \
 	$(LIBNL_CFLAGS) \
 	$(DBUS_CFLAGS) \
 	-I$(srcdir)/access \
+	-I$(builddir)/access \
 	-I$(srcdir)/conf \
 	$(AM_CFLAGS) \
 	$(NULL)
@@ -58,6 +60,7 @@ augeastest_DATA += network/test_virtnetworkd.aug
 CLEANFILES += network/virtnetworkd.aug
 
 virtnetworkd_SOURCES = $(REMOTE_DAEMON_SOURCES)
+nodist_virtnetworkd_SOURCES = $(REMOTE_DAEMON_GENERATED)
 virtnetworkd_CFLAGS = \
        $(REMOTE_DAEMON_CFLAGS) \
        -DDAEMON_NAME="\"virtnetworkd\"" \
@@ -65,6 +68,8 @@ virtnetworkd_CFLAGS = \
        $(NULL)
 virtnetworkd_LDFLAGS = $(REMOTE_DAEMON_LD_FLAGS)
 virtnetworkd_LDADD = $(REMOTE_DAEMON_LD_ADD)
+
+SYSCONF_FILES += network/virtnetworkd.sysconf
 
 SYSTEMD_UNIT_FILES += \
 	virtnetworkd.service \
@@ -76,12 +81,22 @@ SYSTEMD_UNIT_FILES_IN += \
 	network/virtnetworkd.service.in \
 	$(NULL)
 
+OPENRC_INIT_FILES += \
+	virtnetworkd.init \
+	$(NULL)
+OPENRC_INIT_FILES_IN += \
+	network/virtnetworkd.init.in \
+	$(NULL)
+
 VIRTNETWORKD_UNIT_VARS = \
 	$(VIRTD_UNIT_VARS) \
 	-e 's|[@]name[@]|Libvirt network|g' \
 	-e 's|[@]service[@]|virtnetworkd|g' \
 	-e 's|[@]sockprefix[@]|virtnetworkd|g' \
 	$(NULL)
+
+virtnetworkd.init: network/virtnetworkd.init.in $(top_builddir)/config.status
+	$(AM_V_GEN)$(SED) $(LIBVIRTD_INIT_VARS) $< > $@-t && mv $@-t $@
 
 virtnetworkd.service: network/virtnetworkd.service.in \
 		$(top_builddir)/config.status
@@ -123,7 +138,7 @@ libvirt_leaseshelper_LDFLAGS = \
 libvirt_leaseshelper_LDADD = \
 	libvirt.la \
 	$(GLIB_LIBS) \
-	../gnulib/lib/libgnu.la
+	$(NULL)
 if WITH_DTRACE_PROBES
 libvirt_leaseshelper_LDADD += libvirt_probes.lo
 endif WITH_DTRACE_PROBES

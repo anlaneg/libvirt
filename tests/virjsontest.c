@@ -26,11 +26,10 @@ testJSONFromFile(const void *data)
     g_autofree char *outfile = NULL;
     g_autofree char *actual = NULL;
 
-    if (virAsprintf(&infile, "%s/virjsondata/parse-%s-in.json",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&outfile, "%s/virjsondata/parse-%s-out.json",
-                    abs_srcdir, info->name) < 0)
-        return -1;
+    infile = g_strdup_printf("%s/virjsondata/parse-%s-in.json",
+                             abs_srcdir, info->name);
+    outfile = g_strdup_printf("%s/virjsondata/parse-%s-out.json",
+                              abs_srcdir, info->name);
 
     if (virTestLoadFile(infile, &indata) < 0)
         return -1;
@@ -114,11 +113,10 @@ testJSONAddRemove(const void *data)
     g_autofree char *outfile = NULL;
     g_autofree char *actual = NULL;
 
-    if (virAsprintf(&infile, "%s/virjsondata/add-remove-%s-in.json",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&outfile, "%s/virjsondata/add-remove-%s-out.json",
-                    abs_srcdir, info->name) < 0)
-        return -1;
+    infile = g_strdup_printf("%s/virjsondata/add-remove-%s-in.json",
+                             abs_srcdir, info->name);
+    outfile = g_strdup_printf("%s/virjsondata/add-remove-%s-out.json",
+                              abs_srcdir, info->name);
 
     if (virTestLoadFile(infile, &indata) < 0)
         return -1;
@@ -350,11 +348,10 @@ testJSONDeflatten(const void *data)
     g_autofree char *outfile = NULL;
     g_autofree char *actual = NULL;
 
-    if (virAsprintf(&infile, "%s/virjsondata/deflatten-%s-in.json",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&outfile, "%s/virjsondata/deflatten-%s-out.json",
-                    abs_srcdir, info->name) < 0)
-        return -1;
+    infile = g_strdup_printf("%s/virjsondata/deflatten-%s-in.json",
+                             abs_srcdir, info->name);
+    outfile = g_strdup_printf("%s/virjsondata/deflatten-%s-out.json",
+                              abs_srcdir, info->name);
 
     if (virTestLoadFile(infile, &indata) < 0)
         return -1;
@@ -612,6 +609,7 @@ mymain(void)
     DO_TEST_DEFLATTEN("concat", true);
     DO_TEST_DEFLATTEN("concat-double-key", false);
     DO_TEST_DEFLATTEN("qemu-sheepdog", true);
+    DO_TEST_DEFLATTEN("dotted-array", true);
 
     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

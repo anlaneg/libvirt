@@ -2,31 +2,24 @@ DOMAIN = $(PACKAGE_NAME)
 COPYRIGHT_HOLDER = The Libvirt authors
 MSGID_BUGS_ADDRESS = https://libvirt.org/bugs.html
 
-LANGS := \
-	af am anp ar as ast bal be bg bn_IN \
-	bn bo br brx bs ca cs cy da de_CH \
-	de el en_GB eo es et eu fa fil fi \
-	fr fur ga gl gu he hi hr hu ia \
-	id ilo is it ja ka kk km kn ko \
-	kw_GB kw@kkcor kw kw@uccor ky lt lv mai mk ml \
-	mn mr ms my nb nds ne nl nn nso \
-	or pa pl pt_BR pt ro ru si sk sl \
-	sq sr@latin sr sv ta te tg th tr tw \
-	uk ur vi wba yo zh_CN zh_HK zh_TW zu
+LANGS := $(shell cat $(srcdir)/LINGUAS)
 
+POTFILES_IN = $(srcdir)/POTFILES.in
+POTFILES: $(POTFILES_IN)
+	$(AM_V_GEN) cat $(POTFILES_IN) | \
+		$(SED) 's|[@]SRCDIR[@]|$(top_srcdir)|' | \
+		$(SED) 's|[@]BUILDDIR[@]|$(top_builddir)|' > $@
+POTFILE_DEPS = $(shell cat POTFILES)
+POTFILE := $(DOMAIN).pot
+POFILES := $(LANGS:%=%.po)
+GMOFILES := $(LANGS:%=%.gmo)
 
-POTFILE_DEPS := $(shell $(SED) 's,^,$(top_srcdir)/,' $(srcdir)/POTFILES)
-POTFILE := $(srcdir)/$(DOMAIN).pot
-POFILES := $(LANGS:%=$(srcdir)/%.po)
-GMOFILES := $(LANGS:%=$(srcdir)/%.gmo)
-
-MAINTAINERCLEANFILES = $(POTFILE) $(POFILES) $(GMOFILES)
+CLEANFILES = $(GMOFILES) POTFILES
 
 EXTRA_DIST = \
-	POTFILES \
-	$(POTFILE) \
-	$(POFILES) \
-	$(GMOFILES)
+	LINGUAS \
+	$(POTFILES_IN) \
+	$(POFILES)
 
 if HAVE_GNU_GETTEXT_TOOLS
 
@@ -39,53 +32,41 @@ XGETTEXT_ARGS = \
 	--package-name="$(PACKAGE_NAME)" \
 	--package-version="$(PACKAGE_VERSION)" \
 	--msgid-bugs-address="$(MSGID_BUGS_ADDRESS)" \
-	--directory=$(top_srcdir) \
+	--sort-output \
 	$(NULL)
 
 SED_PO_FIXUP_ARGS = \
-       -e "s|text/plain; charset=CHARSET|text/plain; charset=UTF-8|g" \
-       -e "s|SOME DESCRIPTIVE TITLE|Libvirt package strings|g" \
-       -e "s|Copyright (C) YEAR|Copyright (C) $$(date +'%Y')|" \
-       $(NULL)
-
-update-po: $(POFILES)
+	-e "s|text/plain; charset=CHARSET|text/plain; charset=UTF-8|g" \
+	-e "s|SOME DESCRIPTIVE TITLE|Libvirt package strings|g" \
+	-e "s|Copyright (C) YEAR|Copyright (C) $$(date +'%Y')|" \
+	$(NULL)
 
 update-gmo: $(GMOFILES)
 
-update-mini-po: $(POTFILE)
+# The results of this target should not be committed to Git. The Weblate
+# service is responsible for updating .po files when the .pot is changed.
+update-po: $(POTFILE)
+	cd $(srcdir) && \
 	for lang in $(LANGS); do \
 	  echo "Minimizing $$lang content" && \
 	  $(MSGMERGE) --no-location --no-fuzzy-matching --sort-output \
 	    $$lang.po $(POTFILE) | \
-	  $(SED) $(SED_PO_FIXUP_ARGS) | \
-	  $(RUNUTF8) $(PYTHON) $(top_srcdir)/scripts/minimize-po.py > \
-	    $(srcdir)/$$lang.mini.po ; \
+	  $(SED) $(SED_PO_FIXUP_ARGS) > $$lang.po-t && \
+	  mv $$lang.po-t $$lang.po ; \
 	done
 
-push-pot: $(POTFILE)
-	zanata push --push-type=source
-
-pull-po: $(POTFILE)
-	zanata pull --create-skeletons
-	$(MAKE) update-mini-po
-	$(MAKE) update-gmo
-
-$(POTFILE): POTFILES $(POTFILE_DEPS)
+$(POTFILE): POTFILES
 	$(XGETTEXT) -o $@-t $(XGETTEXT_ARGS) \
-	  --files-from=$(abs_srcdir)/POTFILES
-	$(SED) $(SED_PO_FIXUP_ARGS) < $@-t > $@
+	  --files-from=$(abs_builddir)/POTFILES
+	$(SED) $(SED_PO_FIXUP_ARGS) < $@-t > $(srcdir)/$@
 	rm -f $@-t
 
-$(srcdir)/%.po: $(srcdir)/%.mini.po $(POTFILE)
-	$(MSGMERGE) --no-fuzzy-matching $< $(POTFILE) | \
-	  $(SED) $(SED_PO_FIXUP_ARGS) > $@
-
-$(srcdir)/%.gmo: $(srcdir)/%.po
+%.gmo: %.po
 	rm -f $@ $@-t
 	$(MSGFMT) -c -o $@-t $<
 	mv $@-t $@
 
-.PRECIOUS: $(POTFILE) $(POFILES)
+.PHONY: $(POTFILE)
 
 endif HAVE_GNU_GETTEXT_TOOLS
 
@@ -99,7 +80,7 @@ install-data-hook: $(GMOFILES)
 	for lang in $(LANGS); do \
 	  d=$(DESTDIR)$(langinstdir)/$$lang/LC_MESSAGES; \
 	  mkdir -p $$d; \
-	  install -m 0644 $(srcdir)/$$lang.gmo $$d/$(DOMAIN).mo; \
+	  install -m 0644 $$lang.gmo $$d/$(DOMAIN).mo; \
 	done
 
 uninstall-hook:

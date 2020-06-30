@@ -57,7 +57,6 @@ qemuCheckpointDelete(virDomainObjPtr vm,
 int
 qemuCheckpointCreateCommon(virQEMUDriverPtr driver,
                            virDomainObjPtr vm,
-                           virCapsPtr caps,
                            virDomainCheckpointDefPtr *def,
                            virJSONValuePtr *actions,
                            virDomainMomentObjPtr *chk);
@@ -68,3 +67,15 @@ qemuCheckpointCreateFinalize(virQEMUDriverPtr driver,
                              virQEMUDriverConfigPtr cfg,
                              virDomainMomentObjPtr chk,
                              bool update_current);
+
+void
+qemuCheckpointRollbackMetadata(virDomainObjPtr vm,
+                               virDomainMomentObjPtr chk);
+
+int
+qemuCheckpointDiscardDiskBitmaps(virStorageSourcePtr src,
+                                 virHashTablePtr blockNamedNodeData,
+                                 const char *delbitmap,
+                                 virJSONValuePtr actions,
+                                 const char *diskdst,
+                                 GSList **reopenimages);

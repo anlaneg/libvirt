@@ -10,7 +10,6 @@ LOG_DAEMON_GENERATED = \
 	$(NULL)
 
 LOG_DRIVER_SOURCES = \
-	$(LOG_PROTOCOL_GENERATED) \
 	logging/log_manager.c \
 	logging/log_manager.h \
 	$(NULL)
@@ -30,10 +29,8 @@ LOG_PROTOCOL = $(srcdir)/logging/log_protocol.x
 
 EXTRA_DIST += \
 	$(LOG_PROTOCOL) \
-	$(LOG_PROTOCOL_GENERATED) \
-	$(LOG_DAEMON_GENERATED) \
 	$(LOG_DAEMON_SOURCES) \
-	$(LOG_DRIVER_SOURCES) \
+	$(LOG_DRIVER) \
         logging/virtlogd.aug \
         logging/virtlogd.conf \
         logging/test_virtlogd.aug.in \
@@ -42,13 +39,11 @@ BUILT_SOURCES += \
 	$(LOG_PROTOCOL_GENERATED) \
 	$(LOG_DAEMON_GENERATED) \
 	$(NULL)
-MAINTAINERCLEANFILES += \
+CLEANFILES += \
 	$(LOG_PROTOCOL_GENERATED) \
 	$(LOG_DAEMON_GENERATED) \
 	$(NULL)
 
-PODFILES += logging/virtlogd.pod
-MANINFILES += virtlogd.8.in
 SYSCONF_FILES += logging/virtlogd.sysconf
 
 VIRTLOGD_UNIT_FILES_IN = \
@@ -60,13 +55,25 @@ VIRTLOGD_UNIT_FILES_IN = \
 SYSTEMD_UNIT_FILES += $(notdir $(VIRTLOGD_UNIT_FILES_IN:%.in=%))
 SYSTEMD_UNIT_FILES_IN += $(VIRTLOGD_UNIT_FILES_IN)
 
+OPENRC_INIT_FILES += \
+	virtlogd.init \
+	$(NULL)
+OPENRC_INIT_FILES_IN += \
+	logging/virtlogd.init.in \
+	$(NULL)
+
 noinst_LTLIBRARIES += libvirt_driver_log.la
 
 libvirt_la_BUILT_LIBADD += libvirt_driver_log.la
 libvirt_driver_log_la_SOURCES = \
 	$(LOG_DRIVER_SOURCES) \
 	$(NULL)
+nodist_libvirt_driver_log_la_SOURCES = \
+	$(LOG_PROTOCOL_GENERATED) \
+	$(NULL)
 libvirt_driver_log_la_CFLAGS = \
+	-I$(builddir)/logging \
+	-I$(builddir)/rpc \
 	$(AM_CFLAGS) \
 	$(XDR_CFLAGS) \
 	$(NULL)
@@ -74,14 +81,17 @@ libvirt_driver_log_la_CFLAGS = \
 if WITH_LIBVIRTD
 sbin_PROGRAMS += virtlogd
 
-man8_MANS += virtlogd.8
 
 virtlogd_SOURCES = \
 		$(LOG_DAEMON_SOURCES) \
+		$(NULL)
+nodist_virtlogd_SOURCES = \
 		$(LOG_PROTOCOL_GENERATED) \
 		$(LOG_DAEMON_GENERATED) \
 		$(NULL)
 virtlogd_CFLAGS = \
+		-I$(builddir)/logging \
+		-I$(builddir)/rpc \
 		$(AM_CFLAGS) \
 		$(PIE_CFLAGS) \
 		$(XDR_CFLAGS) \
@@ -95,8 +105,6 @@ virtlogd_LDADD = \
 		libvirt_driver_admin.la \
 		libvirt.la \
 		$(GLIB_LIBS) \
-		../gnulib/lib/libgnu.la \
-		$(CYGWIN_EXTRA_LIBADD) \
 		$(NULL)
 if WITH_DTRACE_PROBES
 virtlogd_LDADD += libvirt_probes.lo
@@ -123,17 +131,10 @@ logging/log_daemon_dispatch_stubs.h: $(LOG_PROTOCOL) \
 		$(srcdir)/rpc/gendispatch.pl Makefile.am
 	$(AM_V_GEN)perl -w $(srcdir)/rpc/gendispatch.pl --mode=server \
 	    virLogManagerProtocol VIR_LOG_MANAGER_PROTOCOL \
-	    $(LOG_PROTOCOL) > $(srcdir)/logging/log_daemon_dispatch_stubs.h
+	    $(LOG_PROTOCOL) > logging/log_daemon_dispatch_stubs.h
 
-virtlogd.8.in: logging/virtlogd.pod
-	$(AM_V_GEN)$(POD2MAN) --section=8 $< $@-t1 && \
-	if grep 'POD ERROR' $@-t1; then rm $@-t1; exit 1; fi && \
-	sed \
-		-e 's|SYSCONFDIR|\@sysconfdir\@|g' \
-		-e 's|LOCALSTATEDIR|\@localstatedir\@|g' \
-		< $@-t1 > $@-t2 && \
-	rm -f $@-t1 && \
-	mv $@-t2 $@
+virtlogd.init: logging/virtlogd.init.in $(top_builddir)/config.status
+	$(AM_V_GEN)$(SED) $(COMMON_UNIT_VARS) $< > $@-t && mv $@-t $@
 
 virtlogd.service: logging/virtlogd.service.in $(top_builddir)/config.status
 	$(AM_V_GEN)sed $(COMMON_UNIT_VARS) $< > $@-t && mv $@-t $@

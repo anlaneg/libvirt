@@ -27,7 +27,6 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "virthread.h"
-#include "virutil.h"
 #include "virstring.h"
 
 #define LIBVIRT_VIRERRORPRIV_H_ALLOW
@@ -144,6 +143,7 @@ VIR_ENUM_IMPL(virErrorDomain,
               "Domain Checkpoint",
 
               "TPM", /* 70 */
+              "BPF",
 );
 
 
@@ -830,7 +830,7 @@ virRaiseErrorFull(const char *filename,
     } else {
         va_list ap;
         va_start(ap, fmt);
-        ignore_value(virVasprintfQuiet(&str, fmt, ap));
+        str = g_strdup_vprintf(fmt, ap);
         va_end(ap);
     }
 
@@ -909,7 +909,7 @@ typedef struct {
 } virErrorMsgTuple;
 
 
-const virErrorMsgTuple virErrorMsgStrings[VIR_ERR_NUMBER_LAST] = {
+static const virErrorMsgTuple virErrorMsgStrings[] = {
     [VIR_ERR_OK] = { NULL, NULL },
     [VIR_ERR_INTERNAL_ERROR] = {
         N_("internal error"),
@@ -1232,7 +1232,12 @@ const virErrorMsgTuple virErrorMsgStrings[VIR_ERR_NUMBER_LAST] = {
     [VIR_ERR_NO_NETWORK_PORT] = {
         N_("network port not found"),
         N_("network port not found: %s") },
+    [VIR_ERR_NO_HOSTNAME] = {
+        N_("no hostname found"),
+        N_("no hostname found: %s") },
 };
+
+G_STATIC_ASSERT(G_N_ELEMENTS(virErrorMsgStrings) == VIR_ERR_NUMBER_LAST);
 
 
 /**
@@ -1288,7 +1293,7 @@ void virReportErrorHelper(int domcode,
 
     if (fmt) {
         va_start(args, fmt);
-        vsnprintf(errorMessage, sizeof(errorMessage)-1, fmt, args);
+        g_vsnprintf(errorMessage, sizeof(errorMessage)-1, fmt, args);
         va_end(args);
     } else {
         errorMessage[0] = '\0';
@@ -1300,31 +1305,6 @@ void virReportErrorHelper(int domcode,
                       virerr, errorMessage, NULL,
                       -1, -1, virerr, errorMessage);
     errno = save_errno;
-}
-
-/**
- * virStrerror:
- * @theerrno: the errno value
- * @errBuf: the buffer to save the error to
- * @errBufLen: the buffer length
- *
- * Generate an error string for the given errno
- *
- * Returns a pointer to the error string, possibly indicating that the
- *         error is unknown
- */
-const char *virStrerror(int theerrno, char *errBuf, size_t errBufLen)
-{
-    int save_errno = errno;
-    const char *ret;
-    const char *str = g_strerror(theerrno);
-    size_t len = strlen(str);
-
-    memcpy(errBuf, str, MIN(len, errBufLen));
-    errBuf[errBufLen-1] = '\0';
-    ret = errBuf;
-    errno = save_errno;
-    return ret;
 }
 
 /**
@@ -1358,7 +1338,7 @@ void virReportSystemErrorFull(int domcode,
         int n;
 
         va_start(args, fmt);
-        n = vsnprintf(msgDetailBuf, sizeof(msgDetailBuf), fmt, args);
+        n = g_vsnprintf(msgDetailBuf, sizeof(msgDetailBuf), fmt, args);
         va_end(args);
 
         size_t len = strlen(errnoDetail);
@@ -1484,17 +1464,13 @@ virLastErrorPrefixMessage(const char *fmt, ...)
         return;
 
     va_start(args, fmt);
+    fmtmsg = g_strdup_vprintf(fmt, args);
+    va_end(args);
 
-    if (virVasprintfQuiet(&fmtmsg, fmt, args) < 0)
-        goto cleanup;
-
-    if (virAsprintfQuiet(&newmsg, "%s: %s", fmtmsg, err->message) < 0)
-        goto cleanup;
+    newmsg = g_strdup_printf("%s: %s", fmtmsg, err->message);
 
     VIR_FREE(err->message);
     err->message = g_steal_pointer(&newmsg);
 
- cleanup:
-    va_end(args);
     errno = save_errno;
 }

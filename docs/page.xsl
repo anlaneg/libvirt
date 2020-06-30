@@ -7,6 +7,8 @@
   exclude-result-prefixes="xsl exsl html"
   version="1.0">
 
+  <xsl:param name="builddir" select="'..'"/>
+
   <xsl:template match="node() | @*" mode="content">
     <xsl:copy>
       <xsl:apply-templates select="node() | @*" mode="content"/>
@@ -75,6 +77,7 @@
   <!-- This is the master page structure -->
   <xsl:template match="/" mode="page">
     <xsl:param name="pagename"/>
+    <xsl:param name="pagesrc"/>
     <xsl:param name="timestamp"/>
     <xsl:text disable-output-escaping="yes">&lt;!DOCTYPE html&gt;
 </xsl:text>
@@ -95,9 +98,15 @@
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"/>
         <link rel="manifest" href="/manifest.json"/>
         <meta name="theme-color" content="#ffffff"/>
-        <title>libvirt: <xsl:value-of select="html:html/html:body/html:h1"/></title>
+        <title>libvirt: <xsl:value-of select="html:html/html:body//html:h1"/></title>
         <meta name="description" content="libvirt, virtualization, virtualization API"/>
-        <xsl:apply-templates select="/html:html/html:head/*" mode="content"/>
+        <xsl:if test="$pagename = 'libvirt-go.html'">
+          <meta name="go-import" content="libvirt.org/libvirt-go git https://libvirt.org/git/libvirt-go.git"/>
+        </xsl:if>
+        <xsl:if test="$pagename = 'libvirt-go-xml.html'">
+          <meta name="go-import" content="libvirt.org/libvirt-go-xml git https://libvirt.org/git/libvirt-go-xml.git"/>
+        </xsl:if>
+        <xsl:apply-templates select="/html:html/html:head/html:script" mode="content"/>
 
         <script type="text/javascript" src="{$href_base}js/main.js">
           <xsl:comment>// forces non-empty element</xsl:comment>
@@ -157,6 +166,12 @@
               <li><a href="http://serverfault.com/questions/tagged/libvirt">serverfault</a></li>
             </ul>
           </div>
+          <div id="contribute">
+            <h3>Contribute</h3>
+            <ul>
+              <li><a href="https://gitlab.com/libvirt/libvirt/-/blob/master/docs/{$pagesrc}">edit this page</a></li>
+            </ul>
+          </div>
           <div id="conduct">
             Participants in the libvirt project agree to abide by <a href="{$href_base}governance.html#codeofconduct">the project code of conduct</a>
           </div>
@@ -168,17 +183,20 @@
 
   <xsl:template name="include">
     <xsl:variable name="inchtml">
-      <xsl:copy-of select="document(@filename)"/>
+      <xsl:copy-of select="document(concat($builddir, '/docs/', @filename))"/>
     </xsl:variable>
 
     <xsl:apply-templates select="exsl:node-set($inchtml)/html:html/html:body/*" mode="content"/>
   </xsl:template>
 
-  <xsl:template match="html:h2 | html:h3 | html:h4 | html:h5 | html:h6" mode="content">
+  <xsl:template match="html:h1 | html:h2 | html:h3 | html:h4 | html:h5 | html:h6" mode="content">
     <xsl:element name="{name()}">
       <xsl:apply-templates mode="copy" />
       <xsl:if test="./html:a/@id">
         <a class="headerlink" href="#{html:a/@id}" title="Permalink to this headline">&#xb6;</a>
+      </xsl:if>
+      <xsl:if test="./html:a[@class='toc-backref']">
+        <a class="headerlink" href="#{../@id}" title="Permalink to this headline">&#xb6;</a>
       </xsl:if>
     </xsl:element>
   </xsl:template>

@@ -48,9 +48,9 @@ CI_PREPARE_SCRIPT = $(CI_ROOTDIR)/prepare.sh
 CI_BUILD_SCRIPT = $(CI_ROOTDIR)/build.sh
 
 # Location of the container images we're going to pull
-# Can be useful to overridde to use a locally built
+# Can be useful to override to use a locally built
 # image instead
-CI_IMAGE_PREFIX = quay.io/libvirt/buildenv-libvirt-
+CI_IMAGE_PREFIX = registry.gitlab.com/libvirt/libvirt/ci-
 
 # The default tag is ':latest' but if the container
 # repo above uses different conventions this can override it
@@ -220,6 +220,7 @@ ci-run-command@%: ci-prepare-tree
 		  --login \
 		  --user="#$(CI_UID)" \
 		  --group="#$(CI_GID)" \
+		  CONFIGURE_OPTS="$$CONFIGURE_OPTS" \
 		  CI_CONT_SRCDIR="$(CI_CONT_SRCDIR)" \
 		  CI_CONT_BUILDDIR="$(CI_CONT_BUILDDIR)" \
 		  CI_SMP="$(CI_SMP)" \
@@ -238,6 +239,17 @@ ci-build@%:
 ci-check@%:
 	$(MAKE) -C $(CI_ROOTDIR) ci-build@$* CI_MAKE_ARGS="check"
 
+ci-list-images:
+	@echo
+	@echo "Available x86 container images:"
+	@echo
+	@sh list-images.sh "$(CI_IMAGE_PREFIX)" | grep -v cross
+	@echo
+	@echo "Available cross-compiler container images:"
+	@echo
+	@sh list-images.sh "$(CI_IMAGE_PREFIX)" | grep cross
+	@echo
+
 ci-help:
 	@echo "Build libvirt inside containers used for CI"
 	@echo
@@ -246,34 +258,14 @@ ci-help:
 	@echo "    ci-build@\$$IMAGE - run a default 'make'"
 	@echo "    ci-check@\$$IMAGE - run a 'make check'"
 	@echo "    ci-shell@\$$IMAGE - run an interactive shell"
-	@echo
-	@echo "Available x86 container images:"
-	@echo
-	@echo "    centos-7"
-	@echo "    debian-9"
-	@echo "    debian-10"
-	@echo "    debian-sid"
-	@echo "    fedora-29"
-	@echo "    fedora-30"
-	@echo "    fedora-rawhide"
-	@echo "    ubuntu-16"
-	@echo "    ubuntu-18"
-	@echo
-	@echo "Available cross-compiler container images:"
-	@echo
-	@echo "    debian-{9,10,sid}-cross-aarch64"
-	@echo "    debian-{9,10,sid}-cross-armv6l"
-	@echo "    debian-{9,10,sid}-cross-armv7l"
-	@echo "    debian-{10,sid}-cross-i686"
-	@echo "    debian-{9,10,sid}-cross-mips64el"
-	@echo "    debian-{9,10,sid}-cross-mips"
-	@echo "    debian-{9,10,sid}-cross-mipsel"
-	@echo "    debian-{9,10,sid}-cross-ppc64le"
-	@echo "    debian-{9,10,sid}-cross-s390x"
+	@echo "    ci-list-images  - list available images"
+	@echo "    ci-help         - show this help message"
 	@echo
 	@echo "Available make variables:"
 	@echo
-	@echo "    CI_CLEAN=0     - do not delete '$(CI_SCRATCHDIR)' after completion"
-	@echo "    CI_REUSE=1     - re-use existing '$(CI_SCRATCHDIR)' content"
-	@echo "    CI_ENGINE=auto - container engine to use (podman, docker)"
+	@echo "    CI_CLEAN=0          - do not delete '$(CI_SCRATCHDIR)' after completion"
+	@echo "    CI_REUSE=1          - re-use existing '$(CI_SCRATCHDIR)' content"
+	@echo "    CI_ENGINE=auto      - container engine to use (podman, docker)"
+	@echo "    CI_CONFIGURE_ARGS=  - extra arguments passed to configure"
+	@echo "    CI_MAKE_ARGS=       - extra arguments passed to make, e.g. space delimited list of targets"
 	@echo

@@ -25,7 +25,6 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 
 #include "internal.h"
 #include "viriptables.h"
@@ -192,7 +191,7 @@ iptablesInput(virFirewallPtr fw,
 {
     char portstr[32];
 
-    snprintf(portstr, sizeof(portstr), "%d", port);
+    g_snprintf(portstr, sizeof(portstr), "%d", port);
     portstr[sizeof(portstr) - 1] = '\0';
 
     virFirewallAddRule(fw, layer,
@@ -217,7 +216,7 @@ iptablesOutput(virFirewallPtr fw,
 {
     char portstr[32];
 
-    snprintf(portstr, sizeof(portstr), "%d", port);
+    g_snprintf(portstr, sizeof(portstr), "%d", port);
     portstr[sizeof(portstr) - 1] = '\0';
 
     virFirewallAddRule(fw, layer,
@@ -401,7 +400,7 @@ static char *iptablesFormatNetwork(virSocketAddr *netaddr,
     if (!netstr)
         return NULL;
 
-    ignore_value(virAsprintf(&ret, "%s/%d", netstr, prefix));
+    ret = g_strdup_printf("%s/%d", netstr, prefix);
 
     return ret;
 }
@@ -855,29 +854,24 @@ iptablesForwardMasquerade(virFirewallPtr fw,
     g_autofree char *portRangeStr = NULL;
     g_autofree char *natRangeStr = NULL;
     virFirewallRulePtr rule;
+    int af = VIR_SOCKET_ADDR_FAMILY(netaddr);
+    virFirewallLayer layer = af == AF_INET ?
+        VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
 
     if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
         return -1;
 
-    if (!VIR_SOCKET_ADDR_IS_FAMILY(netaddr, AF_INET)) {
-        /* Higher level code *should* guaranteee it's impossible to get here. */
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Attempted to NAT '%s'. NAT is only supported for IPv4."),
-                       networkstr);
-        return -1;
-    }
-
-    if (VIR_SOCKET_ADDR_IS_FAMILY(&addr->start, AF_INET)) {
+    if (VIR_SOCKET_ADDR_IS_FAMILY(&addr->start, af)) {
         if (!(addrStartStr = virSocketAddrFormat(&addr->start)))
             return -1;
-        if (VIR_SOCKET_ADDR_IS_FAMILY(&addr->end, AF_INET)) {
+        if (VIR_SOCKET_ADDR_IS_FAMILY(&addr->end, af)) {
             if (!(addrEndStr = virSocketAddrFormat(&addr->end)))
                 return -1;
         }
     }
 
     if (protocol && protocol[0]) {
-        rule = virFirewallAddRule(fw, VIR_FIREWALL_LAYER_IPV4,
+        rule = virFirewallAddRule(fw, layer,
                                   "--table", "nat",
                                   action == ADD ? "--insert" : "--delete",
                                   pvt ? "LIBVIRT_PRT" : "POSTROUTING",
@@ -886,7 +880,7 @@ iptablesForwardMasquerade(virFirewallPtr fw,
                                   "!", "--destination", networkstr,
                                   NULL);
     } else {
-        rule = virFirewallAddRule(fw, VIR_FIREWALL_LAYER_IPV4,
+        rule = virFirewallAddRule(fw, layer,
                                   "--table", "nat",
                                   action == ADD ? "--insert" : "--delete",
                                   pvt ? "LIBVIRT_PRT" : "POSTROUTING",
@@ -905,30 +899,24 @@ iptablesForwardMasquerade(virFirewallPtr fw,
         }
 
         if (port->start < port->end && port->end < 65536) {
-            if (virAsprintf(&portRangeStr, ":%u-%u",
-                            port->start, port->end) < 0)
-                return -1;
+            portRangeStr = g_strdup_printf(":%u-%u", port->start, port->end);
         } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Invalid port range '%u-%u'."),
                            port->start, port->end);
+            return -1;
         }
     }
 
     /* Use --jump SNAT if public addr is specified */
     if (addrStartStr && addrStartStr[0]) {
-        int r = 0;
-
         if (addrEndStr && addrEndStr[0]) {
-            r = virAsprintf(&natRangeStr, "%s-%s%s", addrStartStr, addrEndStr,
-                            portRangeStr ? portRangeStr : "");
+            natRangeStr = g_strdup_printf("%s-%s%s", addrStartStr, addrEndStr,
+                                          portRangeStr ? portRangeStr : "");
         } else {
-            r = virAsprintf(&natRangeStr, "%s%s", addrStartStr,
-                            portRangeStr ? portRangeStr : "");
+            natRangeStr = g_strdup_printf("%s%s", addrStartStr,
+                                          portRangeStr ? portRangeStr : "");
         }
-
-        if (r < 0)
-            return -1;
 
         virFirewallRuleAddArgList(fw, rule,
                                   "--jump", "SNAT",
@@ -1011,20 +999,14 @@ iptablesForwardDontMasquerade(virFirewallPtr fw,
                               int action)
 {
     g_autofree char *networkstr = NULL;
+    virFirewallLayer layer = VIR_SOCKET_ADDR_FAMILY(netaddr) == AF_INET ?
+        VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
 
     if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
         return -1;
 
-    if (!VIR_SOCKET_ADDR_IS_FAMILY(netaddr, AF_INET)) {
-        /* Higher level code *should* guaranteee it's impossible to get here. */
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Attempted to NAT '%s'. NAT is only supported for IPv4."),
-                       networkstr);
-        return -1;
-    }
-
     if (physdev && physdev[0])
-        virFirewallAddRule(fw, VIR_FIREWALL_LAYER_IPV4,
+        virFirewallAddRule(fw, layer,
                            "--table", "nat",
                            action == ADD ? "--insert" : "--delete",
                            pvt ? "LIBVIRT_PRT" : "POSTROUTING",
@@ -1034,7 +1016,7 @@ iptablesForwardDontMasquerade(virFirewallPtr fw,
                            "--jump", "RETURN",
                            NULL);
     else
-        virFirewallAddRule(fw, VIR_FIREWALL_LAYER_IPV4,
+        virFirewallAddRule(fw, layer,
                            "--table", "nat",
                            action == ADD ? "--insert" : "--delete",
                            pvt ? "LIBVIRT_PRT" : "POSTROUTING",
@@ -1106,7 +1088,7 @@ iptablesOutputFixUdpChecksum(virFirewallPtr fw,
 {
     char portstr[32];
 
-    snprintf(portstr, sizeof(portstr), "%d", port);
+    g_snprintf(portstr, sizeof(portstr), "%d", port);
     portstr[sizeof(portstr) - 1] = '\0';
 
     virFirewallAddRule(fw, VIR_FIREWALL_LAYER_IPV4,

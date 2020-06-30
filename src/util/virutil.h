@@ -44,8 +44,6 @@ int virScaleInteger(unsigned long long *value, const char *suffix,
                     unsigned long long scale, unsigned long long limit)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-int virHexToBin(unsigned char c);
-
 int virParseVersionString(const char *str, unsigned long *version,
                           bool allowMissing);
 
@@ -101,7 +99,7 @@ char *virGetUserDirectory(void);
 char *virGetUserDirectoryByUID(uid_t uid);
 char *virGetUserConfigDirectory(void);
 char *virGetUserCacheDirectory(void);
-char *virGetUserRuntimeDirectory(void);
+char *virGetUserRuntimeDirectory(void) G_GNUC_NO_INLINE;
 char *virGetUserShell(uid_t uid);
 char *virGetUserName(uid_t uid) G_GNUC_NO_INLINE;
 char *virGetGroupName(gid_t gid) G_GNUC_NO_INLINE;
@@ -116,13 +114,11 @@ bool virDoesUserExist(const char *name);
 bool virDoesGroupExist(const char *name);
 
 
-bool virIsDevMapperDevice(const char *dev_name) ATTRIBUTE_NONNULL(1);
-
 bool virValidateWWN(const char *wwn);
 
 int virGetDeviceID(const char *path,
                    int *maj,
-                   int *min);
+                   int *min) G_GNUC_NO_INLINE;
 int virSetDeviceUnprivSGIO(const char *path,
                            const char *sysfs_dir,
                            int unpriv_sgio);
@@ -149,6 +145,40 @@ bool virHostHasIOMMU(void);
 
 char *virHostGetDRMRenderNode(void) G_GNUC_NO_INLINE;
 
+/* Kernel cmdline match and comparison strategy for arg=value pairs */
+typedef enum {
+    /* substring comparison of argument values */
+    VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX = 1,
+
+    /* strict string comparison of argument values */
+    VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ = 2,
+
+    /* look for any occurrence of the argument with the expected value,
+     * this should be used when an argument set to the expected value overrides
+     * all the other occurrences of the argument, e.g. when looking for 'arg=1'
+     * in 'arg=0 arg=1 arg=0' the search would succeed with this flag
+     */
+    VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST = 4,
+
+    /* look for the last occurrence of argument with the expected value,
+     * this should be used when the last occurrence of the argument overrides
+     * all the other ones, e.g. when looking for 'arg=1' in 'arg=0 arg=1' the
+     * search would succeed with this flag, but in 'arg=1 arg=0' it would not,
+     * because 'arg=0' overrides all the previous occurrences of 'arg'
+     */
+    VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST = 8,
+} virKernelCmdlineFlags;
+
+const char *virKernelCmdlineNextParam(const char *cmdline,
+                                      char **param,
+                                      char **val);
+
+bool virKernelCmdlineMatchParam(const char *cmdline,
+                                const char *arg,
+                                const char **values,
+                                size_t len_values,
+                                virKernelCmdlineFlags flags);
+
 /**
  * VIR_ASSIGN_IS_OVERFLOW:
  * @rvalue: value that is checked (evaluated twice)
@@ -159,3 +189,39 @@ char *virHostGetDRMRenderNode(void) G_GNUC_NO_INLINE;
  */
 #define VIR_ASSIGN_IS_OVERFLOW(lvalue, rvalue) \
     (((lvalue) = (rvalue)) != (rvalue))
+
+char *virGetPassword(void);
+
+/*
+ * virPipe:
+ *
+ * Open a pair of FDs which can be used to communicate
+ * with each other. The FDs will have O_CLOEXEC set.
+ * This will report a libvirt error on failure.
+ *
+ * Returns: -1 on error, 0 on success
+ */
+int virPipe(int fds[2]);
+
+/*
+ * virPipeQuiet:
+ *
+ * Open a pair of FDs which can be used to communicate
+ * with each other. The FDs will have O_CLOEXEC set.
+ * This will set errno on failure.
+ *
+ * Returns: -1 on error, 0 on success
+ */
+int virPipeQuiet(int fds[2]);
+
+/*
+ * virPipe:
+ *
+ * Open a pair of FDs which can be used to communicate
+ * with each other. The FDs will have O_CLOEXEC and
+ * O_NONBLOCK set.
+ * This will report a libvirt error on failure.
+ *
+ * Returns: -1 on error, 0 on success
+ */
+int virPipeNonBlock(int fds[2]);

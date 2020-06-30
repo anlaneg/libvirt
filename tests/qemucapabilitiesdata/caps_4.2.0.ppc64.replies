@@ -21,7 +21,7 @@
       "minor": 1,
       "major": 4
     },
-    "package": "v4.1.0-1378-g98b2e3c9ab"
+    "package": "v4.1.0-2198-g9e583f2"
   },
   "id": "libvirt-2"
 }
@@ -5896,11 +5896,121 @@
 }
 
 {
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "pcie-root-port"
+  },
+  "id": "libvirt-31"
+}
+
+{
+  "return": [
+    {
+      "name": "addr",
+      "description": "Slot and optional function number, example: 06.0 or 06",
+      "type": "int32"
+    },
+    {
+      "name": "power_controller_present",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "aer_log_max",
+      "type": "uint16"
+    },
+    {
+      "name": "x-speed",
+      "description": "2_5/5/8/16",
+      "type": "PCIELinkSpeed"
+    },
+    {
+      "name": "slot",
+      "type": "uint16"
+    },
+    {
+      "name": "x-pcie-lnksta-dllla",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "port",
+      "type": "uint8"
+    },
+    {
+      "name": "mem-reserve",
+      "type": "size"
+    },
+    {
+      "name": "x-pcie-extcap-init",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "pref64-reserve",
+      "type": "size"
+    },
+    {
+      "name": "rombar",
+      "type": "uint32"
+    },
+    {
+      "name": "command_serr_enable",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "romfile",
+      "type": "str"
+    },
+    {
+      "name": "multifunction",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "chassis",
+      "type": "uint8"
+    },
+    {
+      "name": "x-width",
+      "description": "1/2/4/8/12/16/32",
+      "type": "PCIELinkWidth"
+    },
+    {
+      "name": "failover_pair_id",
+      "type": "str"
+    },
+    {
+      "name": "pref32-reserve",
+      "type": "size"
+    },
+    {
+      "name": "bus-reserve",
+      "type": "uint32"
+    },
+    {
+      "name": "x-migrate-msix",
+      "type": "bool"
+    },
+    {
+      "name": "disable-acs",
+      "type": "bool"
+    },
+    {
+      "name": "io-reserve",
+      "type": "size"
+    }
+  ],
+  "id": "libvirt-31"
+}
+
+{
   "execute": "qom-list-properties",
   "arguments": {
     "typename": "memory-backend-file"
   },
-  "id": "libvirt-31"
+  "id": "libvirt-32"
 }
 
 {
@@ -5965,7 +6075,7 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-31"
+  "id": "libvirt-32"
 }
 
 {
@@ -5973,7 +6083,7 @@
   "arguments": {
     "typename": "memory-backend-memfd"
   },
-  "id": "libvirt-32"
+  "id": "libvirt-33"
 }
 
 {
@@ -6037,12 +6147,12 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-32"
+  "id": "libvirt-33"
 }
 
 {
   "execute": "query-machines",
-  "id": "libvirt-33"
+  "id": "libvirt-34"
 }
 
 {
@@ -6097,7 +6207,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-3.1",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6105,7 +6215,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.12-sxxm",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6129,7 +6239,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-3.0",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6137,7 +6247,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.10",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6153,7 +6263,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.11",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6161,7 +6271,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.12",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6169,7 +6279,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.9",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6185,7 +6295,7 @@
       "hotpluggable-cpus": false,
       "name": "pseries-2.6",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6193,7 +6303,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.7",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6201,7 +6311,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-2.8",
       "numa-mem-supported": true,
-      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6209,7 +6319,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-4.2",
       "numa-mem-supported": true,
-      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "is-default": true,
       "cpu-max": 1024,
       "deprecated": false,
@@ -6219,7 +6329,7 @@
       "hotpluggable-cpus": false,
       "name": "pseries-2.4",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6227,7 +6337,7 @@
       "hotpluggable-cpus": false,
       "name": "pseries-2.5",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6235,7 +6345,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-4.0",
       "numa-mem-supported": true,
-      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6243,7 +6353,7 @@
       "hotpluggable-cpus": true,
       "name": "pseries-4.1",
       "numa-mem-supported": true,
-      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6251,7 +6361,7 @@
       "hotpluggable-cpus": false,
       "name": "pseries-2.2",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6266,7 +6376,7 @@
       "hotpluggable-cpus": false,
       "name": "pseries-2.3",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6274,7 +6384,7 @@
       "hotpluggable-cpus": false,
       "name": "pseries-2.1",
       "numa-mem-supported": true,
-      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "default-cpu-type": "host-powerpc64-cpu",
       "cpu-max": 1024,
       "deprecated": false
     },
@@ -6304,7 +6414,7 @@
       "deprecated": false
     }
   ],
-  "id": "libvirt-33"
+  "id": "libvirt-34"
 }
 
 {
@@ -6312,7 +6422,7 @@
   "arguments": {
     "typename": "pseries-4.2-machine"
   },
-  "id": "libvirt-34"
+  "id": "libvirt-35"
 }
 
 {
@@ -6511,12 +6621,12 @@
       "type": "string"
     }
   ],
-  "id": "libvirt-34"
+  "id": "libvirt-35"
 }
 
 {
   "execute": "query-cpu-definitions",
-  "id": "libvirt-35"
+  "id": "libvirt-36"
 }
 
 {
@@ -8712,34 +8822,34 @@
       "static": false
     }
   ],
-  "id": "libvirt-35"
+  "id": "libvirt-36"
 }
 
 {
   "execute": "query-tpm-models",
-  "id": "libvirt-36"
+  "id": "libvirt-37"
 }
 
 {
   "return": [
   ],
-  "id": "libvirt-36"
+  "id": "libvirt-37"
 }
 
 {
   "execute": "query-tpm-types",
-  "id": "libvirt-37"
+  "id": "libvirt-38"
 }
 
 {
   "return": [
   ],
-  "id": "libvirt-37"
+  "id": "libvirt-38"
 }
 
 {
   "execute": "query-command-line-options",
-  "id": "libvirt-38"
+  "id": "libvirt-39"
 }
 
 {
@@ -9878,12 +9988,12 @@
       "option": "drive"
     }
   ],
-  "id": "libvirt-38"
+  "id": "libvirt-39"
 }
 
 {
   "execute": "query-migrate-capabilities",
-  "id": "libvirt-39"
+  "id": "libvirt-40"
 }
 
 {
@@ -9961,12 +10071,12 @@
       "capability": "validate-uuid"
     }
   ],
-  "id": "libvirt-39"
+  "id": "libvirt-40"
 }
 
 {
   "execute": "query-qmp-schema",
-  "id": "libvirt-40"
+  "id": "libvirt-41"
 }
 
 {
@@ -22195,7 +22305,7 @@
       ]
     }
   ],
-  "id": "libvirt-40"
+  "id": "libvirt-41"
 }
 
 {
@@ -24403,4 +24513,271 @@
     }
   ],
   "id": "libvirt-2"
+}
+
+{
+  "execute": "query-machines",
+  "id": "libvirt-3"
+}
+
+{
+  "return": [
+    {
+      "hotpluggable-cpus": false,
+      "name": "ref405ep",
+      "numa-mem-supported": false,
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "sam460ex",
+      "numa-mem-supported": false,
+      "default-cpu-type": "460exb-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "none",
+      "numa-mem-supported": false,
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "virtex-ml507",
+      "numa-mem-supported": false,
+      "default-cpu-type": "440-xilinx-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "ppce500",
+      "numa-mem-supported": false,
+      "default-cpu-type": "e500v2_v30-powerpc64-cpu",
+      "cpu-max": 32,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "mpc8544ds",
+      "numa-mem-supported": false,
+      "default-cpu-type": "e500v2_v30-powerpc64-cpu",
+      "cpu-max": 15,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-3.1",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.12-sxxm",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "bamboo",
+      "numa-mem-supported": false,
+      "default-cpu-type": "440epb-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "g3beige",
+      "numa-mem-supported": false,
+      "default-cpu-type": "750_v3.1-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-3.0",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.10",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "prep",
+      "numa-mem-supported": false,
+      "default-cpu-type": "602-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": true
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.11",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.12",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.9",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "mac99",
+      "numa-mem-supported": false,
+      "default-cpu-type": "970fx_v3.1-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "pseries-2.6",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.7",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-2.8",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-4.2",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "is-default": true,
+      "cpu-max": 1024,
+      "deprecated": false,
+      "alias": "pseries"
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "pseries-2.4",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "pseries-2.5",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-4.0",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": true,
+      "name": "pseries-4.1",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "pseries-2.2",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "taihu",
+      "numa-mem-supported": false,
+      "cpu-max": 1,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "pseries-2.3",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "pseries-2.1",
+      "numa-mem-supported": true,
+      "default-cpu-type": "power7_v2.3-powerpc64-cpu",
+      "cpu-max": 1024,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "powernv8",
+      "numa-mem-supported": false,
+      "default-cpu-type": "power8_v2.0-powerpc64-cpu",
+      "cpu-max": 2048,
+      "deprecated": false
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "powernv9",
+      "numa-mem-supported": false,
+      "default-cpu-type": "power9_v2.0-powerpc64-cpu",
+      "cpu-max": 2048,
+      "deprecated": false,
+      "alias": "powernv"
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "40p",
+      "numa-mem-supported": false,
+      "default-cpu-type": "604-powerpc64-cpu",
+      "cpu-max": 1,
+      "deprecated": false
+    }
+  ],
+  "id": "libvirt-3"
 }

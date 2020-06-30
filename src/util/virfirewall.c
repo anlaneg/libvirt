@@ -27,7 +27,6 @@
 #include "virfirewalld.h"
 #include "viralloc.h"
 #include "virerror.h"
-#include "virutil.h"
 #include "virstring.h"
 #include "vircommand.h"
 #include "virlog.h"
@@ -509,19 +508,15 @@ void virFirewallRuleAddArgFormat(virFirewallPtr firewall,
     VIR_FIREWALL_RULE_RETURN_IF_ERROR(firewall, rule);
 
     va_start(list, fmt);
-
-    if (virVasprintf(&arg, fmt, list) < 0)
-        goto no_memory;
+    arg = g_strdup_vprintf(fmt, list);
+    va_end(list);
 
     ADD_ARG(rule, arg);
-
-    va_end(list);
 
     return;
 
  no_memory:
     firewall->err = ENOMEM;
-    va_end(list);
 }
 
 

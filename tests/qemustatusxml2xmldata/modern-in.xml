@@ -261,6 +261,7 @@
   <allowReboot value='yes'/>
   <nodename index='123'/>
   <blockjobs active='no'/>
+  <agentTimeout>-2</agentTimeout>
   <domain type='kvm' id='1'>
     <name>upstream</name>
     <uuid>dcf47dbd-46d1-4d5b-b442-262a806a333a</uuid>
@@ -307,10 +308,16 @@
       <emulator>/usr/bin/qemu-system-x86_64</emulator>
       <disk type='file' device='disk'>
         <driver name='qemu' type='qcow2' discard='unmap' detect_zeroes='on'/>
+        <auth username='testuser'>
+          <secret type='iscsi' usage='libvirtiscsi'/>
+        </auth>
         <source file='/var/lib/libvirt/images/a.qcow2'/>
         <backingStore type='file' index='1'>
           <format type='qcow2'/>
           <source file='/var/lib/libvirt/images/base.qcow2'>
+            <slices>
+              <slice type='storage' offset='1234' size='3456'/>
+            </slices>
             <seclabel model='dac' relabel='yes'>
               <label>qemu:qemu</label>
             </seclabel>
@@ -321,12 +328,14 @@
               <nodenames>
                 <nodename type='storage' name='test-storage'/>
                 <nodename type='format' name='test-format'/>
+                <nodename type='slice-storage' name='test-slice-storage'/>
               </nodenames>
               <reservations mgralias='test-alias'/>
               <relPath>base.qcow2</relPath>
               <objects>
                 <secret type='auth' alias='test-auth-alias'/>
                 <secret type='encryption' alias='test-encryption-alias'/>
+                <secret type='httpcookie' alias='http-cookie-alias'/>
                 <TLSx509 alias='transport-alias'/>
               </objects>
             </privateData>
@@ -342,6 +351,7 @@
             <nodename type='copyOnRead' name='cor-node'/>
           </nodenames>
         </privateData>
+        <diskSecretsPlacement auth='true'/>
       </disk>
       <disk type='file' device='cdrom'>
         <driver name='qemu' type='raw'/>

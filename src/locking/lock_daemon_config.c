@@ -41,22 +41,14 @@ virLockDaemonConfigFilePath(bool privileged, char **configfile)
     if (privileged) {
         *configfile = g_strdup(SYSCONFDIR "/libvirt/virtlockd.conf");
     } else {
-        char *configdir = NULL;
+        g_autofree char *configdir = NULL;
 
-        if (!(configdir = virGetUserConfigDirectory()))
-            goto error;
+        configdir = virGetUserConfigDirectory();
 
-        if (virAsprintf(configfile, "%s/virtlockd.conf", configdir) < 0) {
-            VIR_FREE(configdir);
-            goto error;
-        }
-        VIR_FREE(configdir);
+        *configfile = g_strdup_printf("%s/virtlockd.conf", configdir);
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
 

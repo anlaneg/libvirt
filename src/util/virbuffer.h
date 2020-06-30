@@ -35,6 +35,15 @@ typedef virBuffer *virBufferPtr;
 
 #define VIR_BUFFER_INITIALIZER { NULL, 0 }
 
+/**
+ * VIR_BUFFER_INIT_CHILD:
+ * @parentbuf: parent buffer for XML element formatting
+ *
+ * Intitialize a virBuffer structure and set up the indentation level for
+ * formatting XML subelements of @parentbuf.
+ */
+#define VIR_BUFFER_INIT_CHILD(parentbuf) { NULL, (parentbuf)->indent + 2 }
+
 struct _virBuffer {
     GString *str;
     int indent;
@@ -79,17 +88,10 @@ void virBufferURIEncodeString(virBufferPtr buf, const char *str);
 void virBufferAdjustIndent(virBufferPtr buf, int indent);
 void virBufferSetIndent(virBufferPtr, int indent);
 
-/**
- * virBufferSetChildIndent
- *
- * Gets the parent indentation, increments it by 2 and sets it to
- * child buffer.
- */
-#define virBufferSetChildIndent(childBuf_, parentBuf_) \
-    virBufferSetIndent(childBuf_, virBufferGetIndent(parentBuf_) + 2)
-
 size_t virBufferGetIndent(const virBuffer *buf);
 size_t virBufferGetEffectiveIndent(const virBuffer *buf);
 
-void virBufferTrim(virBufferPtr buf, const char *trim, int len);
+void virBufferTrim(virBufferPtr buf, const char *trim);
+void virBufferTrimChars(virBufferPtr buf, const char *trim);
+void virBufferTrimLen(virBufferPtr buf, int len);
 void virBufferAddStr(virBufferPtr buf, const char *str);

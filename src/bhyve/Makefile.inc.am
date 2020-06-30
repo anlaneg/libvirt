@@ -22,8 +22,8 @@ BHYVE_DRIVER_SOURCES = \
 	bhyve/bhyve_utils.h \
 	$(NULL)
 
-DRIVER_SOURCE_FILES += $(BHYVE_DRIVER_SOURCES)
-STATEFUL_DRIVER_SOURCE_FILES += $(BHYVE_DRIVER_SOURCES)
+DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(BHYVE_DRIVER_SOURCES))
+STATEFUL_DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(BHYVE_DRIVER_SOURCES))
 
 EXTRA_DIST += $(BHYVE_DRIVER_SOURCES)
 
@@ -35,14 +35,15 @@ libvirt_driver_bhyve_la_LIBADD = \
 	libvirt_driver_bhyve_impl.la \
 	libvirt.la \
 	$(GLIB_LIBS) \
-	../gnulib/lib/libgnu.la \
 	$(NULL)
 mod_LTLIBRARIES += libvirt_driver_bhyve.la
 libvirt_driver_bhyve_la_LDFLAGS = $(AM_LDFLAGS_MOD_NOUNDEF)
 
 libvirt_driver_bhyve_impl_la_CFLAGS = \
 	-I$(srcdir)/access \
+	-I$(builddir)/access \
 	-I$(srcdir)/conf \
+	-I$(srcdir)/hypervisor \
 	$(AM_CFLAGS) \
 	$(NULL)
 libvirt_driver_bhyve_impl_la_LDFLAGS = $(AM_LDFLAGS)
@@ -56,6 +57,7 @@ augeastest_DATA += bhyve/test_virtbhyved.aug
 CLEANFILES += bhyve/virtbhyved.aug
 
 virtbhyved_SOURCES = $(REMOTE_DAEMON_SOURCES)
+nodist_virtbhyved_SOURCES = $(REMOTE_DAEMON_GENERATED)
 virtbhyved_CFLAGS = \
        $(REMOTE_DAEMON_CFLAGS) \
        -DDAEMON_NAME="\"virtbhyved\"" \

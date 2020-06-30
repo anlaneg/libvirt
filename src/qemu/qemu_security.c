@@ -26,7 +26,7 @@
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
-VIR_LOG_INIT("qemu.qemu_process");
+VIR_LOG_INIT("qemu.qemu_security");
 
 
 int
@@ -38,6 +38,13 @@ qemuSecuritySetAllLabel(virQEMUDriverPtr driver,
     int ret = -1;
     qemuDomainObjPrivatePtr priv = vm->privateData;
     pid_t pid = -1;
+
+    /* Explicitly run this outside of transaction. We really want to relabel
+     * the file in the host and not in the domain's namespace. */
+    if (virSecurityManagerDomainSetPathLabelRO(driver->securityManager,
+                                               vm->def,
+                                               stdin_path) < 0)
+        goto cleanup;
 
     if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         pid = vm->pid;
@@ -98,7 +105,8 @@ int
 qemuSecuritySetImageLabel(virQEMUDriverPtr driver,
                           virDomainObjPtr vm,
                           virStorageSourcePtr src,
-                          bool backingChain)
+                          bool backingChain,
+                          bool chainTop)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
     pid_t pid = -1;
@@ -107,6 +115,9 @@ qemuSecuritySetImageLabel(virQEMUDriverPtr driver,
 
     if (backingChain)
         labelFlags |= VIR_SECURITY_DOMAIN_IMAGE_LABEL_BACKING_CHAIN;
+
+    if (chainTop)
+        labelFlags |= VIR_SECURITY_DOMAIN_IMAGE_PARENT_CHAIN_TOP;
 
     if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         pid = vm->pid;
@@ -604,54 +615,25 @@ qemuSecurityDomainSetPathLabel(virQEMUDriverPtr driver,
 
 
 int
-qemuSecuritySetSavedStateLabel(virQEMUDriverPtr driver,
+qemuSecurityDomainRestorePathLabel(virQEMUDriverPtr driver,
                                    virDomainObjPtr vm,
-                                   const char *savefile)
+                                   const char *path,
+                                   bool ignoreNS)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
     pid_t pid = -1;
     int ret = -1;
 
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
+    if (!ignoreNS &&
+        qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         pid = vm->pid;
 
     if (virSecurityManagerTransactionStart(driver->securityManager) < 0)
         goto cleanup;
 
-    if (virSecurityManagerSetSavedStateLabel(driver->securityManager,
-                                             vm->def,
-                                             savefile) < 0)
-        goto cleanup;
-
-    if (virSecurityManagerTransactionCommit(driver->securityManager,
-                                            pid, priv->rememberOwner) < 0)
-        goto cleanup;
-
-    ret = 0;
- cleanup:
-    virSecurityManagerTransactionAbort(driver->securityManager);
-    return ret;
-}
-
-
-int
-qemuSecurityRestoreSavedStateLabel(virQEMUDriverPtr driver,
-                                       virDomainObjPtr vm,
-                                       const char *savefile)
-{
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    pid_t pid = -1;
-    int ret = -1;
-
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
-        pid = vm->pid;
-
-    if (virSecurityManagerTransactionStart(driver->securityManager) < 0)
-        goto cleanup;
-
-    if (virSecurityManagerRestoreSavedStateLabel(driver->securityManager,
+    if (virSecurityManagerDomainRestorePathLabel(driver->securityManager,
                                                  vm->def,
-                                                 savefile) < 0)
+                                                 path) < 0)
         goto cleanup;
 
     if (virSecurityManagerTransactionCommit(driver->securityManager,

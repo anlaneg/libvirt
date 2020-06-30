@@ -29,7 +29,6 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <inttypes.h>
-#include <signal.h>
 
 #if WITH_READLINE
 # include <readline/readline.h>
@@ -47,6 +46,7 @@
 #include "virstring.h"
 #include "virgettext.h"
 
+#include "virsh-backup.h"
 #include "virsh-checkpoint.h"
 #include "virsh-console.h"
 #include "virsh-domain.h"
@@ -60,11 +60,6 @@
 #include "virsh-secret.h"
 #include "virsh-snapshot.h"
 #include "virsh-volume.h"
-
-/* Gnulib doesn't guarantee SA_SIGINFO support.  */
-#ifndef SA_SIGINFO
-# define SA_SIGINFO 0
-#endif
 
 //记录进程名称
 static char *progname;
@@ -530,9 +525,6 @@ virshShowVersion(vshControl *ctl G_GNUC_UNUSED)
 #ifdef WITH_VMWARE
     vshPrint(ctl, " VMware");
 #endif
-#ifdef WITH_PHYP
-    vshPrint(ctl, " PHYP");
-#endif
 #ifdef WITH_VBOX
     vshPrint(ctl, " VirtualBox");
 #endif
@@ -851,6 +843,7 @@ static const vshCmdGrp cmdGroups[] = {
     {VIRSH_CMD_GRP_NODEDEV, "nodedev", nodedevCmds},
     {VIRSH_CMD_GRP_SECRET, "secret", secretCmds},
     {VIRSH_CMD_GRP_SNAPSHOT, "snapshot", snapshotCmds},
+    {VIRSH_CMD_GRP_BACKUP, "backup", backupCmds},
     {VIRSH_CMD_GRP_STORAGE_POOL, "pool", storagePoolCmds},
     {VIRSH_CMD_GRP_STORAGE_VOL, "volume", storageVolCmds},
 	//virsh对关的命令行

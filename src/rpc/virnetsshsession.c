@@ -29,7 +29,6 @@
 #include "virlog.h"
 #include "configmake.h"
 #include "virthread.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "virfile.h"
 #include "virobject.h"
@@ -345,7 +344,7 @@ virNetSSHCheckHostKey(virNetSSHSessionPtr sess)
             }
 
             /* calculate remote key hash, using MD5 algorithm that is
-             * usual in OpenSSH. The returned value should *NOT* be freed*/
+             * usual in OpenSSH. The returned value should *NOT* be freed */
             if (!(keyhash = libssh2_hostkey_hash(sess->session,
                                                  LIBSSH2_HOSTKEY_HASH_MD5))) {
                 virReportError(VIR_ERR_SSH, "%s",
@@ -357,20 +356,13 @@ virNetSSHCheckHostKey(virNetSSHSessionPtr sess)
              * we have to use a *MAGIC* constant. */
             for (i = 0; i < 16; i++)
                 virBufferAsprintf(&buff, "%02hhX:", keyhash[i]);
-            virBufferTrim(&buff, ":", 1);
+            virBufferTrim(&buff, ":");
 
             keyhashstr = virBufferContentAndReset(&buff);
 
             askKey.type = VIR_CRED_ECHOPROMPT;
-            if (virAsprintf((char **)&askKey.prompt,
-                            _("Accept SSH host key with hash '%s' for "
-                              "host '%s:%d' (%s/%s)?"),
-                            keyhashstr,
-                            sess->hostname, sess->port,
-                            "y", "n") < 0) {
-                VIR_FREE(keyhashstr);
-                return -1;
-            }
+            askKey.prompt = g_strdup_printf(_("Accept SSH host key with hash '%s' for " "host '%s:%d' (%s/%s)?"),
+                                            keyhashstr, sess->hostname, sess->port, "y", "n");
 
             if (sess->cred->cb(&askKey, 1, sess->cred->cbdata)) {
                 virReportError(VIR_ERR_SSH, "%s",
@@ -628,10 +620,8 @@ virNetSSHAuthenticatePrivkey(virNetSSHSessionPtr sess,
         return -1;
     }
 
-    if (virAsprintf((char **)&retr_passphrase.prompt,
-                    _("Passphrase for key '%s'"),
-                    priv->filename) < 0)
-        return -1;
+    retr_passphrase.prompt = g_strdup_printf(_("Passphrase for key '%s'"),
+                                             priv->filename);
 
     if (sess->cred->cb(&retr_passphrase, 1, sess->cred->cbdata)) {
         virReportError(VIR_ERR_SSH, "%s",
@@ -934,7 +924,7 @@ virNetSSHOpenChannel(virNetSSHSessionPtr sess)
         return -1;
     }
 
-    /* nonblocking mode - currently does nothing*/
+    /* nonblocking mode - currently does nothing */
     libssh2_channel_set_blocking(sess->channel, 0);
 
     /* channel open */
@@ -1142,11 +1132,10 @@ virNetSSHSessionAuthAddKeyboardAuth(virNetSSHSessionPtr sess,
 
 }
 
-int
+void
 virNetSSHSessionSetChannelCommand(virNetSSHSessionPtr sess,
                                   const char *command)
 {
-    int ret = 0;
     virObjectLock(sess);
 
     VIR_FREE(sess->channelCommand);
@@ -1154,7 +1143,6 @@ virNetSSHSessionSetChannelCommand(virNetSSHSessionPtr sess,
     sess->channelCommand = g_strdup(command);
 
     virObjectUnlock(sess);
-    return ret;
 }
 
 int

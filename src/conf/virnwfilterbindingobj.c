@@ -19,6 +19,7 @@
  */
 
 #include <config.h>
+#include <unistd.h>
 
 #include "viralloc.h"
 #include "virerror.h"
@@ -139,7 +140,7 @@ virNWFilterBindingObjConfigFile(const char *dir,
 {
     char *ret;
 
-    ignore_value(virAsprintf(&ret, "%s/%s.xml", dir, name));
+    ret = g_strdup_printf("%s/%s.xml", dir, name);
     return ret;
 }
 

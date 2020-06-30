@@ -64,18 +64,14 @@ virNetDevOpenvswitchAddTimeout(virCommandPtr cmd)
  *
  * Construct the VLAN configuration parameters to be passed to
  * ovs-vsctl command.
- *
- * Returns 0 in case of success or -1 in case of failure.
  */
-static int
-virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
+static void
+virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, const virNetDevVlan *virtVlan)
 {
-    int ret = -1;
-    size_t i = 0;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (!virtVlan || !virtVlan->nTags)
-        return 0;
+        return;
 
     switch (virtVlan->nativeMode) {
     case VIR_NATIVE_VLAN_MODE_TAGGED:
@@ -92,6 +88,8 @@ virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
     }
 
     if (virtVlan->trunk) {
+        size_t i;
+
         virBufferAddLit(&buf, "trunk=");
 
         /*
@@ -100,7 +98,7 @@ virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
          * start of the for loop if there are more than one VLANs
          * on this trunk port.
          */
-        virBufferAsprintf(&buf, "%d", virtVlan->tag[i]);
+        virBufferAsprintf(&buf, "%d", virtVlan->tag[0]);
 
         for (i = 1; i < virtVlan->nTags; i++) {
             virBufferAddLit(&buf, ",");
@@ -111,10 +109,6 @@ virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
     } else if (virtVlan->nTags) {
         virCommandAddArgFormat(cmd, "tag=%d", virtVlan->tag[0]);
     }
-
-    ret = 0;
-    virBufferFreeAndReset(&buf);
-    return ret;
 }
 
 /**
@@ -132,8 +126,8 @@ virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
 int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
                                 const virMacAddr *macaddr,
                                 const unsigned char *vmuuid,
-                                virNetDevVPortProfilePtr ovsport,
-                                virNetDevVlanPtr virtVlan)
+                                const virNetDevVPortProfile *ovsport,
+                                const virNetDevVlan *virtVlan)
 {
     char macaddrstr[VIR_MAC_STRING_BUFLEN];
     char ifuuidstr[VIR_UUID_STRING_BUFLEN];
@@ -148,19 +142,13 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
     virUUIDFormat(ovsport->interfaceID, ifuuidstr);
     virUUIDFormat(vmuuid, vmuuidstr);
 
-    if (virAsprintf(&attachedmac_ex_id, "external-ids:attached-mac=\"%s\"",
-                    macaddrstr) < 0)
-        return -1;
-    if (virAsprintf(&ifaceid_ex_id, "external-ids:iface-id=\"%s\"",
-                    ifuuidstr) < 0)
-        return -1;
-    if (virAsprintf(&vmid_ex_id, "external-ids:vm-id=\"%s\"",
-                    vmuuidstr) < 0)
-        return -1;
+    attachedmac_ex_id = g_strdup_printf("external-ids:attached-mac=\"%s\"",
+                                        macaddrstr);
+    ifaceid_ex_id = g_strdup_printf("external-ids:iface-id=\"%s\"", ifuuidstr);
+    vmid_ex_id = g_strdup_printf("external-ids:vm-id=\"%s\"", vmuuidstr);
     if (ovsport->profileID[0] != '\0') {
-        if (virAsprintf(&profile_ex_id, "external-ids:port-profile=\"%s\"",
-                        ovsport->profileID) < 0)
-            return -1;
+        profile_ex_id = g_strdup_printf("external-ids:port-profile=\"%s\"",
+                                        ovsport->profileID);
     }
 
     cmd = virCommandNew(OVSVSCTL);
@@ -168,8 +156,7 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
     virCommandAddArgList(cmd, "--", "--if-exists", "del-port",
                          ifname, "--", "add-port", brname, ifname, NULL);
 
-    if (virNetDevOpenvswitchConstructVlans(cmd, virtVlan) < 0)
-        return -1;
+    virNetDevOpenvswitchConstructVlans(cmd, virtVlan);
 
     if (ovsport->profileID[0] == '\0') {
         virCommandAddArgList(cmd,
@@ -496,11 +483,8 @@ int
 virNetDevOpenvswitchGetVhostuserIfname(const char *path,
                                        char **ifname)
 {
-    char *tmpIfname = NULL;
-    char **tokens = NULL;
-    size_t ntokens = 0;
+    const char *tmpIfname = NULL;
     int status;
-    int ret = -1;
     g_autoptr(virCommand) cmd = NULL;
 
     /* Openvswitch vhostuser path are hardcoded to
@@ -510,10 +494,8 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
      * so we pick the filename and check it's a openvswitch interface
      */
     if (!path ||
-        !(tmpIfname = strrchr(path, '/'))) {
-        ret = 0;
-        goto cleanup;
-    }
+        !(tmpIfname = strrchr(path, '/')))
+        return 0;
 
     tmpIfname++;
     cmd = virCommandNew(OVSVSCTL);
@@ -522,16 +504,11 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
     if (virCommandRun(cmd, &status) < 0 ||
         status) {
         /* it's not a openvswitch vhostuser interface. */
-        ret = 0;
-        goto cleanup;
+        return 0;
     }
 
     *ifname = g_strdup(tmpIfname);
-    ret = 1;
-
- cleanup:
-    virStringListFreeCount(tokens, ntokens);
-    return ret;
+    return 1;
 }
 
 /**
@@ -544,7 +521,7 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
  * Returns 0 in case of success or -1 in case of failure.
  */
 int virNetDevOpenvswitchUpdateVlan(const char *ifname,
-                                   virNetDevVlanPtr virtVlan)
+                                   const virNetDevVlan *virtVlan)
 {
     g_autoptr(virCommand) cmd = NULL;
 
@@ -556,8 +533,7 @@ int virNetDevOpenvswitchUpdateVlan(const char *ifname,
                          "--", "--if-exists", "clear", "Port", ifname, "vlan_mode",
                          "--", "--if-exists", "set", "Port", ifname, NULL);
 
-    if (virNetDevOpenvswitchConstructVlans(cmd, virtVlan) < 0)
-        return -1;
+    virNetDevOpenvswitchConstructVlans(cmd, virtVlan);
 
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,

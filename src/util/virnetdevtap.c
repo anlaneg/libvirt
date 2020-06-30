@@ -32,10 +32,13 @@
 #include "datatypes.h"
 
 #include <unistd.h>
-#include <regex.h>
 #include <sys/types.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
+#ifndef WIN32
+# include <sys/ioctl.h>
+#endif
+#ifdef HAVE_NET_IF
+# include <net/if.h>
+#endif
 #include <fcntl.h>
 #ifdef __linux__
 # include <linux/if_tun.h>    /* IFF_TUN, IFF_NO_PI */
@@ -395,8 +398,7 @@ int virNetDevTapCreate(char **ifname,
         for (i = 0; i <= IF_MAXUNIT; i++) {
             g_autofree char *newname = NULL;
 
-            if (virAsprintf(&newname, *ifname, i) < 0)
-                goto cleanup;
+            newname = g_strdup_printf(*ifname, i);
 
             if (virNetDevExists(newname) == 0) {
                 newifname = g_steal_pointer(&newname);
@@ -416,8 +418,7 @@ int virNetDevTapCreate(char **ifname,
 
     if (tapfd) {
         g_autofree char *dev_path = NULL;
-        if (virAsprintf(&dev_path, "/dev/%s", ifr.ifr_name) < 0)
-            goto cleanup;
+        dev_path = g_strdup_printf("/dev/%s", ifr.ifr_name);
 
         if ((*tapfd = open(dev_path, O_RDWR)) < 0) {
             virReportSystemError(errno,
@@ -502,8 +503,9 @@ virNetDevTapAttachBridge(const char *tapname,
                          const char *brname,
                          const virMacAddr *macaddr,
                          const unsigned char *vmuuid,
-                         virNetDevVPortProfilePtr virtPortProfile,
-                         virNetDevVlanPtr virtVlan,
+                         const virNetDevVPortProfile *virtPortProfile,
+                         const virNetDevVlan *virtVlan,
+                         virTristateBool isolatedPort,
                          unsigned int mtu,
                          unsigned int *actualMTU)
 {
@@ -517,16 +519,16 @@ virNetDevTapAttachBridge(const char *tapname,
      */
     if (mtu > 0) {
         if (virNetDevSetMTU(tapname, mtu) < 0)
-            goto error;
+            return -1;
     } else {
         if (virNetDevSetMTUFromDevice(tapname, brname) < 0)
-            goto error;
+            return -1;
     }
     if (actualMTU) {
         int retMTU = virNetDevGetMTU(tapname);
 
         if (retMTU < 0)
-            goto error;
+            return -1;
 
         *actualMTU = retMTU;
     }
@@ -535,21 +537,28 @@ virNetDevTapAttachBridge(const char *tapname,
     if (virtPortProfile) {
         if (virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_MIDONET) {
             if (virNetDevMidonetBindPort(tapname, virtPortProfile) < 0)
-                goto error;
+                return -1;
         } else if (virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
             if (virNetDevOpenvswitchAddPort(brname, tapname, macaddr, vmuuid,
                                             virtPortProfile, virtVlan) < 0)
-                goto error;
+                return -1;
         }
     } else {
         if (virNetDevBridgeAddPort(brname, tapname) < 0)
-            goto error;
+            return -1;
+
+        if (isolatedPort == VIR_TRISTATE_BOOL_YES &&
+            virNetDevBridgePortSetIsolated(brname, tapname, true) < 0) {
+            virErrorPtr err;
+
+            virErrorPreserveLast(&err);
+            ignore_value(virNetDevBridgeRemovePort(brname, tapname));
+            virErrorRestore(&err);
+            return -1;
+        }
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
 
@@ -574,8 +583,9 @@ virNetDevTapReattachBridge(const char *tapname,
                            const char *brname,
                            const virMacAddr *macaddr,
                            const unsigned char *vmuuid,
-                           virNetDevVPortProfilePtr virtPortProfile,
-                           virNetDevVlanPtr virtVlan,
+                           const virNetDevVPortProfile *virtPortProfile,
+                           const virNetDevVlan *virtVlan,
+                           virTristateBool isolatedPort,
                            unsigned int mtu,
                            unsigned int *actualMTU)
 {
@@ -613,6 +623,7 @@ virNetDevTapReattachBridge(const char *tapname,
                                  macaddr, vmuuid,
                                  virtPortProfile,
                                  virtVlan,
+                                 isolatedPort,
                                  mtu, actualMTU) < 0)
         return -1;
 
@@ -660,8 +671,9 @@ int virNetDevTapCreateInBridgePort(const char *brname,
                                    const char *tunpath,
                                    int *tapfd,
                                    size_t tapfdSize,
-                                   virNetDevVPortProfilePtr virtPortProfile,
-                                   virNetDevVlanPtr virtVlan,
+                                   const virNetDevVPortProfile *virtPortProfile,
+                                   const virNetDevVlan *virtVlan,
+                                   virTristateBool isolatedPort,
                                    virNetDevCoalescePtr coalesce,
                                    unsigned int mtu,
                                    unsigned int *actualMTU,
@@ -699,7 +711,8 @@ int virNetDevTapCreateInBridgePort(const char *brname,
         goto error;
 
     if (virNetDevTapAttachBridge(*ifname, brname, macaddr, vmuuid,
-                                 virtPortProfile, virtVlan, mtu, actualMTU) < 0) {
+                                 virtPortProfile, virtVlan,
+                                 isolatedPort, mtu, actualMTU) < 0) {
         goto error;
     }
 

@@ -25,7 +25,11 @@
     </loader>
   </os>
   <cpu>
-    <mode name='host-passthrough' supported='yes'/>
+    <mode name='host-passthrough' supported='yes'>
+      <enum name='hostPassthroughMigratable'>
+        <value>off</value>
+      </enum>
+    </mode>
     <mode name='host-model' supported='yes'>
       <model fallback='forbid'>zEC12.2-base</model>
       <feature policy='require' name='aefsi'/>
@@ -138,6 +142,7 @@
     <video supported='yes'>
       <enum name='modelType'>
         <value>virtio</value>
+        <value>none</value>
       </enum>
     </video>
     <hostdev supported='yes'>
@@ -151,7 +156,6 @@
         <value>optional</value>
       </enum>
       <enum name='subsysType'>
-        <value>usb</value>
         <value>pci</value>
         <value>scsi</value>
       </enum>
@@ -177,6 +181,8 @@
     <gic supported='no'/>
     <vmcoreinfo supported='no'/>
     <genid supported='no'/>
+    <backingStoreInput supported='no'/>
+    <backup supported='no'/>
     <sev supported='no'/>
   </features>
 </domainCapabilities>

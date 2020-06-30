@@ -23,7 +23,6 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <termios.h>
 
 #include "internal.h"
 #include "virerror.h"
@@ -31,6 +30,7 @@
 #include "virpolkit.h"
 #include "vsh.h"
 #include "virsh-completer.h"
+#include "virenum.h"
 
 #define VIRSH_PROMPT_RW    "virsh # "
 #define VIRSH_PROMPT_RO    "virsh > "
@@ -51,6 +51,7 @@
 #define VIRSH_CMD_GRP_NWFILTER         "Network Filter"
 #define VIRSH_CMD_GRP_SECRET           "Secret"
 #define VIRSH_CMD_GRP_SNAPSHOT         "Snapshot"
+#define VIRSH_CMD_GRP_BACKUP           "Backup"
 #define VIRSH_CMD_GRP_HOST_AND_HV      "Host and Hypervisor"
 #define VIRSH_CMD_GRP_VIRSH            "Virsh itself"
 
@@ -160,7 +161,8 @@ struct _virshControl {
 struct _virshCtrlData {
     vshControl *ctl;
     const vshCmd *cmd;
-    int writefd;
+    GMainLoop *eventLoop;
+    int ret;
     virConnectPtr dconn;
 };
 

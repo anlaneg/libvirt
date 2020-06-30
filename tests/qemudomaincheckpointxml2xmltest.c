@@ -53,7 +53,7 @@ testCompareXMLToXMLFiles(const char *inxml,
         virTestLoadFile(outxml, &outXmlData) < 0)
         return -1;
 
-    if (!(def = virDomainCheckpointDefParseString(inXmlData, driver.caps,
+    if (!(def = virDomainCheckpointDefParseString(inXmlData,
                                                   driver.xmlopt, NULL,
                                                   parseflags))) {
         if (flags & TEST_INVALID)
@@ -91,7 +91,7 @@ testCompareXMLToXMLFiles(const char *inxml,
     if (!def->parent.dom)
         formatflags |= VIR_DOMAIN_CHECKPOINT_FORMAT_NO_DOMAIN;
 
-    if (!(actual = virDomainCheckpointDefFormat(def, driver.caps,
+    if (!(actual = virDomainCheckpointDefFormat(def,
                                                 driver.xmlopt,
                                                 formatflags)))
         return -1;
@@ -120,9 +120,8 @@ testCheckpointPostParse(virDomainMomentDefPtr def)
     if (def->creationTime)
         return -1;
     def->creationTime = mocktime;
-    if (!def->name &&
-        virAsprintf(&def->name, "%lld", def->creationTime) < 0)
-        return -1;
+    if (!def->name)
+        def->name = g_strdup_printf("%lld", def->creationTime);
     return 0;
 }
 
@@ -176,7 +175,7 @@ mymain(void)
     /* Unset or set all envvars here that are copied in qemudBuildCommandLine
      * using ADD_ENV_COPY, otherwise these tests may fail due to unexpected
      * values for these envvars */
-    setenv("PATH", "/bin", 1);
+    g_setenv("PATH", "/bin", TRUE);
 
     /* Test a normal user redefine */
     DO_TEST_OUT("redefine", 0);

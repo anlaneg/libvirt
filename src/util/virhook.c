@@ -22,7 +22,6 @@
 #include <config.h>
 
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -34,6 +33,7 @@
 #include "virfile.h"
 #include "configmake.h"
 #include "vircommand.h"
+#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_HOOK
 
@@ -49,6 +49,7 @@ VIR_ENUM_DECL(virHookQemuOp);
 VIR_ENUM_DECL(virHookLxcOp);
 VIR_ENUM_DECL(virHookNetworkOp);
 VIR_ENUM_DECL(virHookLibxlOp);
+VIR_ENUM_DECL(virHookBhyveOp);
 
 VIR_ENUM_IMPL(virHookDriver,
               VIR_HOOK_DRIVER_LAST,
@@ -57,6 +58,7 @@ VIR_ENUM_IMPL(virHookDriver,
               "lxc",
               "network",
               "libxl",
+              "bhyve",
 );
 
 VIR_ENUM_IMPL(virHookDaemonOp,
@@ -117,6 +119,15 @@ VIR_ENUM_IMPL(virHookLibxlOp,
               "reconnect",
 );
 
+VIR_ENUM_IMPL(virHookBhyveOp,
+              VIR_HOOK_BHYVE_OP_LAST,
+              "start",
+              "stopped",
+              "prepare",
+              "release",
+              "started",
+);
+
 static int virHooksFound = -1;
 
 /**
@@ -132,7 +143,11 @@ static int virHooksFound = -1;
 static int
 virHookCheck(int no, const char *driver)
 {
+    int ret;
+    DIR *dir;
+    struct dirent *entry;
     g_autofree char *path = NULL;
+    g_autofree char *dir_path = NULL;
 
     if (driver == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -151,17 +166,40 @@ virHookCheck(int no, const char *driver)
     //如果文件不存在，则报错
     if (!virFileExists(path)) {
         VIR_DEBUG("No hook script %s", path);
-        return 0;
+    } else if (!virFileIsExecutable(path)) {
+        VIR_WARN("Non-executable hook script %s", path);
+    } else {
+        VIR_DEBUG("Found hook script %s", path);
+        return 1;
     }
 
     //文件必须可执行
-    if (!virFileIsExecutable(path)) {
-        VIR_WARN("Non-executable hook script %s", path);
+    dir_path = g_strdup_printf("%s.d", path);
+    if ((ret = virDirOpenIfExists(&dir, dir_path)) < 0)
+        return -1;
+
+    if (!ret) {
+        VIR_DEBUG("No hook script dir %s", dir_path);
         return 0;
     }
 
-    VIR_DEBUG("Found hook script %s", path);
-    return 1;
+    while ((ret = virDirRead(dir, &entry, dir_path)) > 0) {
+        g_autofree char *entry_path = g_build_filename(dir_path,
+                                                       entry->d_name,
+                                                       NULL);
+        if (!virFileIsExecutable(entry_path)) {
+            VIR_WARN("Non-executable hook script %s", entry_path);
+            continue;
+        }
+
+        VIR_DEBUG("Found hook script %s", entry_path);
+        ret = 1;
+        break;
+    }
+
+    VIR_DIR_CLOSE(dir);
+
+    return ret;
 }
 
 /*
@@ -225,6 +263,57 @@ virHookPresent(int driver)
 }
 
 /**
+ * virRunScript:
+ * @path: the script path
+ * @id: an id for the object '-' if non available for example on daemon hooks
+ * @op: the operation on the id
+ * @subop: a sub_operation, currently unused
+ * @extra: optional string information
+ * @input: extra input given to the script on stdin
+ * @output: optional address of variable to store malloced result buffer
+ *
+ * Implement a execution of script. This is a synchronous call, we wait for
+ * execution completion. If @output is non-NULL, *output is guaranteed to be
+ * allocated after successful virRunScript, and is best-effort allocated after
+ * failed virRunScript; the caller is responsible for freeing *output.
+ *
+ * Returns: 0 if the execution succeeded, -1 if script returned an error
+ */
+static int
+virRunScript(const char *path,
+             const char *id,
+             const char *op,
+             const char *subop,
+             const char *extra,
+             const char *input,
+             char **output)
+{
+    int ret;
+    g_autoptr(virCommand) cmd = NULL;
+
+    VIR_DEBUG("Calling hook %s id=%s op=%s subop=%s extra=%s",
+              path, id, op, subop, extra);
+
+    cmd = virCommandNewArgList(path, id, op, subop, extra, NULL);
+
+    virCommandAddEnvPassCommon(cmd);
+
+    if (input)
+        virCommandSetInputBuffer(cmd, input);
+    if (output)
+        virCommandSetOutputBuffer(cmd, output);
+
+    ret = virCommandRun(cmd, NULL);
+    if (ret < 0) {
+        /* Convert INTERNAL_ERROR into known error.  */
+        virReportError(VIR_ERR_HOOK_SCRIPT_FAILED, "%s",
+                       virGetLastErrorMessage());
+    }
+
+    return ret;
+}
+
+/**
  * virHookCall:
  * @driver: the driver number (from virHookDriver enum)
  * @id: an id for the object '-' if non available for example on daemon hooks
@@ -234,11 +323,17 @@ virHookPresent(int driver)
  * @input: extra input given to the script on stdin
  * @output: optional address of variable to store malloced result buffer
  *
- * Implement a hook call, where the external script for the driver is
+ * Implement a hook call, where the external scripts for the driver are
  * called with the given information. This is a synchronous call, we wait for
  * execution completion. If @output is non-NULL, *output is guaranteed to be
  * allocated after successful virHookCall, and is best-effort allocated after
  * failed virHookCall; the caller is responsible for freeing *output.
+ *
+ * The script from LIBVIRT_HOOK_DIR is executed the first, followed by scripts
+ * found under "$driver.d/" directory (sorted alphabetically. If output from
+ * the hook script is expected, then the output produced by LIBVIRT_HOOK_DIR
+ * script is fed as input to the first script from the "$driver.d/" directory
+ * and its output is fed as input to the second and so on.
  *
  * Returns: 0 if the execution succeeded, 1 if the script was not found or
  *          invalid parameters, and -1 if script returned an error
@@ -252,12 +347,16 @@ virHookCall(int driver/*要调用的hook点名称*/,
             const char *input/*hook输入函数*/,
             char **output)
 {
-    int ret;
+    int ret, script_ret;
+    DIR *dir;
+    struct dirent *entry;
     g_autofree char *path = NULL;
-    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *dir_path = NULL;
+    VIR_AUTOSTRINGLIST entries = NULL;
     const char *drvstr;
     const char *opstr;
     const char *subopstr;
+    size_t i, nentries;
 
     if (output)
         *output = NULL;
@@ -298,6 +397,10 @@ virHookCall(int driver/*要调用的hook点名称*/,
         case VIR_HOOK_DRIVER_NETWORK:
         		//获得network driver hook时的opstr
             opstr = virHookNetworkOpTypeToString(op);
+            break;
+        case VIR_HOOK_DRIVER_BHYVE:
+            opstr = virHookBhyveOpTypeToString(op);
+            break;
     }
     if (opstr == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -321,24 +424,61 @@ virHookCall(int driver/*要调用的hook点名称*/,
         return -1;
     }
 
-    VIR_DEBUG("Calling hook opstr=%s subopstr=%s extra=%s",
-              opstr, subopstr, extra);
+    script_ret = 1;
 
-    cmd = virCommandNewArgList(path, id, opstr, subopstr, extra, NULL);
-
-    virCommandAddEnvPassCommon(cmd);
-
-    if (input)
-        virCommandSetInputBuffer(cmd, input);
-    if (output)
-        virCommandSetOutputBuffer(cmd, output);
-
-    ret = virCommandRun(cmd, NULL);
-    if (ret < 0) {
-        /* Convert INTERNAL_ERROR into known error.  */
-        virReportError(VIR_ERR_HOOK_SCRIPT_FAILED, "%s",
-                       virGetLastErrorMessage());
+    if (virFileIsExecutable(path)) {
+        script_ret = virRunScript(path, id, opstr, subopstr, extra,
+                                  input, output);
     }
 
-    return ret;
+    dir_path = g_strdup_printf("%s.d", path);
+    if ((ret = virDirOpenIfExists(&dir, dir_path)) < 0)
+        return -1;
+
+    if (!ret)
+        return script_ret;
+
+    while ((ret = virDirRead(dir, &entry, dir_path)) > 0) {
+        g_autofree char *entry_path = g_build_filename(dir_path,
+                                                       entry->d_name,
+                                                       NULL);
+        if (!virFileIsExecutable(entry_path))
+            continue;
+
+        virStringListAdd(&entries, entry_path);
+    }
+
+    VIR_DIR_CLOSE(dir);
+
+    if (ret < 0)
+        return -1;
+
+    if (!entries)
+        return script_ret;
+
+    nentries = virStringListLength((const char **)entries);
+    qsort(entries, nentries, sizeof(*entries), virStringSortCompare);
+
+    for (i = 0; i < nentries; i++) {
+        int entry_ret;
+        const char *entry_input;
+        g_autofree char *entry_output = NULL;
+
+        /* Get input from previous output */
+        entry_input = (!script_ret && output &&
+                       !virStringIsEmpty(*output)) ? *output : input;
+        entry_ret = virRunScript(entries[i], id, opstr,
+                                 subopstr, extra, entry_input,
+                                 (output) ? &entry_output : NULL);
+        if (entry_ret < script_ret)
+            script_ret = entry_ret;
+
+        /* Replace output to new output from item */
+        if (!entry_ret && output && !virStringIsEmpty(entry_output)) {
+            g_free(*output);
+            *output = g_steal_pointer(&entry_output);
+        }
+    }
+
+    return script_ret;
 }

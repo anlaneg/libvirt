@@ -14032,28 +14032,6 @@
 }
 
 {
-  "execute": "query-cpu-model-expansion",
-  "arguments": {
-    "type": "static",
-    "model": {
-      "name": "host",
-      "props": {
-        "migratable": false
-      }
-    }
-  },
-  "id": "libvirt-36"
-}
-
-{
-  "id": "libvirt-36",
-  "error": {
-    "class": "GenericError",
-    "desc": "Property '.migratable' not found"
-  }
-}
-
-{
   "execute": "qmp_capabilities",
   "id": "libvirt-1"
 }
@@ -14476,4 +14454,52 @@
     "class": "GenericError",
     "desc": "The CPU definition 'max' is unknown."
   }
+}
+
+{
+  "execute": "query-machines",
+  "id": "libvirt-4"
+}
+
+{
+  "return": [
+    {
+      "hotpluggable-cpus": false,
+      "name": "s390-ccw-virtio-2.7",
+      "cpu-max": 248
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "s390-ccw-virtio-2.6",
+      "cpu-max": 248
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "none",
+      "cpu-max": 1
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "s390-ccw-virtio-2.5",
+      "cpu-max": 248
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "s390-ccw-virtio-2.4",
+      "cpu-max": 248
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "s390-ccw-virtio-2.9",
+      "is-default": true,
+      "cpu-max": 248,
+      "alias": "s390-ccw-virtio"
+    },
+    {
+      "hotpluggable-cpus": false,
+      "name": "s390-ccw-virtio-2.8",
+      "cpu-max": 248
+    }
+  ],
+  "id": "libvirt-4"
 }

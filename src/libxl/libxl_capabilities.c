@@ -169,8 +169,7 @@ libxlCapsInitCPU(virCapsPtr caps, libxl_physinfo *phy_info,
     if (!phy_info->hw_cap[0])
         return 0;
 
-    if (VIR_ALLOC(cpu) < 0)
-        goto error;
+    cpu = virCPUDefNew();
 
     host_pae = phy_info->hw_cap[0] & LIBXL_X86_FEATURE_PAE_MASK;
     if (host_pae &&
@@ -187,6 +186,7 @@ libxlCapsInitCPU(virCapsPtr caps, libxl_physinfo *phy_info,
     cpu->type = VIR_CPU_TYPE_HOST;
     cpu->cores = phy_info->cores_per_socket;
     cpu->threads = phy_info->threads_per_core;
+    cpu->dies = 1;
     cpu->sockets = phy_info->nr_cpus / (cpu->cores * cpu->threads);
     caps->host.cpu = cpu;
 
@@ -320,6 +320,7 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
         }
     }
 
+    caps->host.numa = virCapabilitiesHostNUMANew();
     for (i = 0; i < nr_nodes; i++) {
         if (numa_info[i].size == LIBXL_NUMAINFO_INVALID_ENTRY)
             continue;
@@ -337,15 +338,11 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
             }
         }
 
-        if (virCapabilitiesAddHostNUMACell(caps, i,
-                                           numa_info[i].size / 1024,
-                                           nr_cpus_node[i], cpus[i],
-                                           nr_siblings, siblings,
-                                           0, NULL) < 0) {
-            virCapabilitiesClearHostNUMACellCPUTopology(cpus[i],
-                                                        nr_cpus_node[i]);
-            goto cleanup;
-        }
+        virCapabilitiesHostNUMAAddCell(caps->host.numa, i,
+                                       numa_info[i].size / 1024,
+                                       nr_cpus_node[i], cpus[i],
+                                       nr_siblings, siblings,
+                                       0, NULL);
 
         /* This is safe, as the CPU list is now stored in the NUMA cell */
         cpus[i] = NULL;
@@ -357,7 +354,10 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
     if (ret != 0) {
         for (i = 0; cpus && i < nr_nodes; i++)
             VIR_FREE(cpus[i]);
-        virCapabilitiesFreeNUMAInfo(caps);
+        if (caps->host.numa) {
+            virCapabilitiesHostNUMAUnref(caps->host.numa);
+            caps->host.numa = NULL;
+        }
         VIR_FREE(siblings);
     }
 
@@ -397,7 +397,7 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
         return -1;
     }
 
-    regex = g_regex_new(XEN_CAP_REGEX, G_REGEX_EXTENDED, 0, &err);
+    regex = g_regex_new(XEN_CAP_REGEX, 0, 0, &err);
     if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Failed to compile regex %s"), err->message);
@@ -547,46 +547,26 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
                                           NULL) == NULL)
             return -1;
 
-        if (guest_archs[i].pae &&
-            virCapabilitiesAddGuestFeature(guest,
-                                           "pae",
-                                           1,
-                                           0) == NULL)
-            return -1;
+        if (guest_archs[i].pae)
+            virCapabilitiesAddGuestFeature(guest, VIR_CAPS_GUEST_FEATURE_TYPE_PAE);
 
-        if (guest_archs[i].nonpae &&
-            virCapabilitiesAddGuestFeature(guest,
-                                           "nonpae",
-                                           1,
-                                           0) == NULL)
-            return -1;
+        if (guest_archs[i].nonpae)
+            virCapabilitiesAddGuestFeature(guest, VIR_CAPS_GUEST_FEATURE_TYPE_NONPAE);
 
-        if (guest_archs[i].ia64_be &&
-            virCapabilitiesAddGuestFeature(guest,
-                                           "ia64_be",
-                                           1,
-                                           0) == NULL)
-            return -1;
+        if (guest_archs[i].ia64_be)
+            virCapabilitiesAddGuestFeature(guest, VIR_CAPS_GUEST_FEATURE_TYPE_IA64_BE);
 
         if (guest_archs[i].hvm) {
-            if (virCapabilitiesAddGuestFeature(guest,
-                                               "acpi",
-                                               1,
-                                               1) == NULL)
-                return -1;
+            virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_ACPI,
+                                                     true, true);
 
-            if (virCapabilitiesAddGuestFeature(guest, "apic",
-                                               1,
-                                               0) == NULL)
-                return -1;
+            virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_APIC,
+                                                     true, false);
         }
 
         if (guest_archs[i].hvm || guest_archs[i].pvh) {
-            if (virCapabilitiesAddGuestFeature(guest,
-                                               "hap",
-                                               1,
-                                               1) == NULL)
-                return -1;
+            virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_HAP,
+                                                     true, true);
         }
     }
 
@@ -784,9 +764,9 @@ libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
         libxlMakeDomainDeviceHostdevCaps(hostdev) < 0)
         return -1;
 
-    domCaps->iothreads = VIR_TRISTATE_BOOL_NO;
-    domCaps->vmcoreinfo = VIR_TRISTATE_BOOL_NO;
-    domCaps->genid = VIR_TRISTATE_BOOL_NO;
+    domCaps->features[VIR_DOMAIN_CAPS_FEATURE_IOTHREADS] = VIR_TRISTATE_BOOL_NO;
+    domCaps->features[VIR_DOMAIN_CAPS_FEATURE_VMCOREINFO] = VIR_TRISTATE_BOOL_NO;
+    domCaps->features[VIR_DOMAIN_CAPS_FEATURE_GENID] = VIR_TRISTATE_BOOL_NO;
     domCaps->gic.supported = VIR_TRISTATE_BOOL_NO;
 
     return 0;

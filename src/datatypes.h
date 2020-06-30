@@ -610,7 +610,7 @@ struct _virDomain {
 /**
 * _virNetwork:
 *
-* Internal structure associated to a domain
+* Internal structure associated to a network
 */
 struct _virNetwork {
     virObject parent;
@@ -842,6 +842,12 @@ virAdmClientPtr virAdmGetClient(virAdmServerPtr srv,
                                 unsigned long long id,
                                 unsigned long long timestamp,
                                 unsigned int transport);
+
+/* Thread local to watch if an ObjectUnref causes a Dispoe */
+void virConnectWatchDispose(void);
+bool virConnectWasDisposed(void);
+void virAdmConnectWatchDispose(void);
+bool virAdmConnectWasDisposed(void);
 
 virConnectCloseCallbackDataPtr virNewConnectCloseCallbackData(void);
 void virConnectCloseCallbackDataRegister(virConnectCloseCallbackDataPtr close,

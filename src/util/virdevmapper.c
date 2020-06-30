@@ -20,9 +20,7 @@
 
 #include <config.h>
 
-#ifdef MAJOR_IN_MKDEV
-# include <sys/mkdev.h>
-#elif MAJOR_IN_SYSMACROS
+#ifdef __linux__
 # include <sys/sysmacros.h>
 #endif
 
@@ -84,6 +82,9 @@ virDevMapperGetTargetsImpl(const char *path,
         return ret;
     }
 
+    if (!virIsDevMapperDevice(path))
+        return 0;
+
     if (!(dmt = dm_task_create(DM_DEVICE_DEPS))) {
         if (errno == ENOENT || errno == ENODEV) {
             /* It's okay. Kernel is probably built without
@@ -127,10 +128,9 @@ virDevMapperGetTargetsImpl(const char *path,
         goto cleanup;
 
     for (i = 0; i < deps->count; i++) {
-        if (virAsprintfQuiet(&devPaths[i], "/dev/block/%u:%u",
-                             major(deps->device[i]),
-                             minor(deps->device[i])) < 0)
-            goto cleanup;
+        devPaths[i] = g_strdup_printf("/dev/block/%u:%u",
+                                      major(deps->device[i]),
+                                      minor(deps->device[i]));
     }
 
     recursiveDevPaths = NULL;
@@ -203,5 +203,29 @@ virDevMapperGetTargets(const char *path G_GNUC_UNUSED,
 {
     errno = ENOSYS;
     return -1;
+}
+#endif /* ! WITH_DEVMAPPER */
+
+
+#if WITH_DEVMAPPER
+bool
+virIsDevMapperDevice(const char *dev_name)
+{
+    struct stat buf;
+
+    if (!stat(dev_name, &buf) &&
+        S_ISBLK(buf.st_mode) &&
+        dm_is_dm_major(major(buf.st_rdev)))
+            return true;
+
+    return false;
+}
+
+#else /* ! WITH_DEVMAPPER */
+
+bool
+virIsDevMapperDevice(const char *dev_name G_GNUC_UNUSED)
+{
+    return false;
 }
 #endif /* ! WITH_DEVMAPPER */

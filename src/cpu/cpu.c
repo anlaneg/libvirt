@@ -393,8 +393,7 @@ virCPUGetHost(virArch arch,
     if (!(driver = cpuGetSubDriver(arch)))
         return NULL;
 
-    if (VIR_ALLOC(cpu) < 0)
-        return NULL;
+    cpu = virCPUDefNew();
 
     switch (type) {
     case VIR_CPU_TYPE_HOST:
@@ -422,6 +421,7 @@ virCPUGetHost(virArch arch,
 
     if (nodeInfo) {
         cpu->sockets = nodeInfo->sockets;
+        cpu->dies = 1;
         cpu->cores = nodeInfo->cores;
         cpu->threads = nodeInfo->threads;
     }
@@ -456,7 +456,7 @@ virCPUProbeHost(virArch arch)
 {
     virNodeInfo nodeinfo;
 
-    if (virCapabilitiesGetNodeInfo(&nodeinfo))
+    if (virCapabilitiesGetNodeInfo(&nodeinfo) < 0)
         return NULL;
 
     return virCPUGetHost(arch, VIR_CPU_TYPE_HOST, &nodeinfo, NULL);
@@ -647,13 +647,15 @@ virCPUUpdateLive(virArch arch,
     if (!driver->updateLive)
         return 1;
 
-    if (cpu->mode != VIR_CPU_MODE_CUSTOM)
-        return 1;
+    if (cpu->mode == VIR_CPU_MODE_CUSTOM ||
+        cpu->check == VIR_CPU_CHECK_FULL) {
+        if (driver->updateLive(cpu, dataEnabled, dataDisabled) < 0)
+            return -1;
 
-    if (driver->updateLive(cpu, dataEnabled, dataDisabled) < 0)
-        return -1;
+        return 0;
+    }
 
-    return 0;
+    return 1;
 }
 
 
@@ -770,40 +772,35 @@ virCPUDataPtr
 virCPUDataParse(const char *xmlStr)
 {
     struct cpuArchDriver *driver;
-    xmlDocPtr xml = NULL;
-    xmlXPathContextPtr ctxt = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     virCPUDataPtr data = NULL;
-    char *arch = NULL;
+    g_autofree char *arch = NULL;
 
     VIR_DEBUG("xmlStr=%s", xmlStr);
 
     if (!(xml = virXMLParseStringCtxt(xmlStr, _("CPU data"), &ctxt))) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("cannot parse CPU data"));
-        goto cleanup;
+        return NULL;
     }
 
     if (!(arch = virXPathString("string(/cpudata/@arch)", ctxt))) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing CPU data architecture"));
-        goto cleanup;
+        return NULL;
     }
 
     if (!(driver = cpuGetSubDriverByName(arch)))
-        goto cleanup;
+        return NULL;
 
     if (!driver->dataParse) {
         virReportError(VIR_ERR_NO_SUPPORT,
                        _("cannot parse %s CPU data"), arch);
-        goto cleanup;
+        return NULL;
     }
 
     data = driver->dataParse(ctxt);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(xml);
-    VIR_FREE(arch);
     return data;
 }
 
@@ -1095,4 +1092,28 @@ virCPUDataAddFeature(virCPUDataPtr cpuData,
     }
 
     return driver->dataAddFeature(cpuData, name);
+}
+
+
+/**
+ * virCPUArchIsSupported:
+ *
+ * @arch: CPU architecture
+ *
+ * Returns true if the architecture is supported by any CPU driver.
+ */
+bool
+virCPUArchIsSupported(virArch arch)
+{
+    size_t i;
+    size_t j;
+
+    for (i = 0; i < G_N_ELEMENTS(drivers); i++) {
+        for (j = 0; j < drivers[i]->narch; j++) {
+            if (arch == drivers[i]->arch[j])
+                return true;
+        }
+    }
+
+    return false;
 }

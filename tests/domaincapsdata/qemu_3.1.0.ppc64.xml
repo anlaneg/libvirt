@@ -25,7 +25,11 @@
     </loader>
   </os>
   <cpu>
-    <mode name='host-passthrough' supported='yes'/>
+    <mode name='host-passthrough' supported='yes'>
+      <enum name='hostPassthroughMigratable'>
+        <value>off</value>
+      </enum>
+    </mode>
     <mode name='host-model' supported='yes'>
       <model fallback='allow'>POWER8</model>
     </mode>
@@ -65,6 +69,7 @@
         <value>vga</value>
         <value>cirrus</value>
         <value>virtio</value>
+        <value>none</value>
         <value>bochs</value>
       </enum>
     </video>
@@ -105,6 +110,8 @@
     <gic supported='no'/>
     <vmcoreinfo supported='no'/>
     <genid supported='no'/>
+    <backingStoreInput supported='no'/>
+    <backup supported='no'/>
     <sev supported='no'/>
   </features>
 </domainCapabilities>

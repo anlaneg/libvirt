@@ -18,7 +18,9 @@
 
 #pragma once
 
-#include <net/if.h>
+#ifdef HAVE_NET_IF_H
+# include <net/if.h>
+#endif
 
 #include "virbitmap.h"
 #include "virsocketaddr.h"
@@ -253,7 +255,7 @@ virNetDevReadNetConfig(const char *linkdev, int vf,
 int
 virNetDevSetNetConfig(const char *linkdev, int vf,
                       const virMacAddr *adminMAC,
-                      virNetDevVlanPtr vlan,
+                      const virNetDevVlan *vlan,
                       const virMacAddr *MAC,
                       bool setVLan)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;

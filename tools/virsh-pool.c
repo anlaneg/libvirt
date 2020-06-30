@@ -1281,19 +1281,16 @@ cmdPoolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
                     const char *unit;
 
                     val = vshPrettyCapacity(info.capacity, &unit);
-                    if (virAsprintf(&poolInfoTexts[i].capacity,
-                                    "%.2lf %s", val, unit) < 0)
-                        goto cleanup;
+                    poolInfoTexts[i].capacity = g_strdup_printf("%.2lf %s", val,
+                                                                unit);
 
                     val = vshPrettyCapacity(info.allocation, &unit);
-                    if (virAsprintf(&poolInfoTexts[i].allocation,
-                                    "%.2lf %s", val, unit) < 0)
-                        goto cleanup;
+                    poolInfoTexts[i].allocation = g_strdup_printf("%.2lf %s", val,
+                                                                  unit);
 
                     val = vshPrettyCapacity(info.available, &unit);
-                    if (virAsprintf(&poolInfoTexts[i].available,
-                                    "%.2lf %s", val, unit) < 0)
-                        goto cleanup;
+                    poolInfoTexts[i].available = g_strdup_printf("%.2lf %s", val,
+                                                                 unit);
                 } else {
                     /* Capacity related information isn't available */
                     poolInfoTexts[i].capacity = g_strdup(_("-"));
@@ -1366,7 +1363,7 @@ cmdPoolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
     if (!table)
         goto cleanup;
 
-    /* Insert the pool info rows into table*/
+    /* Insert the pool info rows into table */
     for (i = 0; i < list->npools; i++) {
         if (vshTableRowAppend(table,
                               virStoragePoolGetName(list->pools[i]),
@@ -1975,7 +1972,7 @@ virshPoolEventCallback virshPoolEventCallbacks[] = {
       VIR_STORAGE_POOL_EVENT_CALLBACK(vshEventLifecyclePrint), },
     { "refresh", vshEventGenericPrint, }
 };
-verify(VIR_STORAGE_POOL_EVENT_ID_LAST == G_N_ELEMENTS(virshPoolEventCallbacks));
+G_STATIC_ASSERT(VIR_STORAGE_POOL_EVENT_ID_LAST == G_N_ELEMENTS(virshPoolEventCallbacks));
 
 
 static const vshCmdInfo info_pool_event[] = {

@@ -28,7 +28,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "virutil.h"
 #include "virthread.h"
 #include "virfile.h"
 #include "viralloc.h"
@@ -38,6 +37,10 @@
 #include "virgettext.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
+
+#ifndef O_DIRECT
+# define O_DIRECT 0
+#endif
 
 static int
 runIO(const char *path, int fd, int oflags)
@@ -154,7 +157,7 @@ runIO(const char *path, int fd, int oflags)
     }
 
     /* Ensure all data is written */
-    if (fdatasync(fdout) < 0) {
+    if (virFileDataSync(fdout) < 0) {
         if (errno != EINVAL && errno != EROFS) {
             /* fdatasync() may fail on some special FDs, e.g. pipes */
             virReportSystemError(errno, _("unable to fsync %s"), fdoutname);

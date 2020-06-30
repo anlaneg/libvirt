@@ -38,7 +38,13 @@
 #include "libxl_capabilities.h"
 #include "libxl_logger.h"
 
-#define LIBXL_DRIVER_NAME "xenlight"
+#define LIBXL_DRIVER_EXTERNAL_NAME "Xen"
+/*
+ * We are stuck with the 'xenlight' name since it is used by the hostdev
+ * manager. Changing it would break management of any host devices previously
+ * managed under the name 'xenlight'.
+ */
+#define LIBXL_DRIVER_INTERNAL_NAME "xenlight"
 #define LIBXL_VNC_PORT_MIN  5900
 #define LIBXL_VNC_PORT_MAX  65535
 
@@ -138,7 +144,7 @@ struct _libxlDriverPrivate {
     /* Immutable pointer, immutable object */
     virPortAllocatorRangePtr migrationPorts;
 
-    /* Immutable pointer, lockless APIs*/
+    /* Immutable pointer, lockless APIs */
     virSysinfoDefPtr hostsysinfo;
 
     /* Immutable pointer. lockless access */
@@ -164,6 +170,8 @@ struct _libxlSavefileHeader {
 
 libxlDriverConfigPtr
 libxlDriverConfigNew(void);
+int
+libxlDriverConfigInit(libxlDriverConfigPtr cfg);
 
 libxlDriverConfigPtr
 libxlDriverConfigGet(libxlDriverPrivatePtr driver);
@@ -207,7 +215,7 @@ libxlMakeUSB(virDomainHostdevDefPtr hostdev, libxl_device_usbdev *usbdev);
 #endif
 
 virDomainXMLOptionPtr
-libxlCreateXMLConf(void);
+libxlCreateXMLConf(libxlDriverPrivatePtr driver);
 
 #ifdef LIBXL_HAVE_DEVICE_CHANNEL
 # define LIBXL_ATTR_UNUSED

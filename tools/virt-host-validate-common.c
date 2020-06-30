@@ -32,6 +32,7 @@
 #include "virt-host-validate-common.h"
 #include "virstring.h"
 #include "virarch.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -39,7 +40,9 @@ VIR_ENUM_IMPL(virHostValidateCPUFlag,
               VIR_HOST_VALIDATE_CPU_FLAG_LAST,
               "vmx",
               "svm",
-              "sie");
+              "sie",
+              "158",
+              "sev");
 
 static bool quiet;
 
@@ -59,10 +62,7 @@ void virHostMsgCheck(const char *prefix,
         return;
 
     va_start(args, format);
-    if (virVasprintf(&msg, format, args) < 0) {
-        perror("malloc");
-        abort();
-    }
+    msg = g_strdup_vprintf(format, args);
     va_end(args);
 
     fprintf(stdout, _("%6s: Checking %-60s: "), prefix, msg);
@@ -99,7 +99,7 @@ static const char * failMessages[] = {
     N_("NOTE"),
 };
 
-verify(G_N_ELEMENTS(failMessages) == VIR_HOST_VALIDATE_LAST);
+G_STATIC_ASSERT(G_N_ELEMENTS(failMessages) == VIR_HOST_VALIDATE_LAST);
 
 static const char *failEscapeCodes[] = {
     "\033[31m",
@@ -107,7 +107,7 @@ static const char *failEscapeCodes[] = {
     "\033[34m",
 };
 
-verify(G_N_ELEMENTS(failEscapeCodes) == VIR_HOST_VALIDATE_LAST);
+G_STATIC_ASSERT(G_N_ELEMENTS(failEscapeCodes) == VIR_HOST_VALIDATE_LAST);
 
 void virHostMsgFail(virHostValidateLevel level,
                     const char *format,
@@ -120,10 +120,7 @@ void virHostMsgFail(virHostValidateLevel level,
         return;
 
     va_start(args, format);
-    if (virVasprintf(&msg, format, args) < 0) {
-        perror("malloc");
-        abort();
-    }
+    msg = g_strdup_vprintf(format, args);
     va_end(args);
 
     if (virHostMsgWantEscape())
@@ -178,7 +175,7 @@ int virHostValidateNamespace(const char *hvname,
     virHostMsgCheck(hvname, "for namespace %s", ns_name);
     char nspath[100];
 
-    snprintf(nspath, sizeof(nspath), "/proc/self/ns/%s", ns_name);
+    g_snprintf(nspath, sizeof(nspath), "/proc/self/ns/%s", ns_name);
 
     if (access(nspath, F_OK) < 0) {
         virHostMsgFail(level, "%s", hint);
@@ -215,7 +212,8 @@ virBitmapPtr virHostValidateGetCPUFlags(void)
          * on the architecture, so check possible prefixes */
         if (!STRPREFIX(line, "flags") &&
             !STRPREFIX(line, "Features") &&
-            !STRPREFIX(line, "features"))
+            !STRPREFIX(line, "features") &&
+            !STRPREFIX(line, "facilities"))
             continue;
 
         /* fgets() includes the trailing newline in the output buffer,
@@ -415,5 +413,117 @@ int virHostValidateIOMMU(const char *hvname,
         return -1;
     }
     virHostMsgPass();
+    return 0;
+}
+
+
+bool virHostKernelModuleIsLoaded(const char *module)
+{
+    FILE *fp;
+    bool ret = false;
+
+    if (!(fp = fopen("/proc/modules", "r")))
+        return false;
+
+    do {
+        char line[1024];
+
+        if (!fgets(line, sizeof(line), fp))
+            break;
+
+        if (STRPREFIX(line, module)) {
+            ret = true;
+            break;
+        }
+
+    } while (1);
+
+    VIR_FORCE_FCLOSE(fp);
+
+    return ret;
+}
+
+
+int virHostValidateSecureGuests(const char *hvname,
+                                virHostValidateLevel level)
+{
+    virBitmapPtr flags;
+    bool hasFac158 = false;
+    bool hasAMDSev = false;
+    virArch arch = virArchFromHost();
+    g_autofree char *cmdline = NULL;
+    static const char *kIBMValues[] = {"y", "Y", "on", "ON", "oN", "On", "1"};
+    g_autofree char *mod_value = NULL;
+
+    flags = virHostValidateGetCPUFlags();
+
+    if (flags && virBitmapIsBitSet(flags, VIR_HOST_VALIDATE_CPU_FLAG_FACILITY_158))
+        hasFac158 = true;
+    else if (flags && virBitmapIsBitSet(flags, VIR_HOST_VALIDATE_CPU_FLAG_SEV))
+        hasAMDSev = true;
+
+    virBitmapFree(flags);
+
+    virHostMsgCheck(hvname, "%s", _("for secure guest support"));
+    if (ARCH_IS_S390(arch)) {
+        if (hasFac158) {
+            if (!virFileIsDir("/sys/firmware/uv")) {
+                virHostMsgFail(level, "IBM Secure Execution not supported by "
+                                      "the currently used kernel");
+                return 0;
+            }
+
+            if (virFileReadValueString(&cmdline, "/proc/cmdline") < 0)
+                return -1;
+
+            /* we're prefix matching rather than equality matching here, because
+             * kernel would treat even something like prot_virt='yFOO' as
+             * enabled
+             */
+            if (virKernelCmdlineMatchParam(cmdline, "prot_virt", kIBMValues,
+                                           G_N_ELEMENTS(kIBMValues),
+                                           VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST |
+                                           VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX)) {
+                virHostMsgPass();
+                return 1;
+            } else {
+                virHostMsgFail(level,
+                               "IBM Secure Execution appears to be disabled "
+                               "in kernel. Add prot_virt=1 to kernel cmdline "
+                               "arguments");
+            }
+        } else {
+            virHostMsgFail(level, "Hardware or firmware does not provide "
+                                  "support for IBM Secure Execution");
+        }
+    } else if (hasAMDSev) {
+        if (virFileReadValueString(&mod_value, "/sys/module/kvm_amd/parameters/sev") < 0) {
+            virHostMsgFail(level, "AMD Secure Encrypted Virtualization not "
+                                  "supported by the currently used kernel");
+            return 0;
+        }
+
+        if (mod_value[0] != '1') {
+            virHostMsgFail(level,
+                           "AMD Secure Encrypted Virtualization appears to be "
+                           "disabled in kernel. Add kvm_amd.sev=1 "
+                           "to the kernel cmdline arguments");
+            return 0;
+        }
+
+        if (virFileExists("/dev/sev")) {
+            virHostMsgPass();
+            return 1;
+        } else {
+            virHostMsgFail(level,
+                           "AMD Secure Encrypted Virtualization appears to be "
+                           "disabled in firemare.");
+        }
+    } else {
+        virHostMsgFail(level,
+                       "Unknown if this platform has Secure Guest support");
+        return -1;
+    }
+
     return 0;
 }

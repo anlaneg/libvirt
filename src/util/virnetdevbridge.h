@@ -21,7 +21,8 @@
 #include "internal.h"
 #include "virmacaddr.h"
 
-int virNetDevBridgeCreate(const char *brname)
+int virNetDevBridgeCreate(const char *brname,
+                          const virMacAddr *mac)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 int virNetDevBridgeDelete(const char *brname)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
@@ -71,6 +72,15 @@ int virNetDevBridgePortGetUnicastFlood(const char *brname,
 int virNetDevBridgePortSetUnicastFlood(const char *brname,
                                        const char *ifname,
                                        bool enable)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
+int virNetDevBridgePortGetIsolated(const char *brname,
+                                   const char *ifname,
+                                   bool *enable)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
+    G_GNUC_WARN_UNUSED_RESULT;
+int virNetDevBridgePortSetIsolated(const char *brname,
+                                   const char *ifname,
+                                   bool enable)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 typedef enum {

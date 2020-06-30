@@ -24,8 +24,6 @@
 #include <config.h>
 
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 
 #include "virnetlink.h"
 #include "virnetdev.h"
@@ -34,6 +32,7 @@
 #include "virmacaddr.h"
 #include "virerror.h"
 #include "viralloc.h"
+#include "virsocket.h"
 
 #define VIR_FROM_THIS VIR_FROM_NET
 
@@ -62,12 +61,12 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetlinkHandle, virNetlinkFree);
 typedef struct _virNetlinkEventSrvPrivate virNetlinkEventSrvPrivate;
 typedef virNetlinkEventSrvPrivate *virNetlinkEventSrvPrivatePtr;
 struct _virNetlinkEventSrvPrivate {
-    /*Server*/
+    /* Server */
     virMutex lock;
     int eventwatch;
     int netlinkfd;
     virNetlinkHandle *netlinknh;
-    /*Events*/
+    /* Events */
     int handled;
     size_t handlesCount;
     size_t handlesAlloc;
@@ -184,16 +183,14 @@ virNetlinkCreateSocket(int protocol)
     }
     nl_socket_enable_msg_peek(nlhandle);
 
- cleanup:
     return nlhandle;
 
  error:
     if (nlhandle) {
         nl_close(nlhandle);
         virNetlinkFree(nlhandle);
-        nlhandle = NULL;
     }
-    goto cleanup;
+    return NULL;
 }
 
 static virNetlinkHandle *
@@ -541,9 +538,14 @@ virNetlinkNewLink(const char *ifname/*要创建的link名称*/,
     NETLINK_MSG_NEST_END(nl_msg, linkinfo);
 
     if (extra_args) {
-        NETLINK_MSG_PUT(nl_msg, IFLA_LINK,
+        if (extra_args->ifindex) {
+            NETLINK_MSG_PUT(nl_msg, IFLA_LINK,
                         sizeof(uint32_t), extra_args->ifindex);
-        NETLINK_MSG_PUT(nl_msg, IFLA_ADDRESS, VIR_MAC_BUFLEN, extra_args->mac);
+        }
+        if (extra_args->mac) {
+            NETLINK_MSG_PUT(nl_msg, IFLA_ADDRESS,
+                            VIR_MAC_BUFLEN, extra_args->mac);
+        }
     }
 
     if (virNetlinkCommand(nl_msg, &resp, &buflen, 0, 0, NETLINK_ROUTE, 0) < 0)
@@ -1338,7 +1340,7 @@ int virNetlinkEventServiceStart(unsigned int protocol G_GNUC_UNUSED,
 bool virNetlinkEventServiceIsRunning(unsigned int protocol G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
-    return 0;
+    return false;
 }
 
 int virNetlinkEventServiceLocalPid(unsigned int protocol G_GNUC_UNUSED)

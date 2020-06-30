@@ -24,20 +24,12 @@
 #include <stdarg.h>
 #include <time.h>
 #include <sys/time.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <regex.h>
-#include <sys/uio.h>
 #if HAVE_SYSLOG_H
 # include <syslog.h>
 #endif
-#include <sys/socket.h>
-#if HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
-#include <fnmatch.h>
 
 #include "virerror.h"
 #include "virlog.h"
@@ -47,22 +39,22 @@
 #include "virthread.h"
 #include "virfile.h"
 #include "virtime.h"
-#include "intprops.h"
 #include "virstring.h"
 #include "configmake.h"
+#include "virsocket.h"
 
 /* Journald output is only supported on Linux new enough to expose
  * htole64.  */
 #if HAVE_SYSLOG_H && defined(__linux__) && HAVE_DECL_HTOLE64
 # define USE_JOURNALD 1
+# include <sys/uio.h>
 #endif
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.log");
 
-static regex_t *virLogRegex;
-static char virLogHostname[HOST_NAME_MAX+1];
+static GRegex *virLogRegex;
 
 
 #define VIR_LOG_DATE_REGEX "[0-9]{4}-[0-9]{2}-[0-9]{2}"
@@ -149,15 +141,15 @@ virLogUnlock(void)
 }
 
 
-static int
+static void
 virLogSetDefaultOutputToStderr(void)
 {
-    return virAsprintf(&virLogDefaultOutput, "%d:stderr",
-                       virLogDefaultPriority);
+    virLogDefaultOutput = g_strdup_printf("%d:stderr",
+                                          virLogDefaultPriority);
 }
 
 
-static int
+static void
 virLogSetDefaultOutputToJournald(void)
 {
     virLogPriority priority = virLogDefaultPriority;
@@ -167,42 +159,34 @@ virLogSetDefaultOutputToJournald(void)
     if (priority == VIR_LOG_DEBUG)
         priority = VIR_LOG_INFO;
 
-    return virAsprintf(&virLogDefaultOutput, "%d:journald", priority);
+    virLogDefaultOutput = g_strdup_printf("%d:journald", priority);
 }
 
 
 static int
 virLogSetDefaultOutputToFile(const char *binary, bool privileged)
 {
-    int ret = -1;
-    char *logdir = NULL;
+    g_autofree char *logdir = NULL;
     mode_t old_umask;
 
     if (privileged) {
-        if (virAsprintf(&virLogDefaultOutput,
-                        "%d:file:%s/log/libvirt/%s.log", virLogDefaultPriority,
-                        LOCALSTATEDIR, binary) < 0)
-            goto cleanup;
+        virLogDefaultOutput = g_strdup_printf("%d:file:%s/log/libvirt/%s.log",
+                                              virLogDefaultPriority, LOCALSTATEDIR, binary);
     } else {
-        if (!(logdir = virGetUserCacheDirectory()))
-            goto cleanup;
+        logdir = virGetUserCacheDirectory();
 
         old_umask = umask(077);
         if (virFileMakePath(logdir) < 0) {
             umask(old_umask);
-            goto cleanup;
+            return -1;
         }
         umask(old_umask);
 
-        if (virAsprintf(&virLogDefaultOutput, "%d:file:%s/%s.log",
-                        virLogDefaultPriority, logdir, binary) < 0)
-            goto cleanup;
+        virLogDefaultOutput = g_strdup_printf("%d:file:%s/%s.log",
+                                              virLogDefaultPriority, logdir, binary);
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(logdir);
-    return ret;
+    return 0;
 }
 
 
@@ -216,25 +200,23 @@ virLogSetDefaultOutputToFile(const char *binary, bool privileged)
  * Decides on what the default output (journald, file, stderr) should be
  * according to @binary, @godaemon, @privileged. This function should be run
  * exactly once at daemon startup, so no locks are used.
- *
- * Returns 0 on success, -1 in case of a failure.
  */
-int
+void
 virLogSetDefaultOutput(const char *binary, bool godaemon, bool privileged)
 {
     bool have_journald = access("/run/systemd/journal/socket", W_OK) >= 0;
 
     if (godaemon) {
         if (have_journald)
-            return virLogSetDefaultOutputToJournald();
+            virLogSetDefaultOutputToJournald();
+        else
+            virLogSetDefaultOutputToFile(binary, privileged);
     } else {
         if (!isatty(STDIN_FILENO) && have_journald)
-            return virLogSetDefaultOutputToJournald();
-
-        return virLogSetDefaultOutputToStderr();
+            virLogSetDefaultOutputToJournald();
+        else
+            virLogSetDefaultOutputToStderr();
     }
-
-    return virLogSetDefaultOutputToFile(binary, privileged);
 }
 
 
@@ -265,32 +247,21 @@ virLogPriorityString(virLogPriority lvl)
 static int
 virLogOnceInit(void)
 {
-    int r;
-
     if (virMutexInit(&virLogMutex) < 0)
         return -1;
 
     virLogLock();
     virLogDefaultPriority = VIR_LOG_DEFAULT;
 
-    if (VIR_ALLOC_QUIET(virLogRegex) >= 0) {
-        if (regcomp(virLogRegex, VIR_LOG_REGEX, REG_EXTENDED) != 0)
-            VIR_FREE(virLogRegex);
-    }
+    virLogRegex = g_regex_new(VIR_LOG_REGEX, G_REGEX_OPTIMIZE, 0, NULL);
 
-    /* We get and remember the hostname early, because at later time
+    /* GLib caches the hostname using a one time thread initializer.
+     * We want to prime this cache early though, because at later time
      * it might not be possible to load NSS modules via getaddrinfo()
      * (e.g. at container startup the host filesystem will not be
      * accessible anymore.
-     * Must not use virGetHostname though as that causes re-entrancy
-     * problems if it triggers logging codepaths
      */
-    r = gethostname(virLogHostname, sizeof(virLogHostname));
-    if (r == -1) {
-        ignore_value(virStrcpyStatic(virLogHostname, "(unknown)"));
-    } else {
-        NUL_TERMINATE(virLogHostname);
-    }
+    ignore_value(g_get_host_name());
 
     virLogUnlock();
     return 0;
@@ -443,61 +414,46 @@ virLogOutputListFree(virLogOutputPtr *list, int count)
 }
 
 
-static int
+static void
 virLogFormatString(char **msg,
                    int linenr,
                    const char *funcname,
                    virLogPriority priority,
                    const char *str)
 {
-    int ret;
-
-    /*
-     * Be careful when changing the following log message formatting, we rely
-     * on it when stripping libvirt debug messages from qemu log files. So when
-     * changing this, you might also need to change the code there.
-     * virLogFormatString() function name is mentioned there so it's sufficient
-     * to just grep for it to find the right place.
-     */
     if ((funcname != NULL)) {
-        ret = virAsprintfQuiet(msg, "%llu: %s : %s:%d : %s\n",
+        *msg = g_strdup_printf("%llu: %s : %s:%d : %s\n",
                                virThreadSelfID(), virLogPriorityString(priority),
                                funcname, linenr, str);
     } else {
-        ret = virAsprintfQuiet(msg, "%llu: %s : %s\n",
+        *msg = g_strdup_printf("%llu: %s : %s\n",
                                virThreadSelfID(), virLogPriorityString(priority),
                                str);
     }
-    return ret;
 }
 
 
-static int
+static void
 virLogVersionString(const char **rawmsg,
                     char **msg)
 {
     *rawmsg = VIR_LOG_VERSION_STRING;
-    return virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, VIR_LOG_VERSION_STRING);
+    virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, VIR_LOG_VERSION_STRING);
 }
 
 /* Similar to virGetHostname() but avoids use of error
  * reporting APIs or logging APIs, to prevent recursion
  */
-static int
+static void
 virLogHostnameString(char **rawmsg,
                      char **msg)
 {
     char *hoststr;
 
-    if (virAsprintfQuiet(&hoststr, "hostname: %s", virLogHostname) < 0)
-        return -1;
+    hoststr = g_strdup_printf("hostname: %s", g_get_host_name());
 
-    if (virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, hoststr) < 0) {
-        VIR_FREE(hoststr);
-        return -1;
-    }
+    virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, hoststr);
     *rawmsg = hoststr;
-    return 0;
 }
 
 
@@ -510,7 +466,7 @@ virLogSourceUpdate(virLogSourcePtr source)
         size_t i;
 
         for (i = 0; i < virLogNbFilters; i++) {
-            if (fnmatch(virLogFilters[i]->match, source->name, 0) == 0) {
+            if (g_pattern_match_simple(virLogFilters[i]->match, source->name)) {
                 priority = virLogFilters[i]->priority;
                 break;
             }
@@ -582,7 +538,6 @@ virLogVMessage(virLogSourcePtr source,
     char *str = NULL;
     char *msg = NULL;
     char timestamp[VIR_TIME_STRING_BUFLEN];
-    int ret;
     size_t i;
     int saved_errno = errno;
 
@@ -608,12 +563,9 @@ virLogVMessage(virLogSourcePtr source,
     /*
      * serialize the error message, add level and timestamp
      */
-    if (virVasprintfQuiet(&str, fmt, vargs) < 0)
-        goto cleanup;
+    str = g_strdup_vprintf(fmt, vargs);
 
-    ret = virLogFormatString(&msg, linenr, funcname, priority, str);
-    if (ret < 0)
-        goto cleanup;
+    virLogFormatString(&msg, linenr, funcname, priority, str);
 
     if (virTimeStringNowRaw(timestamp) < 0)
         timestamp[0] = '\0';
@@ -630,17 +582,18 @@ virLogVMessage(virLogSourcePtr source,
                 const char *rawinitmsg;
                 char *hoststr = NULL;
                 char *initmsg = NULL;
-                if (virLogVersionString(&rawinitmsg, &initmsg) >= 0)
-                    virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
-                                        __FILE__, __LINE__, __func__,
-                                        timestamp, NULL, rawinitmsg, initmsg,
-                                        virLogOutputs[i]->data);
+                virLogVersionString(&rawinitmsg, &initmsg);
+                virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
+                                    __FILE__, __LINE__, __func__,
+                                    timestamp, NULL, rawinitmsg, initmsg,
+                                    virLogOutputs[i]->data);
                 VIR_FREE(initmsg);
-                if (virLogHostnameString(&hoststr, &initmsg) >= 0)
-                    virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
-                                        __FILE__, __LINE__, __func__,
-                                        timestamp, NULL, hoststr, initmsg,
-                                        virLogOutputs[i]->data);
+
+                virLogHostnameString(&hoststr, &initmsg);
+                virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
+                                    __FILE__, __LINE__, __func__,
+                                    timestamp, NULL, hoststr, initmsg,
+                                    virLogOutputs[i]->data);
                 VIR_FREE(hoststr);
                 VIR_FREE(initmsg);
                 virLogOutputs[i]->logInitMessage = false;
@@ -656,17 +609,18 @@ virLogVMessage(virLogSourcePtr source,
             const char *rawinitmsg;
             char *hoststr = NULL;
             char *initmsg = NULL;
-            if (virLogVersionString(&rawinitmsg, &initmsg) >= 0)
-                virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
-                                 __FILE__, __LINE__, __func__,
-                                 timestamp, NULL, rawinitmsg, initmsg,
-                                 (void *) STDERR_FILENO);
+            virLogVersionString(&rawinitmsg, &initmsg);
+            virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
+                             __FILE__, __LINE__, __func__,
+                             timestamp, NULL, rawinitmsg, initmsg,
+                             (void *) STDERR_FILENO);
             VIR_FREE(initmsg);
-            if (virLogHostnameString(&hoststr, &initmsg) >= 0)
-                virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
-                                 __FILE__, __LINE__, __func__,
-                                 timestamp, NULL, hoststr, initmsg,
-                                 (void *) STDERR_FILENO);
+
+            virLogHostnameString(&hoststr, &initmsg);
+            virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
+                             __FILE__, __LINE__, __func__,
+                             timestamp, NULL, hoststr, initmsg,
+                             (void *) STDERR_FILENO);
             VIR_FREE(hoststr);
             VIR_FREE(initmsg);
             logInitMessageStderr = false;
@@ -703,9 +657,7 @@ virLogOutputToFd(virLogSourcePtr source G_GNUC_UNUSED,
     if (fd < 0)
         return;
 
-    if (virAsprintfQuiet(&msg, "%s: %s", timestamp, str) < 0)
-        return;
-
+    msg = g_strdup_printf("%s: %s", timestamp, str);
     ignore_value(safewrite(fd, msg, strlen(msg)));
     VIR_FREE(msg);
 }
@@ -868,7 +820,7 @@ virLogNewOutputToSyslog(virLogPriority priority,
 #  define IOVEC_SET_STRING(iov, str) IOVEC_SET(iov, str, strlen(str))
 
 /* Used for conversion of numbers to strings, and for length of binary data */
-#  define JOURNAL_BUF_SIZE (MAX(INT_BUFSIZE_BOUND(int), sizeof(uint64_t)))
+#  define JOURNAL_BUF_SIZE (MAX(VIR_INT64_STR_BUFLEN, sizeof(uint64_t)))
 
 struct journalState
 {
@@ -1013,13 +965,7 @@ virLogOutputToJournald(virLogSourcePtr source,
      * and pass an FD to the journal
      */
 
-    /* NB: mkostemp is not declared async signal safe by
-     * POSIX, but this is Linux only code and the GLibc
-     * impl is safe enough, only using open() and inline
-     * asm to read a timestamp (falling back to gettimeofday
-     * on some arches
-     */
-    if ((buffd = mkostemp(path, O_CLOEXEC|O_RDWR)) < 0)
+    if ((buffd = g_mkstemp_full(path, O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)) < 0)
         return;
 
     if (unlink(path) < 0)
@@ -1279,12 +1225,11 @@ virLogSetFromEnv(void)
  */
 bool virLogProbablyLogMessage(const char *str)
 {
-    bool ret = false;
     if (!virLogRegex)
         return false;
-    if (regexec(virLogRegex, str, 0, NULL, 0) == 0)
-        ret = true;
-    return ret;
+    if (g_regex_match(virLogRegex, str, 0, NULL))
+        return true;
+    return false;
 }
 
 
@@ -1371,7 +1316,7 @@ virLogFilterNew(const char *match,
         return NULL;
     }
 
-    /* We must treat 'foo' as equiv to '*foo*' for fnmatch
+    /* We must treat 'foo' as equiv to '*foo*' for g_pattern_match
      * todo substring matches, so add 2 extra bytes
      */
     if (VIR_ALLOC_N_QUIET(mdup, mlen + 3) < 0)

@@ -29,7 +29,6 @@
 #include <dirent.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 
 #include "virerror.h"
 #include "openvz_conf.h"
@@ -41,6 +40,7 @@
 #include "vircommand.h"
 #include "virstring.h"
 #include "virhostcpu.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_OPENVZ
 
@@ -148,18 +148,18 @@ openvzParseBarrierLimit(const char* value,
 
 virCapsPtr openvzCapsInit(void)
 {
-    virCapsPtr caps;
+    g_autoptr(virCaps) caps = NULL;
     virCapsGuestPtr guest;
 
     if ((caps = virCapabilitiesNew(virArchFromHost(),
                                    false, false)) == NULL)
-        goto no_memory;
+        return NULL;
 
-    if (virCapabilitiesInitNUMA(caps) < 0)
-        goto no_memory;
+    if (!(caps->host.numa = virCapabilitiesHostNUMANewHost()))
+        return NULL;
 
     if (virCapabilitiesInitCaches(caps) < 0)
-        goto no_memory;
+        return NULL;
 
     if ((guest = virCapabilitiesAddGuest(caps,
                                          VIR_DOMAIN_OSTYPE_EXE,
@@ -168,7 +168,7 @@ virCapsPtr openvzCapsInit(void)
                                          NULL,
                                          0,
                                          NULL)) == NULL)
-        goto no_memory;
+        return NULL;
 
     if (virCapabilitiesAddGuestDomain(guest,
                                       VIR_DOMAIN_VIRT_OPENVZ,
@@ -176,13 +176,9 @@ virCapsPtr openvzCapsInit(void)
                                       NULL,
                                       0,
                                       NULL) == NULL)
-        goto no_memory;
+        return NULL;
 
-    return caps;
-
- no_memory:
-    virObjectUnref(caps);
-    return NULL;
+    return g_steal_pointer(&caps);
 }
 
 
@@ -237,7 +233,7 @@ openvzReadNetworkConf(virDomainDefPtr def,
     } else if (ret > 0) {
         token = strtok_r(temp, ";", &saveptr);
         while (token != NULL) {
-            /*add new device to list*/
+            /* add new device to list */
             if (VIR_ALLOC(net) < 0)
                 goto error;
 
@@ -247,9 +243,11 @@ openvzReadNetworkConf(virDomainDefPtr def,
             char cpy_temp[32];
             int len;
 
-            /*parse string*/
+            /* parse string */
             do {
-                char *next = strchrnul(p, ',');
+                char *next = strchr(p, ',');
+                if (!next)
+                    next = strchr(p, '\0');
                 if (STRPREFIX(p, "ifname=")) {
                     /* skip in libvirt */
                 } else if (STRPREFIX(p, "host_ifname=")) {
@@ -332,7 +330,7 @@ openvzReadFSConf(virDomainDefPtr def,
 {
     int ret;
     virDomainFSDefPtr fs = NULL;
-    char *veid_str = NULL;
+    g_autofree char *veid_str = NULL;
     char *temp = NULL;
     const char *param;
     unsigned long long barrier, limit;
@@ -344,7 +342,7 @@ openvzReadFSConf(virDomainDefPtr def,
                        veid);
         goto error;
     } else if (ret > 0) {
-        if (!(fs = virDomainFSDefNew()))
+        if (!(fs = virDomainFSDefNew(NULL)))
             goto error;
 
         fs->type = VIR_DOMAIN_FS_TYPE_TEMPLATE;
@@ -359,17 +357,14 @@ openvzReadFSConf(virDomainDefPtr def,
             goto error;
         }
 
-        if (VIR_ALLOC(fs) < 0)
+        if (!(fs = virDomainFSDefNew(NULL)))
             goto error;
 
-        if (virAsprintf(&veid_str, "%d", veid) < 0)
-            goto error;
+        veid_str = g_strdup_printf("%d", veid);
 
         fs->type = VIR_DOMAIN_FS_TYPE_MOUNT;
         if (!(fs->src->path = virStringReplace(temp, "$VEID", veid_str)))
             goto error;
-
-        VIR_FREE(veid_str);
     }
 
     fs->dst = g_strdup("/");
@@ -534,8 +529,7 @@ int openvzLoadDomains(struct openvz_driver *driver)
             def->id = -1;
         else
             def->id = veid;
-        if (virAsprintf(&def->name, "%i", veid) < 0)
-            goto cleanup;
+        def->name = g_strdup_printf("%i", veid);
 
         openvzGetVPSUUID(veid, uuidstr, sizeof(uuidstr));
         ret = virUUIDParse(uuidstr, def->uuid);
@@ -620,14 +614,13 @@ int openvzLoadDomains(struct openvz_driver *driver)
 static int
 openvzWriteConfigParam(const char * conf_file, const char *param, const char *value)
 {
-    char * temp_file = NULL;
+    g_autofree char *temp_file = NULL;
     int temp_fd = -1;
     FILE *fp;
     char *line = NULL;
     size_t line_size = 0;
 
-    if (virAsprintf(&temp_file, "%s.tmp", conf_file)<0)
-        return -1;
+    temp_file = g_strdup_printf("%s.tmp", conf_file);
 
     fp = fopen(conf_file, "r");
     if (fp == NULL)
@@ -671,7 +664,6 @@ openvzWriteConfigParam(const char * conf_file, const char *param, const char *va
     VIR_FORCE_CLOSE(temp_fd);
     if (temp_file)
         unlink(temp_file);
-    VIR_FREE(temp_file);
     return -1;
 }
 
@@ -823,9 +815,8 @@ openvzCopyDefaultConfig(int vpsid)
     if (confdir == NULL)
         goto cleanup;
 
-    if (virAsprintf(&default_conf_file, "%s/ve-%s.conf-sample", confdir,
-                    configfile_value) < 0)
-        goto cleanup;
+    default_conf_file = g_strdup_printf("%s/ve-%s.conf-sample", confdir,
+                                        configfile_value);
 
     if (openvzLocateConfFile(vpsid, &conf_file, "conf") < 0)
         goto cleanup;
@@ -855,9 +846,7 @@ openvzLocateConfFileDefault(int vpsid, char **conffile, const char *ext)
     if (confdir == NULL)
         return -1;
 
-    if (virAsprintf(conffile, "%s/%d.%s", confdir, vpsid,
-                    ext ? ext : "conf") < 0)
-        ret = -1;
+    *conffile = g_strdup_printf("%s/%d.%s", confdir, vpsid, ext ? ext : "conf");
 
     VIR_FREE(confdir);
     return ret;
@@ -868,18 +857,15 @@ openvzLocateConfDir(void)
 {
     const char *conf_dir_list[] = {"/etc/vz/conf", "/usr/local/etc/conf", NULL};
     size_t i = 0;
-    char *ret = NULL;
 
     while (conf_dir_list[i]) {
-        if (virFileExists(conf_dir_list[i])) {
-            ret = g_strdup(conf_dir_list[i]);
-            goto cleanup;
-        }
+        if (virFileExists(conf_dir_list[i]))
+            return g_strdup(conf_dir_list[i]);
+
         i++;
     }
 
- cleanup:
-    return ret;
+    return NULL;
 }
 
 /* Richard Steven's classic readline() function */
@@ -1083,4 +1069,72 @@ int openvzGetVEID(const char *name)
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                    _("Failed to parse vzlist output"));
     return -1;
+}
+
+
+static int
+openvzDomainDefPostParse(virDomainDefPtr def,
+                         unsigned int parseFlags G_GNUC_UNUSED,
+                         void *opaque,
+                         void *parseOpaque G_GNUC_UNUSED)
+{
+    struct openvz_driver *driver = opaque;
+    if (!virCapabilitiesDomainSupported(driver->caps, def->os.type,
+                                        def->os.arch,
+                                        def->virtType))
+        return -1;
+
+    /* fill the init path */
+    if (def->os.type == VIR_DOMAIN_OSTYPE_EXE && !def->os.init)
+        def->os.init = g_strdup("/sbin/init");
+
+    return 0;
+}
+
+
+static int
+openvzDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
+                               const virDomainDef *def G_GNUC_UNUSED,
+                               unsigned int parseFlags G_GNUC_UNUSED,
+                               void *opaque G_GNUC_UNUSED,
+                               void *parseOpaque G_GNUC_UNUSED)
+{
+    if (dev->type == VIR_DOMAIN_DEVICE_CHR &&
+        dev->data.chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE &&
+        dev->data.chr->targetType == VIR_DOMAIN_CHR_CONSOLE_TARGET_TYPE_NONE)
+        dev->data.chr->targetType = VIR_DOMAIN_CHR_CONSOLE_TARGET_TYPE_OPENVZ;
+
+    /* forbid capabilities mode hostdev in this kind of hypervisor */
+    if (dev->type == VIR_DOMAIN_DEVICE_HOSTDEV &&
+        dev->data.hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_CAPABILITIES) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("hostdev mode 'capabilities' is not "
+                         "supported in %s"),
+                       virDomainVirtTypeToString(def->virtType));
+        return -1;
+    }
+
+    if (dev->type == VIR_DOMAIN_DEVICE_VIDEO &&
+        dev->data.video->type == VIR_DOMAIN_VIDEO_TYPE_DEFAULT) {
+        if (def->os.type == VIR_DOMAIN_OSTYPE_HVM)
+            dev->data.video->type = VIR_DOMAIN_VIDEO_TYPE_VGA;
+        else
+            dev->data.video->type = VIR_DOMAIN_VIDEO_TYPE_PARALLELS;
+    }
+
+    return 0;
+}
+
+
+virDomainDefParserConfig openvzDomainDefParserConfig = {
+    .domainPostParseCallback = openvzDomainDefPostParse,
+    .devicesPostParseCallback = openvzDomainDeviceDefPostParse,
+    .features = VIR_DOMAIN_DEF_FEATURE_NAME_SLASH,
+};
+
+virDomainXMLOptionPtr openvzXMLOption(struct openvz_driver *driver)
+{
+    openvzDomainDefParserConfig.priv = driver;
+    return virDomainXMLOptionNew(&openvzDomainDefParserConfig,
+                                 NULL, NULL, NULL, NULL);
 }

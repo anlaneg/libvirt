@@ -81,7 +81,6 @@ ppc64CheckCompatibilityMode(const char *host_model,
     int host;
     int compat;
     char *tmp;
-    virCPUCompareResult ret = VIR_CPU_COMPARE_ERROR;
 
     if (!compat_mode)
         return VIR_CPU_COMPARE_IDENTICAL;
@@ -94,7 +93,7 @@ ppc64CheckCompatibilityMode(const char *host_model,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s",
                        _("Host CPU does not support compatibility modes"));
-        goto out;
+        return VIR_CPU_COMPARE_ERROR;
     }
 
     /* Valid compatibility modes: power6, power7, power8, power9 */
@@ -105,17 +104,14 @@ ppc64CheckCompatibilityMode(const char *host_model,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Unknown compatibility mode %s"),
                        compat_mode);
-        goto out;
+        return VIR_CPU_COMPARE_ERROR;
     }
 
     /* Version check */
     if (compat > host)
-        ret = VIR_CPU_COMPARE_INCOMPATIBLE;
-    else
-        ret = VIR_CPU_COMPARE_IDENTICAL;
+        return VIR_CPU_COMPARE_INCOMPATIBLE;
 
- out:
-    return ret;
+    return VIR_CPU_COMPARE_IDENTICAL;
 }
 
 static void
@@ -459,11 +455,9 @@ ppc64Compute(virCPUDefPtr host,
         if (!found) {
             VIR_DEBUG("CPU arch %s does not match host arch",
                       virArchToString(cpu->arch));
-            if (message &&
-                virAsprintf(message,
-                            _("CPU arch %s does not match host arch"),
-                            virArchToString(cpu->arch)) < 0)
-                goto cleanup;
+            if (message)
+                *message = g_strdup_printf(_("CPU arch %s does not match host arch"),
+                                           virArchToString(cpu->arch));
 
             ret = VIR_CPU_COMPARE_INCOMPATIBLE;
             goto cleanup;
@@ -477,12 +471,11 @@ ppc64Compute(virCPUDefPtr host,
         (!host->vendor || STRNEQ(cpu->vendor, host->vendor))) {
         VIR_DEBUG("host CPU vendor does not match required CPU vendor %s",
                   cpu->vendor);
-        if (message &&
-            virAsprintf(message,
-                        _("host CPU vendor does not match required "
-                        "CPU vendor %s"),
-                        cpu->vendor) < 0)
-            goto cleanup;
+        if (message) {
+            *message = g_strdup_printf(_("host CPU vendor does not match required "
+                                         "CPU vendor %s"),
+                                       cpu->vendor);
+        }
 
         ret = VIR_CPU_COMPARE_INCOMPATIBLE;
         goto cleanup;
@@ -532,12 +525,11 @@ ppc64Compute(virCPUDefPtr host,
     if (STRNEQ(guest_model->name, host_model->name)) {
         VIR_DEBUG("host CPU model does not match required CPU model %s",
                   guest_model->name);
-        if (message &&
-            virAsprintf(message,
-                        _("host CPU model does not match required "
-                        "CPU model %s"),
-                        guest_model->name) < 0)
-            goto cleanup;
+        if (message) {
+            *message = g_strdup_printf(_("host CPU model does not match required "
+                                         "CPU model %s"),
+                                       guest_model->name);
+        }
 
         ret = VIR_CPU_COMPARE_INCOMPATIBLE;
         goto cleanup;
@@ -761,8 +753,7 @@ virCPUppc64Baseline(virCPUDefPtr *cpus,
         }
     }
 
-    if (VIR_ALLOC(cpu) < 0)
-        goto error;
+    cpu = virCPUDefNew();
 
     cpu->model = g_strdup(model->name);
 

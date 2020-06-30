@@ -99,24 +99,24 @@ virAdmInitialize(void)
 static char *
 getSocketPath(virURIPtr uri)
 {
-    char *rundir = virGetUserRuntimeDirectory();
-    char *sock_path = NULL;
+    g_autofree char *rundir = virGetUserRuntimeDirectory();
+    g_autofree char *sock_path = NULL;
     size_t i = 0;
 
     if (!uri)
-        goto cleanup;
+        return NULL;
 
 
     for (i = 0; i < uri->paramsCount; i++) {
         virURIParamPtr param = &uri->params[i];
 
         if (STREQ(param->name, "socket")) {
-            VIR_FREE(sock_path);
+            g_free(sock_path);
             sock_path = g_strdup(param->value);
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Unknown URI parameter '%s'"), param->name);
-            goto error;
+            return NULL;
         }
     }
 
@@ -127,7 +127,7 @@ getSocketPath(virURIPtr uri)
         if (!uri->scheme) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            "%s", _("No URI scheme specified"));
-            goto error;
+            return NULL;
         }
         if (STREQ(uri->scheme, "libvirtd")) {
             legacy = true;
@@ -135,39 +135,28 @@ getSocketPath(virURIPtr uri)
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Unsupported URI scheme '%s'"),
                            uri->scheme);
-            goto error;
+            return NULL;
         }
 
         if (legacy) {
             sockbase = g_strdup("libvirt-admin-sock");
         } else {
-            if (virAsprintf(&sockbase, "%s-admin-sock", uri->scheme) < 0)
-                goto error;
+            sockbase = g_strdup_printf("%s-admin-sock", uri->scheme);
         }
 
         if (STREQ_NULLABLE(uri->path, "/system")) {
-            if (virAsprintf(&sock_path, RUNSTATEDIR "/libvirt/%s",
-                            sockbase) < 0)
-                goto error;
+            sock_path = g_strdup_printf(RUNSTATEDIR "/libvirt/%s", sockbase);
         } else if (STREQ_NULLABLE(uri->path, "/session")) {
-            if (!rundir || virAsprintf(&sock_path, "%s/%s", rundir,
-                                       sockbase) < 0)
-                goto error;
+            sock_path = g_strdup_printf("%s/%s", rundir, sockbase);
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Invalid URI path '%s', try '/system'"),
                            NULLSTR_EMPTY(uri->path));
-            goto error;
+            return NULL;
         }
     }
 
- cleanup:
-    VIR_FREE(rundir);
-    return sock_path;
-
- error:
-    VIR_FREE(sock_path);
-    goto cleanup;
+    return g_steal_pointer(&sock_path);
 }
 
 static int
@@ -214,11 +203,11 @@ virAdmGetDefaultURI(virConfPtr conf, char **uristr)
 virAdmConnectPtr
 virAdmConnectOpen(const char *name, unsigned int flags)
 {
-    char *sock_path = NULL;
+    g_autofree char *sock_path = NULL;
     char *alias = NULL;
     virAdmConnectPtr conn = NULL;
     g_autoptr(virConf) conf = NULL;
-    char *uristr = NULL;
+    g_autofree char *uristr = NULL;
 
     if (virAdmInitialize() < 0)
         goto error;
@@ -244,7 +233,7 @@ virAdmConnectOpen(const char *name, unsigned int flags)
         goto error;
 
     if (alias) {
-        VIR_FREE(uristr);
+        g_free(uristr);
         uristr = alias;
     }
 
@@ -262,16 +251,12 @@ virAdmConnectOpen(const char *name, unsigned int flags)
     if (remoteAdminConnectOpen(conn, flags) < 0)
         goto error;
 
- cleanup:
-    VIR_FREE(sock_path);
-    VIR_FREE(uristr);
     return conn;
 
  error:
     virDispatchError(NULL);
     virObjectUnref(conn);
-    conn = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 /**
@@ -310,7 +295,9 @@ virAdmConnectClose(virAdmConnectPtr conn)
 
     virCheckAdmConnectReturn(conn, -1);
 
-    if (!virObjectUnref(conn))
+    virAdmConnectWatchDispose();
+    virObjectUnref(conn);
+    if (virAdmConnectWasDisposed())
         return 0;
     return 1;
 }
@@ -335,8 +322,7 @@ virAdmConnectClose(virAdmConnectPtr conn)
 int
 virAdmConnectRef(virAdmConnectPtr conn)
 {
-    VIR_DEBUG("conn=%p refs=%d", conn,
-              conn ? conn->parent.parent.u.s.refs : 0);
+    VIR_DEBUG("conn=%p", conn);
 
     virResetLastError();
     virCheckAdmConnectReturn(conn, -1);
@@ -1085,6 +1071,36 @@ virAdmServerSetClientLimits(virAdmServerPtr srv,
 
     if ((ret = remoteAdminServerSetClientLimits(srv, params, nparams,
                                                 flags)) < 0)
+        goto error;
+
+    return ret;
+ error:
+    virDispatchError(NULL);
+    return ret;
+}
+
+/**
+ * virAdmServerUpdateTlsFiles:
+ * @srv: a valid server object reference
+ * @flags: extra flags; not used yet, so callers should always pass 0
+ *
+ * Notify server to update tls file, such as cacert, cacrl, server cert / key.
+ *
+ * Returns 0 if the TLS files have been updated successfully or -1 in case of an
+ * error.
+ */
+int
+virAdmServerUpdateTlsFiles(virAdmServerPtr srv,
+                           unsigned int flags)
+{
+    int ret = -1;
+
+    VIR_DEBUG("srv=%p, flags=0x%x", srv, flags);
+    virResetLastError();
+
+    virCheckAdmServerGoto(srv, error);
+
+    if ((ret = remoteAdminServerUpdateTlsFiles(srv, flags)) < 0)
         goto error;
 
     return ret;

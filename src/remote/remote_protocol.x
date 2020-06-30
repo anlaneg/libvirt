@@ -37,7 +37,7 @@
 %#include <libvirt/libvirt.h>
 %#include "internal.h"
 %#include "virxdrdefs.h"
-%#include <arpa/inet.h>
+%#include "virsocket.h"
 
 /*----- Data types. -----*/
 
@@ -3744,6 +3744,33 @@ struct remote_connect_set_identity_args {
     unsigned int flags;
 };
 
+struct remote_domain_agent_set_response_timeout_args {
+    remote_nonnull_domain dom;
+    int timeout;
+    unsigned int flags;
+};
+
+struct remote_domain_agent_set_response_timeout_ret {
+    int result;
+};
+
+
+struct remote_domain_backup_begin_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string backup_xml;
+    remote_string checkpoint_xml;
+    unsigned int flags;
+};
+
+struct remote_domain_backup_get_xml_desc_args {
+    remote_nonnull_domain dom;
+    unsigned int flags;
+};
+
+struct remote_domain_backup_get_xml_desc_ret {
+    remote_nonnull_string xml;
+};
+
 /*----- Protocol. -----*/
 
 /* Define the program number, protocol version and procedure numbers here. */
@@ -6340,7 +6367,7 @@ enum remote_procedure {
     REMOTE_PROC_NODE_DEVICE_EVENT_UPDATE = 377,
 
     /**
-     * @generate: none
+     * @generate: server
      * @priority: high
      * @acl: storage_vol:read
      */
@@ -6617,5 +6644,25 @@ enum remote_procedure {
      * @generate: client
      * @acl: connect:write
      */
-    REMOTE_PROC_CONNECT_SET_IDENTITY = 419
+    REMOTE_PROC_CONNECT_SET_IDENTITY = 419,
+
+    /**
+     * @generate: both
+     * @acl: domain:write
+     */
+    REMOTE_PROC_DOMAIN_AGENT_SET_RESPONSE_TIMEOUT = 420,
+
+    /**
+     * @generate: both
+     * @acl: domain:checkpoint
+     * @acl: domain:block_write
+     */
+    REMOTE_PROC_DOMAIN_BACKUP_BEGIN = 421,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_BACKUP_GET_XML_DESC = 422
 };

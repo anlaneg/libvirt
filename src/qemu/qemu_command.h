@@ -41,6 +41,11 @@
 #define QEMU_BLOCK_IOTUNE_MAX 1000000000000000LL
 
 VIR_ENUM_DECL(qemuVideo);
+VIR_ENUM_DECL(qemuSoundCodec);
+
+typedef enum {
+    QEMU_BUILD_COMMANDLINE_VALIDATE_KEEP_JSON = 1 << 0,
+} qemuBuildCommandLineFlags;
 
 virCommandPtr qemuBuildCommandLine(virQEMUDriverPtr driver,
                                    virLogManagerPtr logManager,
@@ -52,18 +57,19 @@ virCommandPtr qemuBuildCommandLine(virQEMUDriverPtr driver,
                                    bool standalone,
                                    bool enableFips,
                                    size_t *nnicindexes,
-                                   int **nicindexes);
+                                   int **nicindexes,
+                                   unsigned int flags);
 
 /* Generate the object properties for pr-manager */
 virJSONValuePtr qemuBuildPRManagerInfoProps(virStorageSourcePtr src);
 virJSONValuePtr qemuBuildPRManagedManagerInfoProps(qemuDomainObjPrivatePtr priv);
 
+virJSONValuePtr qemuBuildDBusVMStateInfoProps(virQEMUDriverPtr driver,
+                                              virDomainObjPtr vm);
+
 /* Generate the object properties for a secret */
 int qemuBuildSecretInfoProps(qemuDomainSecretInfoPtr secinfo,
                              virJSONValuePtr *propsret);
-
-virJSONValuePtr qemuBuildDBusVMStateInfoProps(const char *id,
-                                              const char *addr);
 
 /* Generate the object properties for a tls-creds-x509 */
 int qemuBuildTLSx509BackendProps(const char *tlspath,
@@ -85,12 +91,15 @@ qemuBuildChrDeviceStr(char **deviceStr,
                       virDomainChrDefPtr chr,
                       virQEMUCapsPtr qemuCaps);
 
-char *qemuBuildHostNetStr(virDomainNetDefPtr net,
-                          char **tapfd,
-                          size_t tapfdSize,
-                          char **vhostfd,
-                          size_t vhostfdSize,
-                          const char *slirpfd);
+virJSONValuePtr
+qemuBuildChannelGuestfwdNetdevProps(virDomainChrDefPtr chr);
+
+virJSONValuePtr qemuBuildHostNetStr(virDomainNetDefPtr net,
+                                    char **tapfd,
+                                    size_t tapfdSize,
+                                    char **vhostfd,
+                                    size_t vhostfdSize,
+                                    const char *slirpfd);
 
 /* Current, best practice */
 char *qemuBuildNicDevStr(virDomainDefPtr def,
@@ -100,7 +109,7 @@ char *qemuBuildNicDevStr(virDomainDefPtr def,
                          virQEMUCapsPtr qemuCaps);
 
 char *qemuDeviceDriveHostAlias(virDomainDiskDefPtr disk);
-bool qemuDiskBusNeedsDriveArg(int bus);
+bool qemuDiskBusIsSD(int bus);
 
 qemuBlockStorageSourceAttachDataPtr
 qemuBuildStorageSourceAttachPrepareDrive(virDomainDiskDefPtr disk,
@@ -197,8 +206,6 @@ int qemuGetDriveSourceString(virStorageSourcePtr src,
 bool
 qemuDiskConfigBlkdeviotuneEnabled(virDomainDiskDefPtr disk);
 
-int qemuCheckDiskConfig(virDomainDiskDefPtr disk,
-                        virQEMUCapsPtr qemuCaps);
 
 bool
 qemuCheckFips(void);

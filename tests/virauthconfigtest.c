@@ -41,9 +41,8 @@ struct ConfigLookupData {
 
 static int testAuthLookup(const void *args)
 {
-    int ret = -1;
     const struct ConfigLookupData *data = args;
-    const char *actual = NULL;
+    g_autofree char *actual = NULL;
     int rv;
 
     rv = virAuthConfigLookup(data->config,
@@ -53,7 +52,7 @@ static int testAuthLookup(const void *args)
                              &actual);
 
     if (rv < 0)
-        goto cleanup;
+        return -1;
 
     if (data->expect) {
         if (!actual ||
@@ -62,7 +61,7 @@ static int testAuthLookup(const void *args)
                      data->expect, data->hostname,
                      data->service, data->credname,
                      NULLSTR(actual));
-            goto cleanup;
+            return -1;
         }
     } else {
         if (actual) {
@@ -70,13 +69,11 @@ static int testAuthLookup(const void *args)
                      data->hostname,
                      data->service, data->credname,
                      actual);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -87,7 +84,9 @@ mymain(void)
 
     virAuthConfigPtr config;
 
+#ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
 #define TEST_LOOKUP(config, hostname, service, credname, expect) \
     do  { \

@@ -177,8 +177,7 @@ addnhostsWrite(const char *path,
      * for runtime addition.
      */
 
-    if (virAsprintf(&tmp, "%s.new", path) < 0)
-        return -ENOMEM;
+    tmp = g_strdup_printf("%s.new", path);
 
     if (!(f = fopen(tmp, "w"))) {
         istmp = false;
@@ -297,11 +296,14 @@ hostsfileAdd(dnsmasqHostsfile *hostsfile,
              virSocketAddr *ip,
              const char *name,
              const char *id,
+             const char *leasetime,
              bool ipv6)
 {
-    char *ipstr = NULL;
+    g_autofree char *ipstr = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+
     if (VIR_REALLOC_N(hostsfile->hosts, hostsfile->nhosts + 1) < 0)
-        goto error;
+        return -1;
 
     if (!(ipstr = virSocketAddrFormat(ip)))
         return -1;
@@ -309,40 +311,30 @@ hostsfileAdd(dnsmasqHostsfile *hostsfile,
     /* the first test determines if it is a dhcpv6 host */
     if (ipv6) {
         if (name && id) {
-            if (virAsprintf(&hostsfile->hosts[hostsfile->nhosts].host,
-                            "id:%s,%s,[%s]", id, name, ipstr) < 0)
-                goto error;
+            virBufferAsprintf(&buf, "id:%s,%s", id, name);
         } else if (name && !id) {
-            if (virAsprintf(&hostsfile->hosts[hostsfile->nhosts].host,
-                            "%s,[%s]", name, ipstr) < 0)
-                goto error;
+            virBufferAsprintf(&buf, "%s", name);
         } else if (!name && id) {
-            if (virAsprintf(&hostsfile->hosts[hostsfile->nhosts].host,
-                            "id:%s,[%s]", id, ipstr) < 0)
-                goto error;
+            virBufferAsprintf(&buf, "id:%s", id);
         }
+        virBufferAsprintf(&buf, ",[%s]", ipstr);
     } else if (name && mac) {
-        if (virAsprintf(&hostsfile->hosts[hostsfile->nhosts].host, "%s,%s,%s",
-                        mac, ipstr, name) < 0)
-            goto error;
+        virBufferAsprintf(&buf, "%s,%s,%s", mac, ipstr, name);
     } else if (name && !mac) {
-        if (virAsprintf(&hostsfile->hosts[hostsfile->nhosts].host, "%s,%s",
-                        name, ipstr) < 0)
-            goto error;
+        virBufferAsprintf(&buf, "%s,%s", name, ipstr);
     } else {
-        if (virAsprintf(&hostsfile->hosts[hostsfile->nhosts].host, "%s,%s",
-                        mac, ipstr) < 0)
-            goto error;
+        virBufferAsprintf(&buf, "%s,%s", mac, ipstr);
     }
-    VIR_FREE(ipstr);
+
+    if (leasetime)
+        virBufferAsprintf(&buf, ",%s", leasetime);
+
+    if (!(hostsfile->hosts[hostsfile->nhosts].host = virBufferContentAndReset(&buf)))
+        return -1;
 
     hostsfile->nhosts++;
 
     return 0;
-
- error:
-    VIR_FREE(ipstr);
-    return -1;
 }
 
 static dnsmasqHostsfile *
@@ -387,8 +379,7 @@ hostsfileWrite(const char *path,
      * for runtime addition.
      */
 
-    if (virAsprintf(&tmp, "%s.new", path) < 0)
-        return -ENOMEM;
+    tmp = g_strdup_printf("%s.new", path);
 
     if (!(f = fopen(tmp, "w"))) {
         istmp = false;
@@ -509,9 +500,10 @@ dnsmasqAddDhcpHost(dnsmasqContext *ctx,
                    virSocketAddr *ip,
                    const char *name,
                    const char *id,
+                   const char *leasetime,
                    bool ipv6)
 {
-    return hostsfileAdd(ctx->hostsfile, mac, ip, name, id, ipv6);
+    return hostsfileAdd(ctx->hostsfile, mac, ip, name, id, leasetime, ipv6);
 }
 
 /*
@@ -648,6 +640,7 @@ dnsmasqCapsSet(dnsmasqCapsPtr caps,
 static int
 dnsmasqCapsSetFromBuffer(dnsmasqCapsPtr caps, const char *buf)
 {
+    int len;
     const char *p;
 
     caps->noRefresh = true;
@@ -683,10 +676,14 @@ dnsmasqCapsSetFromBuffer(dnsmasqCapsPtr caps, const char *buf)
     return 0;
 
  fail:
-    p = strchrnul(buf, '\n');
+    p = strchr(buf, '\n');
+    if (!p)
+        len = strlen(buf);
+    else
+        len = p - buf;
     virReportError(VIR_ERR_INTERNAL_ERROR,
                    _("cannot parse %s version number in '%.*s'"),
-                   caps->binaryPath, (int) (p - buf), buf);
+                   caps->binaryPath, len, buf);
     return -1;
 
 }
@@ -752,8 +749,7 @@ dnsmasqCapsRefreshInternal(dnsmasqCapsPtr caps, bool force)
     if (virCommandRun(cmd, NULL) < 0)
         goto cleanup;
 
-    if (virAsprintf(&complete, "%s\n%s", version, help) < 0)
-        goto cleanup;
+    complete = g_strdup_printf("%s\n%s", version, help);
 
     ret = dnsmasqCapsSetFromBuffer(caps, complete);
 
@@ -865,4 +861,24 @@ bool
 dnsmasqCapsGet(dnsmasqCapsPtr caps, dnsmasqCapsFlags flag)
 {
     return caps && virBitmapIsBitSet(caps->flags, flag);
+}
+
+
+/** dnsmasqDhcpHostsToString:
+ *
+ *   Turns a vector of dnsmasqDhcpHost into the string that is ought to be
+ *   stored in the hostsfile, this functionality is split to make hostsfiles
+ *   testable. Returs NULL if nhosts is 0.
+ */
+char *
+dnsmasqDhcpHostsToString(dnsmasqDhcpHost *hosts,
+                         unsigned int nhosts)
+{
+    size_t i;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+
+    for (i = 0; i < nhosts; i++)
+        virBufferAsprintf(&buf, "%s\n", hosts[i].host);
+
+    return virBufferContentAndReset(&buf);
 }

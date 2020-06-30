@@ -152,13 +152,9 @@ virStorageFileBackendGlusterCreate(virStorageSourcePtr src)
 {
     virStorageFileBackendGlusterPrivPtr priv = src->drv->priv;
     glfs_fd_t *fd = NULL;
-    mode_t mode = S_IRUSR;
-
-    if (!src->readonly)
-        mode |= S_IWUSR;
 
     if (!(fd = glfs_creat(priv->vol, src->path,
-                          O_CREAT | O_TRUNC | O_WRONLY, mode)))
+                          O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR)))
         return -1;
 
     ignore_value(glfs_close(fd));
@@ -311,11 +307,11 @@ virStorageFileBackendGlusterGetUniqueIdentifier(virStorageSourcePtr src)
                                                     priv)))
         return NULL;
 
-    ignore_value(virAsprintf(&priv->canonpath, "gluster://%s:%u/%s/%s",
-                             src->hosts->name,
-                             src->hosts->port,
-                             src->volume,
-                             filePath));
+    priv->canonpath = g_strdup_printf("gluster://%s:%u/%s/%s",
+                                      src->hosts->name,
+                                      src->hosts->port,
+                                      src->volume,
+                                      filePath);
 
     return priv->canonpath;
 }

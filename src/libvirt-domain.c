@@ -21,13 +21,12 @@
 #include <config.h>
 #include <sys/stat.h>
 
-#include "intprops.h"
-
 #include "datatypes.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "virlog.h"
 #include "virtypedparam.h"
+#include "virutil.h"
 
 VIR_LOG_INIT("libvirt.domain");
 
@@ -59,7 +58,7 @@ virConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(ids, error);
+    virCheckNonNullArrayArgGoto(ids, maxids, error);
     virCheckNonNegativeArgGoto(maxids, error);
 
     if (conn->driver->connectListDomains) {
@@ -592,7 +591,7 @@ virDomainFree(virDomainPtr domain)
 int
 virDomainRef(virDomainPtr domain)
 {
-    VIR_DOMAIN_DEBUG(domain, "refs=%d", domain ? domain->parent.u.s.refs : 0);
+    VIR_DOMAIN_DEBUG(domain);
 
     virResetLastError();
 
@@ -3549,6 +3548,10 @@ virDomainMigrate(virDomainPtr domain,
                              VIR_MIGRATE_NON_SHARED_INC,
                              error);
 
+    VIR_EXCLUSIVE_FLAGS_GOTO(VIR_MIGRATE_TUNNELLED,
+                             VIR_MIGRATE_PARALLEL,
+                             error);
+
     if (flags & VIR_MIGRATE_OFFLINE) {
         if (!VIR_DRV_SUPPORTS_FEATURE(domain->conn->driver, domain->conn,
                                       VIR_DRV_FEATURE_MIGRATION_OFFLINE)) {
@@ -3702,6 +3705,10 @@ virDomainMigrate2(virDomainPtr domain,
 
     VIR_EXCLUSIVE_FLAGS_GOTO(VIR_MIGRATE_NON_SHARED_DISK,
                              VIR_MIGRATE_NON_SHARED_INC,
+                             error);
+
+    VIR_EXCLUSIVE_FLAGS_GOTO(VIR_MIGRATE_TUNNELLED,
+                             VIR_MIGRATE_PARALLEL,
                              error);
 
     if (flags & VIR_MIGRATE_OFFLINE) {
@@ -4090,6 +4097,10 @@ virDomainMigrateToURI(virDomainPtr domain,
     virCheckReadOnlyGoto(domain->conn->flags, error);
     virCheckNonNullArgGoto(duri, error);
 
+    VIR_EXCLUSIVE_FLAGS_GOTO(VIR_MIGRATE_TUNNELLED,
+                             VIR_MIGRATE_PARALLEL,
+                             error);
+
     if (virDomainMigrateUnmanagedCheckCompat(domain, flags) < 0)
         goto error;
 
@@ -4161,6 +4172,10 @@ virDomainMigrateToURI2(virDomainPtr domain,
     /* First checkout the source */
     virCheckDomainReturn(domain, -1);
     virCheckReadOnlyGoto(domain->conn->flags, error);
+
+    VIR_EXCLUSIVE_FLAGS_GOTO(VIR_MIGRATE_TUNNELLED,
+                             VIR_MIGRATE_PARALLEL,
+                             error);
 
     if (virDomainMigrateUnmanagedCheckCompat(domain, flags) < 0)
         goto error;
@@ -4234,6 +4249,10 @@ virDomainMigrateToURI3(virDomainPtr domain,
     /* First checkout the source */
     virCheckDomainReturn(domain, -1);
     virCheckReadOnlyGoto(domain->conn->flags, error);
+
+    VIR_EXCLUSIVE_FLAGS_GOTO(VIR_MIGRATE_TUNNELLED,
+                             VIR_MIGRATE_PARALLEL,
+                             error);
 
     if (virDomainMigrateUnmanagedCheckCompat(domain, flags) < 0)
         goto error;
@@ -6387,7 +6406,7 @@ virConnectListDefinedDomains(virConnectPtr conn, char **const names,
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(names, error);
+    virCheckNonNullArrayArgGoto(names, maxnames, error);
     virCheckNonNegativeArgGoto(maxnames, error);
 
     if (conn->driver->connectListDefinedDomains) {
@@ -7300,11 +7319,11 @@ virDomainGetVcpuPinInfo(virDomainPtr domain, int ncpumaps,
     virCheckDomainReturn(domain, -1);
     conn = domain->conn;
 
-    virCheckNonNullArgGoto(cpumaps, error);
+    virCheckNonNullArrayArgGoto(cpumaps, ncpumaps, error);
     virCheckPositiveArgGoto(ncpumaps, error);
     virCheckPositiveArgGoto(maplen, error);
 
-    if (INT_MULTIPLY_OVERFLOW(ncpumaps, maplen)) {
+    if (VIR_INT_MULTIPLY_OVERFLOW(ncpumaps, maplen)) {
         virReportError(VIR_ERR_OVERFLOW, _("input too large: %d * %d"),
                        ncpumaps, maplen);
         goto error;
@@ -7505,7 +7524,7 @@ virDomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
     else
         virCheckZeroArgGoto(maplen, error);
 
-    if (cpumaps && INT_MULTIPLY_OVERFLOW(maxinfo, maplen)) {
+    if (cpumaps && VIR_INT_MULTIPLY_OVERFLOW(maxinfo, maplen)) {
         virReportError(VIR_ERR_OVERFLOW, _("input too large: %d * %d"),
                        maxinfo, maplen);
         goto error;
@@ -8798,7 +8817,8 @@ virDomainGetJobInfo(virDomainPtr domain, virDomainJobInfoPtr info)
  * flag may be used to query statistics of a completed incoming pre-copy
  * migration (statistics for post-copy migration are only available on the
  * source host). Statistics of a completed job are automatically destroyed
- * once read or when libvirtd is restarted. Note that time information
+ * once read (unless the VIR_DOMAIN_JOB_STATS_COMPLETED_KEEP is used as well)
+ * or when libvirtd is restarted. Note that time information
  * returned for completed migrations may be completely irrelevant unless both
  * source and destination hosts have synchronized time (i.e., NTP daemon is
  * running on both of them). The statistics of a completed job can also be
@@ -8825,6 +8845,9 @@ virDomainGetJobStats(virDomainPtr domain,
     virCheckNonNullArgGoto(type, error);
     virCheckNonNullArgGoto(params, error);
     virCheckNonNullArgGoto(nparams, error);
+    VIR_REQUIRE_FLAG_GOTO(VIR_DOMAIN_JOB_STATS_KEEP_COMPLETED,
+                          VIR_DOMAIN_JOB_STATS_COMPLETED,
+                          error);
 
     conn = domain->conn;
 
@@ -9947,6 +9970,10 @@ virDomainBlockJobAbort(virDomainPtr dom, const char *disk,
  * and was no-op. In this case libvirt reports cur = 1 and end = 1.
  * Since 2.3.0.
  *
+ * Note that the progress reported for blockjobs corresponding to a pull-mode
+ * backup don't report progress of the backup but rather usage of temporary
+ * space required for the backup.
+ *
  * Returns -1 in case of failure, 0 when nothing found, 1 when info was found.
  */
 int
@@ -10580,12 +10607,14 @@ virDomainOpenGraphics(virDomainPtr dom,
         goto error;
     }
 
+#ifndef WIN32
     if (!S_ISSOCK(sb.st_mode)) {
         virReportInvalidArg(fd,
                             _("fd %d must be a socket"),
                             fd);
         goto error;
     }
+#endif /* !WIN32 */
 
     virCheckReadOnlyGoto(dom->conn->flags, error);
 
@@ -10998,10 +11027,7 @@ virDomainGetDiskErrors(virDomainPtr dom,
 
     virCheckDomainReturn(dom, -1);
 
-    if (maxerrors)
-        virCheckNonNullArgGoto(errors, error);
-    else
-        virCheckNullArgGoto(errors, error);
+    virCheckNonNullArrayArgGoto(errors, maxerrors, error);
 
     if (dom->conn->driver->domainGetDiskErrors) {
         int ret = dom->conn->driver->domainGetDiskErrors(dom, errors,
@@ -11022,12 +11048,13 @@ virDomainGetDiskErrors(virDomainPtr dom,
 /**
  * virDomainGetHostname:
  * @domain: a domain object
- * @flags: extra flags; not used yet, so callers should always pass 0
+ * @flags: bitwise-OR of virDomainGetHostnameFlags
  *
- * Get the hostname for that domain.
+ * Get the hostname for that domain. If no hostname is found,
+ * then an error is raised with VIR_ERR_NO_HOSTNAME code.
  *
- * Dependent on hypervisor used, this may require a guest agent to be
- * available.
+ * Dependent on hypervisor and @flags used, this may require a
+ * guest agent to be available.
  *
  * Returns the hostname which must be freed by the caller, or
  * NULL if there was an error.
@@ -11138,10 +11165,7 @@ virDomainFSFreeze(virDomainPtr dom,
 
     virCheckDomainReturn(dom, -1);
     virCheckReadOnlyGoto(dom->conn->flags, error);
-    if (nmountpoints)
-        virCheckNonNullArgGoto(mountpoints, error);
-    else
-        virCheckNullArgGoto(mountpoints, error);
+    virCheckNonNullArrayArgGoto(mountpoints, nmountpoints, error);
 
     if (dom->conn->driver->domainFSFreeze) {
         int ret = dom->conn->driver->domainFSFreeze(
@@ -11183,10 +11207,7 @@ virDomainFSThaw(virDomainPtr dom,
 
     virCheckDomainReturn(dom, -1);
     virCheckReadOnlyGoto(dom->conn->flags, error);
-    if (nmountpoints)
-        virCheckNonNullArgGoto(mountpoints, error);
-    else
-        virCheckNullArgGoto(mountpoints, error);
+    virCheckNonNullArrayArgGoto(mountpoints, nmountpoints, error);
 
     if (dom->conn->driver->domainFSThaw) {
         int ret = dom->conn->driver->domainFSThaw(
@@ -11626,11 +11647,11 @@ virConnectGetDomainCapabilities(virConnectPtr conn,
  *
  *     The typed parameter keys are in this format:
  *
- *     "iothread.cnt" - maximum number of IOThreads in the subsequent list
- *                      as unsigned int. Each IOThread in the list will
- *                      will use it's iothread_id value as the <id>. There
- *                      may be fewer <id> entries than the iothread.cnt
- *                      value if the polling values are not supported.
+ *     "iothread.count" - maximum number of IOThreads in the subsequent list
+ *                        as unsigned int. Each IOThread in the list will
+ *                        will use it's iothread_id value as the <id>. There
+ *                        may be fewer <id> entries than the iothread.count
+ *                        value if the polling values are not supported.
  *     "iothread.<id>.poll-max-ns" - maximum polling time in ns as an unsigned
  *                                   long long. A 0 (zero) means polling is
  *                                   disabled.
@@ -11642,6 +11663,27 @@ virConnectGetDomainCapabilities(virConnectPtr conn,
  *                                 A 0 (zero) indicates to allow the underlying
  *                                 hypervisor to choose how to shrink the
  *                                 polling time.
+ *
+ * VIR_DOMAIN_STATS_MEMORY:
+ *     Return memory bandwidth statistics and the usage information. The typed
+ *     parameter keys are in this format:
+ *
+ *     "memory.bandwidth.monitor.count" - the number of memory bandwidth
+ *                                        monitors for this domain
+ *     "memory.bandwidth.monitor.<num>.name" - the name of monitor <num>
+ *     "memory.bandwidth.monitor.<num>.vcpus" - the vcpu list of monitor <num>
+ *     "memory.bandwidth.monitor.<num>.node.count" - the number of memory
+ *                                            controller in monitor <num>
+ *     "memory.bandwidth.monitor.<num>.node.<index>.id" - host allocated memory
+ *                                                 controller id for controller
+ *                                                 <index> of monitor <num>
+ *     "memory.bandwidth.monitor.<num>.node.<index>.bytes.local" - the
+ *                       accumulative bytes consumed by @vcpus that passing
+ *                       through the memory controller in the same processor
+ *                       that the scheduled host CPU belongs to.
+ *     "memory.bandwidth.monitor.<num>.node.<index>.bytes.total" - the total
+ *                       bytes consumed by @vcpus that passing through all
+ *                       memory controllers, either local or remote controller.
  *
  * Note that entire stats groups or individual stat fields may be missing from
  * the output in case they are not supported by the given hypervisor, are not
@@ -11906,15 +11948,15 @@ virDomainFSInfoFree(virDomainFSInfoPtr info)
     if (!info)
         return;
 
-    VIR_FREE(info->mountpoint);
-    VIR_FREE(info->name);
-    VIR_FREE(info->fstype);
+    g_free(info->mountpoint);
+    g_free(info->name);
+    g_free(info->fstype);
 
     for (i = 0; i < info->ndevAlias; i++)
-        VIR_FREE(info->devAlias[i]);
-    VIR_FREE(info->devAlias);
+        g_free(info->devAlias[i]);
+    g_free(info->devAlias);
 
-    VIR_FREE(info);
+    g_free(info);
 }
 
 /**
@@ -12274,7 +12316,7 @@ virDomainSetVcpu(virDomainPtr domain,
  *      "timezone.offset" - the offset to UTC in seconds as an int
  *
  * VIR_DOMAIN_GUEST_INFO_FILESYSTEM:
- *  Returns inforamtion about the filesystems within the domain.  The typed
+ *  Returns information about the filesystems within the domain.  The typed
  *  parameter keys are in this format:
  *
  *      "fs.count" - the number of filesystems defined on this domain
@@ -12498,4 +12540,198 @@ int virDomainGetLaunchSecurityInfo(virDomainPtr domain,
  error:
     virDispatchError(domain->conn);
     return -1;
+}
+
+
+/**
+ * virDomainAgentSetResponseTimeout:
+ * @domain: a domain object
+ * @timeout: timeout in seconds
+ * @flags: extra flags; not used yet, so callers should always pass 0
+ *
+ * Set how long to wait for a response from guest agent commands. By default,
+ * agent commands block forever waiting for a response.
+ *
+ * @timeout must be a value from virDomainAgentResponseTimeoutValues or
+ * positive:
+ *
+ *   VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_BLOCK(-2): meaning to block forever
+ *      waiting for a result.
+ *   VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_DEFAULT(-1): use default timeout value.
+ *   VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_NOWAIT(0): does not wait.
+ *   positive value: wait for @timeout seconds
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+virDomainAgentSetResponseTimeout(virDomainPtr domain,
+                                 int timeout,
+                                 unsigned int flags)
+{
+    virConnectPtr conn;
+
+    VIR_DOMAIN_DEBUG(domain, "timeout=%i, flags=0x%x",
+                     timeout, flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, -1);
+    conn = domain->conn;
+
+    virCheckReadOnlyGoto(conn->flags, error);
+
+    if (conn->driver->domainAgentSetResponseTimeout) {
+        if (conn->driver->domainAgentSetResponseTimeout(domain, timeout, flags) < 0)
+            goto error;
+        return 0;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(conn);
+    return -1;
+}
+
+
+/**
+ * virDomainBackupBegin:
+ * @domain: a domain object
+ * @backupXML: description of the requested backup
+ * @checkpointXML: description of a checkpoint to create or NULL
+ * @flags: bitwise or of virDomainBackupBeginFlags
+ *
+ * Start a point-in-time backup job for the specified disks of a
+ * running domain.
+ *
+ * A backup job is a domain job and thus mutually exclusive with any other
+ * domain job such as migration.
+ *
+ * For now, backup jobs are also mutually exclusive with any
+ * other block job on the same device, although this restriction may
+ * be lifted in a future release. Progress of the backup job can be
+ * tracked via virDomainGetJobStats(). Completion of the job is also announced
+ * asynchronously via VIR_DOMAIN_EVENT_ID_JOB_COMPLETED event.
+ *
+ * There are two fundamental backup approaches. The first, called a
+ * push model, instructs the hypervisor to copy the state of the guest
+ * disk to the designated storage destination (which may be on the
+ * local file system or a network device). In this mode, the
+ * hypervisor writes the content of the guest disk to the destination,
+ * then emits VIR_DOMAIN_EVENT_ID_JOB_COMPLETED when the backup is
+ * either complete or failed (the backup image is invalid if the job
+ * fails or virDomainAbortJob() is used prior to the event being
+ * emitted). This kind of the job finishes automatically. Users can
+ * determine success by using virDomainGetJobStats() with
+ * VIR_DOMAIN_JOB_STATS_COMPLETED flag.
+ *
+ * The second, called a pull model, instructs the hypervisor to expose
+ * the state of the guest disk over an NBD export. A third-party
+ * client can then connect to this export and read whichever portions
+ * of the disk it desires.  In this mode libvirt has to be informed via
+ * virDomainAbortJob() when the third-party NBD client is done and the backup
+ * resources can be released.
+ *
+ * The @backupXML parameter contains details about the backup in the top-level
+ * element <domainbackup>, including which backup mode to use, whether the
+ * backup is incremental from a previous checkpoint, which disks
+ * participate in the backup, the destination for a push model backup,
+ * and the temporary storage and NBD server details for a pull model
+ * backup.
+ *
+ * virDomainBackupGetXMLDesc() can be called to learn actual
+ * values selected.  For more information, see
+ * formatcheckpoint.html#BackupAttributes.
+ *
+ * The @checkpointXML parameter is optional; if non-NULL, then libvirt
+ * behaves as if virDomainCheckpointCreateXML() were called to create
+ * a checkpoint atomically covering the same point in time as the
+ * backup.
+ *
+ * The VIR_DOMAIN_BACKUP_BEGIN_REUSE_EXTERNAL specifies that the output or
+ * temporary files described by the @backupXML document were created by the
+ * caller with correct format and size to hold the backup or temporary data.
+ *
+ * The creation of a new checkpoint allows for future incremental backups.
+ * Note that some hypervisors may require a particular disk format, such as
+ * qcow2, in order to take advantage of checkpoints, while allowing arbitrary
+ * formats if checkpoints are not involved.
+ *
+ * Returns 0 on success or -1 on failure.
+ */
+int
+virDomainBackupBegin(virDomainPtr domain,
+                     const char *backupXML,
+                     const char *checkpointXML,
+                     unsigned int flags)
+{
+    virConnectPtr conn;
+
+    VIR_DOMAIN_DEBUG(domain, "backupXML=%s, checkpointXML=%s, flags=0x%x",
+                     NULLSTR(backupXML), NULLSTR(checkpointXML), flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, -1);
+    conn = domain->conn;
+
+    virCheckNonNullArgGoto(backupXML, error);
+    virCheckReadOnlyGoto(conn->flags, error);
+
+    if (conn->driver->domainBackupBegin) {
+        int ret;
+        ret = conn->driver->domainBackupBegin(domain, backupXML, checkpointXML,
+                                              flags);
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+ error:
+    virDispatchError(conn);
+    return -1;
+}
+
+
+/**
+ * virDomainBackupGetXMLDesc:
+ * @domain: a domain object
+ * @flags: extra flags; not used yet, so callers should always pass 0
+ *
+ * Queries the configuration of the active backup job.
+ *
+ * In some cases, a user can start a backup job without supplying all
+ * details and rely on libvirt to fill in the rest (for example,
+ * selecting the port used for an NBD export). This API can then be
+ * used to learn what default values were chosen.
+ *
+ * Returns a NUL-terminated UTF-8 encoded XML instance or NULL in
+ * case of error.  The caller must free() the returned value.
+ */
+char *
+virDomainBackupGetXMLDesc(virDomainPtr domain,
+                          unsigned int flags)
+{
+    virConnectPtr conn;
+
+    VIR_DOMAIN_DEBUG(domain, "flags=0x%x", flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, NULL);
+    conn = domain->conn;
+
+    if (conn->driver->domainBackupGetXMLDesc) {
+        char *ret;
+        ret = conn->driver->domainBackupGetXMLDesc(domain, flags);
+        if (!ret)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+ error:
+    virDispatchError(conn);
+    return NULL;
 }

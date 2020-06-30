@@ -332,7 +332,7 @@ bool
 virStoragePoolObjIsAutostart(virStoragePoolObjPtr obj)
 {
     if (!obj->configFile)
-        return 0;
+        return false;
 
     return obj->autostart;
 }
@@ -1036,10 +1036,7 @@ virStoragePoolObjVolumeListExport(virConnectPtr conn,
         return ret;
     }
 
-    if (VIR_ALLOC_N(data.vols, virHashSize(volumes->objsName) + 1) < 0) {
-        virObjectRWUnlock(volumes);
-        return -1;
-    }
+    data.vols = g_new0(virStorageVolPtr, virHashSize(volumes->objsName) + 1);
 
     virHashForEach(volumes->objsName, virStoragePoolObjVolumeListExportCallback, &data);
     virObjectRWUnlock(volumes);
@@ -1229,8 +1226,7 @@ matchFCHostToSCSIHost(virStorageAdapterFCHostPtr fchost,
          */
         if (!fchost->parent &&
             (conn = virGetConnectNodeDev())) {
-            if (virAsprintf(&scsi_host_name, "scsi_%s", name) < 0)
-                goto cleanup;
+            scsi_host_name = g_strdup_printf("scsi_%s", name);
             if ((parent_name = virNodeDeviceGetParentName(conn,
                                                           scsi_host_name))) {
                 if (virStorageIsSameHostnum(parent_name, scsi_hostnum)) {
@@ -2078,8 +2074,13 @@ virStoragePoolObjListExport(virConnectPtr conn,
 
     virObjectRWLockRead(poolobjs);
 
-    if (pools && VIR_ALLOC_N(data.pools, virHashSize(poolobjs->objs) + 1) < 0)
-        goto error;
+    if (!pools) {
+        int ret = virHashSize(poolobjs->objs);
+        virObjectRWUnlock(poolobjs);
+        return ret;
+    }
+
+    data.pools = g_new0(virStoragePoolPtr, virHashSize(poolobjs->objs) + 1);
 
     virHashForEach(poolobjs->objs, virStoragePoolObjListExportCallback, &data);
     virObjectRWUnlock(poolobjs);

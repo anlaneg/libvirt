@@ -65,6 +65,7 @@ int virHostCPUStatsAssign(virNodeCPUStatsPtr param,
 
 #ifdef __linux__
 int virHostCPUGetSocket(unsigned int cpu, unsigned int *socket);
+int virHostCPUGetDie(unsigned int cpu, unsigned int *die);
 int virHostCPUGetCore(unsigned int cpu, unsigned int *core);
 
 virBitmapPtr virHostCPUGetSiblingsList(unsigned int cpu);
@@ -78,3 +79,5 @@ int virHostCPUGetMSR(unsigned long index,
                      uint64_t *msr);
 
 virHostCPUTscInfoPtr virHostCPUGetTscInfo(void);
+
+int virHostCPUGetSignature(char **signature);

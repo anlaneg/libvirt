@@ -187,12 +187,9 @@ testCgroupDetectMounts(const void *args)
     virBuffer buf = VIR_BUFFER_INITIALIZER;
     size_t i;
 
-    setenv("VIR_CGROUP_MOCK_FILENAME", data->file, 1);
+    g_setenv("VIR_CGROUP_MOCK_FILENAME", data->file, TRUE);
 
-    if (virAsprintf(&parsed, "%s/vircgroupdata/%s.parsed",
-                    abs_srcdir, data->file) < 0) {
-        goto cleanup;
-    }
+    parsed = g_strdup_printf("%s/vircgroupdata/%s.parsed", abs_srcdir, data->file);
 
     if (virCgroupNewSelf(&group) < 0) {
         if (data->fail)
@@ -218,7 +215,7 @@ testCgroupDetectMounts(const void *args)
     result = 0;
 
  cleanup:
-    unsetenv("VIR_CGROUP_MOCK_FILENAME");
+    g_unsetenv("VIR_CGROUP_MOCK_FILENAME");
     VIR_FREE(parsed);
     virCgroupFree(&group);
     virBufferFreeAndReset(&buf);
@@ -585,6 +582,7 @@ static int testCgroupNewForSelfUnified(const void *args G_GNUC_UNUSED)
         (1 << VIR_CGROUP_CONTROLLER_CPU) |
         (1 << VIR_CGROUP_CONTROLLER_CPUACCT) |
         (1 << VIR_CGROUP_CONTROLLER_MEMORY) |
+        (1 << VIR_CGROUP_CONTROLLER_DEVICES) |
         (1 << VIR_CGROUP_CONTROLLER_BLKIO);
 
     if (virCgroupNewSelf(&cgroup) < 0) {
@@ -607,14 +605,12 @@ static int testCgroupNewForSelfHybrid(const void *args G_GNUC_UNUSED)
     const char *empty[VIR_CGROUP_CONTROLLER_LAST] = { 0 };
     const char *mounts[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPUSET] = "/not/really/sys/fs/cgroup/cpuset",
-        [VIR_CGROUP_CONTROLLER_DEVICES] = "/not/really/sys/fs/cgroup/devices",
         [VIR_CGROUP_CONTROLLER_FREEZER] = "/not/really/sys/fs/cgroup/freezer",
         [VIR_CGROUP_CONTROLLER_NET_CLS] = "/not/really/sys/fs/cgroup/net_cls",
         [VIR_CGROUP_CONTROLLER_PERF_EVENT] = "/not/really/sys/fs/cgroup/perf_event",
     };
     const char *placement[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPUSET] = "/",
-        [VIR_CGROUP_CONTROLLER_DEVICES] = "/",
         [VIR_CGROUP_CONTROLLER_FREEZER] = "/",
         [VIR_CGROUP_CONTROLLER_NET_CLS] = "/",
         [VIR_CGROUP_CONTROLLER_PERF_EVENT] = "/",
@@ -623,6 +619,7 @@ static int testCgroupNewForSelfHybrid(const void *args G_GNUC_UNUSED)
         (1 << VIR_CGROUP_CONTROLLER_CPU) |
         (1 << VIR_CGROUP_CONTROLLER_CPUACCT) |
         (1 << VIR_CGROUP_CONTROLLER_MEMORY) |
+        (1 << VIR_CGROUP_CONTROLLER_DEVICES) |
         (1 << VIR_CGROUP_CONTROLLER_BLKIO);
 
     if (virCgroupNewSelf(&cgroup) < 0) {
@@ -992,18 +989,18 @@ initFakeFS(const char *mode,
 
     fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
-    if (!mkdtemp(fakerootdir)) {
+    if (!g_mkdtemp(fakerootdir)) {
         fprintf(stderr, "Cannot create fakerootdir");
         abort();
     }
 
-    setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, 1);
+    g_setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, TRUE);
 
     if (mode)
-        setenv("VIR_CGROUP_MOCK_MODE", mode, 1);
+        g_setenv("VIR_CGROUP_MOCK_MODE", mode, TRUE);
 
     if (filename)
-        setenv("VIR_CGROUP_MOCK_FILENAME", filename, 1);
+        g_setenv("VIR_CGROUP_MOCK_FILENAME", filename, TRUE);
 
     return fakerootdir;
 }
@@ -1015,9 +1012,9 @@ cleanupFakeFS(char *fakerootdir)
         virFileDeleteTree(fakerootdir);
 
     VIR_FREE(fakerootdir);
-    unsetenv("LIBVIRT_FAKE_ROOT_DIR");
-    unsetenv("VIR_CGROUP_MOCK_MODE");
-    unsetenv("VIR_CGROUP_MOCK_FILENAME");
+    g_unsetenv("LIBVIRT_FAKE_ROOT_DIR");
+    g_unsetenv("VIR_CGROUP_MOCK_MODE");
+    g_unsetenv("VIR_CGROUP_MOCK_FILENAME");
 }
 
 static int

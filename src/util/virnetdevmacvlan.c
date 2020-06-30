@@ -42,8 +42,6 @@ VIR_ENUM_IMPL(virNetDevMacVLanMode,
 
 #if WITH_MACVTAP
 # include <fcntl.h>
-# include <sys/socket.h>
-# include <sys/ioctl.h>
 
 # include <net/if.h>
 # include <linux/if_tun.h>
@@ -61,6 +59,7 @@ VIR_ENUM_IMPL(virNetDevMacVLanMode,
 # include "virnetdev.h"
 # include "virpidfile.h"
 # include "virbitmap.h"
+# include "virsocket.h"
 
 VIR_LOG_INIT("util.netdevmacvlan");
 
@@ -294,8 +293,7 @@ virNetDevMacVLanIsMacvtap(const char *ifname)
     if (virNetDevGetIndex(ifname, &ifindex) < 0)
         return false;
 
-    if (virAsprintf(&tapname, "/dev/tap%d", ifindex) < 0)
-        return false;
+    tapname = g_strdup_printf("/dev/tap%d", ifindex);
 
     return virFileExists(tapname);
 }
@@ -393,8 +391,7 @@ virNetDevMacVLanTapOpen(const char *ifname,
     if (virNetDevGetIndex(ifname, &ifindex) < 0)
         return -1;
 
-    if (virAsprintf(&tapname, "/dev/tap%d", ifindex) < 0)
-        goto cleanup;
+    tapname = g_strdup_printf("/dev/tap%d", ifindex);
 
     for (i = 0; i < tapfdSize; i++) {
         int fd = -1;
@@ -528,11 +525,11 @@ typedef struct virNetlinkCallbackData *virNetlinkCallbackDataPtr;
 static int instance2str(const unsigned char *p, char *dst, size_t size)
 {
     if (dst && size > INSTANCE_STRLEN) {
-        snprintf(dst, size, "%02x%02x%02x%02x-%02x%02x-%02x%02x-"
-                 "%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 p[0], p[1], p[2], p[3],
-                 p[4], p[5], p[6], p[7],
-                 p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]);
+        g_snprintf(dst, size, "%02x%02x%02x%02x-%02x%02x-%02x%02x-"
+                   "%02x%02x-%02x%02x%02x%02x%02x%02x",
+                   p[0], p[1], p[2], p[3],
+                   p[4], p[5], p[6], p[7],
+                   p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]);
         return 0;
     }
     return -1;
@@ -828,7 +825,7 @@ virNetDevMacVLanVPortProfileRegisterCallback(const char *ifname,
                                              const virMacAddr *macaddress,
                                              const char *linkdev,
                                              const unsigned char *vmuuid,
-                                             virNetDevVPortProfilePtr virtPortProfile,
+                                             const virNetDevVPortProfile *virtPortProfile,
                                              virNetDevVPortProfileOp vmOp)
 {
     virNetlinkCallbackDataPtr calld = NULL;
@@ -895,9 +892,9 @@ virNetDevMacVLanCreateWithVPortProfile(const char *ifnameRequested,
                                        const virMacAddr *macaddress,
                                        const char *linkdev,
                                        virNetDevMacVLanMode mode,
-                                       virNetDevVlanPtr vlan,
+                                       const virNetDevVlan *vlan,
                                        const unsigned char *vmuuid,
-                                       virNetDevVPortProfilePtr virtPortProfile,
+                                       const virNetDevVPortProfile *virtPortProfile,
                                        char **ifnameResult,
                                        virNetDevVPortProfileOp vmOp,
                                        char *stateDir,
@@ -999,7 +996,7 @@ virNetDevMacVLanCreateWithVPortProfile(const char *ifnameRequested,
             virMutexUnlock(&virNetDevMacVLanCreateMutex);
             return -1;
         }
-        snprintf(ifname, sizeof(ifname), pattern, reservedID);
+        g_snprintf(ifname, sizeof(ifname), pattern, reservedID);
         if (virNetDevMacVLanCreate(ifname, type, macaddress, linkdev,
                                    macvtapMode, &do_retry) < 0) {
             virNetDevMacVLanReleaseID(reservedID, flags);
@@ -1094,7 +1091,7 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
                                            const virMacAddr *macaddr,
                                            const char *linkdev,
                                            int mode,
-                                           virNetDevVPortProfilePtr virtPortProfile,
+                                           const virNetDevVPortProfile *virtPortProfile,
                                            char *stateDir)
 {
     int ret = 0;
@@ -1149,7 +1146,7 @@ int virNetDevMacVLanRestartWithVPortProfile(const char *cr_ifname,
                                             const virMacAddr *macaddress,
                                             const char *linkdev,
                                             const unsigned char *vmuuid,
-                                            virNetDevVPortProfilePtr virtPortProfile,
+                                            const virNetDevVPortProfile *virtPortProfile,
                                             virNetDevVPortProfileOp vmOp)
 {
     int rc = 0;
@@ -1158,7 +1155,7 @@ int virNetDevMacVLanRestartWithVPortProfile(const char *cr_ifname,
                                                       linkdev, vmuuid,
                                                       virtPortProfile, vmOp);
     if (rc < 0)
-        goto error;
+        return rc;
 
     ignore_value(virNetDevVPortProfileAssociate(cr_ifname,
                                                 virtPortProfile,
@@ -1168,7 +1165,6 @@ int virNetDevMacVLanRestartWithVPortProfile(const char *cr_ifname,
                                                 vmuuid,
                                                 vmOp, true));
 
- error:
     return rc;
 
 }
@@ -1224,9 +1220,9 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *ifname G_GNUC_UNUSED,
                                            const virMacAddr *macaddress G_GNUC_UNUSED,
                                            const char *linkdev G_GNUC_UNUSED,
                                            virNetDevMacVLanMode mode G_GNUC_UNUSED,
-                                           virNetDevVlanPtr vlan G_GNUC_UNUSED,
+                                           const virNetDevVlan *vlan G_GNUC_UNUSED,
                                            const unsigned char *vmuuid G_GNUC_UNUSED,
-                                           virNetDevVPortProfilePtr virtPortProfile G_GNUC_UNUSED,
+                                           const virNetDevVPortProfile *virtPortProfile G_GNUC_UNUSED,
                                            char **res_ifname G_GNUC_UNUSED,
                                            virNetDevVPortProfileOp vmop G_GNUC_UNUSED,
                                            char *stateDir G_GNUC_UNUSED,
@@ -1243,7 +1239,7 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname G_GNUC_UNUSED,
                                            const virMacAddr *macaddress G_GNUC_UNUSED,
                                            const char *linkdev G_GNUC_UNUSED,
                                            int mode G_GNUC_UNUSED,
-                                           virNetDevVPortProfilePtr virtPortProfile G_GNUC_UNUSED,
+                                           const virNetDevVPortProfile *virtPortProfile G_GNUC_UNUSED,
                                            char *stateDir G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
@@ -1255,7 +1251,7 @@ int virNetDevMacVLanRestartWithVPortProfile(const char *cr_ifname G_GNUC_UNUSED,
                                             const virMacAddr *macaddress G_GNUC_UNUSED,
                                             const char *linkdev G_GNUC_UNUSED,
                                             const unsigned char *vmuuid G_GNUC_UNUSED,
-                                            virNetDevVPortProfilePtr virtPortProfile G_GNUC_UNUSED,
+                                            const virNetDevVPortProfile *virtPortProfile G_GNUC_UNUSED,
                                             virNetDevVPortProfileOp vmOp G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
@@ -1267,7 +1263,7 @@ int virNetDevMacVLanVPortProfileRegisterCallback(const char *ifname G_GNUC_UNUSE
                                                  const virMacAddr *macaddress G_GNUC_UNUSED,
                                                  const char *linkdev G_GNUC_UNUSED,
                                                  const unsigned char *vmuuid G_GNUC_UNUSED,
-                                                 virNetDevVPortProfilePtr virtPortProfile G_GNUC_UNUSED,
+                                                 const virNetDevVPortProfile *virtPortProfile G_GNUC_UNUSED,
                                                  virNetDevVPortProfileOp vmOp G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",

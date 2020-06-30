@@ -24,6 +24,7 @@
 #include "viralloc.h"
 #include "virmacaddr.h"
 #include "virsh-domain.h"
+#include "virsh-domain-monitor.h"
 #include "virsh-util.h"
 #include "virsh.h"
 #include "virstring.h"
@@ -214,10 +215,9 @@ virshDomainInterfaceStateCompleter(vshControl *ctl,
     if (virMacAddrParse(iface, &macaddr) == 0)
         virMacAddrFormat(&macaddr, macstr);
 
-    if (virAsprintf(&xpath, "/domain/devices/interface[(mac/@address = '%s') or "
-                            "                          (target/@dev = '%s')]",
-                           macstr, iface) < 0)
-        return NULL;
+    xpath = g_strdup_printf("/domain/devices/interface[(mac/@address = '%s') or "
+                            "                          (target/@dev = '%s')]", macstr,
+                            iface);
 
     if ((ninterfaces = virXPathNodeSet(xpath, ctxt, &interfaces)) < 0)
         return NULL;
@@ -296,4 +296,42 @@ virshDomainShutdownModeCompleter(vshControl *ctl,
         return NULL;
 
     return virshCommaStringListComplete(mode, modes);
+}
+
+
+char **
+virshDomainInterfaceAddrSourceCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                        const vshCmd *cmd G_GNUC_UNUSED,
+                                        unsigned int flags)
+{
+    char **ret = NULL;
+    size_t i;
+
+    virCheckFlags(0, NULL);
+
+    ret = g_new0(typeof(*ret), VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LAST + 1);
+
+    for (i = 0; i < VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LAST; i++)
+        ret[i] = g_strdup(virshDomainInterfaceAddressesSourceTypeToString(i));
+
+    return ret;
+}
+
+
+char **
+virshDomainHostnameSourceCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                   const vshCmd *cmd G_GNUC_UNUSED,
+                                   unsigned int flags)
+{
+    char **ret = NULL;
+    size_t i;
+
+    virCheckFlags(0, NULL);
+
+    ret = g_new0(typeof(*ret), VIRSH_DOMAIN_HOSTNAME_SOURCE_LAST + 1);
+
+    for (i = 0; i < VIRSH_DOMAIN_HOSTNAME_SOURCE_LAST; i++)
+        ret[i] = g_strdup(virshDomainHostnameSourceTypeToString(i));
+
+    return ret;
 }

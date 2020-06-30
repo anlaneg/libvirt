@@ -25,13 +25,7 @@
 # include <sys/mount.h>
 # include <fcntl.h>
 # include <sys/stat.h>
-
-# ifdef MAJOR_IN_MKDEV
-#  include <sys/mkdev.h>
-# elif MAJOR_IN_SYSMACROS
-#  include <sys/sysmacros.h>
-# endif
-
+# include <sys/sysmacros.h>
 # include <sys/types.h>
 # include <signal.h>
 # include <dirent.h>
@@ -174,9 +168,13 @@ virCgroupPartitionNeedsEscaping(const char *path)
         if (STRPREFIX(line, "#subsys_name"))
             continue;
 
-        tmp = strchrnul(line, ' ');
-        *tmp = '\0';
-        len = tmp - line;
+        tmp = strchr(line, ' ');
+        if (tmp) {
+            *tmp = '\0';
+            len = tmp - line;
+        } else {
+            len = strlen(line);
+        }
 
         if (STRPREFIX(path, line) &&
             path[len] == '.') {
@@ -206,8 +204,7 @@ virCgroupPartitionEscape(char **path)
     if ((rc = virCgroupPartitionNeedsEscaping(*path)) <= 0)
         return rc;
 
-    if (virAsprintf(&newstr, "_%s", *path) < 0)
-        return -1;
+    newstr = g_strdup_printf("_%s", *path);
 
     VIR_FREE(*path);
     *path = newstr;
@@ -291,9 +288,7 @@ virCgroupDetectPlacement(virCgroupPtr group,
     if (pid == -1) {
         procfile = g_strdup("/proc/self/cgroup");
     } else {
-        if (virAsprintf(&procfile, "/proc/%lld/cgroup",
-                        (long long) pid) < 0)
-            goto cleanup;
+        procfile = g_strdup_printf("/proc/%lld/cgroup", (long long)pid);
     }
 
     mapping = fopen(procfile, "r");
@@ -406,7 +401,8 @@ virCgroupDetect(virCgroupPtr group,
 
     for (i = 0; i < VIR_CGROUP_BACKEND_TYPE_LAST; i++) {
         if (group->backends[i]) {
-            int rc = group->backends[i]->detectControllers(group, controllers, parent);
+            int rc = group->backends[i]->detectControllers(group, controllers, parent,
+                                                           controllersAvailable);
             if (rc < 0)
                 return -1;
             controllersAvailable |= rc;
@@ -427,7 +423,6 @@ virCgroupDetect(virCgroupPtr group,
 char *
 virCgroupGetBlockDevString(const char *path)
 {
-    char *ret = NULL;
     struct stat sb;
 
     if (stat(path, &sb) < 0) {
@@ -446,10 +441,7 @@ virCgroupGetBlockDevString(const char *path)
 
     /* Automatically append space after the string since all callers
      * use it anyway */
-    if (virAsprintf(&ret, "%d:%d ", major(sb.st_rdev), minor(sb.st_rdev)) < 0)
-        return NULL;
-
-    return ret;
+    return g_strdup_printf("%d:%d ", major(sb.st_rdev), minor(sb.st_rdev));
 }
 
 
@@ -563,8 +555,7 @@ virCgroupSetValueU64(virCgroupPtr group,
 {
     g_autofree char *strval = NULL;
 
-    if (virAsprintf(&strval, "%llu", value) < 0)
-        return -1;
+    strval = g_strdup_printf("%llu", value);
 
     return virCgroupSetValueStr(group, controller, key, strval);
 }
@@ -578,8 +569,7 @@ virCgroupSetValueI64(virCgroupPtr group,
 {
     g_autofree char *strval = NULL;
 
-    if (virAsprintf(&strval, "%lld", value) < 0)
-        return -1;
+    strval = g_strdup_printf("%lld", value);
 
     return virCgroupSetValueStr(group, controller, key, strval);
 }
@@ -682,11 +672,8 @@ virCgroupNew(pid_t pid,
     if (path[0] == '/' || !parent) {
         (*group)->path = g_strdup(path);
     } else {
-        if (virAsprintf(&(*group)->path, "%s%s%s",
-                        parent->path,
-                        STREQ(parent->path, "") ? "" : "/",
-                        path) < 0)
-            goto error;
+        (*group)->path = g_strdup_printf("%s%s%s", parent->path,
+                                         STREQ(parent->path, "") ? "" : "/", path);
     }
 
     if (virCgroupDetect(*group, pid, controllers, path, parent) < 0)
@@ -786,7 +773,7 @@ virCgroupSetPartitionSuffix(const char *path, char **res)
         return ret;
 
     for (i = 0; tokens[i] != NULL; i++) {
-        /* Whitelist the 3 top level fixed dirs
+        /* Special case the 3 top level fixed dirs
          * NB i == 0 is "", since we have leading '/'
          */
         if (i == 1 &&
@@ -855,9 +842,6 @@ virCgroupNewPartition(const char *path,
     if (virCgroupSetPartitionSuffix(path, &newPath) < 0)
         goto cleanup;
 
-    if (virCgroupNew(-1, newPath, NULL, controllers, group) < 0)
-        goto cleanup;
-
     if (STRNEQ(newPath, "/")) {
         char *tmp;
         parentPath = g_strdup(newPath);
@@ -868,7 +852,12 @@ virCgroupNewPartition(const char *path,
 
         if (virCgroupNew(-1, parentPath, NULL, controllers, &parent) < 0)
             goto cleanup;
+    }
 
+    if (virCgroupNew(-1, newPath, parent, controllers, group) < 0)
+        goto cleanup;
+
+    if (parent) {
         if (virCgroupMakeGroup(parent, *group, create, VIR_CGROUP_NONE) < 0)
             goto cleanup;
     }
@@ -918,9 +907,7 @@ virCgroupNewDomainPartition(virCgroupPtr partition,
 {
     g_autofree char *grpname = NULL;
 
-    if (virAsprintf(&grpname, "%s.libvirt-%s",
-                    name, driver) < 0)
-        return -1;
+    grpname = g_strdup_printf("%s.libvirt-%s", name, driver);
 
     if (virCgroupPartitionEscape(&grpname) < 0)
         return -1;
@@ -971,15 +958,13 @@ virCgroupNewThread(virCgroupPtr domain,
 
     switch (nameval) {
     case VIR_CGROUP_THREAD_VCPU:
-        if (virAsprintf(&name, "vcpu%d", id) < 0)
-            return -1;
+        name = g_strdup_printf("vcpu%d", id);
         break;
     case VIR_CGROUP_THREAD_EMULATOR:
         name = g_strdup("emulator");
         break;
     case VIR_CGROUP_THREAD_IOTHREAD:
-        if (virAsprintf(&name, "iothread%d", id) < 0)
-            return -1;
+        name = g_strdup_printf("iothread%d", id);
         break;
     case VIR_CGROUP_THREAD_LAST:
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1427,7 +1412,7 @@ virCgroupGetBlkioWeight(virCgroupPtr group, unsigned int *weight)
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupSetBlkioDeviceReadIops(virCgroupPtr group,
                                 const char *path,
                                 unsigned int riops)
@@ -1445,7 +1430,7 @@ virCgroupSetBlkioDeviceReadIops(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupSetBlkioDeviceWriteIops(virCgroupPtr group,
                                  const char *path,
                                  unsigned int wiops)
@@ -1463,7 +1448,7 @@ virCgroupSetBlkioDeviceWriteIops(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupSetBlkioDeviceReadBps(virCgroupPtr group,
                                const char *path,
                                unsigned long long rbps)
@@ -1480,7 +1465,7 @@ virCgroupSetBlkioDeviceReadBps(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupSetBlkioDeviceWriteBps(virCgroupPtr group,
                                 const char *path,
                                 unsigned long long wbps)
@@ -1499,7 +1484,7 @@ virCgroupSetBlkioDeviceWriteBps(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupSetBlkioDeviceWeight(virCgroupPtr group,
                               const char *path,
                               unsigned int weight)
@@ -1516,7 +1501,7 @@ virCgroupSetBlkioDeviceWeight(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupGetBlkioDeviceReadIops(virCgroupPtr group,
                                 const char *path,
                                 unsigned int *riops)
@@ -1533,7 +1518,7 @@ virCgroupGetBlkioDeviceReadIops(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupGetBlkioDeviceWriteIops(virCgroupPtr group,
                                  const char *path,
                                  unsigned int *wiops)
@@ -1550,7 +1535,7 @@ virCgroupGetBlkioDeviceWriteIops(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupGetBlkioDeviceReadBps(virCgroupPtr group,
                                const char *path,
                                unsigned long long *rbps)
@@ -1567,7 +1552,7 @@ virCgroupGetBlkioDeviceReadBps(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupGetBlkioDeviceWriteBps(virCgroupPtr group,
                                 const char *path,
                                 unsigned long long *wbps)
@@ -1584,7 +1569,7 @@ virCgroupGetBlkioDeviceWriteBps(virCgroupPtr group,
  *
  * Returns: 0 on success, -1 on error
  */
-int
+static int
 virCgroupGetBlkioDeviceWeight(virCgroupPtr group,
                               const char *path,
                               unsigned int *weight)
@@ -2356,10 +2341,8 @@ virCgroupRemoveRecursively(char *grppath)
 
         if (ent->d_type != DT_DIR) continue;
 
-        if (virAsprintf(&path, "%s/%s", grppath, ent->d_name) == -1) {
-            rc = -ENOMEM;
-            break;
-        }
+        path = g_strdup_printf("%s/%s", grppath, ent->d_name);
+
         rc = virCgroupRemoveRecursively(path);
         if (rc != 0)
             break;
@@ -2514,6 +2497,13 @@ virCgroupPidCopy(const void *name)
 }
 
 
+static char *
+virCgroupPidPrintHuman(const void *name)
+{
+    return g_strdup_printf("%ld", (const long)name);
+}
+
+
 int
 virCgroupKillRecursiveInternal(virCgroupPtr group,
                                int signum,
@@ -2595,10 +2585,11 @@ virCgroupKillRecursive(virCgroupPtr group, int signum)
     bool backendAvailable = false;
     virCgroupBackendPtr *backends = virCgroupBackendGetAll();
     virHashTablePtr pids = virHashCreateFull(100,
-                                             NULL, NULL,
+                                             NULL,
                                              virCgroupPidCode,
                                              virCgroupPidEqual,
                                              virCgroupPidCopy,
+                                             virCgroupPidPrintHuman,
                                              NULL);
 
     VIR_DEBUG("group=%p path=%s signum=%d", group, group->path, signum);
@@ -2999,7 +2990,7 @@ virCgroupGetBlkioWeight(virCgroupPtr group G_GNUC_UNUSED,
 }
 
 
-int
+static int
 virCgroupSetBlkioDeviceWeight(virCgroupPtr group G_GNUC_UNUSED,
                               const char *path G_GNUC_UNUSED,
                               unsigned int weight G_GNUC_UNUSED)
@@ -3009,7 +3000,7 @@ virCgroupSetBlkioDeviceWeight(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupSetBlkioDeviceReadIops(virCgroupPtr group G_GNUC_UNUSED,
                                 const char *path G_GNUC_UNUSED,
                                 unsigned int riops G_GNUC_UNUSED)
@@ -3019,7 +3010,7 @@ virCgroupSetBlkioDeviceReadIops(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupSetBlkioDeviceWriteIops(virCgroupPtr group G_GNUC_UNUSED,
                                  const char *path G_GNUC_UNUSED,
                                  unsigned int wiops G_GNUC_UNUSED)
@@ -3029,7 +3020,7 @@ virCgroupSetBlkioDeviceWriteIops(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupSetBlkioDeviceReadBps(virCgroupPtr group G_GNUC_UNUSED,
                                const char *path G_GNUC_UNUSED,
                                unsigned long long rbps G_GNUC_UNUSED)
@@ -3039,7 +3030,7 @@ virCgroupSetBlkioDeviceReadBps(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupSetBlkioDeviceWriteBps(virCgroupPtr group G_GNUC_UNUSED,
                                 const char *path G_GNUC_UNUSED,
                                 unsigned long long wbps G_GNUC_UNUSED)
@@ -3049,7 +3040,7 @@ virCgroupSetBlkioDeviceWriteBps(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupGetBlkioDeviceWeight(virCgroupPtr group G_GNUC_UNUSED,
                               const char *path G_GNUC_UNUSED,
                               unsigned int *weight G_GNUC_UNUSED)
@@ -3059,7 +3050,7 @@ virCgroupGetBlkioDeviceWeight(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupGetBlkioDeviceReadIops(virCgroupPtr group G_GNUC_UNUSED,
                                 const char *path G_GNUC_UNUSED,
                                 unsigned int *riops G_GNUC_UNUSED)
@@ -3069,7 +3060,7 @@ virCgroupGetBlkioDeviceReadIops(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupGetBlkioDeviceWriteIops(virCgroupPtr group G_GNUC_UNUSED,
                                  const char *path G_GNUC_UNUSED,
                                  unsigned int *wiops G_GNUC_UNUSED)
@@ -3079,7 +3070,7 @@ virCgroupGetBlkioDeviceWriteIops(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupGetBlkioDeviceReadBps(virCgroupPtr group G_GNUC_UNUSED,
                                const char *path G_GNUC_UNUSED,
                                unsigned long long *rbps G_GNUC_UNUSED)
@@ -3089,7 +3080,7 @@ virCgroupGetBlkioDeviceReadBps(virCgroupPtr group G_GNUC_UNUSED,
     return -1;
 }
 
-int
+static int
 virCgroupGetBlkioDeviceWriteBps(virCgroupPtr group G_GNUC_UNUSED,
                                 const char *path G_GNUC_UNUSED,
                                 unsigned long long *wbps G_GNUC_UNUSED)
@@ -3584,6 +3575,178 @@ virCgroupDelThread(virCgroupPtr cgroup,
         virCgroupRemove(new_cgroup);
         virCgroupFree(&new_cgroup);
     }
+
+    return 0;
+}
+
+
+/**
+ * Calls virCgroupSetBlkioDeviceWeight() to set up blkio device weight,
+ * then retrieves the actual value set by the kernel with
+ * virCgroupGetBlkioDeviceWeight() in the same @weight pointer.
+ */
+int
+virCgroupSetupBlkioDeviceWeight(virCgroupPtr cgroup, const char *path,
+                                unsigned int *weight)
+{
+    if (virCgroupSetBlkioDeviceWeight(cgroup, path, *weight) < 0 ||
+        virCgroupGetBlkioDeviceWeight(cgroup, path, weight) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+/**
+ * Calls virCgroupSetBlkioDeviceReadIops() to set up blkio device riops,
+ * then retrieves the actual value set by the kernel with
+ * virCgroupGetBlkioDeviceReadIops() in the same @riops pointer.
+ */
+int
+virCgroupSetupBlkioDeviceReadIops(virCgroupPtr cgroup, const char *path,
+                                  unsigned int *riops)
+{
+    if (virCgroupSetBlkioDeviceReadIops(cgroup, path, *riops) < 0 ||
+        virCgroupGetBlkioDeviceReadIops(cgroup, path, riops) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+/**
+ * Calls virCgroupSetBlkioDeviceWriteIops() to set up blkio device wiops,
+ * then retrieves the actual value set by the kernel with
+ * virCgroupGetBlkioDeviceWriteIops() in the same @wiops pointer.
+ */
+int
+virCgroupSetupBlkioDeviceWriteIops(virCgroupPtr cgroup, const char *path,
+                                   unsigned int *wiops)
+{
+    if (virCgroupSetBlkioDeviceWriteIops(cgroup, path, *wiops) < 0 ||
+        virCgroupGetBlkioDeviceWriteIops(cgroup, path, wiops) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+/**
+ * Calls virCgroupSetBlkioDeviceReadBps() to set up blkio device rbps,
+ * then retrieves the actual value set by the kernel with
+ * virCgroupGetBlkioDeviceReadBps() in the same @rbps pointer.
+ */
+int
+virCgroupSetupBlkioDeviceReadBps(virCgroupPtr cgroup, const char *path,
+                                 unsigned long long *rbps)
+{
+    if (virCgroupSetBlkioDeviceReadBps(cgroup, path, *rbps) < 0 ||
+        virCgroupGetBlkioDeviceReadBps(cgroup, path, rbps) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+/**
+ * Calls virCgroupSetBlkioDeviceWriteBps() to set up blkio device wbps,
+ * then retrieves the actual value set by the kernel with
+ * virCgroupGetBlkioDeviceWriteBps() in the same @wbps pointer.
+ */
+int
+virCgroupSetupBlkioDeviceWriteBps(virCgroupPtr cgroup, const char *path,
+                                  unsigned long long *wbps)
+{
+    if (virCgroupSetBlkioDeviceWriteBps(cgroup, path, *wbps) < 0 ||
+        virCgroupGetBlkioDeviceWriteBps(cgroup, path, wbps) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+int
+virCgroupSetupCpusetCpus(virCgroupPtr cgroup, virBitmapPtr cpumask)
+{
+    g_autofree char *new_cpus = NULL;
+
+    if (!(new_cpus = virBitmapFormat(cpumask)))
+        return -1;
+
+    if (virCgroupSetCpusetCpus(cgroup, new_cpus) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+/* Per commit 97814d8ab3, the Linux kernel can consider a 'shares'
+ * value of '0' and '1' as 2, and any value larger than a maximum
+ * is reduced to maximum.
+ *
+ * The 'realValue' pointer holds the actual 'shares' value set by
+ * the kernel if the function returned success. */
+int
+virCgroupSetupCpuShares(virCgroupPtr cgroup, unsigned long long shares,
+                        unsigned long long *realValue)
+{
+    if (virCgroupSetCpuShares(cgroup, shares) < 0)
+        return -1;
+
+    if (virCgroupGetCpuShares(cgroup, realValue) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+int
+virCgroupSetupCpuPeriodQuota(virCgroupPtr cgroup,
+                             unsigned long long period,
+                             long long quota)
+{
+    unsigned long long old_period;
+
+    if (period == 0 && quota == 0)
+        return 0;
+
+    if (period) {
+        /* get old period, and we can rollback if set quota failed */
+        if (virCgroupGetCpuCfsPeriod(cgroup, &old_period) < 0)
+            return -1;
+
+        if (virCgroupSetCpuCfsPeriod(cgroup, period) < 0)
+            return -1;
+    }
+
+    if (quota &&
+        virCgroupSetCpuCfsQuota(cgroup, quota) < 0)
+        goto error;
+
+    return 0;
+
+ error:
+    if (period) {
+        virErrorPtr saved;
+
+        virErrorPreserveLast(&saved);
+        ignore_value(virCgroupSetCpuCfsPeriod(cgroup, old_period));
+        virErrorRestore(&saved);
+    }
+
+    return -1;
+}
+
+
+int
+virCgroupGetCpuPeriodQuota(virCgroupPtr cgroup, unsigned long long *period,
+                           long long *quota)
+{
+    if (virCgroupGetCpuCfsPeriod(cgroup, period) < 0)
+        return -1;
+
+    if (virCgroupGetCpuCfsQuota(cgroup, quota) < 0)
+        return -1;
 
     return 0;
 }
