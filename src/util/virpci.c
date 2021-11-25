@@ -77,9 +77,9 @@ struct _virPCIDevice {
     unsigned int  pci_pm_cap_pos;
     bool          has_flr;
     bool          has_pm_reset;
-    bool          managed;
+    bool          managed;/*是否配置了managed*/
 
-    virPCIStubDriver stubDriver;
+    virPCIStubDriver stubDriver;/*指明驱动xen,vfio*/
 
     /* used by reattach function */
     bool          unbind_from_stub;
@@ -205,7 +205,7 @@ static int virPCIOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(virPCI);
 
-
+/*返回指定pci driver对应路径*/
 static char *
 virPCIDriverDir(const char *driver)
 {
@@ -215,7 +215,7 @@ virPCIDriverDir(const char *driver)
     return buffer;
 }
 
-
+//例如：/sys/bus/pci/devices/0000:d8:00.1/driver_override
 static char *
 virPCIFile(const char *device, const char *file)
 {
@@ -1047,6 +1047,7 @@ virPCIDeviceUnbind(virPCIDevicePtr dev)
     g_autofree char *drvpath = NULL;
     g_autofree char *driver = NULL;
 
+    /*取此设备对应的驱动名称*/
     if (virPCIDeviceGetDriverPathAndName(dev, &drvpath, &driver) < 0)
         return -1;
 
@@ -1054,9 +1055,11 @@ virPCIDeviceUnbind(virPCIDevicePtr dev)
         /* The device is not bound to any driver */
         return 0;
 
+    /*打开驱动对应的unbind,*/
     if (!(path = virPCIFile(dev->name, "driver/unbind")))
         return -1;
 
+    /*指定自此驱动解绑此设备*/
     if (virFileExists(path)) {
         if (virFileWriteStr(path, dev->name, 0) < 0) {
             virReportSystemError(errno,
@@ -1083,6 +1086,7 @@ int virPCIDeviceRebind(virPCIDevicePtr dev)
     if (virPCIDeviceUnbind(dev) < 0)
         return -1;
 
+    /*触发linux kernel开始针对此设备进行探测*/
     if (virFileWriteStr(PCI_SYSFS "drivers_probe", dev->name, 0) < 0) {
         virReportSystemError(errno,
                              _("Failed to trigger a probe for PCI device '%s'"),
@@ -1114,6 +1118,7 @@ virPCIDeviceBindWithDriverOverride(virPCIDevicePtr dev,
     if (!(path = virPCIFile(dev->name, "driver_override")))
         return -1;
 
+    /*向此地址写入驱动名称*/
     if (virFileWriteStr(path, driverName, 0) < 0) {
         virReportSystemError(errno,
                              _("Failed to add driver '%s' to driver_override "
@@ -1128,6 +1133,7 @@ virPCIDeviceBindWithDriverOverride(virPCIDevicePtr dev,
     return 0;
 }
 
+/*设备完成驱动解绑*/
 static int
 virPCIDeviceUnbindFromStub(virPCIDevicePtr dev)
 {
@@ -1136,6 +1142,7 @@ virPCIDeviceUnbindFromStub(virPCIDevicePtr dev)
         return 0;
     }
 
+    /*传入'\n'完成解绑*/
     return virPCIDeviceBindWithDriverOverride(dev, "\n");
 }
 
@@ -1161,9 +1168,11 @@ virPCIDeviceBindToStub(virPCIDevicePtr dev)
 
     if (!(stubDriverPath = virPCIDriverDir(stubDriverName))  ||
         !(driverLink = virPCIFile(dev->name, "driver")))
+        /*申请两个路径内存失败，退出*/
         return -1;
 
     if (virFileExists(driverLink)) {
+        /*设备已被绑定了驱动，检查是否已绑定到指定驱动，如果是，显示debug,并返回0*/
         if (virFileLinkPointsTo(driverLink, stubDriverPath)) {
             /* The device is already bound to the correct driver */
             VIR_DEBUG("Device %s is already bound to %s",
@@ -1172,6 +1181,7 @@ virPCIDeviceBindToStub(virPCIDevicePtr dev)
         }
     }
 
+    /*为其绑定驱动*/
     if (virPCIDeviceBindWithDriverOverride(dev, stubDriverName) < 0)
         return -1;
 
@@ -1362,6 +1372,7 @@ virPCIDeviceAddressAsString(const virPCIDeviceAddress *addr)
     return str;
 }
 
+/*新建pci设备*/
 virPCIDevicePtr
 virPCIDeviceNew(unsigned int domain,
                 unsigned int bus,
@@ -1465,6 +1476,7 @@ virPCIDeviceGetAddress(virPCIDevicePtr dev)
     return &(dev->address);
 }
 
+/*返回pci设备名称*/
 const char *
 virPCIDeviceGetName(virPCIDevicePtr dev)
 {
@@ -2396,6 +2408,7 @@ virPCIGetSysfsFile(char *virPCIDeviceName, char **pci_sysfs_device_link)
     return 0;
 }
 
+/*构造pci设备路径*/
 int
 virPCIDeviceAddressGetSysfsFile(virPCIDeviceAddressPtr addr,
                                 char **pci_sysfs_device_link)
@@ -2445,6 +2458,7 @@ virPCIGetNetName(const char *device_link_sysfs_path,
         goto cleanup;
     }
 
+    /*遍历这个目录*/
     while (virDirRead(dir, &entry, pcidev_sysfs_net_path) > 0) {
         /* if the caller sent a physPortID, compare it to the
          * physportID of this netdev. If not, look for entry[idx].

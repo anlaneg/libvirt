@@ -1143,7 +1143,7 @@ qemuDomainNetDeviceVportRemove(virDomainNetDefPtr net)
 int
 qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
                           virDomainObjPtr vm,
-                          virDomainNetDefPtr net)
+                          virDomainNetDefPtr net/*待加入的网络设备*/)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
     virDomainDeviceDef dev = { VIR_DOMAIN_DEVICE_NET, { .net = net } };
@@ -1539,7 +1539,7 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
     goto cleanup;
 }
 
-
+/*附加pci设备*/
 static int
 qemuDomainAttachHostPCIDevice(virQEMUDriverPtr driver,
                               virDomainObjPtr vm,

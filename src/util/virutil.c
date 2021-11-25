@@ -1640,9 +1640,11 @@ virHostHasIOMMU(void)
     bool ret = false;
     int direrr;
 
+    /*此目录必须存在*/
     if (virDirOpenQuiet(&iommuDir, "/sys/kernel/iommu_groups/") < 0)
         goto cleanup;
 
+    /*此目录下必须有成员*/
     while ((direrr = virDirRead(iommuDir, &iommuGroup, NULL)) > 0)
         break;
 

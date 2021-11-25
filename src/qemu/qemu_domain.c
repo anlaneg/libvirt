@@ -100,6 +100,7 @@ qemuDomainObjFromDomain(virDomainPtr domain)
     virQEMUDriverPtr driver = domain->conn->privateData;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
+    /*通过uuid找到vm*/
     vm = virDomainObjListFindByUUID(driver->domains, domain->uuid);
     if (!vm) {
         virUUIDFormat(domain->uuid, uuidstr);
@@ -8921,6 +8922,7 @@ qemuDomainGetMemLockLimitBytes(virDomainDefPtr def,
      * Note that this may not be valid for all platforms.
      */
     if (!forceVFIO) {
+        /*有使用vfio,增加1G内存*/
         for (i = 0; i < def->nhostdevs; i++) {
             if (virHostdevIsVFIODevice(def->hostdevs[i]) ||
                 virHostdevIsMdevDevice(def->hostdevs[i])) {

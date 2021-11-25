@@ -250,6 +250,7 @@ virNetDevSetMACInternal(const char *ifname,
     if ((fd = virNetDevSetupControl(ifname, &ifr)) < 0)
         return -1;
 
+    /*通过ioctl设置ifname的mac地址*/
     /* To fill ifr.ifr_hdaddr.sa_family field */
     if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0) {
         virReportSystemError(errno, _("Cannot get interface MAC on '%s'"),
@@ -1044,6 +1045,7 @@ int virNetDevValidateConfig(const char *ifname G_GNUC_UNUSED,
 
 #ifdef __linux__
 
+/*构造/sys/class/net/$ifname/$file文件路径*/
 int
 virNetDevSysfsFile(char **pf_sysfs_device_link, const char *ifname,
                    const char *file)
@@ -1103,13 +1105,16 @@ virNetDevGetPCIDevice(const char *devName)
     if (virNetDevSysfsFile(&vfSysfsDevicePath, devName, "device") < 0)
         return NULL;
 
+    /*此设备必须为pci设备*/
     if (!virNetDevIsPCIDevice(vfSysfsDevicePath))
         return NULL;
 
+    /*获取此设备的pci-addr*/
     vfPCIAddr = virPCIGetDeviceAddressFromSysfsLink(vfSysfsDevicePath);
     if (!vfPCIAddr)
         return NULL;
 
+    /*构造pci设备对象*/
     return virPCIDeviceNew(vfPCIAddr->domain, vfPCIAddr->bus,
                            vfPCIAddr->slot, vfPCIAddr->function);
 }
@@ -1137,6 +1142,10 @@ virNetDevGetPhysPortID(const char *ifname,
 
     *physPortID = NULL;
 
+    /*读取pf文件对应的phys_port_id
+     * # cat /sys/class/net/eth4/phys_switch_id
+f688ba0003723f04
+    */
     if (virNetDevSysfsFile(&physPortIDFile, ifname, "phys_port_id") < 0)
         return -1;
 
@@ -1333,8 +1342,9 @@ virNetDevGetPhysicalFunction(const char *ifname, char **pfname)
  * (success).
  */
 int
-virNetDevPFGetVF(const char *pfname, int vf, char **vfname)
+virNetDevPFGetVF(const char *pfname, int vf, char **vfname/*出参，vf名称*/)
 {
+    /*通过pf名称及vf编号，获取vf名称*/
     g_autofree char *virtfnName = NULL;
     g_autofree char *virtfnSysfsPath = NULL;
     g_autofree char *pfPhysPortID = NULL;
@@ -1494,10 +1504,10 @@ static struct nla_policy ifla_vf_policy[IFLA_VF_MAX+1] = {
                             .maxlen = sizeof(struct ifla_vf_vlan) },
 };
 
-
+/*设置vf配置*/
 static int
-virNetDevSetVfConfig(const char *ifname, int vf,
-                     const virMacAddr *macaddr, int vlanid,
+virNetDevSetVfConfig(const char *ifname/*pf接口名称*/, int vf/*vf编号*/,
+                     const virMacAddr *macaddr/*vf mac地址*/, int vlanid/*vlanid号*/,
                      bool *allowRetry)
 {
     int rc = -1;
@@ -1524,6 +1534,7 @@ virNetDevSetVfConfig(const char *ifname, int vf,
     if (nlmsg_append(nl_msg,  &ifinfo, sizeof(ifinfo), NLMSG_ALIGNTO) < 0)
         goto buffer_too_small;
 
+    /*填充待设置的pf名称*/
     if (ifname &&
         nla_put(nl_msg, IFLA_IFNAME, strlen(ifname)+1, ifname) < 0)
         goto buffer_too_small;
@@ -1532,6 +1543,7 @@ virNetDevSetVfConfig(const char *ifname, int vf,
     if (!(vfinfolist = nla_nest_start(nl_msg, IFLA_VFINFO_LIST)))
         goto buffer_too_small;
 
+    /*开始配置vfinfo*/
     if (!(vfinfo = nla_nest_start(nl_msg, IFLA_VF_INFO)))
         goto buffer_too_small;
 
@@ -1541,6 +1553,7 @@ virNetDevSetVfConfig(const char *ifname, int vf,
              .mac = { 0, },
         };
 
+        /*向ifla_vf_mac中填入此mac地址*/
         virMacAddrGetRaw(macaddr, ifla_vf_mac.mac);
 
         if (nla_put(nl_msg, IFLA_VF_MAC, sizeof(ifla_vf_mac),
@@ -1548,6 +1561,7 @@ virNetDevSetVfConfig(const char *ifname, int vf,
             goto buffer_too_small;
     }
 
+    /*设置此vf对应的vlan*/
     if (vlanid >= 0) {
         struct ifla_vf_vlan ifla_vf_vlan = {
              .vf = vf,
@@ -1563,6 +1577,7 @@ virNetDevSetVfConfig(const char *ifname, int vf,
     nla_nest_end(nl_msg, vfinfo);
     nla_nest_end(nl_msg, vfinfolist);
 
+    /*执行此配置*/
     if (virNetlinkCommand(nl_msg, &resp, &recvbuflen, 0, 0,
                           NETLINK_ROUTE, 0) < 0)
         goto cleanup;
@@ -2090,6 +2105,7 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
                       bool setVlan)
 {
     char MACStr[VIR_MAC_STRING_BUFLEN];
+    /*记录pf设备名称*/
     const char *pfDevName = NULL;
     g_autofree char *pfDevOrig = NULL;
     g_autofree char *vfDevOrig = NULL;
@@ -2102,8 +2118,10 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
 
         /* linkdev should get the VF's netdev name (or NULL if none) */
         if (virNetDevPFGetVF(pfDevName, vf, &vfDevOrig) < 0)
+            /*获取不到vf名称，退出*/
             return -1;
 
+        /*变更为vf名称*/
         linkdev = vfDevOrig;
 
     } else if (virNetDevIsVirtualFunction(linkdev) == 1) {
@@ -2118,6 +2136,7 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
     }
 
 
+    /*非sriov情况下的配置*/
     if (!pfDevName) {
         /* if it's not SRIOV, then we can't set the admin MAC address
          * or vlan tag
@@ -2162,6 +2181,7 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
     if (MAC) {
         int setMACrc;
 
+        /*vf名称必须存在*/
         if (!linkdev) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("VF %d of PF '%s' is not bound to a net driver, "
@@ -2170,6 +2190,7 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
             return -1;
         }
 
+        /*针对此linkdev直接设置mac*/
         setMACrc = virNetDevSetMACInternal(linkdev, MAC, !!pfDevOrig);
         if (setMACrc < 0) {
             bool allowRetry = false;
@@ -2189,7 +2210,7 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
              * the VF from its net driver. This causes the VF's MAC to
              * be initialized to whatever was stored in the admin MAC.
              */
-
+            /*通过pf设置此vf的mac及vlan*/
             if (virNetDevSetVfConfig(pfDevName, vf,
                                      MAC, vlanTag, &allowRetry) < 0) {
                 return -1;
@@ -2210,7 +2231,7 @@ virNetDevSetNetConfig(const char *linkdev, int vf,
              * wait, then upcoming operations on the VF may fail.
              */
             while (retries-- > 0 && !virNetDevExists(linkdev))
-               g_usleep(1000);
+               g_usleep(1000);/*等此网络设备出现*/
         }
 
         if (pfDevOrig && setMACrc == 0) {

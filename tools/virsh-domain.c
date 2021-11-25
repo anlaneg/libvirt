@@ -140,8 +140,8 @@ static const vshCmdInfo info_attach_device[] = {
 };
 
 static const vshCmdOptDef opts_attach_device[] = {
-    VIRSH_COMMON_OPT_DOMAIN_FULL(0),
-    VIRSH_COMMON_OPT_FILE(N_("XML file")),
+    VIRSH_COMMON_OPT_DOMAIN_FULL(0),/*需要指明domain*/
+    VIRSH_COMMON_OPT_FILE(N_("XML file")),/*需要指明xml文件*/
     VIRSH_COMMON_OPT_DOMAIN_PERSISTENT,
     VIRSH_COMMON_OPT_DOMAIN_CONFIG,
     VIRSH_COMMON_OPT_DOMAIN_LIVE,
@@ -149,6 +149,7 @@ static const vshCmdOptDef opts_attach_device[] = {
     {.name = NULL}
 };
 
+/*负责向某个vm添加一个设备*/
 static bool
 cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
 {
@@ -158,6 +159,7 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
     int rv;
     bool ret = false;
     unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
+    /*检查命令选项*/
     bool current = vshCommandOptBool(cmd, "current");
     bool config = vshCommandOptBool(cmd, "config");
     bool live = vshCommandOptBool(cmd, "live");
@@ -176,6 +178,7 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
         return false;
 
+    /*获取一个选项的参数*/
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         goto cleanup;
 
@@ -183,6 +186,7 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
         virDomainIsActive(dom) == 1)
         flags |= VIR_DOMAIN_AFFECT_LIVE;
 
+    /*读取xml*/
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0) {
         vshReportError(ctl);
         goto cleanup;
@@ -191,7 +195,8 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
     if (flags || current)
         rv = virDomainAttachDeviceFlags(dom, buffer, flags);
     else
-        rv = virDomainAttachDevice(dom, buffer);
+        /*为domain附加设备*/
+        rv = virDomainAttachDevice(dom, buffer/*设备对应的xml文件*/);
 
     VIR_FREE(buffer);
 
@@ -561,6 +566,7 @@ static int str2DiskAddress(const char *str, struct DiskAddress *diskAddr)
     return -1;
 }
 
+/*命令添加磁盘设备*/
 static bool
 cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
 {
@@ -894,12 +900,13 @@ virshParseRateStr(vshControl *ctl,
 
 #undef VIRSH_PARSE_RATE_FIELD
 
+/*通过命令添加interface*/
 static bool
 cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
 {
     virDomainPtr dom = NULL;
     const char *mac = NULL, *target = NULL, *script = NULL,
-               *type = NULL, *source = NULL, *model = NULL,
+               *type = NULL/*接口类型*/, *source = NULL, *model = NULL,
                *inboundStr = NULL, *outboundStr = NULL, *alias = NULL;
     virNetDevBandwidthRate inbound, outbound;
     virDomainNetType typ;
@@ -965,6 +972,7 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
         }
     }
 
+    /*利用上面的参数，生成xml文件*/
     /* Make XML of interface */
     virBufferAsprintf(&buf, "<interface type='%s'", type);
 
@@ -1061,7 +1069,7 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</interface>\n");
 
-    xml = virBufferContentAndReset(&buf);
+    xml = virBufferContentAndReset(&bu f);
 
     if (vshCommandOptBool(cmd, "print-xml")) {
         vshPrint(ctl, "%s", xml);
@@ -1076,6 +1084,7 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
         virDomainIsActive(dom) == 1)
         flags |= VIR_DOMAIN_AFFECT_LIVE;
 
+    /*依据生成的xml attach设备*/
     if (flags || current)
         ret = virDomainAttachDeviceFlags(dom, xml, flags);
     else
@@ -14333,18 +14342,21 @@ cmdGuestInfo(vshControl *ctl, const vshCmd *cmd)
 }
 
 const vshCmdDef domManagementCmds[] = {
+        //设备添加
     {.name = "attach-device",
      .handler = cmdAttachDevice,
      .opts = opts_attach_device,
      .info = info_attach_device,
      .flags = 0
     },
+    //磁盘添加
     {.name = "attach-disk",
      .handler = cmdAttachDisk,
      .opts = opts_attach_disk,
      .info = info_attach_disk,
      .flags = 0
     },
+    //网络接口添加
     {.name = "attach-interface",
      .handler = cmdAttachInterface,
      .opts = opts_attach_interface,
@@ -14444,6 +14456,7 @@ const vshCmdDef domManagementCmds[] = {
      .info = info_destroy,
      .flags = 0
     },
+    /*设备移除*/
     {.name = "detach-device",
      .handler = cmdDetachDevice,
      .opts = opts_detach_device,

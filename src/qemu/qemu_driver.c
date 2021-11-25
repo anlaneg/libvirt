@@ -7873,6 +7873,7 @@ qemuDomainAttachDeviceLive(virDomainObjPtr vm,
         break;
 
     case VIR_DOMAIN_DEVICE_NET:
+        /*添加网络设备*/
         qemuDomainObjCheckNetTaint(driver, vm, dev->data.net, NULL);
         ret = qemuDomainAttachNetDevice(driver, vm, dev->data.net);
         if (!ret) {
@@ -8168,6 +8169,7 @@ qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
         break;
 
     case VIR_DOMAIN_DEVICE_NET:
+        /*向vm中加入网络设备*/
         net = dev->data.net;
         if (virDomainNetInsert(vmdef, net))
             return -1;
@@ -8675,7 +8677,7 @@ qemuDomainAttachDeviceLiveAndConfigHomogenize(const virDomainDeviceDef *devConf,
 
 }
 
-
+/*向vm中附加xml配置*/
 static int
 qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
                                     virQEMUDriverPtr driver,
@@ -8706,6 +8708,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
         if (!vmdef)
             goto cleanup;
 
+        /*通过xml解析出dev配置*/
         if (!(devConf = virDomainDeviceDefParse(xml, vmdef,
                                                 driver->xmlopt, priv->qemuCaps,
                                                 parse_flags)))
@@ -8727,6 +8730,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
                                          false) < 0)
             goto cleanup;
 
+        /*为vm添加此设备*/
         if (qemuDomainAttachDeviceConfig(vmdef, devConf, priv->qemuCaps,
                                          parse_flags,
                                          driver->xmlopt) < 0)
@@ -8751,6 +8755,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
                                          true) < 0)
             goto cleanup;
 
+        /*为vm添加live设备*/
         if (qemuDomainAttachDeviceLive(vm, devLive, driver) < 0)
             goto cleanup;
         /*
@@ -8781,8 +8786,8 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
 }
 
 static int
-qemuDomainAttachDeviceFlags(virDomainPtr dom,
-                            const char *xml,
+qemuDomainAttachDeviceFlags(virDomainPtr dom/*要操作的domain*/,
+                            const char *xml/*设备配置*/,
                             unsigned int flags)
 {
     virQEMUDriverPtr driver = dom->conn->privateData;
@@ -8791,6 +8796,7 @@ qemuDomainAttachDeviceFlags(virDomainPtr dom,
 
     virNWFilterReadLockFilterUpdates();
 
+    //通过domain拿到vm
     if (!(vm = qemuDomainObjFromDomain(dom)))
         goto cleanup;
 
@@ -8803,6 +8809,7 @@ qemuDomainAttachDeviceFlags(virDomainPtr dom,
     if (virDomainObjUpdateModificationImpact(vm, &flags) < 0)
         goto endjob;
 
+    /*附加device*/
     if (qemuDomainAttachDeviceLiveAndConfig(vm, driver, xml, flags) < 0)
         goto endjob;
 
@@ -8817,6 +8824,7 @@ qemuDomainAttachDeviceFlags(virDomainPtr dom,
     return ret;
 }
 
+/*为qemu动态添加设备*/
 static int qemuDomainAttachDevice(virDomainPtr dom, const char *xml)
 {
     return qemuDomainAttachDeviceFlags(dom, xml,
@@ -23218,6 +23226,7 @@ static virHypervisorDriver qemuHypervisorDriver = {
     //通过xml创建domain
     .domainCreateXML = qemuDomainCreateXML, /* 0.2.0 */
     .domainLookupByID = qemuDomainLookupByID, /* 0.2.0 */
+    //通过uuid查找domain
     .domainLookupByUUID = qemuDomainLookupByUUID, /* 0.2.0 */
     .domainLookupByName = qemuDomainLookupByName, /* 0.2.0 */
     .domainSuspend = qemuDomainSuspend, /* 0.2.0 */
@@ -23279,6 +23288,7 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .domainDefineXMLFlags = qemuDomainDefineXMLFlags, /* 1.2.12 */
     .domainUndefine = qemuDomainUndefine, /* 0.2.0 */
     .domainUndefineFlags = qemuDomainUndefineFlags, /* 0.9.4 */
+    /*为domain添加设备*/
     .domainAttachDevice = qemuDomainAttachDevice, /* 0.4.1 */
     .domainAttachDeviceFlags = qemuDomainAttachDeviceFlags, /* 0.7.7 */
     .domainDetachDevice = qemuDomainDetachDevice, /* 0.5.0 */
@@ -23446,6 +23456,7 @@ static virConnectDriver qemuConnectDriver = {
     .localOnly = true,
     .uriSchemes = (const char *[]){ "qemu", NULL },
     .embeddable = true,
+    /*qemu对应的hypervisor驱动*/
     .hypervisorDriver = &qemuHypervisorDriver,
 };
 

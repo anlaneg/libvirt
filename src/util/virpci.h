@@ -55,6 +55,7 @@ struct _virZPCIDeviceAddress {
 
 #define VIR_PCI_DEVICE_ADDRESS_FMT "%04x:%02x:%02x.%d"
 
+/*pci设备地址*/
 struct _virPCIDeviceAddress {
     unsigned int domain;
     unsigned int bus;

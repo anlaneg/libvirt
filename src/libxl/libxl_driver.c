@@ -4171,6 +4171,7 @@ libxlDomainAttachDeviceFlags(virDomainPtr dom, const char *xml,
     }
 
     if (flags & VIR_DOMAIN_DEVICE_MODIFY_LIVE) {
+        /* 解析xml文件 */
         if (!(devLive = virDomainDeviceDefParse(xml, vm->def,
                                             driver->xmlopt, NULL,
                                             VIR_DOMAIN_DEF_PARSE_INACTIVE)))
@@ -6704,6 +6705,7 @@ static virHypervisorDriver libxlHypervisorDriver = {
     .domainDefineXMLFlags = libxlDomainDefineXMLFlags, /* 1.2.12 */
     .domainUndefine = libxlDomainUndefine, /* 0.9.0 */
     .domainUndefineFlags = libxlDomainUndefineFlags, /* 0.9.4 */
+    /*libvirt利用xml attatch设备*/
     .domainAttachDevice = libxlDomainAttachDevice, /* 0.9.2 */
     .domainAttachDeviceFlags = libxlDomainAttachDeviceFlags, /* 0.9.2 */
     .domainDetachDevice = libxlDomainDetachDevice,    /* 0.9.2 */

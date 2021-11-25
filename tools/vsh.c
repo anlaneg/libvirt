@@ -396,8 +396,8 @@ vshCmddefCheckInternals(vshControl *ctl,
  * which keep track of required options and options needing an argument.
  */
 static int
-vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg,
-                  uint64_t *opts_required)
+vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg/*出参，收集需要参数的选项bitmap*/,
+                  uint64_t *opts_required/*出参，收集必须的选项bitmap*/)
 {
     size_t i;
     bool optional = false;
@@ -405,9 +405,11 @@ vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg,
     *opts_need_arg = 0;
     *opts_required = 0;
 
+    /*如果没有选项，则跳出*/
     if (!cmd->opts)
         return 0;
 
+    /*遍历每个选项，按bit位来记每个选项的索引，获知哪些opt是必须的*/
     for (i = 0; cmd->opts[i].name; i++) {
         const vshCmdOptDef *opt = &cmd->opts[i];
 
@@ -424,6 +426,7 @@ vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg,
             continue;
         }
 
+        /*跳过别名的选项*/
         if (opt->type == VSH_OT_ALIAS)
             continue; /* skip the alias option */
 
@@ -504,9 +507,10 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
     return ret;
 }
 
+/*取需要首个解析的选项*/
 static const vshCmdOptDef *
-vshCmddefGetData(const vshCmdDef *cmd, uint64_t *opts_need_arg,
-                 uint64_t *opts_seen)
+vshCmddefGetData(const vshCmdDef *cmd, uint64_t *opts_need_arg/*入出参*/,
+                 uint64_t *opts_seen/*出参*/)
 {
     size_t i;
     const vshCmdOptDef *opt;
@@ -518,8 +522,11 @@ vshCmddefGetData(const vshCmdDef *cmd, uint64_t *opts_need_arg,
     i = __builtin_ffsl(*opts_need_arg) - 1;
     opt = &cmd->opts[i];
     if (opt->type != VSH_OT_ARGV)
+        /*标记此选项不再需要，已提定*/
         *opts_need_arg &= ~(1ULL << i);
+    /*标记此选项已看见*/
     *opts_seen |= 1ULL << i;
+    /*返回首个需要的选项*/
     return opt;
 }
 
@@ -552,7 +559,7 @@ vshCommandCheckOpts(vshControl *ctl, const vshCmd *cmd, uint64_t opts_required,
 }
 
 static const vshCmdDef *
-vshCmdDefSearchGrp(const char *cmdname)
+vshCmdDefSearchGrp(const char *cmdname/*命令*/)
 {
     const vshCmdGrp *g;
     const vshCmdDef *c;
@@ -589,6 +596,7 @@ vshCmddefSearch(const char *cmdname)
     	//groups式查找
         return vshCmdDefSearchGrp(cmdname);
     else
+        //groups不存在，在cmdSet中查找（目前cmdSet为NULL）
         return vshCmdDefSearchSet(cmdname);
 }
 
@@ -1410,7 +1418,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                     VIR_FREE(tkdata);
                     break;
                 } else if (!(cmd = vshCmddefSearch(tkdata))) {
-            	    //首次进入，先利用获得的tkdata(首个参数）查找cmd
+            	    //首次进入，利用获得的tkdata(首个参数，没有查找到cmd，报错
                     if (!partial)
                         vshError(ctl, _("unknown command: '%s'"), tkdata);
                     goto syntaxError;   /* ... or ignore this command only? */
@@ -1418,10 +1426,13 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
 
                 /* aliases need to be resolved to the actual commands */
                 if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
+                    /*查找到的cmd是一个别名，需要重查一遍它对应的实际command*/
                     VIR_FREE(tkdata);
                     tkdata = g_strdup(cmd->alias);
                     cmd = vshCmddefSearch(tkdata);
                 }
+
+                /*收其此cmd选项哪些需要参数，哪些是必须的*/
                 if (vshCmddefOptParse(cmd, &opts_need_arg,
                                       &opts_required) < 0) {
                     if (!partial)
@@ -1502,6 +1513,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
             } else {
  get_data:
                 /* Special case 'help' to ignore spurious data */
+                /*拿到一个需要匹配的选项*/
                 if (!(opt = vshCmddefGetData(cmd, &opts_need_arg,
                                              &opts_seen)) &&
                      STRNEQ(cmd->name, "help")) {
@@ -3134,6 +3146,7 @@ cmdHelp(vshControl *ctl, const vshCmd *cmd)
             for (def = grp->commands; def->name; def++) {
                 if (def->flags & VSH_CMD_FLAG_ALIAS)
                     continue;
+                /*显示命令及其对应的help*/
                 vshPrint(ctl, "    %-30s %s\n", def->name,
                          _(vshCmddefGetInfo(def, "help")));
             }

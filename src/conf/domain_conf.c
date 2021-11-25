@@ -302,7 +302,7 @@ VIR_ENUM_IMPL(virDomainDevice,
               "disk",
               "lease",
               "filesystem",
-              "interface",
+              "interface",/*网络设备*/
               "input",
               "sound",
               "video",
@@ -12023,6 +12023,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
 
     ctxt->node = node;
 
+    /*取type属性*/
     type = virXMLPropString(node, "type");
     if (type != NULL) {
     	//type字符串取值转对应枚举
@@ -12051,7 +12052,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
     while (cur != NULL) {
         if (cur->type == XML_ELEMENT_NODE) {
             if (virXMLNodeNameEqual(cur, "source")) {
-		//处理source节点
+                //处理source节点
                 xmlNodePtr tmpnode = ctxt->node;
 
                 ctxt->node = cur;
@@ -12061,7 +12062,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                 ctxt->node = tmpnode;
             }
             if (!macaddr && virXMLNodeNameEqual(cur, "mac")) {
-		//处理mac节点
+                //处理mac节点
                 macaddr = virXMLPropString(cur, "address");
             } else if (!network &&
                        def->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
@@ -16993,6 +16994,7 @@ virDomainVsockDefParseXML(virDomainXMLOptionPtr xmlopt,
     return g_steal_pointer(&vsock);
 }
 
+/*利用xml生成device*/
 virDomainDeviceDefPtr
 virDomainDeviceDefParse(const char *xmlStr,
                         const virDomainDef *def,
@@ -17010,9 +17012,11 @@ virDomainDeviceDefParse(const char *xmlStr,
 
     node = ctxt->node;
 
+    /*申请一个dev空间*/
     if (VIR_ALLOC(dev) < 0)
         return NULL;
 
+    /*通过xml节点名称设置dev->type*/
     if ((dev->type = virDomainDeviceTypeFromString((const char *) node->name)) < 0) {
         /* Some crazy mapping of serial, parallel, console and channel to
          * VIR_DOMAIN_DEVICE_CHR. */
@@ -17020,6 +17024,7 @@ virDomainDeviceDefParse(const char *xmlStr,
             virXMLNodeNameEqual(node, "console") ||
             virXMLNodeNameEqual(node, "parallel") ||
             virXMLNodeNameEqual(node, "serial")) {
+            /*定为字符类设备*/
             dev->type = VIR_DOMAIN_DEVICE_CHR;
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -17044,6 +17049,7 @@ virDomainDeviceDefParse(const char *xmlStr,
             return NULL;
         break;
     case VIR_DOMAIN_DEVICE_NET:
+        /*为网络设备，执行解析*/
         if (!(dev->data.net = virDomainNetDefParseXML(xmlopt, node, ctxt, flags)))
             return NULL;
         break;
@@ -31985,6 +31991,7 @@ virDomainNetCreatePort(virConnectPtr conn,
             return -1;
     }
 
+    /*格式化参数*/
     if (!(portxml = virNetworkPortDefFormat(portdef)))
         return -1;
 
@@ -32566,7 +32573,7 @@ virDomainDefHasNVMeDisk(const virDomainDef *def)
     return false;
 }
 
-
+/*domain是否有hostdev*/
 bool
 virDomainDefHasVFIOHostdev(const virDomainDef *def)
 {
@@ -32826,6 +32833,7 @@ virHostdevIsMdevDevice(const virDomainHostdevDef *hostdev)
 bool
 virHostdevIsVFIODevice(const virDomainHostdevDef *hostdev)
 {
+    /*检查是否vfio hostdev*/
     return hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
         hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI &&
         hostdev->source.subsys.u.pci.backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO;

@@ -96,7 +96,7 @@ struct _virDomainDeviceDef {
         virDomainControllerDefPtr controller;
         virDomainLeaseDefPtr lease;
         virDomainFSDefPtr fs;
-        virDomainNetDefPtr net;
+        virDomainNetDefPtr net;/*网络设备*/
         virDomainInputDefPtr input;
         virDomainSoundDefPtr sound;
         virDomainVideoDefPtr video;
@@ -234,7 +234,9 @@ struct _virDomainHostdevSubsysUSB {
 };
 
 struct _virDomainHostdevSubsysPCI {
+    /*host端设备地址*/
     virPCIDeviceAddress addr; /* host address */
+    /*host端方式*/
     int backend; /* enum virDomainHostdevSubsysPCIBackendType */
 };
 
@@ -296,7 +298,7 @@ struct _virDomainHostdevSubsys {
     int type; /* enum virDomainHostdevSubsysType */
     union {
         virDomainHostdevSubsysUSB usb;
-        virDomainHostdevSubsysPCI pci;
+        virDomainHostdevSubsysPCI pci;/*pci设备*/
         virDomainHostdevSubsysSCSI scsi;
         virDomainHostdevSubsysSCSIVHost scsi_host;
         virDomainHostdevSubsysMediatedDev mdev;
@@ -346,7 +348,7 @@ struct _virDomainHostdevDef {
     bool readonly;
     bool shareable;
     union {
-        virDomainHostdevSubsys subsys;
+        virDomainHostdevSubsys subsys;/*子系统*/
         virDomainHostdevCaps caps;
     } source;
     virDomainHostdevOrigStates origstates;
@@ -874,7 +876,7 @@ typedef enum {
     VIR_DOMAIN_NET_TYPE_UDP,
 
     VIR_DOMAIN_NET_TYPE_LAST
-} virDomainNetType;
+} virDomainNetType;/*网络类型*/
 
 /* network model types */
 typedef enum {
@@ -1018,7 +1020,7 @@ struct _virDomainNetDef {
             int localport;
         } socket; /* any of NET_CLIENT or NET_SERVER or NET_MCAST */
         struct {
-            char *name;
+            char *name;/*network名称*/
             char *portgroup;
             unsigned char portid[VIR_UUID_BUFLEN];
             /* actual has info about the currently used physical
@@ -1046,7 +1048,7 @@ struct _virDomainNetDef {
         } direct;
         struct {
             virDomainHostdevDef def;
-        } hostdev;
+        } hostdev;/*hostdev方式*/
     } data;
     /* virtPortProfile is used by network/bridge/direct/hostdev */
     virNetDevVPortProfilePtr virtPortProfile;
@@ -2584,6 +2586,7 @@ struct _virDomainDef {
     size_t nvideos;
     virDomainVideoDefPtr *videos;
 
+    /*指明使用的hostdev设备*/
     size_t nhostdevs;
     virDomainHostdevDefPtr *hostdevs;
 

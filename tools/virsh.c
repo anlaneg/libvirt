@@ -812,7 +812,7 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
 }
 
 static const vshCmdDef virshCmds[] = {
-    VSH_CMD_CD,
+    VSH_CMD_CD,//cd命令
     VSH_CMD_ECHO,
     VSH_CMD_EXIT,
     VSH_CMD_HELP,
@@ -829,8 +829,9 @@ static const vshCmdDef virshCmds[] = {
     {.name = NULL}
 };
 
-//支持的命令group集合
+//支持的命令group集合（virsh 中的具体命令需要在这此group中查找）
 static const vshCmdGrp cmdGroups[] = {
+    //'attach-device'命令属于domain
     {VIRSH_CMD_GRP_DOM_MANAGEMENT, "domain", domManagementCmds},
 	//'list'命令属于monitor
     {VIRSH_CMD_GRP_DOM_MONITORING, "monitor", domMonitoringCmds},

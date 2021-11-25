@@ -136,7 +136,9 @@ struct _vshCmdInfo {
  * vshCmdOptDef - command option definition
  */
 struct _vshCmdOptDef {
+    /*选项名称*/
     const char *name;           /* the name of option, or NULL for list end */
+    /*选项数据类型*/
     vshCmdOptType type;         /* option type */
     unsigned int flags;         /* flags */
     const char *help;           /* non-NULL help string; or for VSH_OT_ALIAS
@@ -170,10 +172,14 @@ enum {
  */
 struct _vshCmdDef {
     const char *name;           /* name of command, or NULL for list end */
+    /*命令处理函数*/
     bool (*handler) (vshControl *, const vshCmd *);    /* command handler */
+    /*指明此cmd容许的选项（最后一个选项name为NULL），可以为空，表示没有选项*/
     const vshCmdOptDef *opts;   /* definition of command options */
+    /*命令的帮助及描述信息*/
     const vshCmdInfo *info;     /* details about command */
     unsigned int flags;         /* bitwise OR of VSH_CMD_FLAG */
+    /*如果cmd打了VSH_CMD_FLAG_ALIAS标记，则此成员指出实际的cmd名称*/
     const char *alias;          /* name of the aliased command */
 };
 

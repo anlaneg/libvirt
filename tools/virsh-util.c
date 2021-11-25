@@ -49,6 +49,7 @@ virshLookupDomainInternal(vshControl *ctl,
         strlen(name) == VIR_UUID_STRING_BUFLEN-1) {
         vshDebug(ctl, VSH_ERR_DEBUG, "%s: <domain> trying as domain UUID\n",
                  cmdname);
+        /*尝试采用uuid查找到dom*/
         dom = virDomainLookupByUUIDString(priv->conn, name);
     }
 
@@ -95,6 +96,7 @@ virshCommandOptDomainBy(vshControl *ctl,
     if (name)
         *name = n;
 
+    /*通过n查找domain*/
     return virshLookupDomainInternal(ctl, cmd->def->name, n, flags);
 }
 

@@ -601,6 +601,7 @@ struct _virAdmClient {
 */
 struct _virDomain {
     virObject parent;
+    /*与后端的连接*/
     virConnectPtr conn;                  /* pointer back to the connection */
     char *name;                          /* the domain external name */
     int id;                              /* the domain ID */

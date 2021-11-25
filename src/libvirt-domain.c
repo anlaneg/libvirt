@@ -8181,7 +8181,7 @@ virDomainGetMetadata(virDomainPtr domain,
  * Returns 0 in case of success, -1 in case of failure.
  */
 int
-virDomainAttachDevice(virDomainPtr domain, const char *xml)
+virDomainAttachDevice(virDomainPtr domain, const char *xml/*设备对应的xml*/)
 {
     virConnectPtr conn;
 
@@ -8195,6 +8195,7 @@ virDomainAttachDevice(virDomainPtr domain, const char *xml)
     virCheckNonNullArgGoto(xml, error);
     virCheckReadOnlyGoto(conn->flags, error);
 
+    /*通过driver为domain添加设备*/
     if (conn->driver->domainAttachDevice) {
        int ret;
        ret = conn->driver->domainAttachDevice(domain, xml);
@@ -8629,6 +8630,7 @@ virDomainIsActive(virDomainPtr dom)
 
     virCheckDomainReturn(dom, -1);
 
+    /*检查domain是否活跃*/
     if (dom->conn->driver->domainIsActive) {
         int ret;
         ret = dom->conn->driver->domainIsActive(dom);

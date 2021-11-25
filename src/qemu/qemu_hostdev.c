@@ -134,7 +134,7 @@ qemuHostdevUpdateActiveDomainDevices(virQEMUDriverPtr driver,
     return 0;
 }
 
-
+/*需要vfio,mdev*/
 bool
 qemuHostdevNeedsVFIO(const virDomainHostdevDef *hostdev)
 {
@@ -152,6 +152,7 @@ qemuHostdevHostSupportsPassthroughVFIO(void)
 
     /* condition 2 - /dev/vfio/vfio exists */
     if (!virFileExists(QEMU_DEV_VFIO))
+        /*必须有vfio*/
         return false;
 
     return true;
@@ -159,10 +160,11 @@ qemuHostdevHostSupportsPassthroughVFIO(void)
 
 
 static bool
-qemuHostdevPreparePCIDevicesCheckSupport(virDomainHostdevDefPtr *hostdevs,
+qemuHostdevPreparePCIDevicesCheckSupport(virDomainHostdevDefPtr *hostdevs/*所有hostdev设备*/,
                                          size_t nhostdevs,
                                          virQEMUCapsPtr qemuCaps)
 {
+    /*检查是否支持passthrough*/
     bool supportsPassthroughVFIO = qemuHostdevHostSupportsPassthroughVFIO();
     size_t i;
 
@@ -171,11 +173,13 @@ qemuHostdevPreparePCIDevicesCheckSupport(virDomainHostdevDefPtr *hostdevs,
         virDomainHostdevDefPtr hostdev = hostdevs[i];
         int *backend = &hostdev->source.subsys.u.pci.backend;
 
+        /*只支持pci设备*/
         if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS)
             continue;
         if (hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI)
             continue;
 
+        /*后端支持检查*/
         switch ((virDomainHostdevSubsysPCIBackendType)*backend) {
         case VIR_DOMAIN_HOSTDEV_PCI_BACKEND_DEFAULT:
             if (supportsPassthroughVFIO &&
@@ -237,15 +241,16 @@ qemuHostdevPrepareNVMeDisks(virQEMUDriverPtr driver,
 
 int
 qemuHostdevPreparePCIDevices(virQEMUDriverPtr driver,
-                             const char *name,
-                             const unsigned char *uuid,
-                             virDomainHostdevDefPtr *hostdevs,
-                             int nhostdevs,
+                             const char *name/*domain名称*/,
+                             const unsigned char *uuid/*domain的uuid*/,
+                             virDomainHostdevDefPtr *hostdevs/*要准备的host设备*/,
+                             int nhostdevs/*host设备数目*/,
                              virQEMUCapsPtr qemuCaps,
                              unsigned int flags)
 {
     virHostdevManagerPtr hostdev_mgr = driver->hostdevMgr;
 
+    /*检查后端确认支持*/
     if (!qemuHostdevPreparePCIDevicesCheckSupport(hostdevs, nhostdevs, qemuCaps))
         return -1;
 
@@ -354,6 +359,7 @@ qemuHostdevPrepareDomainDevices(virQEMUDriverPtr driver,
     if (qemuHostdevPrepareNVMeDisks(driver, def->name, def->disks, def->ndisks) < 0)
         return -1;
 
+    /*pci设备准备*/
     if (qemuHostdevPreparePCIDevices(driver, def->name, def->uuid,
                                      def->hostdevs, def->nhostdevs,
                                      qemuCaps, flags) < 0)

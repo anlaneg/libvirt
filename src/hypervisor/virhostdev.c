@@ -264,6 +264,7 @@ virHostdevGetPCIHostDeviceList(virDomainHostdevDefPtr *hostdevs, int nhostdevs)
     g_autoptr(virPCIDeviceList) pcidevs = NULL;
     size_t i;
 
+    /*申请内存失败*/
     if (!(pcidevs = virPCIDeviceListNew()))
         return NULL;
 
@@ -289,6 +290,7 @@ static int
 virHostdevPCISysfsPath(virDomainHostdevDefPtr hostdev,
                        char **sysfs_path)
 {
+    /*利用参数，构造pci地址*/
     virPCIDeviceAddress config_address;
 
     config_address.domain = hostdev->source.subsys.u.pci.addr.domain;
@@ -296,6 +298,7 @@ virHostdevPCISysfsPath(virDomainHostdevDefPtr hostdev,
     config_address.slot = hostdev->source.subsys.u.pci.addr.slot;
     config_address.function = hostdev->source.subsys.u.pci.addr.function;
 
+    /*利用地址，构造pci设备对应的路径*/
     return virPCIDeviceAddressGetSysfsFile(&config_address, sysfs_path);
 }
 
@@ -320,10 +323,13 @@ virHostdevNetDevice(virDomainHostdevDefPtr hostdev,
 {
     g_autofree char *sysfs_path = NULL;
 
+    /*取hostdev对应的sysfs路径*/
     if (virHostdevPCISysfsPath(hostdev, &sysfs_path) < 0)
         return -1;
 
+    /*检查此设备是否为vf*/
     if (virPCIIsVirtualFunction(sysfs_path) == 1) {
+        /*是vf，则取pf名称及vf索引号*/
         if (virPCIGetVirtualFunctionInfo(sysfs_path, pfNetDevIdx,
                                          linkdev, vf) < 0)
             return -1;
@@ -461,9 +467,11 @@ virHostdevSetNetConfig(virDomainHostdevDefPtr hostdev,
     int vf = -1;
     bool port_profile_associate = true;
 
+    /*此pci设备必须存在*/
     if (!virHostdevIsPCINetDevice(hostdev))
         return 0;
 
+    /*取hostdev对应的设备名称及vf编号*/
     if (virHostdevNetDevice(hostdev, -1, &linkdev, &vf) < 0)
         return -1;
 
@@ -482,6 +490,7 @@ virHostdevSetNetConfig(virDomainHostdevDefPtr hostdev,
                                                uuid, port_profile_associate) < 0)
             return -1;
     } else {
+        /*设置此vf对应的mac及vlan*/
         if (virNetDevSetNetConfig(linkdev, vf, &hostdev->parentnet->mac,
                                   vlan, NULL, true) < 0)
             return -1;
@@ -611,6 +620,7 @@ virHostdevRestoreNetConfig(virDomainHostdevDefPtr hostdev,
             MAC = NULL;
         }
 
+        /*设置vf的mac地址及vlan*/
         ignore_value(virNetDevSetNetConfig(linkdev, vf,
                                            adminMAC, vlan, MAC, true));
         return 0;
@@ -648,6 +658,7 @@ virHostdevReattachAllPCIDevices(virHostdevManagerPtr mgr,
 {
     size_t i;
 
+    /*遍历所有pci设备*/
     for (i = 0; i < virPCIDeviceListCount(pcidevs); i++) {
         virPCIDevicePtr pci = virPCIDeviceListGet(pcidevs, i);
         virPCIDevicePtr actual;
@@ -658,6 +669,7 @@ virHostdevReattachAllPCIDevices(virHostdevManagerPtr mgr,
             continue;
 
         if (virPCIDeviceGetManaged(actual)) {
+            /*此不活跃设备被管理，此处执行设备解绑*/
             VIR_DEBUG("Reattaching managed PCI device %s",
                       virPCIDeviceGetName(pci));
             if (virPCIDeviceReattach(actual,
@@ -828,6 +840,7 @@ virHostdevPreparePCIDevicesImpl(virHostdevManagerPtr mgr,
      * the network device, set the new netdev config */
     for (i = 0; i < nhostdevs; i++) {
 
+        /*配置各个hostdev*/
         if (virHostdevSetNetConfig(hostdevs[i], uuid) < 0)
             goto resetvfnetconfig;
 

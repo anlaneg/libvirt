@@ -434,6 +434,7 @@ virDomainPCIAddressValidate(virDomainPCIAddressSetPtr addrs,
         virReportError(errType, "%s", _("No PCI buses available"));
         return false;
     }
+    /*pci地址的domain必须为0*/
     if (addr->domain != 0) {
         virReportError(errType,
                        _("Invalid PCI address %s. "
@@ -441,6 +442,8 @@ virDomainPCIAddressValidate(virDomainPCIAddressSetPtr addrs,
                        addrStr);
         return false;
     }
+
+    /*pci bus的地址不得超过addrs->nbuses*/
     if (addr->bus >= addrs->nbuses) {
         virReportError(errType,
                        _("Invalid PCI address %s. "
@@ -915,6 +918,7 @@ virDomainPCIAddressEnsureAddr(virDomainPCIAddressSetPtr addrs,
     if (!(addrStr = virPCIDeviceAddressAsString(&dev->addr.pci)))
         return -1;
 
+    /*目前不支持多function的pci设备热插拔*/
     if (virDeviceInfoPCIAddressIsPresent(dev)) {
         /* We do not support hotplug multi-function PCI device now, so we should
          * reserve the whole slot. The function of the PCI device must be 0.

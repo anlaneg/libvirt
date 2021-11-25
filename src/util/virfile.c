@@ -2870,7 +2870,7 @@ virFileRemove(const char *path,
 #endif /* WIN32 */
 
 static int
-virDirOpenInternal(DIR **dirp, const char *name, bool ignoreENOENT, bool quiet)
+virDirOpenInternal(DIR **dirp/*出参，目录描述符*/, const char *name/*目录名称*/, bool ignoreENOENT, bool quiet)
 {
     *dirp = opendir(name); /* exempt from syntax-check */
     if (!*dirp) {

@@ -1490,6 +1490,7 @@ struct _virHypervisorDriver {
     virDrvDomainDefineXMLFlags domainDefineXMLFlags;
     virDrvDomainUndefine domainUndefine;
     virDrvDomainUndefineFlags domainUndefineFlags;
+    /*为domain添加设备*/
     virDrvDomainAttachDevice domainAttachDevice;
     virDrvDomainAttachDeviceFlags domainAttachDeviceFlags;
     virDrvDomainDetachDevice domainDetachDevice;
