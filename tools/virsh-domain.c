@@ -1069,7 +1069,7 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</interface>\n");
 
-    xml = virBufferContentAndReset(&bu f);
+    xml = virBufferContentAndReset(&buf);
 
     if (vshCommandOptBool(cmd, "print-xml")) {
         vshPrint(ctl, "%s", xml);
