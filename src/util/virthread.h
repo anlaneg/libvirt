@@ -30,6 +30,7 @@ typedef struct virMutex virMutex;
 typedef virMutex *virMutexPtr;
 
 struct virMutex {
+    /*使用pthread mutex*/
     pthread_mutex_t lock;
 };
 
@@ -59,6 +60,7 @@ typedef struct virThread virThread;
 typedef virThread *virThreadPtr;
 
 struct virThread {
+    /*线程id*/
     pthread_t thread;
 };
 

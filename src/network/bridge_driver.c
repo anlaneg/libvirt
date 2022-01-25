@@ -303,6 +303,7 @@ networkObjFromNetwork(virNetworkPtr net)
     virNetworkObjPtr obj;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
+    /*通过uuid查询此network*/
     obj = virNetworkObjFindByUUID(driver->networks, net->uuid);
     if (!obj) {
         virUUIDFormat(net->uuid, uuidstr);
@@ -328,7 +329,7 @@ networkRunHook(virNetworkObjPtr obj,
     int ret = -1;
 
     if (virHookPresent(VIR_HOOK_DRIVER_NETWORK)) {
-    		//drvier network对应的hook存在
+    	//drvier network对应的hook存在
         if (!obj) {
             VIR_DEBUG("Not running hook as @obj is NULL");
             ret = 0;
@@ -502,6 +503,7 @@ networkRemoveInactive(virNetworkDriverStatePtr driver,
 }
 
 
+/*构造dummy nic名称*/
 static char *
 networkBridgeDummyNicName(const char *brname)
 {
@@ -518,11 +520,12 @@ networkBridgeDummyNicName(const char *brname)
         nicname = g_strdup_printf("%.*s%s%s",
                                   /* space for last 3 chars + "-nic" + NULL */
                                   (int)(IFNAMSIZ - (3 + sizeof(dummyNicSuffix))),
-                                  brname, brname + strlen(brname) - 3,
-                                  dummyNicSuffix);
+                                  brname/*桥名称*/, brname + strlen(brname) - 3,
+                                  dummyNicSuffix/*网卡后缀*/);
     } else {
         nicname = g_strdup_printf("%s%s", brname, dummyNicSuffix);
     }
+    /*返回dummy接口名称*/
     return nicname;
 }
 
@@ -542,6 +545,7 @@ networkUpdatePort(virNetworkPortDefPtr port,
     return false;
 }
 
+/*更新指定的network*/
 static int
 networkUpdateState(virNetworkObjPtr obj,
                    void *opaque)
@@ -554,6 +558,7 @@ networkUpdateState(virNetworkObjPtr obj,
     int ret = -1;
 
     virObjectLock(obj);
+    /*跳过没有active的network*/
     if (!virNetworkObjIsActive(obj)) {
         ret = 0;
         goto cleanup;
@@ -567,15 +572,19 @@ networkUpdateState(virNetworkObjPtr obj,
     case VIR_NETWORK_FORWARD_OPEN:
         /* If bridge doesn't exist, then mark it inactive */
         if (!(def->bridge && virNetDevExists(def->bridge) == 1))
+            /*桥不存在，置为in active*/
             virNetworkObjSetActive(obj, false);
 
+        /*获得macMap文件名*/
         if (!(macMapFile = virMacMapFileName(driver->dnsmasqStateDir,
                                              def->bridge)))
             goto cleanup;
 
+        /*通过配置文件生成macMap*/
         if (!(macmap = virMacMapNew(macMapFile)))
             goto cleanup;
 
+        /*设置此network对应的macmap*/
         virNetworkObjSetMacMap(obj, macmap);
 
         break;
@@ -583,6 +592,7 @@ networkUpdateState(virNetworkObjPtr obj,
     case VIR_NETWORK_FORWARD_BRIDGE:
         if (def->bridge) {
             if (virNetDevExists(def->bridge) != 1)
+                /*bridge不存在，置为inactive*/
                 virNetworkObjSetActive(obj, false);
             break;
         }
@@ -727,6 +737,7 @@ networkStateInitialize(bool privileged,
         return -1;
     }
 
+    /*申请network_driver*/
     if (VIR_ALLOC(network_driver) < 0)
         goto error;
 
@@ -779,14 +790,17 @@ networkStateInitialize(bool privileged,
     /* if this fails now, it will be retried later with dnsmasqCapsRefresh() */
     network_driver->dnsmasqCaps = dnsmasqCapsNewFromBinary(DNSMASQ);
 
+    /*创建network*/
     if (!(network_driver->networks = virNetworkObjListNew()))
         goto error;
 
+    /*加载network state*/
     if (virNetworkObjLoadAllState(network_driver->networks,
                                   network_driver->stateDir,
                                   network_driver->xmlopt) < 0)
         goto error;
 
+    /*加载network config，只加载autostart network*/
     if (virNetworkObjLoadAllConfigs(network_driver->networks,
                                     network_driver->networkConfigDir,
                                     network_driver->networkAutostartDir,
@@ -799,7 +813,7 @@ networkStateInitialize(bool privileged,
      * network's state file). */
     virNetworkObjListForEach(network_driver->networks,
                              networkUpdateState,
-                             network_driver);
+                             network_driver/*参数*/);
     virNetworkObjListPrune(network_driver->networks,
                            VIR_CONNECT_LIST_NETWORKS_INACTIVE |
                            VIR_CONNECT_LIST_NETWORKS_TRANSIENT);
@@ -2171,6 +2185,7 @@ networkReloadFirewallRulesHelper(virNetworkObjPtr obj,
     virObjectLock(obj);
     def = virNetworkObjGetDef(obj);
     if (virNetworkObjIsActive(obj)) {
+        /*此network为active情况*/
         switch ((virNetworkForwardType) def->forward.type) {
         case VIR_NETWORK_FORWARD_NONE:
         case VIR_NETWORK_FORWARD_NAT:
@@ -2434,7 +2449,7 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
 
     /* Create and configure the bridge device */
     if (!def->bridge) {
-    		//桥名称未指定，报错
+    	//桥名称未指定，报错
         /* bridge name can only be empty if the config files were
          * edited directly. Otherwise networkValidate() (called after
          * parsing the XML from networkCreateXML() and
@@ -2461,6 +2476,7 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
          */
         macTapIfName = networkBridgeDummyNicName(def->bridge);
         if (!macTapIfName)
+            /*构造dummy名称失败*/
             goto error;
         /* Keep tun fd open and interface up to allow for IPv6 DAD to happen */
         if (virNetDevTapCreateInBridgePort(def->bridge,
@@ -2492,6 +2508,7 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
     if (virNetDevBridgeSetSTPDelay(def->bridge, def->delay * 1000) < 0)
         goto error;
 
+    /*按需设置stp*/
     if (virNetDevBridgeSetSTP(def->bridge, def->stp ? true : false) < 0)
         goto error;
 
@@ -2863,6 +2880,7 @@ networkShutdownNetworkExternal(virNetworkObjPtr obj G_GNUC_UNUSED)
 }
 
 
+/*启动network*/
 static int
 networkStartNetwork(virNetworkDriverStatePtr driver,
                     virNetworkObjPtr obj)
@@ -2873,6 +2891,7 @@ networkStartNetwork(virNetworkDriverStatePtr driver,
     VIR_DEBUG("driver=%p, network=%p", driver, obj);
 
     if (virNetworkObjIsActive(obj)) {
+        /*跳过active的network*/
         virReportError(VIR_ERR_OPERATION_INVALID,
                        "%s", _("network is already active"));
         return ret;
@@ -2905,7 +2924,7 @@ networkStartNetwork(virNetworkDriverStatePtr driver,
         break;
 
     case VIR_NETWORK_FORWARD_BRIDGE:
-    		//按桥模式转发，创建相应的桥
+    	//按桥模式转发，创建相应的桥
         if (def->bridge) {
             if (networkStartNetworkBridge(obj) < 0)
                 goto cleanup;
@@ -3670,6 +3689,7 @@ networkCreateXML(virConnectPtr conn,
 }
 
 
+/*通过xml定义network*/
 static virNetworkPtr
 networkDefineXML(virConnectPtr conn,
                  const char *xml)
@@ -3980,6 +4000,7 @@ networkUpdate(virNetworkPtr net,
 }
 
 
+/*创建network*/
 static int
 networkCreate(virNetworkPtr net)
 {
@@ -3990,7 +4011,9 @@ networkCreate(virNetworkPtr net)
     virObjectEventPtr event = NULL;
 
     if (!(obj = networkObjFromNetwork(net)))
+        /*此obj不存在*/
         goto cleanup;
+
     def = virNetworkObjGetDef(obj);
 
     if (virNetworkCreateEnsureACL(net->conn, def) < 0)
@@ -4766,9 +4789,11 @@ networkNotifyPort(virNetworkObjPtr obj,
     virNetworkForwardIfDefPtr dev = NULL;
     size_t i;
 
+    /*取network*/
     netdef = virNetworkObjGetDef(obj);
 
     if (!virNetworkObjIsActive(obj)) {
+        /*network不为active,退出*/
         virReportError(VIR_ERR_OPERATION_INVALID,
                        _("network '%s' is not active"),
                        netdef->name);
@@ -5777,7 +5802,7 @@ networkListAllPorts(virNetworkPtr net,
     return ret;
 }
 
-
+/*注册bridge相关的network driver*/
 static virNetworkDriver networkDriver = {
     .name = "bridge",
     .connectNumOfNetworks = networkConnectNumOfNetworks, /* 0.2.0 */
@@ -5822,10 +5847,12 @@ static virHypervisorDriver networkHypervisorDriver = {
 };
 
 
+/*注册本地network connect driver*/
 static virConnectDriver networkConnectDriver = {
     .localOnly = true,
     .uriSchemes = (const char *[]){ "network", NULL },
     .hypervisorDriver = &networkHypervisorDriver,
+    /*指明bridge网络驱动*/
     .networkDriver = &networkDriver,
 };
 
@@ -5840,6 +5867,7 @@ static virStateDriver networkStateDriver = {
 int
 networkRegister(void)
 {
+    /*注册network connect驱动*/
     if (virRegisterConnectDriver(&networkConnectDriver, false) < 0)
         return -1;
     if (virSetSharedNetworkDriver(&networkDriver) < 0)

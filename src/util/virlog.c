@@ -106,7 +106,7 @@ static size_t virLogNbOutputs;
 /*
  * Default priorities
  */
-static virLogPriority virLogDefaultPriority = VIR_LOG_DEFAULT;
+static virLogPriority virLogDefaultPriority = VIR_LOG_DEFAULT;/*日志默认优先级*/
 
 static void virLogResetFilters(void);
 static void virLogResetOutputs(void);
@@ -304,6 +304,7 @@ virLogReset(void)
 int
 virLogSetDefaultPriority(virLogPriority priority)
 {
+    /*log优先级检查*/
     if ((priority < VIR_LOG_DEBUG) || (priority > VIR_LOG_ERROR)) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Failed to set logging priority, argument '%u' is "
@@ -1180,6 +1181,7 @@ virLogGetNbOutputs(void)
 int
 virLogParseDefaultPriority(const char *priority)
 {
+    /*log优先级字符串与优先级映射*/
     if (STREQ(priority, "1") || STREQ(priority, "debug"))
         return VIR_LOG_DEBUG;
     else if (STREQ(priority, "2") || STREQ(priority, "info"))
@@ -1208,6 +1210,7 @@ virLogSetFromEnv(void)
 
     debugEnv = getenv("LIBVIRT_DEBUG");
     if (debugEnv && *debugEnv)
+        /*设置默认log优先级*/
         virLogSetDefaultPriority(virLogParseDefaultPriority(debugEnv));
     debugEnv = getenv("LIBVIRT_LOG_FILTERS");
     if (debugEnv && *debugEnv)

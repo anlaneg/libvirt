@@ -376,6 +376,8 @@
             goto label; \
         } \
     } while (0)
+
+/*argname不能为NULL*/
 #define virCheckNonNullArgGoto(argname, label) \
     do { \
         if (argname == NULL) { \

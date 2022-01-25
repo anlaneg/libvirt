@@ -142,6 +142,7 @@ static int virNetDevSetupControlFull(const char *ifname,
     if (ifr && ifname) {
         memset(ifr, 0, sizeof(*ifr));
 
+        /*设置ifr_name*/
         if (virStrcpyStatic(ifr->ifr_name, ifname) < 0) {
             virReportSystemError(ERANGE,
                                  _("Network interface name '%s' is too long"),
@@ -150,6 +151,7 @@ static int virNetDevSetupControlFull(const char *ifname,
         }
     }
 
+    /*创建socket*/
     if ((fd = socket(domain, type, 0)) < 0) {
         virReportSystemError(errno, "%s",
                              _("Cannot open network interface control socket"));
@@ -203,15 +205,19 @@ int virNetDevExists(const char *ifname)
     if ((fd = virNetDevSetupControl(ifname, &ifr)) < 0)
         return -1;
 
+    /*提取接口flags*/
     if (ioctl(fd, SIOCGIFFLAGS, &ifr)) {
         if (errno == ENODEV || errno == ENXIO)
+            /*设备不存在*/
             return 0;
 
         virReportSystemError(errno, _("Unable to check interface flags for %s"),
                              ifname);
+        /*操作失败*/
         return -1;
     }
 
+    /*接口存在*/
     return 1;
 }
 #else

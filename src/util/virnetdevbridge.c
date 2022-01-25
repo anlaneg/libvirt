@@ -499,6 +499,7 @@ virNetDevBridgeCreate(const char *brname,
     if (virNetDevSetName(ifr.ifr_name, brname) == -1)
         return -1;
 
+    /*设置桥mac*/
     if (virNetDevSetMAC(brname, mac) < 0) {
         virErrorPtr savederr;
 

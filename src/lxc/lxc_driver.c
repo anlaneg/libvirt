@@ -121,6 +121,7 @@ lxcDomObjFromDomain(virDomainPtr domain)
 
 /* Functions */
 
+/*表明lxc支持的system*/
 static int
 lxcConnectURIProbe(char **uri)
 {
@@ -5179,6 +5180,7 @@ static virStateDriver lxcStateDriver = {
 
 int lxcRegister(void)
 {
+    /*注册lxc相关的driver*/
     if (virRegisterConnectDriver(&lxcConnectDriver,
                                  true) < 0)
         return -1;

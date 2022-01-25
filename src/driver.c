@@ -53,6 +53,7 @@ virDriverLoadModule(const char *name,
 
     VIR_DEBUG("Module load %s", name);
 
+    /*构造模块so*/
     if (!(modfile = virFileFindResourceFull(name,
                                             "libvirt_driver_",
                                             ".so",

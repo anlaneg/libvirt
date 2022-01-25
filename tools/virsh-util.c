@@ -106,6 +106,7 @@ virshCommandOptDomain(vshControl *ctl,
                       const vshCmd *cmd,
                       const char **name)
 {
+    /*查询name对应的domain,例如uuid,name*/
     return virshCommandOptDomainBy(ctl, cmd, name,
                                    VIRSH_BYID | VIRSH_BYUUID | VIRSH_BYNAME);
 }

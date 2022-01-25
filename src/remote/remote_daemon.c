@@ -166,6 +166,7 @@ static int daemonInitialize(void)
         return -1;
 # endif
 # ifdef WITH_QEMU
+    /*加载qemu*/
     if (virDriverLoadModule("qemu", "qemuRegister", false) < 0)
         return -1;
 # endif
@@ -595,6 +596,7 @@ static void daemonRunStateInit(void *opaque)
      * This is deliberately done after telling the parent process
      * we're ready, since it can take a long time and this will
      * seriously delay OS bootup process */
+    /*初始化HV驱动*/
     if (virStateInitialize(virNetDaemonIsPrivileged(dmn),
                            mandatory,
                            NULL,
@@ -639,6 +641,7 @@ static int daemonStateInit(virNetDaemonPtr dmn)
 {
     virThread thr;
     virObjectRef(dmn);
+    /*创建线程执行daemonRunStateInit*/
     if (virThreadCreateFull(&thr, false, daemonRunStateInit,
                             "daemon-init", false, dmn) < 0) {
         virObjectUnref(dmn);
@@ -1028,6 +1031,7 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
+    /*daemon初始化*/
     if (daemonInitialize() < 0) {
         ret = VIR_DAEMON_ERR_INIT;
         goto cleanup;

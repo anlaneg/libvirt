@@ -121,6 +121,7 @@ virshCatchDisconnect(virConnectPtr conn,
 virConnectPtr
 virshConnect(vshControl *ctl, const char *uri, bool readonly)
 {
+    /*执行与hypervisor之间的连接*/
     virConnectPtr c = NULL;
     int interval = 5; /* Default */
     int count = 6;    /* Default */
@@ -143,7 +144,7 @@ virshConnect(vshControl *ctl, const char *uri, bool readonly)
     do {
         virErrorPtr err;
 
-        //创建connect
+        //创建connect，获得对应的driver
         if ((c = virConnectOpenAuth(uri, virConnectAuthPtrDefault,
                                     readonly ? VIR_CONNECT_RO : 0)))
             break;
@@ -201,6 +202,7 @@ virshConnect(vshControl *ctl, const char *uri, bool readonly)
 static int
 virshReconnect(vshControl *ctl, const char *name, bool readonly, bool force)
 {
+    /*与libvirtd建立连接*/
     bool connected = false;
     virshControlPtr priv = ctl->privData;
 
@@ -212,6 +214,7 @@ virshReconnect(vshControl *ctl, const char *name, bool readonly, bool force)
         readonly = priv->readonly;
 
     if (priv->conn) {
+        /*如果已有连接，则先断开*/
         int ret;
         connected = true;
 
@@ -224,10 +227,11 @@ virshReconnect(vshControl *ctl, const char *name, bool readonly, bool force)
                                   "disconnect from the hypervisor"));
     }
 
-    //创建连接
-    priv->conn = virshConnect(ctl, name ? name : ctl->connname, readonly);
+    //创建新连接
+    priv->conn = virshConnect(ctl, name ? name : ctl->connname/*如果未指定connname，则使用ctl名称*/, readonly);
 
     if (!priv->conn) {
+        /*连接失败*/
         if (disconnected)
             vshError(ctl, "%s", _("Failed to reconnect to the hypervisor"));
         else
@@ -352,7 +356,7 @@ virshInit(vshControl *ctl)
     vshInitReload(ctl);
 
     if (priv->conn)
-    		//已连接，退出
+    	//已连接，退出
         return false;
 
     /* set up the library error handler */
@@ -363,6 +367,7 @@ virshInit(vshControl *ctl)
         return false;
     }
 
+    /*创建thread,执行eventloop*/
     if (virThreadCreate(&ctl->eventLoop, true, vshEventLoop, ctl) < 0) {
         vshReportError(ctl);
         return false;
@@ -376,6 +381,7 @@ virshInit(vshControl *ctl)
     }
 
     if (ctl->connname) {
+        /*如果指定了conname,则在此处进行连接*/
         /* Connecting to a named connection must succeed, but we delay
          * connecting to the default connection until we need it
          * (since the first command might be 'connect' which allows a
@@ -681,6 +687,7 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
             ctl->connname = g_strdup(optarg);
             break;
         case 'd':
+            /*设置Debug级别*/
             if (virStrToLong_i(optarg, NULL, 10, &debug) < 0) {
                 vshError(ctl, _("option %s takes a numeric argument"),
                          longindex == -1 ? "-d" : "--debug");
@@ -706,11 +713,12 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
             }
             break;
         case 'h':
-        		//显示帮助
+        	//显示帮助
             virshUsage();
             exit(EXIT_SUCCESS);
             break;
         case 'k':
+            /*keepalive间隔*/
             if (virStrToLong_i(optarg, NULL, 0, &keepalive) < 0) {
                 vshError(ctl,
                          _("Invalid value for option %s"),
@@ -793,18 +801,18 @@ virshParseArgv(vshControl *ctl, int argc, char **argv)
     }
 
     if (argc == optind) {
-    		//后面无命令，认定交互模式
+    	//后面无命令，认定交互模式
         ctl->imode = true;
     } else {
         /* parse command */
-    		//存在command参数，认为非交互模式
+    	//存在command参数，认为非交互模式
         ctl->imode = false;
         if (argc - optind == 1) {
-        		//仅剩余一个参数，按字符串解析
+        	//仅剩余一个参数，按字符串解析
             vshDebug(ctl, VSH_ERR_INFO, "commands: \"%s\"\n", argv[optind]);
             return vshCommandStringParse(ctl, argv[optind], NULL);
         } else {
-        		//解析多个字符串
+        	//解析多个字符串
             return vshCommandArgvParse(ctl, argc - optind, argv + optind);
         }
     }
@@ -852,6 +860,7 @@ static const vshCmdGrp cmdGroups[] = {
     {NULL, NULL, NULL}
 };
 
+/*virsh命令执行，用于接立连接*/
 static const vshClientHooks hooks = {
     .connHandler = virshConnectionHandler
 };
@@ -907,7 +916,7 @@ main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    //初始化libvirt
+    //初始化libvirt，注册驱动
     if (virInitialize() < 0) {
         vshError(ctl, "%s", _("Failed to initialize libvirt"));
         return EXIT_FAILURE;
@@ -947,6 +956,7 @@ main(int argc, char **argv)
         do {
             const char *prompt = virshCtl.readonly ? VIRSH_PROMPT_RO
                 : VIRSH_PROMPT_RW;
+            /*读取一行数据*/
             ctl->cmdstr =
                 vshReadline(ctl, prompt);
             if (ctl->cmdstr == NULL)
@@ -955,7 +965,7 @@ main(int argc, char **argv)
 #if WITH_READLINE
                 add_history(ctl->cmdstr);
 #endif
-                //自stdin读取到数据并运行
+                //解析此行数据，并运行
                 if (vshCommandStringParse(ctl, ctl->cmdstr, NULL))
                     vshCommandRun(ctl, ctl->cmd);
             }

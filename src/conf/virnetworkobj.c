@@ -44,7 +44,7 @@ struct _virNetworkObj {
 
     pid_t dnsmasqPid;
     pid_t radvdPid;
-    bool active;
+    bool active;/*network是否active*/
     bool autostart;
     bool persistent;
 
@@ -57,15 +57,16 @@ struct _virNetworkObj {
     unsigned int taint;
 
     /* Immutable pointer, self locking APIs */
-    virMacMapPtr macmap;
+    virMacMapPtr macmap;/*指向此network对应的macMap*/
 
+    /*通过uuid查询network port*/
     virHashTablePtr ports; /* uuid -> virNetworkPortDefPtr */
 };
 
 struct _virNetworkObjList {
     virObjectRWLockable parent;
 
-    virHashTablePtr objs;
+    virHashTablePtr objs;/*创建的hashtable,保存network*/
 };
 
 static virClassPtr virNetworkObjClass;
@@ -167,6 +168,7 @@ virNetworkObjGetNewDef(virNetworkObjPtr obj)
 }
 
 
+/*检查network是否active*/
 bool
 virNetworkObjIsActive(virNetworkObjPtr obj)
 {
@@ -174,6 +176,7 @@ virNetworkObjIsActive(virNetworkObjPtr obj)
 }
 
 
+/*设置此netowrk是否active*/
 void
 virNetworkObjSetActive(virNetworkObjPtr obj,
                        bool active)
@@ -263,6 +266,7 @@ virNetworkObjSetFloorSum(virNetworkObjPtr obj,
 }
 
 
+/*设置此network对应的macmap*/
 void
 virNetworkObjSetMacMap(virNetworkObjPtr obj,
                        virMacMapPtr macmap)
@@ -370,6 +374,7 @@ virNetworkObjFindByUUIDLocked(virNetworkObjListPtr nets,
 
     virUUIDFormat(uuid, uuidstr);
 
+    /*通过uuid查询network*/
     obj = virHashLookup(nets->objs, uuidstr);
     if (obj)
         virObjectRef(obj);
@@ -522,7 +527,7 @@ virNetworkObjUpdateAssignDef(virNetworkObjPtr obj,
             obj->newDef = obj->def;
         else
             virNetworkDefFree(obj->def);
-        obj->def = def;
+        obj->def = def;/*更新配置*/
     } else { /* !live */
         virNetworkDefFree(obj->newDef);
         if (virNetworkObjIsActive(obj)) {
@@ -578,6 +583,7 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
         virObjectLock(obj);
         /* UUID matches, but if names don't match, refuse it */
         if (STRNEQ(obj->def->name, def->name)) {
+            /*查找到的name与实际nme不符，进行告警*/
             virUUIDFormat(obj->def->uuid, uuidstr);
             virReportError(VIR_ERR_OPERATION_FAILED,
                            _("network '%s' is already defined with uuid %s"),
@@ -588,6 +594,7 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
         if (flags & VIR_NETWORK_OBJ_LIST_ADD_CHECK_LIVE) {
             /* UUID & name match, but if network is already active, refuse it */
             if (virNetworkObjIsActive(obj)) {
+                /*obj已active,拒绝*/
                 virReportError(VIR_ERR_OPERATION_INVALID,
                                _("network is already active as '%s'"),
                                obj->def->name);
@@ -595,11 +602,13 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
             }
         }
 
+        /*obj已存在，执行更新*/
         virNetworkObjUpdateAssignDef(obj, def,
                                      !!(flags & VIR_NETWORK_OBJ_LIST_ADD_LIVE));
     } else {
         /* UUID does not match, but if a name matches, refuse it */
         if ((obj = virNetworkObjFindByNameLocked(nets, def->name))) {
+            /*uuid没有查询到，通过name查询到obj,报错*/
             virObjectLock(obj);
             virUUIDFormat(obj->def->uuid, uuidstr);
             virReportError(VIR_ERR_OPERATION_FAILED,
@@ -608,6 +617,7 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
             goto cleanup;
         }
 
+        /*没有查询到此network,执行添加*/
         if (!(obj = virNetworkObjNew()))
               goto cleanup;
 
@@ -651,6 +661,7 @@ virNetworkObjAssignDef(virNetworkObjListPtr nets,
     virNetworkObjPtr obj;
 
     virObjectRWLockWrite(nets);
+    /*增加/更新network*/
     obj = virNetworkObjAssignDefLocked(nets, def, flags);
     virObjectRWUnlock(nets);
     return obj;
@@ -872,8 +883,8 @@ virNetworkObjSaveStatus(const char *statusDir,
 
 static virNetworkObjPtr
 virNetworkLoadState(virNetworkObjListPtr nets,
-                    const char *stateDir,
-                    const char *name,
+                    const char *stateDir/*目录路径*/,
+                    const char *name/*文件名称*/,
                     virNetworkXMLOptionPtr xmlopt)
 {
     char *configFile = NULL;
@@ -889,9 +900,11 @@ virNetworkLoadState(virNetworkObjListPtr nets,
     size_t i;
 
 
+    /*生成配置文件路径*/
     if ((configFile = virNetworkConfigFile(stateDir, name)) == NULL)
         goto error;
 
+    /*解析配置文件*/
     if (!(xml = virXMLParseCtxt(configFile, NULL, _("(network status)"), &ctxt)))
         goto error;
 
@@ -997,6 +1010,7 @@ virNetworkLoadState(virNetworkObjListPtr nets,
 }
 
 
+/*读取network配置*/
 static virNetworkObjPtr
 virNetworkLoadConfig(virNetworkObjListPtr nets,
                      const char *configDir,
@@ -1009,17 +1023,22 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
     virNetworkObjPtr obj;
     int autostart;
 
+    /*网络配置文件*/
     if ((configFile = virNetworkConfigFile(configDir, name)) == NULL)
         goto error;
+    /*此文件对应的autostartLink*/
     if ((autostartLink = virNetworkConfigFile(autostartDir, name)) == NULL)
         goto error;
 
+    /*检查两者是否同一文件*/
     if ((autostart = virFileLinkPointsTo(autostartLink, configFile)) < 0)
         goto error;
 
+    /*此文件被置为autostart,开始解析，生成xml对象*/
     if (!(def = virNetworkDefParseFile(configFile, xmlopt)))
         goto error;
 
+    /*名称必须与def中设置的一样*/
     if (STRNEQ(name, def->name)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Network config filename '%s'"
@@ -1034,7 +1053,9 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
     case VIR_NETWORK_FORWARD_ROUTE:
     case VIR_NETWORK_FORWARD_OPEN:
         if (!def->mac_specified) {
+            /*没有指定mac,生成指定前缀的mac*/
             virNetworkSetBridgeMacAddr(def);
+            /*生成network配置并进行保存（mac完成写入）*/
             virNetworkSaveConfig(configDir, def, xmlopt);
         }
         break;
@@ -1055,6 +1076,7 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
         goto error;
     }
 
+    /*设置/更新obj*/
     if (!(obj = virNetworkObjAssignDef(nets, def, 0)))
         goto error;
 
@@ -1083,12 +1105,15 @@ virNetworkObjLoadAllState(virNetworkObjListPtr nets,
     int ret = -1;
     int rc;
 
+    /*打开stateDir目录，返回dir*/
     if ((rc = virDirOpenIfExists(&dir, stateDir)) <= 0)
         return rc;
 
+    /*遍历每个目录实体entry*/
     while ((ret = virDirRead(dir, &entry, stateDir)) > 0) {
         virNetworkObjPtr obj;
 
+        /*跳过非.xml后缀文件*/
         if (!virStringStripSuffix(entry->d_name, ".xml"))
             continue;
 
@@ -1108,10 +1133,11 @@ virNetworkObjLoadAllState(virNetworkObjListPtr nets,
 }
 
 
+/*加载network配置目录下配置文件，要求其被在autostartDir下置有链接*/
 int
 virNetworkObjLoadAllConfigs(virNetworkObjListPtr nets,
-                            const char *configDir,
-                            const char *autostartDir,
+                            const char *configDir/*network配置目录*/,
+                            const char *autostartDir/*network autostart配置目录*/,
                             virNetworkXMLOptionPtr xmlopt)
 {
     DIR *dir;
@@ -1119,21 +1145,25 @@ virNetworkObjLoadAllConfigs(virNetworkObjListPtr nets,
     int ret = -1;
     int rc;
 
+    /*打开network配置目录*/
     if ((rc = virDirOpenIfExists(&dir, configDir)) <= 0)
         return rc;
 
+    /*读取目录成员*/
     while ((ret = virDirRead(dir, &entry, configDir)) > 0) {
         virNetworkObjPtr obj;
 
+        /*跳过非xml文件*/
         if (!virStringStripSuffix(entry->d_name, ".xml"))
             continue;
 
         /* NB: ignoring errors, so one malformed config doesn't
            kill the whole process */
+        /*解析并生成network对象，并添加进nets的hashtable中*/
         obj = virNetworkLoadConfig(nets,
-                                   configDir,
-                                   autostartDir,
-                                   entry->d_name,
+                                   configDir,/*network配置目录*/
+                                   autostartDir,/*network autostart配置目录*/
+                                   entry->d_name,/*目录成员*/
                                    xmlopt);
         virNetworkObjEndAPI(&obj);
     }
@@ -1438,9 +1468,9 @@ virNetworkObjListExport(virConnectPtr conn,
 
 
 struct virNetworkObjListForEachHelperData {
-    virNetworkObjListIterator callback;
-    void *opaque;
-    int ret;
+    virNetworkObjListIterator callback;/*network遍历函数*/
+    void *opaque;/*network遍历函数参数*/
+    int ret;/*记录遍历返回值*/
 };
 
 static int
@@ -1450,8 +1480,9 @@ virNetworkObjListForEachHelper(void *payload,
 {
     struct virNetworkObjListForEachHelperData *data = opaque;
 
+    /*调用callback,传入network及参数*/
     if (data->callback(payload, data->opaque) < 0)
-        data->ret = -1;
+        data->ret = -1;/*出错时，将ret设置-1*/
     return 0;
 }
 
@@ -1475,8 +1506,9 @@ virNetworkObjListForEach(virNetworkObjListPtr nets,
                          void *opaque)
 {
     struct virNetworkObjListForEachHelperData data = {
-        .callback = callback, .opaque = opaque, .ret = 0};
+        .callback = callback/*network遍历函数*/, .opaque = opaque, .ret = 0};
     virObjectRWLockRead(nets);
+    /*遍历network*/
     virHashForEach(nets->objs, virNetworkObjListForEachHelper, &data);
     virObjectRWUnlock(nets);
     return data.ret;
@@ -1616,6 +1648,7 @@ virNetworkObjListPrune(virNetworkObjListPtr nets,
 }
 
 
+/*生成ports对应的文件路径*/
 char *
 virNetworkObjGetPortStatusDir(virNetworkObjPtr net,
                               const char *stateDir)
@@ -1852,19 +1885,20 @@ virNetworkObjPortForEachCallback(void *payload,
     return 0;
 }
 
+/*遍历network下所有ports*/
 int
 virNetworkObjPortForEach(virNetworkObjPtr obj,
                          virNetworkPortListIter iter,
                          void *opaque)
 {
-    virNetworkObjPortListForEachData data = { iter, opaque, false };
+    virNetworkObjPortListForEachData data = { iter/*回调函数*/, opaque, false };
     virHashForEach(obj->ports, virNetworkObjPortForEachCallback, &data);
     if (data.err)
         return -1;
     return 0;
 }
 
-
+/*加载stateDir目录下，所有port信息*/
 static int
 virNetworkObjLoadAllPorts(virNetworkObjPtr net,
                           const char *stateDir)
@@ -1880,25 +1914,31 @@ virNetworkObjLoadAllPorts(virNetworkObjPtr net,
     if (!(dir = virNetworkObjGetPortStatusDir(net, stateDir)))
         goto cleanup;
 
+    /*如果目录不存在，则返回*/
     if ((rc = virDirOpenIfExists(&dh, dir)) <= 0) {
         ret = rc;
         goto cleanup;
     }
 
+    /*遍历目录成员项*/
     while ((rc = virDirRead(dh, &de, dir)) > 0) {
         g_autofree char *file = NULL;
 
+        /*跳过.xml后缀文件*/
         if (!virStringStripSuffix(de->d_name, ".xml"))
             continue;
 
+        /*生成文件全路径*/
         file = g_strdup_printf("%s/%s.xml", dir, de->d_name);
 
+        /*解析port*/
         portdef = virNetworkPortDefParseFile(file);
         if (!portdef) {
             VIR_WARN("Cannot parse port %s", file);
             continue;
         }
 
+        /*添加ports到net->ports*/
         virUUIDFormat(portdef->uuid, uuidstr);
         if (virHashAddEntry(net->ports, uuidstr, portdef) < 0)
             goto cleanup;

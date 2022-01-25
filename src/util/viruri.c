@@ -363,10 +363,12 @@ virURIResolveAlias(virConfPtr conf, const char *alias, char **uri)
 
     *uri = NULL;
 
+    /*取uri别名数组*/
     if (virConfGetValueStringList(conf, "uri_aliases", false, &aliases) < 0)
         return -1;
 
     if (aliases && *aliases) {
+        /*执行别名匹配*/
         ret = virURIFindAliasMatch(aliases, alias, uri);
         virStringListFree(aliases);
     } else {

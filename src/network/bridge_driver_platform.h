@@ -41,11 +41,11 @@ struct _virNetworkDriverState {
     virNetworkObjListPtr networks;
 
     /* Immutable pointers, Immutable objects */
-    char *networkConfigDir;
-    char *networkAutostartDir;
+    char *networkConfigDir;/*网络配置目录路径*/
+    char *networkAutostartDir;/*autostart目录路径*/
     char *stateDir;
     char *pidDir;
-    char *dnsmasqStateDir;
+    char *dnsmasqStateDir;/*dnsmasq状态目录路径*/
     char *radvdStateDir;
 
     /* Require lock to get a reference on the object,

@@ -2877,6 +2877,7 @@ virDirOpenInternal(DIR **dirp/*出参，目录描述符*/, const char *name/*目
         if (quiet)
             return -1;
 
+        /*目录不存在，返回0*/
         if (ignoreENOENT && errno == ENOENT)
             return 0;
         virReportSystemError(errno, _("cannot open directory '%s'"), name);
@@ -2956,13 +2957,14 @@ int virDirRead(DIR *dirp, struct dirent **ent, const char *name)
         errno = 0;
         *ent = readdir(dirp); /* exempt from syntax-check */
         if (!*ent && errno) {
+            /*读目录失败，返回-1*/
             if (name)
                 virReportSystemError(errno, _("Unable to read directory '%s'"),
                                      name);
             return -1;
         }
     } while (*ent && (STREQ((*ent)->d_name, ".") ||
-                      STREQ((*ent)->d_name, "..")));
+                      STREQ((*ent)->d_name, "..")));/*遍历dir,并跳过'.','..'目录，其它目录立即退出*/
     return !!*ent;
 }
 

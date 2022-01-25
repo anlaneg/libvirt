@@ -35,6 +35,7 @@
 
 VIR_LOG_INIT("util.error");
 
+/*per thread变量*/
 virThreadLocal virLastErr;
 
 virErrorFunc virErrorHandler = NULL;     /* global error handler */

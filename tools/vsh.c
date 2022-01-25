@@ -449,20 +449,23 @@ static vshCmdOptDef helpopt = {
     .help = N_("print help for this function")
 };
 static const vshCmdOptDef *
-vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
-                   uint64_t *opts_seen, size_t *opt_index, char **optstr,
+vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd/*当前命令*/, const char *name/*当前选项名*/,
+                   uint64_t *opts_seen/*入出参，遇到的选项*/, size_t *opt_index/*出参，命中哪个选项*/, char **optstr,
                    bool report)
 {
     size_t i;
     const vshCmdOptDef *ret = NULL;
     char *alias = NULL;
 
+    /*针对help选项，统一处理*/
     if (STREQ(name, helpopt.name))
         return &helpopt;
 
+    /*遍历此cmd下所有选项*/
     for (i = 0; cmd->opts && cmd->opts[i].name; i++) {
         const vshCmdOptDef *opt = &cmd->opts[i];
 
+        /*检查当前输入字符串是否与opt->name匹配*/
         if (STREQ(opt->name, name)) {
             if (opt->type == VSH_OT_ALIAS) {
                 char *value;
@@ -486,6 +489,8 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
                 }
                 continue;
             }
+
+            /*重复使用当前选项*/
             if ((*opts_seen & (1ULL << i)) && opt->type != VSH_OT_ARGV) {
                 if (report)
                     vshError(ctl, _("option --%s already seen"), name);
@@ -493,7 +498,7 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
             }
             *opts_seen |= 1ULL << i;
             *opt_index = i;
-            ret = opt;
+            ret = opt;/*返回命中的选项*/
             goto cleanup;
         }
     }
@@ -1287,7 +1292,7 @@ vshBlockJobOptionBandwidth(vshControl *ctl,
  * Executes command(s) and returns return code from last command
  */
 bool
-vshCommandRun(vshControl *ctl, const vshCmd *cmd)
+vshCommandRun(vshControl *ctl, const vshCmd *cmd/*待运行的命令*/)
 {
     const vshClientHooks *hooks = ctl->hooks;
     bool ret = true;
@@ -1296,10 +1301,11 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
         gint64 before, after;
         bool enable_timing = ctl->timing;
 
+        /*命令执行前时间*/
         before = g_get_real_time();
 
-        if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT) ||
-            (hooks && hooks->connHandler && hooks->connHandler(ctl)/*重新连接*/)) {
+        if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT)/*如不需要连接*/ ||
+            (hooks && hooks->connHandler && hooks->connHandler(ctl)/*重新连接成功*/)) {
         	//执行对应的命令处理
             ret = cmd->def->handler(ctl, cmd);
         } else {
@@ -1307,6 +1313,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             ret = false;
         }
 
+        /*命令执行后时间*/
         after = g_get_real_time();
 
         /* try to automatically catch disconnections */
@@ -1327,12 +1334,14 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             return ret;
 
         if (enable_timing) {
+            /*显示命令执行用时*/
             double diff_ms = (after - before) / 1000.0;
 
             vshPrint(ctl, _("\n(Time: %.3f ms)\n\n"), diff_ms);
         } else {
             vshPrintExtra(ctl, "\n");
         }
+        /*切换到下一条命令*/
         cmd = cmd->next;
     }
     return ret;
@@ -1365,8 +1374,9 @@ struct _vshCommandParser {
     char **arg_end;
 };
 
+/*解析命令行，获得一个或一组命令（每个命令包含一个或多个选项）*/
 static bool
-vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
+vshCommandParse(vshControl *ctl, vshCommandParser *parser/*命令行*/, vshCmd **partial)
 {
     char *tkdata = NULL;
     vshCmd *clast = NULL;
@@ -1374,6 +1384,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
     const vshCmdDef *cmd = NULL;
 
     if (!partial) {
+        /*清空ctl->cmd*/
         vshCommandFree(ctl->cmd);
         ctl->cmd = NULL;
     }
@@ -1382,9 +1393,9 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
         vshCmdOpt *last = NULL;
         vshCommandToken tk;
         bool data_only = false;
-        uint64_t opts_need_arg = 0;
-        uint64_t opts_required = 0;
-        uint64_t opts_seen = 0;
+        uint64_t opts_need_arg = 0;/*需要参数的选项*/
+        uint64_t opts_required = 0;/*必须的选项*/
+        uint64_t opts_seen = 0;/*遇到的选项*/
 
         cmd = NULL;
         first = NULL;
@@ -1397,28 +1408,33 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
         while (1) {
             const vshCmdOptDef *opt = NULL;
 
+            /*取参数，并填充到tkdata*/
             tkdata = NULL;
             tk = parser->getNextArg(ctl, parser, &tkdata, true);
 
             if (tk == VSH_TK_ERROR)
             	//解析出错
                 goto syntaxError;
+
             if (tk != VSH_TK_ARG) {
+                /*解析结束*/
                 VIR_FREE(tkdata);
                 break;
             }
 
+            /*当前还没有识别命令，先识别命令*/
             if (cmd == NULL) {
                 /* first token must be command name or comment */
                 if (*tkdata == '#') {
+                    /*遇到‘#’注释符，停止处理*/
                     do {
                         VIR_FREE(tkdata);
                         tk = parser->getNextArg(ctl, parser, &tkdata, false);
                     } while (tk == VSH_TK_ARG);
                     VIR_FREE(tkdata);
                     break;
-                } else if (!(cmd = vshCmddefSearch(tkdata))) {
-            	    //首次进入，利用获得的tkdata(首个参数，没有查找到cmd，报错
+                } else if (!(cmd = vshCmddefSearch(tkdata))/*确认当前cmd*/) {
+            	    //没有查找到cmd，报错
                     if (!partial)
                         vshError(ctl, _("unknown command: '%s'"), tkdata);
                     goto syntaxError;   /* ... or ignore this command only? */
@@ -1432,7 +1448,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                     cmd = vshCmddefSearch(tkdata);
                 }
 
-                /*收其此cmd选项哪些需要参数，哪些是必须的*/
+                /*收集此cmd选项哪些需要参数，哪些是必须的*/
                 if (vshCmddefOptParse(cmd, &opts_need_arg,
                                       &opts_required) < 0) {
                     if (!partial)
@@ -1446,7 +1462,8 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 goto get_data;
             } else if (tkdata[0] == '-' && tkdata[1] == '-' &&
                        g_ascii_isalnum(tkdata[2])) {
-                char *optstr = strchr(tkdata + 2, '=');
+                /*长选项处理*/
+                char *optstr = strchr(tkdata + 2, '=');/*选项value*/
                 size_t opt_index = 0;
 
                 if (optstr) {
@@ -1457,6 +1474,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 if (!(opt = vshCmddefGetOption(ctl, cmd, tkdata + 2,
                                                &opts_seen, &opt_index,
                                                &optstr, partial == NULL))) {
+                    /*不认识的选项*/
                     VIR_FREE(optstr);
                     if (STREQ(cmd->name, "help"))
                         continue;
@@ -1507,6 +1525,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 }
             } else if (tkdata[0] == '-' && tkdata[1] == '-' &&
                        tkdata[2] == '\0') {
+                /*选项处理结束，其后为数据*/
                 VIR_FREE(tkdata);
                 data_only = true;
                 continue;
@@ -1534,6 +1553,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 if (!first)
                     first = arg;
                 if (last)
+                    /*将选项串起来*/
                     last->next = arg;
                 last = arg;
 
@@ -1553,11 +1573,12 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
 
             /* if we encountered --help, replace parsed command with
              * 'help <cmdname>' */
-            for (tmpopt = first; tmpopt; tmpopt = tmpopt->next) {
+            for (tmpopt = first/*指向此命令的首个选项*/; tmpopt; tmpopt = tmpopt->next) {
                 const vshCmdDef *help;
                 if (STRNEQ(tmpopt->def->name, "help"))
                     continue;
 
+                /*遇到选项Help,更换cmd为此help*/
                 help = vshCmddefSearch("help");
                 vshCommandOptFree(first);
                 first = vshMalloc(ctl, sizeof(vshCmdOpt));
@@ -1576,6 +1597,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
             c->next = NULL;
             first = NULL;
 
+            /*执行选项检查*/
             if (!partial &&
                 vshCommandCheckOpts(ctl, c, opts_required, opts_seen) < 0) {
                 VIR_FREE(c);
@@ -1623,15 +1645,15 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
  * --------------------
  */
 
-//获取下一个参数
+//获取下一个参数(通过增加arg_pos位置，指向下一个参数）
 static vshCommandToken ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
 vshCommandArgvGetArg(vshControl *ctl G_GNUC_UNUSED,
                      vshCommandParser *parser,
-                     char **res,
+                     char **res/*出参，返回对应的参数*/,
                      bool report G_GNUC_UNUSED)
 {
     if (parser->arg_pos == parser->arg_end) {
-    		//已达到最后一个参数，返回结束
+    	//已达到最后一个参数，返回结束
         *res = NULL;
         return VSH_TK_END;
     }
@@ -1642,8 +1664,9 @@ vshCommandArgvGetArg(vshControl *ctl G_GNUC_UNUSED,
     return VSH_TK_ARG;
 }
 
+/*命令解析，多个命令*/
 bool
-vshCommandArgvParse(vshControl *ctl, int nargs, char **argv)
+vshCommandArgvParse(vshControl *ctl, int nargs/*参数数*/, char **argv)
 {
     vshCommandParser parser;
 
@@ -1744,9 +1767,9 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
     return VSH_TK_ARG;
 }
 
-//命令行解析
+//命令行解析(单个命令）
 bool
-vshCommandStringParse(vshControl *ctl, char *cmdstr, vshCmd **partial)
+vshCommandStringParse(vshControl *ctl, char *cmdstr/*单行数据*/, vshCmd **partial)
 {
     vshCommandParser parser;
 
@@ -2031,6 +2054,7 @@ vshEventLoop(void *opaque)
         virMutexUnlock(&ctl->lock);
 
         if (quit)
+            /*跳出，执行退出*/
             break;
 
         if (virEventRunDefaultImpl() < 0)
@@ -2412,6 +2436,7 @@ vshEditWriteToTempFile(vshControl *ctl, const char *doc)
         return NULL;
     }
 
+    /*写文件内容到fd*/
     if (safewrite(fd, doc, strlen(doc)) == -1) {
         vshError(ctl, _("write: %s: failed to write to temporary file: %s"),
                  ret, g_strerror(errno));
@@ -3055,6 +3080,7 @@ bool
 vshInit(vshControl *ctl, const vshCmdGrp *groups, const vshCmdDef *set)
 {
     if (!ctl->hooks) {
+        /*需要提前设置hooks*/
         vshError(ctl, "%s", _("client hooks cannot be NULL"));
         return false;
     }

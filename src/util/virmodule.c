@@ -115,6 +115,7 @@ virModuleLoad(const char *path,
         }
     }
 
+    /*加载so,并进行函数调用*/
     if (!(rethandle = virModuleLoadFile(path)))
         goto cleanup;
 

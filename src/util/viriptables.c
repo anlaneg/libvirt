@@ -76,6 +76,7 @@ iptablesPrivateChainCreate(virFirewallPtr fw,
     int ret = -1;
     size_t i;
 
+    /*创建chain,link*/
     if (!(chains = virHashCreate(50, NULL)))
         goto cleanup;
     if (!(links = virHashCreate(50, NULL)))
@@ -155,6 +156,7 @@ iptablesSetupPrivateChains(virFirewallLayer layer)
 
     virFirewallStartTransaction(fw, 0);
 
+    /*遍历data*/
     for (i = 0; i < G_N_ELEMENTS(data); i++)
         virFirewallAddRuleFull(fw, data[i].layer,
                                false, iptablesPrivateChainCreate,

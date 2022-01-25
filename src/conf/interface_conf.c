@@ -823,6 +823,7 @@ virInterfaceDefParseNode(xmlDocPtr xml,
     if (!(ctxt = virXMLXPathContextNew(xml)))
         return NULL;
 
+    /*解析interface对应的xml*/
     ctxt->node = root;
     return virInterfaceDefParseXML(ctxt, VIR_INTERFACE_TYPE_LAST);
 }

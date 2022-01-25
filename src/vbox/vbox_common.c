@@ -518,6 +518,7 @@ vboxAttachStorageControllers(virDomainDefPtr def,
 }
 
 
+/*填充vbox对应的连接uri*/
 static int
 vboxConnectURIProbe(char **uri)
 {

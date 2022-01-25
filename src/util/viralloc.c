@@ -89,6 +89,7 @@ int virReallocN(void *ptrptr,
                 size_t size,
                 size_t count)
 {
+    /*申请合适大小的内存*/
     *(void **)ptrptr = g_realloc_n(*(void**)ptrptr, size, count);
     return 0;
 }
@@ -109,17 +110,20 @@ int virReallocN(void *ptrptr,
  * Returns zero on success, aborts on OOM
  */
 int virExpandN(void *ptrptr,
-               size_t size,
-               size_t *countptr,
-               size_t add)
+               size_t size/*元素内存大小*/,
+               size_t *countptr/*元素数*/,
+               size_t add/*增加的元素数*/)
 {
     if (*countptr + add < *countptr)
+        /*防止内存过大*/
         abort();
 
     if (virReallocN(ptrptr, size, *countptr + add) < 0)
+        /*申请内存失败*/
         abort();
+    /*初始化新增的元素*/
     memset(*(char **)ptrptr + (size * *countptr), 0, size * add);
-    *countptr += add;
+    *countptr += add;/*增加元素数*/
     return 0;
 }
 

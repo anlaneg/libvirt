@@ -75,7 +75,7 @@ typedef virQEMUDriverConfig *virQEMUDriverConfigPtr;
 struct _virQEMUDriverConfig {
     virObject parent;
 
-    //各driver对应的uri
+    //qemu driver对应的uri
     char *uri;
 
     uid_t user;

@@ -264,10 +264,10 @@ typedef virNetworkDef *virNetworkDefPtr;
 struct _virNetworkDef {
     unsigned char uuid[VIR_UUID_BUFLEN];
     bool uuid_specified;
-    char *name;
+    char *name;/*网络名称*/
     int   connections; /* # of guest interfaces connected to this network */
 
-    //桥名称
+    //桥设备名称
     char *bridge;       /* Name of bridge device */
     char *bridgeZone;  /* name of firewalld zone for bridge */
     int  macTableManager; /* enum virNetworkBridgeMACTableManager */

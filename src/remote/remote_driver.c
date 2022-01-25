@@ -1004,6 +1004,7 @@ doRemoteOpen(virConnectPtr conn,
         port = g_strdup(LIBVIRTD_TCP_PORT);
     } /* Port not used for unix, ext., default for ssh */
 
+    /*设置主机名称*/
     priv->hostname = g_strdup(conn->uri && conn->uri->server ? conn->uri->server : "localhost");
 
     if (conn->uri)
@@ -8438,6 +8439,7 @@ unsigned long remoteVersion(void)
 
 static virHypervisorDriver hypervisor_driver = {
     .name = "remote",
+    /*建立到libvirt的连接*/
     .connectOpen = remoteConnectOpen, /* 0.3.0 */
     .connectClose = remoteConnectClose, /* 0.3.0 */
     .connectSetIdentity = remoteConnectSetIdentity, /* 5.8.0 */
@@ -8834,7 +8836,9 @@ static virNWFilterDriver nwfilter_driver = {
 };
 
 static virConnectDriver connect_driver = {
+        /*hypervisor驱动*/
     .hypervisorDriver = &hypervisor_driver,
+    /*interface驱动*/
     .interfaceDriver = &interface_driver,
     .networkDriver = &network_driver,
     .nodeDeviceDriver = &node_device_driver,
@@ -8859,7 +8863,7 @@ int
 remoteRegister(void)
 {
     if (virRegisterConnectDriver(&connect_driver,
-                                 false) < 0)
+                                 false/*不使用share driver*/) < 0)
         return -1;
     if (virRegisterStateDriver(&state_driver) < 0)
         return -1;

@@ -395,7 +395,7 @@ virHookCall(int driver/*要调用的hook点名称*/,
             opstr = virHookLibxlOpTypeToString(op);
             break;
         case VIR_HOOK_DRIVER_NETWORK:
-        		//获得network driver hook时的opstr
+        	//获得network driver hook时的opstr
             opstr = virHookNetworkOpTypeToString(op);
             break;
         case VIR_HOOK_DRIVER_BHYVE:

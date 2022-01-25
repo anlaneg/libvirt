@@ -43,7 +43,7 @@ VIR_LOG_INIT("util.virmacmap");
 struct virMacMap {
     virObjectLockable parent;
 
-    virHashTablePtr macs;
+    virHashTablePtr macs;/*以domain进行maclist进行查询*/
 };
 
 
@@ -87,11 +87,13 @@ virMacMapAddLocked(virMacMapPtr mgr,
 {
     char **macsList = NULL;
 
+    /*取此domain对应的mac list*/
     if ((macsList = virHashLookup(mgr->macs, domain)) &&
         virStringListHasString((const char**) macsList, mac)) {
         return 0;
     }
 
+    /*向mac list中添加mac*/
     if (virStringListAdd(&macsList, mac) < 0 ||
         virHashUpdateEntry(mgr->macs, domain, macsList) < 0)
         return -1;
@@ -125,6 +127,7 @@ virMacMapRemoveLocked(virMacMapPtr mgr,
 }
 
 
+/*加载配置文件，并填充macMap*/
 static int
 virMacMapLoadFile(virMacMapPtr mgr,
                   const char *file)
@@ -135,10 +138,11 @@ virMacMapLoadFile(virMacMapPtr mgr,
     size_t i;
     int ret = -1;
 
+    /*文件存在，自file中读取到map_str中*/
     if (virFileExists(file) &&
         (map_str_len = virFileReadAll(file,
                                       VIR_MAC_MAP_FILE_SIZE_MAX,
-                                      &map_str)) < 0)
+                                      &map_str/*出参，文件内容*/)) < 0)
         goto cleanup;
 
     if (map_str_len == 0) {
@@ -153,6 +157,7 @@ virMacMapLoadFile(virMacMapPtr mgr,
         goto cleanup;
     }
 
+    /*map必须为array*/
     if (!virJSONValueIsArray(map)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Malformed file structure: %s"),
@@ -160,28 +165,33 @@ virMacMapLoadFile(virMacMapPtr mgr,
         goto cleanup;
     }
 
+    /*遍历map数组*/
     for (i = 0; i < virJSONValueArraySize(map); i++) {
         virJSONValuePtr tmp = virJSONValueArrayGet(map, i);
         virJSONValuePtr macs;
         const char *domain;
         size_t j;
 
+        /*取domain*/
         if (!(domain = virJSONValueObjectGetString(tmp, "domain"))) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Missing domain"));
             goto cleanup;
         }
 
+        /*取macs*/
         if (!(macs = virJSONValueObjectGetArray(tmp, "macs"))) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Missing macs"));
             goto cleanup;
         }
 
+        /*遍历macs,本身为数组，成员是string类型mac*/
         for (j = 0; j < virJSONValueArraySize(macs); j++) {
             virJSONValuePtr macJSON = virJSONValueArrayGet(macs, j);
             const char *mac = virJSONValueGetString(macJSON);
 
+            /*添加domain的maclist*/
             if (virMacMapAddLocked(mgr, domain, mac) < 0)
                 goto cleanup;
         }
@@ -299,9 +309,11 @@ virMacMapNew(const char *file)
         return NULL;
 
     virObjectLock(mgr);
+    /*初始化macs表*/
     if (!(mgr->macs = virHashCreate(VIR_MAC_HASH_TABLE_SIZE, NULL)))
         goto error;
 
+    /*加载配置文件*/
     if (file &&
         virMacMapLoadFile(mgr, file) < 0)
         goto error;

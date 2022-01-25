@@ -1480,6 +1480,7 @@ virConnectUnregisterCloseCallback(virConnectPtr conn,
     virCheckConnectReturn(conn, -1);
     virCheckNonNullArgGoto(cb, error);
 
+    /*连接断开前清理工作*/
     if (conn->driver->connectUnregisterCloseCallback &&
         conn->driver->connectUnregisterCloseCallback(conn, cb) < 0)
         goto error;

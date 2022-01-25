@@ -1291,6 +1291,7 @@ static virHypervisorDriver udevHypervisorDriver = {
 };
 
 
+/*注册用于local的udev connect driver*/
 static virConnectDriver udevConnectDriver = {
     .localOnly = true,
     .uriSchemes = (const char *[]){ "interface", NULL },

@@ -224,10 +224,10 @@ virNetDevProbeVnetHdr(int tapfd)
  *
  * Returns 0 in case of success or -1 on failure.
  */
-int virNetDevTapCreate(char **ifname,
+int virNetDevTapCreate(char **ifname/*一组待创建的tap名称*/,
                        const char *tunpath,
-                       int *tapfd,
-                       size_t tapfdSize,
+                       int *tapfd,/*出参，数字，每个对应的tapfd*/
+                       size_t tapfdSize/*tapfd数组大小*/,
                        unsigned int flags)
 {
     size_t i;
@@ -275,6 +275,7 @@ int virNetDevTapCreate(char **ifname,
 
         }
 
+        /*创建tap口*/
         if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
             virReportSystemError(errno,
                                  _("Unable to create tap device %s"),
@@ -664,9 +665,9 @@ virNetDevTapReattachBridge(const char *tapname,
  *
  * Returns 0 in case of success or -1 on failure
  */
-int virNetDevTapCreateInBridgePort(const char *brname,
-                                   char **ifname,
-                                   const virMacAddr *macaddr,
+int virNetDevTapCreateInBridgePort(const char *brname/*桥名称*/,
+                                   char **ifname/*dummy网卡名称*/,
+                                   const virMacAddr *macaddr/*网卡mac地址*/,
                                    const unsigned char *vmuuid,
                                    const char *tunpath,
                                    int *tapfd,
@@ -682,6 +683,7 @@ int virNetDevTapCreateInBridgePort(const char *brname,
     virMacAddr tapmac;
     size_t i;
 
+    /*创建tap设备名称*/
     if (virNetDevTapCreate(ifname, tunpath, tapfd, tapfdSize, flags) < 0)
         return -1;
 
@@ -707,15 +709,18 @@ int virNetDevTapCreateInBridgePort(const char *brname,
             tapmac.addr[0] = 0xFE;
     }
 
+    /*为tap口设置mac*/
     if (virNetDevSetMAC(*ifname, &tapmac) < 0)
         goto error;
 
+    /*将ifname添加进br中*/
     if (virNetDevTapAttachBridge(*ifname, brname, macaddr, vmuuid,
                                  virtPortProfile, virtVlan,
                                  isolatedPort, mtu, actualMTU) < 0) {
         goto error;
     }
 
+    /*up接口*/
     if (virNetDevSetOnline(*ifname, !!(flags & VIR_NETDEV_TAP_CREATE_IFUP)) < 0)
         goto error;
 

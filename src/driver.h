@@ -79,9 +79,9 @@ typedef virConnectDriver *virConnectDriverPtr;
 
 struct _virConnectDriver {
     /* Whether driver permits a server in the URI */
-    bool localOnly;
+    bool localOnly;/*标记此driver 仅local有效*/
     /* Whether driver needs a server in the URI */
-    bool remoteOnly;
+    bool remoteOnly;/*标记此driver仅remote有效*/
     /* Whether driver can be used in embedded mode */
     bool embeddable;
     /*
@@ -89,7 +89,7 @@ struct _virConnectDriver {
      *  - Single element { NULL } list indicates no supported schemes
      *  - NULL list indicates wildcard supporting all schemes
      */
-    const char **uriSchemes;
+    const char **uriSchemes;/*uri起始模式符，容许有多个*/
     virHypervisorDriverPtr hypervisorDriver;
     virInterfaceDriverPtr interfaceDriver;
     virNetworkDriverPtr networkDriver;

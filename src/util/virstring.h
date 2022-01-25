@@ -127,6 +127,7 @@ int virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
     G_GNUC_WARN_UNUSED_RESULT;
 int virStrcpy(char *dest, const char *src, size_t destbytes)
     G_GNUC_WARN_UNUSED_RESULT;
+/*string 复制*/
 #define virStrcpyStatic(dest, src) virStrcpy((dest), (src), sizeof(dest))
 
 /* Don't call these directly - use the macros below */

@@ -50,6 +50,7 @@ typedef virStateDriver *virStateDriverPtr;
 
 struct _virStateDriver {
     const char *name;
+    /*标明此driver是否初始化*/
     bool initialized;
     //初始化Driver时调用
     virDrvStateInitialize stateInitialize;

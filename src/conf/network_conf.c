@@ -923,6 +923,7 @@ virNetworkDNSTxtDefParseXML(const char *networkName,
 }
 
 
+/*dns解析*/
 static int
 virNetworkDNSDefParseXML(const char *networkName,
                          xmlNodePtr node,
@@ -1678,6 +1679,7 @@ virNetworkForwardDefParseXML(const char *networkName,
 }
 
 
+/*network解析*/
 virNetworkDefPtr
 virNetworkDefParseXML(xmlXPathContextPtr ctxt,
                       virNetworkXMLOptionPtr xmlopt)
@@ -1708,6 +1710,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt,
         return NULL;
 
     /* Extract network name */
+    /*解network名称*/
     def->name = virXPathString("string(./name[1])", ctxt);
     if (!def->name) {
         virReportError(VIR_ERR_NO_NAME, NULL);
@@ -1718,14 +1721,17 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt,
         return NULL;
 
     /* Extract network uuid */
+    /*解network uuid*/
     uuid = virXPathString("string(./uuid[1])", ctxt);
     if (!uuid) {
+        /*没有uuid,则生成一个*/
         if (virUUIDGenerate(def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("Failed to generate UUID"));
             return NULL;
         }
     } else {
+        /*解析uuid*/
         if (virUUIDParse(uuid, def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("malformed uuid element"));
@@ -1956,6 +1962,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt,
         }
     }
 
+    /*forward模式解析*/
     forwardNode = virXPathNode("./forward", ctxt);
     if (forwardNode &&
         virNetworkForwardDefParseXML(def->name, forwardNode, ctxt, &def->forward) < 0) {
@@ -2115,7 +2122,9 @@ virNetworkDefParse(const char *xmlStr,
     virNetworkDefPtr def = NULL;
     int keepBlanksDefault = xmlKeepBlanksDefault(0);
 
+    /*生成xml对象*/
     if ((xml = virXMLParse(filename, xmlStr, _("(network_definition)"))))
+        /*解析获得network对象指针*/
         def = virNetworkDefParseNode(xml, xmlDocGetRootElement(xml), xmlopt);
 
     xmlKeepBlanksDefault(keepBlanksDefault);
@@ -2132,7 +2141,7 @@ virNetworkDefParseString(const char *xmlStr,
 
 
 virNetworkDefPtr
-virNetworkDefParseFile(const char *filename,
+virNetworkDefParseFile(const char *filename/*文件名称*/,
                        virNetworkXMLOptionPtr xmlopt)
 {
     return virNetworkDefParse(NULL, filename, xmlopt);
@@ -2147,6 +2156,7 @@ virNetworkDefParseNode(xmlDocPtr xml,
     g_autoptr(xmlXPathContext) ctxt = NULL;
 
     if (!virXMLNodeNameEqual(root, "network")) {
+        /*根节点必须为network*/
         virReportError(VIR_ERR_XML_ERROR,
                        _("unexpected root element <%s>, "
                          "expecting <network>"),
@@ -2157,6 +2167,7 @@ virNetworkDefParseNode(xmlDocPtr xml,
     if (!(ctxt = virXMLXPathContextNew(xml)))
         return NULL;
 
+    /*执行network节点解析*/
     ctxt->node = root;
     return virNetworkDefParseXML(ctxt, xmlopt);
 }
@@ -2501,8 +2512,10 @@ virNetworkDefFormatBuf(virBufferPtr buf,
                           virTristateBoolTypeToString(def->trustGuestRxFilters));
     virBufferAddLit(buf, ">\n");
     virBufferAdjustIndent(buf, 2);
+    /*network名称*/
     virBufferEscapeString(buf, "<name>%s</name>\n", def->name);
 
+    /*uuid名称*/
     uuid = def->uuid;
     virUUIDFormat(uuid, uuidstr);
     virBufferAsprintf(buf, "<uuid>%s</uuid>\n", uuidstr);
@@ -2799,6 +2812,7 @@ virNetworkSaveConfig(const char *configDir,
 }
 
 
+/*取网络配置文件路径*/
 char *
 virNetworkConfigFile(const char *dir,
                      const char *name)
@@ -2815,7 +2829,7 @@ virNetworkSetBridgeMacAddr(virNetworkDefPtr def)
          * autogenerate a random one.
          */
         virMacAddrGenerate((unsigned char[]){ 0x52, 0x54, 0 },
-                           &def->mac);
+                           &def->mac);/*未指定mac,生成动态mac*/
         def->mac_specified = true;
     }
 }

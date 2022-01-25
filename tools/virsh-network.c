@@ -64,13 +64,15 @@
     }
 
 
+/*通过name/uuid查询network*/
 virNetworkPtr
 virshCommandOptNetworkBy(vshControl *ctl, const vshCmd *cmd,
-                         const char **name/*出参*/, unsigned int flags)
+                         const char **name/*出参，network名称*/, unsigned int flags)
 {
     virNetworkPtr network = NULL;
     const char *n = NULL;
     const char *optname = "network";
+    /*flags只支持以下两种*/
     virCheckFlags(VIRSH_BYUUID | VIRSH_BYNAME, NULL);
     virshControlPtr priv = ctl->privData;
 
@@ -85,12 +87,15 @@ virshCommandOptNetworkBy(vshControl *ctl, const vshCmd *cmd,
 
     /* try it by UUID */
     if ((flags & VIRSH_BYUUID) && strlen(n) == VIR_UUID_STRING_BUFLEN-1) {
+        /*通过uuid进行network查询*/
         vshDebug(ctl, VSH_ERR_DEBUG, "%s: <%s> trying as network UUID\n",
                  cmd->def->name, optname);
         network = virNetworkLookupByUUIDString(priv->conn, n);
     }
+
     /* try it by NAME */
     if (!network && (flags & VIRSH_BYNAME)) {
+        /*通过name进行network查询*/
         vshDebug(ctl, VSH_ERR_DEBUG, "%s: <%s> trying as network NAME\n",
                  cmd->def->name, optname);
         network = virNetworkLookupByName(priv->conn, n);
@@ -201,6 +206,8 @@ static const vshCmdOptDef opts_network_create[] = {
     {.name = NULL}
 };
 
+
+/*net-create命令处理，命令行指定xml进行创建*/
 static bool
 cmdNetworkCreate(vshControl *ctl, const vshCmd *cmd)
 {
@@ -210,20 +217,25 @@ cmdNetworkCreate(vshControl *ctl, const vshCmd *cmd)
     char *buffer;
     virshControlPtr priv = ctl->privData;
 
+    /*提取file,获取文件名称*/
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
 
+    /*读取from，并填充到buffer*/
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
+    /*从buffer构建network*/
     network = virNetworkCreateXML(priv->conn, buffer);
     VIR_FREE(buffer);
 
     if (network != NULL) {
+        /*创建network成功*/
         vshPrintExtra(ctl, _("Network %s created from %s\n"),
                       virNetworkGetName(network), from);
         virNetworkFree(network);
     } else {
+        /*创建network失败*/
         vshError(ctl, _("Failed to create network from %s"), from);
         ret = false;
     }
@@ -258,20 +270,25 @@ cmdNetworkDefine(vshControl *ctl, const vshCmd *cmd)
     char *buffer;
     virshControlPtr priv = ctl->privData;
 
+    /*通过file指定的xml文件定义network*/
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
 
+    /*读取所有内容到buffer*/
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
+    /*以xml内容define network*/
     network = virNetworkDefineXML(priv->conn, buffer);
     VIR_FREE(buffer);
 
     if (network != NULL) {
+        /*定义network成功*/
         vshPrintExtra(ctl, _("Network %s defined from %s\n"),
                       virNetworkGetName(network), from);
         virNetworkFree(network);
     } else {
+        /*定义network失败*/
         vshError(ctl, _("Failed to define network from %s"), from);
         ret = false;
     }
@@ -303,9 +320,11 @@ cmdNetworkDestroy(vshControl *ctl, const vshCmd *cmd)
     bool ret = true;
     const char *name;
 
+    /*查询network*/
     if (!(network = virshCommandOptNetwork(ctl, cmd, &name)))
         return false;
 
+    /*销毁network*/
     if (virNetworkDestroy(network) == 0) {
         vshPrintExtra(ctl, _("Network %s destroyed\n"), name);
     } else {
@@ -348,6 +367,7 @@ cmdNetworkDumpXML(vshControl *ctl, const vshCmd *cmd)
     unsigned int flags = 0;
     int inactive;
 
+    /*查询指定的network*/
     if (!(network = virshCommandOptNetwork(ctl, cmd, NULL)))
         return false;
 
@@ -355,6 +375,7 @@ cmdNetworkDumpXML(vshControl *ctl, const vshCmd *cmd)
     if (inactive)
         flags |= VIR_NETWORK_XML_INACTIVE;
 
+    /*dump显示network*/
     dump = virNetworkGetXMLDesc(network, flags);
 
     if (dump != NULL) {
@@ -748,6 +769,7 @@ cmdNetworkList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
             goto cleanup;
     }
 
+    /*执行显示*/
     for (i = 0; i < list->nnets; i++) {
         virNetworkPtr network = list->nets[i];
         const char *autostartStr;
@@ -812,6 +834,8 @@ static const vshCmdOptDef opts_network_name[] = {
     {.name = NULL}
 };
 
+
+/*显示uudi指定的network对应的name*/
 static bool
 cmdNetworkName(vshControl *ctl, const vshCmd *cmd)
 {
@@ -1122,9 +1146,11 @@ static const vshCmdOptDef opts_network_edit[] = {
     {.name = NULL}
 };
 
+/*获取network对应的xml*/
 static char *virshNetworkGetXMLDesc(virNetworkPtr network)
 {
     unsigned int flags = VIR_NETWORK_XML_INACTIVE;
+    /*显示此network对应的xml*/
     char *doc = virNetworkGetXMLDesc(network, flags);
 
     if (!doc && last_error->code == VIR_ERR_INVALID_ARG) {
@@ -1146,11 +1172,14 @@ cmdNetworkEdit(vshControl *ctl, const vshCmd *cmd)
     virNetworkPtr network_edited = NULL;
     virshControlPtr priv = ctl->privData;
 
+    /*取此network*/
     network = virshCommandOptNetwork(ctl, cmd, NULL);
     if (network == NULL)
         goto cleanup;
 
+    /*取此network对应的xml*/
 #define EDIT_GET_XML virshNetworkGetXMLDesc(network)
+    /*指明network没有变更*/
 #define EDIT_NOT_CHANGED \
     do { \
         vshPrintExtra(ctl, _("Network %s XML configuration not changed.\n"), \
@@ -1158,6 +1187,7 @@ cmdNetworkEdit(vshControl *ctl, const vshCmd *cmd)
         ret = true; \
         goto edit_cleanup; \
     } while (0)
+    /*通过xml定义network*/
 #define EDIT_DEFINE \
     (network_edited = virNetworkDefineXML(priv->conn, doc_edited))
 #include "virsh-edit.c"
@@ -1414,6 +1444,7 @@ cmdNetworkDHCPLeases(vshControl *ctl, const vshCmd *cmd)
     if (vshCommandOptStringReq(ctl, cmd, "mac", &mac) < 0)
         return false;
 
+    /*查询指定的network*/
     if (!(network = virshCommandOptNetwork(ctl, cmd, &name)))
         return false;
 
@@ -1807,6 +1838,7 @@ cmdNetworkPortList(vshControl *ctl, const vshCmd *cmd)
 #undef FILTER
 
 
+/*network相关的命令*/
 const vshCmdDef networkCmds[] = {
     {.name = "net-autostart",
      .handler = cmdNetworkAutostart,

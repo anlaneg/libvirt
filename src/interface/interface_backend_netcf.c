@@ -904,6 +904,7 @@ static virInterfacePtr netcfInterfaceDefineXML(virConnectPtr conn,
 
     virObjectLock(driver);
 
+    /*通过xml解析interface*/
     ifacedef = virInterfaceDefParseString(xml);
     if (!ifacedef) {
         /* error was already reported */

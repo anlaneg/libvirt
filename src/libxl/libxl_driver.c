@@ -853,7 +853,7 @@ libxlStateReload(void)
     return 0;
 }
 
-
+/*默认支持的uri*/
 static int
 libxlConnectURIProbe(char **uri)
 {
@@ -6763,6 +6763,7 @@ static virHypervisorDriver libxlHypervisorDriver = {
 
 };
 
+/*注册xen相应的driver*/
 static virConnectDriver libxlConnectDriver = {
     .localOnly = true,
     .uriSchemes = (const char *[]){ "xen", NULL },

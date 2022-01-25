@@ -9684,6 +9684,7 @@ virDomainOpenConsole(virDomainPtr dom,
         goto error;
     }
 
+    /*打开指定domain的console*/
     if (conn->driver->domainOpenConsole) {
         int ret;
         ret = conn->driver->domainOpenConsole(dom, dev_name, st, flags);

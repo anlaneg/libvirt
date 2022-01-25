@@ -188,7 +188,9 @@ struct _vshCmdDef {
  */
 struct _vshCmd {
     const vshCmdDef *def;       /* command definition */
+    /*用户指定的此命令选项*/
     vshCmdOpt *opts;            /* list of command arguments */
+    /*指向下一个命令*/
     vshCmd *next;               /* next command */
     bool skipChecks;            /* skip validity checks when retrieving opts */
 };
@@ -207,7 +209,9 @@ struct _vshControl {
     char *connname;             /* connection name */
     //当前进程名称（动态获取的）
     char *progname;             /* program name */
+    /*指向当前待执行的cmd*/
     vshCmd *cmd;                /* the current command */
+    /*指向当前待解析的cmd字符串*/
     char *cmdstr;               /* string with command */
     //是否为交互模式
     bool imode;                 /* interactive mode? */
@@ -224,8 +228,10 @@ struct _vshControl {
     char *historydir;           /* readline history directory name */
     char *historyfile;          /* readline history file name */
     virThread eventLoop;
+    /*互斥锁*/
     virMutex lock;
     bool eventLoopStarted;
+    /*检查是否需要执行退出*/
     bool quit;
     int eventPipe[2];           /* Write-to-self pipe to end waiting for an
                                  * event to occur */
@@ -243,6 +249,7 @@ struct _vshControl {
     bool istty;                 /* is the terminal a tty */
 
     const vshClientHooks *hooks;/* mandatory client specific hooks */
+    /*客户端私有数据*/
     void *privData;             /* client specific data */
 };
 
@@ -250,7 +257,7 @@ typedef void *
 (*vshConnectionHook)(vshControl *ctl);
 
 struct _vshClientHooks {
-    vshConnectionHook connHandler;
+    vshConnectionHook connHandler;/*每组命令执行前连接用（除非命令不需要连接）*/
 };
 
 struct _vshCmdGrp {

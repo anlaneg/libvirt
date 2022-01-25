@@ -101,6 +101,7 @@ virConnectListAllNetworks(virConnectPtr conn,
 
     virCheckConnectReturn(conn, -1);
 
+    /*列出network*/
     if (conn->networkDriver &&
         conn->networkDriver->connectListAllNetworks) {
         int ret;
@@ -294,6 +295,7 @@ virNetworkLookupByName(virConnectPtr conn, const char *name)
     virCheckConnectReturn(conn, NULL);
     virCheckNonNullArgGoto(name, error);
 
+    /*network driver通过name进行查询*/
     if (conn->networkDriver && conn->networkDriver->networkLookupByName) {
         virNetworkPtr ret;
         ret = conn->networkDriver->networkLookupByName(conn, name);
@@ -333,6 +335,7 @@ virNetworkLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
     virCheckConnectReturn(conn, NULL);
     virCheckNonNullArgGoto(uuid, error);
 
+    /*有network driver,且支持相应回调，执行查询*/
     if (conn->networkDriver && conn->networkDriver->networkLookupByUUID) {
         virNetworkPtr ret;
         ret = conn->networkDriver->networkLookupByUUID(conn, uuid);
@@ -341,6 +344,7 @@ virNetworkLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
         return ret;
     }
 
+    /*返回不支持*/
     virReportUnsupportedError();
 
  error:
@@ -370,6 +374,7 @@ virNetworkLookupByUUIDString(virConnectPtr conn, const char *uuidstr)
     virCheckConnectReturn(conn, NULL);
     virCheckNonNullArgGoto(uuidstr, error);
 
+    /*解析uuid*/
     if (virUUIDParse(uuidstr, uuid) < 0) {
         virReportInvalidArg(uuidstr,
                             _("uuidstr in %s must be a valid UUID"),
@@ -377,6 +382,7 @@ virNetworkLookupByUUIDString(virConnectPtr conn, const char *uuidstr)
         goto error;
     }
 
+    /*按uuid进行查询*/
     return virNetworkLookupByUUID(conn, &uuid[0]);
 
  error:
@@ -401,6 +407,7 @@ virNetworkLookupByUUIDString(virConnectPtr conn, const char *uuidstr)
 virNetworkPtr
 virNetworkCreateXML(virConnectPtr conn, const char *xmlDesc)
 {
+    /*通过xml创建network*/
     VIR_DEBUG("conn=%p, xmlDesc=%s", conn, NULLSTR(xmlDesc));
 
     virResetLastError();
@@ -449,6 +456,7 @@ virNetworkDefineXML(virConnectPtr conn, const char *xml)
     virCheckReadOnlyGoto(conn->flags, error);
     virCheckNonNullArgGoto(xml, error);
 
+    /*通过xml定义network*/
     if (conn->networkDriver && conn->networkDriver->networkDefineXML) {
         virNetworkPtr ret;
         ret = conn->networkDriver->networkDefineXML(conn, xml);
@@ -621,6 +629,7 @@ virNetworkDestroy(virNetworkPtr network)
 
     virCheckReadOnlyGoto(conn->flags, error);
 
+    /*通过回调完成network销毁*/
     if (conn->networkDriver && conn->networkDriver->networkDestroy) {
         int ret;
         ret = conn->networkDriver->networkDestroy(network);
@@ -798,6 +807,7 @@ virNetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
     virCheckNetworkReturn(network, NULL);
     conn = network->conn;
 
+    /*显示此network对应的xml*/
     if (conn->networkDriver && conn->networkDriver->networkGetXMLDesc) {
         char *ret;
         ret = conn->networkDriver->networkGetXMLDesc(network, flags);

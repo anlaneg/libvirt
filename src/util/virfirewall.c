@@ -77,9 +77,9 @@ struct _virFirewallGroup {
 struct _virFirewall {
     int err;
 
-    size_t ngroups;
-    virFirewallGroupPtr *groups;
-    size_t currentGroup;
+    size_t ngroups;/*group数组大小*/
+    virFirewallGroupPtr *groups;/*group数组*/
+    size_t currentGroup;/*当前使用到哪个group*/
 };
 
 static virFirewallBackend currentBackend = VIR_FIREWALL_BACKEND_AUTOMATIC;
@@ -113,6 +113,7 @@ virFirewallCheckUpdateLock(bool *lockflag,
 {
     int status; /* Ignore failed commands without logging them */
     g_autoptr(virCommand) cmd = virCommandNewArgs(args);
+    /*运行cmd命令，检查结果*/
     if (virCommandRun(cmd, &status) < 0 || status) {
         VIR_INFO("locking not supported by %s", args[0]);
     } else {
@@ -133,6 +134,7 @@ virFirewallCheckUpdateLocking(void)
     const char *ebtablesArgs[] = {
         EBTABLES_PATH, "--concurrent", "-L", NULL,
     };
+    /*如果此值为空，则不执行，直接退出*/
     if (lockOverride)
         return;
     virFirewallCheckUpdateLock(&iptablesUseLock,
@@ -235,6 +237,7 @@ virFirewallPtr virFirewallNew(void)
     if (virFirewallInitialize() < 0)
         return NULL;
 
+    /*申请firewall*/
     if (VIR_ALLOC(firewall) < 0)
         return NULL;
 
@@ -343,6 +346,8 @@ virFirewallAddRuleFullV(virFirewallPtr firewall,
         firewall->err = EINVAL;
         return NULL;
     }
+
+    /*取当前可填充group*/
     group = firewall->groups[firewall->currentGroup];
 
 
@@ -590,18 +595,22 @@ void virFirewallStartTransaction(virFirewallPtr firewall,
 
     VIR_FIREWALL_RETURN_IF_ERROR(firewall);
 
+    /*申请group*/
     if (!(group = virFirewallGroupNew())) {
         firewall->err = ENOMEM;
         return;
     }
     group->actionFlags = flags;
 
+    /*增加一个group指针空间*/
     if (VIR_EXPAND_N(firewall->groups,
                      firewall->ngroups, 1) < 0) {
         firewall->err = ENOMEM;
         virFirewallGroupFree(group);
         return;
     }
+
+    /*设置group*/
     firewall->groups[firewall->ngroups - 1] = group;
     firewall->currentGroup = firewall->ngroups - 1;
 }

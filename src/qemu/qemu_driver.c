@@ -1154,6 +1154,7 @@ qemuConnectURIProbe(char **uri)
     if (qemu_driver == NULL)
         return 0;
 
+    /*取qemu driver驱动，并返回对应的配置uri*/
     cfg = virQEMUDriverGetConfig(qemu_driver);
     *uri = g_strdup(cfg->uri);
 
@@ -23207,6 +23208,7 @@ qemuDomainAgentSetResponseTimeout(virDomainPtr dom,
 
 static virHypervisorDriver qemuHypervisorDriver = {
     .name = QEMU_DRIVER_NAME,
+    /*填充qemu支持的模式串*/
     .connectURIProbe = qemuConnectURIProbe,
 	//qemu连接
     .connectOpen = qemuConnectOpen, /* 0.2.0 */
@@ -23462,6 +23464,7 @@ static virConnectDriver qemuConnectDriver = {
 
 static virStateDriver qemuStateDriver = {
     .name = QEMU_DRIVER_NAME,
+    /*驱动初始化函数*/
     .stateInitialize = qemuStateInitialize,
     .stateCleanup = qemuStateCleanup,
     .stateReload = qemuStateReload,

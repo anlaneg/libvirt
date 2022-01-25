@@ -773,8 +773,8 @@ catchXMLError(void *ctx, const char *msg G_GNUC_UNUSED, ...)
  */
 xmlDocPtr
 virXMLParseHelper(int domcode,
-                  const char *filename,
-                  const char *xmlStr,
+                  const char *filename,/*xml文件*/
+                  const char *xmlStr,/*文件内容*/
                   const char *url,
                   xmlXPathContextPtr *ctxt)
 {
@@ -818,6 +818,7 @@ virXMLParseHelper(int domcode,
         if (!(*ctxt = virXMLXPathContextNew(xml)))
             goto error;
 
+        /*取根元素*/
         (*ctxt)->node = xmlDocGetRootElement(xml);
     }
 

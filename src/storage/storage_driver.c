@@ -2844,6 +2844,7 @@ virStoragePoolObjBuildTempFilePath(virStoragePoolObjPtr obj,
 }
 
 
+/*存储对应的driver*/
 static virStorageDriver storageDriver = {
     .name = "storage",
     .connectNumOfStoragePools = storageConnectNumOfStoragePools, /* 0.4.0 */

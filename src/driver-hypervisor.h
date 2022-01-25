@@ -1575,6 +1575,7 @@ struct _virHypervisorDriver {
     virDrvDomainQemuAgentCommand domainQemuAgentCommand;
     virDrvConnectDomainQemuMonitorEventRegister connectDomainQemuMonitorEventRegister;
     virDrvConnectDomainQemuMonitorEventDeregister connectDomainQemuMonitorEventDeregister;
+    /*打开console对应的驱动*/
     virDrvDomainOpenConsole domainOpenConsole;
     virDrvDomainOpenChannel domainOpenChannel;
     virDrvDomainOpenGraphics domainOpenGraphics;
@@ -1630,6 +1631,7 @@ struct _virHypervisorDriver {
     virDrvDomainInterfaceAddresses domainInterfaceAddresses;
     virDrvDomainSetUserPassword domainSetUserPassword;
     virDrvConnectRegisterCloseCallback connectRegisterCloseCallback;
+    /*与libvirtd断开连接前执行此回调*/
     virDrvConnectUnregisterCloseCallback connectUnregisterCloseCallback;
     virDrvDomainMigrateStartPostCopy domainMigrateStartPostCopy;
     virDrvDomainGetGuestVcpus domainGetGuestVcpus;

@@ -42,7 +42,7 @@ int virOnce(virOnceControlPtr once, virOnceFunc init)
     return pthread_once(&once->once, init);
 }
 
-
+/*mutext初始化*/
 int virMutexInit(virMutexPtr m)
 {
     int ret;
@@ -58,6 +58,7 @@ int virMutexInit(virMutexPtr m)
     return 0;
 }
 
+/*可重复lock初始化*/
 int virMutexInitRecursive(virMutexPtr m)
 {
     int ret;
@@ -78,17 +79,20 @@ void virMutexDestroy(virMutexPtr m)
     pthread_mutex_destroy(&m->lock);
 }
 
+/*加锁*/
 void virMutexLock(virMutexPtr m)
 {
     pthread_mutex_lock(&m->lock);
 }
 
+/*解锁*/
 void virMutexUnlock(virMutexPtr m)
 {
     pthread_mutex_unlock(&m->lock);
 }
 
 
+/*读写锁初始化*/
 int virRWLockInit(virRWLockPtr m)
 {
     int ret;
@@ -105,18 +109,19 @@ void virRWLockDestroy(virRWLockPtr m)
     pthread_rwlock_destroy(&m->lock);
 }
 
-
+/*添加读锁*/
 void virRWLockRead(virRWLockPtr m)
 {
     pthread_rwlock_rdlock(&m->lock);
 }
 
+/*添加写锁*/
 void virRWLockWrite(virRWLockPtr m)
 {
     pthread_rwlock_wrlock(&m->lock);
 }
 
-
+/*解读写锁*/
 void virRWLockUnlock(virRWLockPtr m)
 {
     pthread_rwlock_unlock(&m->lock);
@@ -180,12 +185,14 @@ void virCondBroadcast(virCondPtr c)
 }
 
 struct virThreadArgs {
+    /*线程工作函数*/
     virThreadFunc func;
-    char *name;
+    char *name;/*线程名称*/
     bool worker;
     void *opaque;
 };
 
+/*线程名称最大长度*/
 size_t virThreadMaxName(void)
 {
 #if defined(__FreeBSD__) || defined(__APPLE__)
@@ -199,6 +206,7 @@ size_t virThreadMaxName(void)
 #endif
 }
 
+/*执行线程函数*/
 static void *virThreadHelper(void *data)
 {
     struct virThreadArgs *args = data;
@@ -214,6 +222,7 @@ static void *virThreadHelper(void *data)
     else
         virThreadJobSet(local.name);
 
+    /*取线程名称*/
     if (maxname) {
         thname = g_strndup(local.name, maxname);
     } else {
@@ -221,6 +230,7 @@ static void *virThreadHelper(void *data)
     }
 
 #if defined(__linux__) || defined(WIN32)
+    /*设置线程名称*/
     pthread_setname_np(pthread_self(), thname);
 #else
 # ifdef __FreeBSD__
@@ -232,6 +242,7 @@ static void *virThreadHelper(void *data)
 # endif
 #endif
 
+    /*执行线程工作函数*/
     local.func(local.opaque);
 
     if (!local.worker)
@@ -241,10 +252,11 @@ static void *virThreadHelper(void *data)
     return NULL;
 }
 
+/*创建并执行线程函数func*/
 int virThreadCreateFull(virThreadPtr thread,
                         bool joinable,
                         virThreadFunc func,
-                        const char *name,
+                        const char *name/*工作函数名*/,
                         bool worker,
                         void *opaque)
 {
@@ -266,6 +278,7 @@ int virThreadCreateFull(virThreadPtr thread,
     args->opaque = opaque;
 
     if (!joinable)
+        /*不需要join,则设置detach*/
         pthread_attr_setdetachstate(&attr, 1);
 
     //创建线程并执行virThreadHelper回调
@@ -353,6 +366,7 @@ void *virThreadLocalGet(virThreadLocalPtr l)
     return pthread_getspecific(l->key);
 }
 
+/*设置线程specific变量*/
 int virThreadLocalSet(virThreadLocalPtr l, void *val)
 {
     int err = pthread_setspecific(l->key, val);

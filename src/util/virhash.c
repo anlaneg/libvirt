@@ -43,7 +43,7 @@ typedef struct _virHashEntry virHashEntry;
 typedef virHashEntry *virHashEntryPtr;
 struct _virHashEntry {
     struct _virHashEntry *next;//指向下一个entry
-    void *name;
+    void *name;/*hash key*/
     void *payload;//hash value值
 };
 
@@ -51,13 +51,14 @@ struct _virHashEntry {
  * The entire hash table
  */
 struct _virHashTable {
+    /*hash桶*/
     virHashEntryPtr *table;
     uint32_t seed;
     size_t size;//hash表桶数
     size_t nbElems;
     virHashDataFree dataFree;
-    virHashKeyCode keyCode;
-    virHashKeyEqual keyEqual;
+    virHashKeyCode keyCode;/*hashcode计算函数*/
+    virHashKeyEqual keyEqual;/*key比对*/
     virHashKeyCopy keyCopy;
     virHashKeyPrintHuman keyPrint;
     virHashKeyFree keyFree;
@@ -163,6 +164,7 @@ virHashTablePtr virHashCreateFull(ssize_t size,
     table->keyPrint = keyPrint;
     table->keyFree = keyFree;
 
+    /*申请table*/
     table->table = g_new0(virHashEntryPtr, table->size);
 
     return table;
@@ -625,7 +627,7 @@ virHashRemoveEntry(virHashTablePtr table, const void *name)
  * Returns 0 on success or -1 on failure.
  */
 int
-virHashForEach(virHashTablePtr table, virHashIterator iter/*元素遍历回调*/, void *data)
+virHashForEach(virHashTablePtr table, virHashIterator iter/*元素遍历回调*/, void *data/*回调参数*/)
 {
     size_t i;
     int ret = -1;
@@ -641,6 +643,7 @@ virHashForEach(virHashTablePtr table, virHashIterator iter/*元素遍历回调*/
             ret = iter(entry->payload, entry->name, data);
 
             if (ret < 0)
+                /*遍历中遇到错误，返回ret*/
                 return ret;
 
             entry = next;

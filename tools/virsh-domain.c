@@ -3027,11 +3027,13 @@ cmdConsole(vshControl *ctl, const vshCmd *cmd)
 {
     virDomainPtr dom;
     bool ret = false;
+    /*是否指定了force*/
     bool force = vshCommandOptBool(cmd, "force");
     bool safe = vshCommandOptBool(cmd, "safe");
     unsigned int flags = 0;
     const char *name = NULL;
 
+    /*取指定domain*/
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
         return false;
 
@@ -14418,6 +14420,7 @@ const vshCmdDef domManagementCmds[] = {
      .flags = 0
     },
 #ifndef WIN32
+    /*执行console口打开*/
     {.name = "console",
      .handler = cmdConsole,
      .opts = opts_console,

@@ -1129,13 +1129,17 @@ virStringStripSuffix(char *str,
     int suffixlen = strlen(suffix);
 
     if (len < suffixlen)
+        /*长度小于后缀，返回false*/
         return false;
 
     if (STRNEQ(str + len - suffixlen, suffix))
+        /*后续不相等，返回false*/
         return false;
 
+    /*清除后缀*/
     str[len - suffixlen] = '\0';
 
+    /*确认匹配后缀*/
     return true;
 }
 

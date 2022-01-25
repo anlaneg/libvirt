@@ -478,6 +478,7 @@ virObjectRWLockRead(void *anyobj)
     if (!obj)
         return;
 
+    /*加读锁*/
     virRWLockRead(&obj->lock);
 }
 

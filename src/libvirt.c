@@ -214,6 +214,7 @@ virConnectAuthPtr virConnectAuthPtrDefault = &virConnectAuthDefault;
 static bool virGlobalError;
 static virOnceControl virGlobalOnce = VIR_ONCE_CONTROL_INITIALIZER;
 
+/*libvirt全局初始化*/
 static void
 virGlobalInit(void)
 {
@@ -234,8 +235,10 @@ virGlobalInit(void)
         goto error;
     }
 
+    /*自环境变量中提取配置设置Log*/
     virLogSetFromEnv();
 
+    /*gntls初始化*/
     virNetTLSInit();
 
 #if WITH_CURL
@@ -244,6 +247,7 @@ virGlobalInit(void)
 
     VIR_DEBUG("register drivers");
 
+    /*网络初始化（windows有效）*/
     g_networking_init();
 
 #ifdef HAVE_LIBINTL_H
@@ -255,6 +259,7 @@ virGlobalInit(void)
      * Note that the order is important: the first ones have a higher
      * priority when calling virConnectOpen.
      */
+    /*驱动注册*/
 #ifdef WITH_TEST
     if (testRegister() == -1)
         goto error;
@@ -525,6 +530,7 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
     VIR_DEBUG("driver=%p name=%s", driver,
               driver ? NULLSTR(driver->hypervisorDriver->name) : "(null)");
 
+    /*driver不能为空*/
     virCheckNonNullArgReturn(driver, -1);
     //注册的连接driver过多
     if (virConnectDriverTabCount >= MAX_DRIVERS) {
@@ -553,7 +559,7 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
             driver->storageDriver = virSharedStorageDriver;
     }
 
-    //存放连接用driver
+    //存放连接用driver，完成注册
     virConnectDriverTab[virConnectDriverTabCount] = driver;
     return virConnectDriverTabCount++;
 }
@@ -576,7 +582,9 @@ virHasDriverForURIScheme(const char *scheme)
 
     for (i = 0; i < virConnectDriverTabCount; i++) {
         if (!virConnectDriverTab[i]->uriSchemes)
+            /*跳过没有uri模式的connect driver*/
             continue;
+        /*进行模式符比对，如果查找到，返回true*/
         for (j = 0; virConnectDriverTab[i]->uriSchemes[j]; j++) {
             if (STREQ(virConnectDriverTab[i]->uriSchemes[j], scheme))
                 return true;
@@ -607,6 +615,7 @@ virRegisterStateDriver(virStateDriverPtr driver)
         return -1;
     }
 
+    /*注册状态driver*/
     virStateDriverTab[virStateDriverTabCount] = driver;
     return virStateDriverTabCount++;
 }
@@ -659,6 +668,7 @@ virStateInitialize(bool privileged,
     for (i = 0; i < virStateDriverTabCount; i++) {
         if (virStateDriverTab[i]->stateInitialize &&
             !virStateDriverTab[i]->initialized) {
+            /*有stateInitialize回调，但没有initialized，调用stateInitialize*/
             virDrvStateInitResult ret;
             VIR_DEBUG("Running global init for %s state driver",
                       virStateDriverTab[i]->name);
@@ -669,6 +679,7 @@ virStateInitialize(bool privileged,
                                                         opaque);
             VIR_DEBUG("State init result %d (mandatory=%d)", ret, mandatory);
             if (ret == VIR_DRV_STATE_INIT_ERROR) {
+                /*初始化失败*/
                 VIR_ERROR(_("Initialization of %s state driver failed: %s"),
                           virStateDriverTab[i]->name,
                           virGetLastErrorMessage());
@@ -716,6 +727,7 @@ virStateCleanup(void)
 int
 virStateReload(void)
 {
+    /*重新初始化所有驱动*/
     size_t i;
     int ret = 0;
 
@@ -859,6 +871,7 @@ virConnectOpenInternal(const char *name,
     char *uristr = NULL;
     bool embed = false;
 
+    /*new一个object*/
     ret = virGetConnect();
     if (ret == NULL)
         return NULL;
@@ -891,12 +904,12 @@ virConnectOpenInternal(const char *name,
     	//有name指定，使用name做为uristr
         uristr = g_strdup(name);
     } else {
-    		//未指定name,自配置文件中提取默认的uristr
+    	//未指定name,自配置文件中提取默认的uristr
         if (virConnectGetDefaultURI(conf, &uristr) < 0)
             goto failed;
 
         if (uristr == NULL) {
-        	//仍然没有拿到默认的URI,采用driver的connectURIProbe函数尝试uri
+        	//仍然没有拿到默认的URI,遍历当前注册的所有driver,采用driver的connectURIProbe函数尝试uri，使用首个uristr
             VIR_DEBUG("Trying to probe for default URI");
             for (i = 0; i < virConnectDriverTabCount && uristr == NULL; i++) {
                 if (virConnectDriverTab[i]->hypervisorDriver->connectURIProbe) {
@@ -976,6 +989,7 @@ virConnectOpenInternal(const char *name,
             if (virEventRequireImpl() < 0)
                 goto failed;
 
+            /*动态加载模块，并调用其对应的注册函数*/
             regMethod = g_strdup_printf("%sRegister", ret->uri->scheme);
 
             if (virDriverLoadModule(ret->uri->scheme, regMethod, false) < 0)
@@ -991,20 +1005,21 @@ virConnectOpenInternal(const char *name,
                 virAccessManagerSetDefault(acl);
             }
 
+            /*初始化所有虚拟化驱动*/
             if (virStateInitialize(geteuid() == 0, true, root, NULL, NULL) < 0)
                 goto failed;
 
             embed = true;
         }
     } else {
-    		//没有uristr情况
+    	//没有uristr情况
         VIR_DEBUG("no name, allowing driver auto-select");
     }
 
     /* Cleansing flags */
     ret->flags = flags & VIR_CONNECT_RO;
 
-    //遍历所有已注册的ConnectDriver
+    //遍历所有已注册的ConnectDriver,尝试remote driver
     for (i = 0; i < virConnectDriverTabCount; i++) {
         /* We're going to probe the remote driver next. So we have already
          * probed all other client-side-only driver before, but none of them
@@ -1028,6 +1043,7 @@ virConnectOpenInternal(const char *name,
              STRCASEEQ(ret->uri->scheme, "parallels") ||
 #endif
              false)) {
+            /*无内建驱动，报错*/
             virReportErrorHelper(VIR_FROM_NONE, VIR_ERR_CONFIG_UNSUPPORTED,
                                  __FILE__, __FUNCTION__, __LINE__,
                                  _("libvirt was built without the '%s' driver"),
