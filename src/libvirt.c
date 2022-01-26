@@ -1107,7 +1107,7 @@ virConnectOpenInternal(const char *name,
             goto failed;
         }
 
-        //ConnectDriver匹配成功，指定连接对应的dirver
+        //遇到首个可匹配的ConnectDriver，指定连接对应的dirver（常见为connect_driver）
         ret->driver = virConnectDriverTab[i]->hypervisorDriver;
         ret->interfaceDriver = virConnectDriverTab[i]->interfaceDriver;
         ret->networkDriver = virConnectDriverTab[i]->networkDriver;

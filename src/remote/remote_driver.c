@@ -788,6 +788,7 @@ remoteGetUNIXSocketHelper(remoteDriverTransport transport,
          * any machine with /run will have a /var/run symlink.
          * The portable option is to thus use $LOCALSTATEDIR/run
          */
+        /*返回socket名称*/
         sockname = g_strdup_printf("%s/run/libvirt/%s-%s", LOCALSTATEDIR,
                                    sock_prefix,
                                    flags & VIR_DRV_OPEN_REMOTE_RO ? "sock-ro" : "sock");
@@ -800,6 +801,7 @@ remoteGetUNIXSocketHelper(remoteDriverTransport transport,
 }
 
 
+/*获取unixsocket名称及路径*/
 static char *
 remoteGetUNIXSocket(remoteDriverTransport transport,
                     remoteDriverMode mode,
@@ -814,6 +816,7 @@ remoteGetUNIXSocket(remoteDriverTransport transport,
     g_autofree char *legacy_sock_name = NULL;
 
     if (driver)
+        /*提供driver的情况下，使用virt%sd*/
         direct_daemon = g_strdup_printf("virt%sd", driver);
 
     legacy_daemon = g_strdup("libvirtd");
@@ -822,6 +825,7 @@ remoteGetUNIXSocket(remoteDriverTransport transport,
         !(direct_sock_name = remoteGetUNIXSocketHelper(transport, direct_daemon, flags)))
         return NULL;
 
+    /*使用legacy sock名称*/
     if (!(legacy_sock_name = remoteGetUNIXSocketHelper(transport, "libvirt", flags)))
         return NULL;
 
@@ -992,6 +996,7 @@ doRemoteOpen(virConnectPtr conn,
         }
     } else {
         /* No URI, then must be probing so use UNIX socket */
+        /*没有指定uri,使用unix socket*/
         transport = REMOTE_DRIVER_TRANSPORT_UNIX;
     }
 
@@ -1107,6 +1112,7 @@ doRemoteOpen(virConnectPtr conn,
     case REMOTE_DRIVER_TRANSPORT_SSH:
     case REMOTE_DRIVER_TRANSPORT_LIBSSH:
     case REMOTE_DRIVER_TRANSPORT_LIBSSH2:
+        /*没有指定sockname,获取sockname*/
         if (!sockname &&
             !(sockname = remoteGetUNIXSocket(transport, mode, driver_str,
                                              &daemon_name, flags)))
@@ -1387,6 +1393,7 @@ doRemoteOpen(virConnectPtr conn,
 #undef EXTRACT_URI_ARG_STR
 #undef EXTRACT_URI_ARG_BOOL
 
+/*申请private_data*/
 static struct private_data *
 remoteAllocPrivateData(void)
 {
@@ -1439,6 +1446,7 @@ remoteConnectOpen(virConnectPtr conn,
         }
     }
 
+    /*申请privateData*/
     if (!(priv = remoteAllocPrivateData()))
         goto cleanup;
 
@@ -1491,6 +1499,7 @@ remoteConnectOpen(virConnectPtr conn,
         }
     }
 
+    /*执行remoteOpen*/
     ret = doRemoteOpen(conn, priv, driver, transport, auth, conf, rflags);
     if (ret != VIR_DRV_OPEN_SUCCESS) {
         conn->privateData = NULL;
@@ -8835,8 +8844,9 @@ static virNWFilterDriver nwfilter_driver = {
     .nwfilterBindingGetXMLDesc = remoteNWFilterBindingGetXMLDesc, /* 4.5.0 */
 };
 
+/*默认的connect Driver*/
 static virConnectDriver connect_driver = {
-        /*hypervisor驱动*/
+    /*hypervisor驱动*/
     .hypervisorDriver = &hypervisor_driver,
     /*interface驱动*/
     .interfaceDriver = &interface_driver,

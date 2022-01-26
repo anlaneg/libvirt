@@ -698,11 +698,13 @@ int virNetSocketNewConnectUNIX(const char *path,
         }
     }
 
+    /*创建unix socket*/
     if ((fd = socket(PF_UNIX, SOCK_STREAM, 0)) < 0) {
         virReportSystemError(errno, "%s", _("Failed to create socket"));
         goto cleanup;
     }
 
+    /*填写unix path*/
     remoteAddr.data.un.sun_family = AF_UNIX;
     if (virStrcpyStatic(remoteAddr.data.un.sun_path, path) < 0) {
         virReportSystemError(ENOMEM, _("Path %s too long for unix socket"), path);
@@ -712,6 +714,7 @@ int virNetSocketNewConnectUNIX(const char *path,
         remoteAddr.data.un.sun_path[0] = '\0';
 
     while (retries) {
+        /*与对端进行行连接*/
         if (connect(fd, &remoteAddr.data.sa, remoteAddr.len) == 0) {
             VIR_DEBUG("connect() succeeded");
             break;
