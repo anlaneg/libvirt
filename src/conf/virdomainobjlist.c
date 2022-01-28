@@ -105,12 +105,14 @@ static int virDomainObjListSearchID(const void *payload,
     virObjectLock(obj);
     if (virDomainObjIsActive(obj) &&
         obj->def->id == *id)
+        /*obj活跃，且id匹配，返回1*/
         want = 1;
     virObjectUnlock(obj);
     return want;
 }
 
 
+/*通过id查询domain*/
 virDomainObjPtr
 virDomainObjListFindByID(virDomainObjListPtr doms,
                          int id)

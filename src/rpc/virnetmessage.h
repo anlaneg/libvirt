@@ -30,6 +30,7 @@ typedef virNetMessage *virNetMessagePtr;
 
 typedef void (*virNetMessageFreeCallback)(virNetMessagePtr msg, void *opaque);
 
+/*远程调用消息结构体*/
 struct _virNetMessage {
     bool tracked;
 

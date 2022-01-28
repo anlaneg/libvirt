@@ -1417,8 +1417,10 @@ struct _virHypervisorDriver {
     virDrvConnectGetMaxVcpus connectGetMaxVcpus;
     virDrvNodeGetInfo nodeGetInfo;
     virDrvConnectGetCapabilities connectGetCapabilities;
+    /*列出domain*/
     virDrvConnectListDomains connectListDomains;
     virDrvConnectNumOfDomains connectNumOfDomains;
+    /*列出此hypervisor上所有doamin*/
     virDrvConnectListAllDomains connectListAllDomains;
     virDrvDomainCreateXML domainCreateXML;
     virDrvDomainCreateXMLWithFiles domainCreateXMLWithFiles;

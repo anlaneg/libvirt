@@ -256,7 +256,7 @@ static void *virThreadHelper(void *data)
 int virThreadCreateFull(virThreadPtr thread,
                         bool joinable,
                         virThreadFunc func,
-                        const char *name/*工作函数名*/,
+                        const char *name/*线程名称*/,
                         bool worker,
                         void *opaque)
 {
@@ -272,7 +272,8 @@ int virThreadCreateFull(virThreadPtr thread,
         goto cleanup;
     }
 
-    args->func = func;//用户定制的回调
+    //用户定制的回调
+    args->func = func;
     args->name = g_strdup(name);
     args->worker = worker;
     args->opaque = opaque;

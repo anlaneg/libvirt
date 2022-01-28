@@ -39,6 +39,7 @@ struct _virNetServerProgram {
 
     unsigned program;
     unsigned version;
+    /*各程序的消息对应的处理回调*/
     virNetServerProgramProcPtr procs;
     size_t nprocs;
 };
@@ -58,6 +59,7 @@ static int virNetServerProgramOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virNetServerProgram);
 
 
+/*新建server program,指明其对应的处理过程*/
 virNetServerProgramPtr virNetServerProgramNew(unsigned program,
                                               unsigned version,
                                               virNetServerProgramProcPtr procs,
@@ -94,6 +96,7 @@ int virNetServerProgramGetVersion(virNetServerProgramPtr prog)
 }
 
 
+/*查看msg是否为指定prog进行处理*/
 int virNetServerProgramMatches(virNetServerProgramPtr prog,
                                virNetMessagePtr msg)
 {
@@ -104,6 +107,7 @@ int virNetServerProgramMatches(virNetServerProgramPtr prog,
 }
 
 
+/*按过程id找到对应的过程指针*/
 static virNetServerProgramProcPtr virNetServerProgramGetProc(virNetServerProgramPtr prog,
                                                              int procedure)
 {
@@ -296,6 +300,7 @@ int virNetServerProgramDispatch(virNetServerProgramPtr prog,
         goto error;
     }
 
+    /*按消息头类型进行分发*/
     switch (msg->header.type) {
     case VIR_NET_CALL:
     case VIR_NET_CALL_WITH_FDS:
@@ -427,6 +432,7 @@ virNetServerProgramDispatchCall(virNetServerProgramPtr prog,
      *
      *   'args and 'ret'
      */
+    /*执行指定过程的处理*/
     rv = (dispatcher->func)(server, client, msg, &rerr, arg, ret);
 
     if (virIdentitySetCurrent(NULL) < 0)

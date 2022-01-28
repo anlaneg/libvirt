@@ -71,16 +71,17 @@ static virEventRemoveTimeoutFunc removeTimeoutImpl;
  * watch number to be used for updating and unregistering for events.
  */
 int
-virEventAddHandle(int fd,
-                  int events,
-                  virEventHandleCallback cb,
-                  void *opaque,
+virEventAddHandle(int fd,/*关注事件的fd*/
+                  int events,/*关注的事件*/
+                  virEventHandleCallback cb,/*事件处理回调*/
+                  void *opaque,/*回调处理参数*/
                   virFreeCallback ff)
 {
     if (!addHandleImpl)
         return -1;
 
-    return addHandleImpl(fd, events, cb, opaque, ff);
+    /*添加事件处理回调*/
+    return addHandleImpl(fd/*关注事件的fd*/, events/*关注的事件*/, cb/*事件处理回调*/, opaque/*回调处理参数*/, ff);
 }
 
 /**
@@ -251,6 +252,7 @@ void virEventRegisterImpl(virEventAddHandleFunc addHandle,
         return;
     }
 
+    /*设置evnet处理函数*/
     addHandleImpl = addHandle;
     updateHandleImpl = updateHandle;
     removeHandleImpl = removeHandle;

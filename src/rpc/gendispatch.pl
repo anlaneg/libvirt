@@ -447,6 +447,7 @@ sub hyper_to_long
 #----------------------------------------------------------------------
 # Output
 
+# 按模式进行文件首先输出
 if ($mode eq "aclsym") {
     print <<__EOF__;
 # Automatically generated from $protocol by gendispatch.pl.

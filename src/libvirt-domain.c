@@ -53,6 +53,7 @@ VIR_LOG_INIT("libvirt.domain");
 int
 virConnectListDomains(virConnectPtr conn, int *ids, int maxids)
 {
+    /*列出所有domain*/
     VIR_DEBUG("conn=%p, ids=%p, maxids=%d", conn, ids, maxids);
 
     virResetLastError();
@@ -61,6 +62,7 @@ virConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     virCheckNonNullArrayArgGoto(ids, maxids, error);
     virCheckNonNegativeArgGoto(maxids, error);
 
+    /*调用conn对应driver的list回调*/
     if (conn->driver->connectListDomains) {
         int ret = conn->driver->connectListDomains(conn, ids, maxids);
         if (ret < 0)
@@ -303,6 +305,7 @@ virDomainLookupByID(virConnectPtr conn, int id)
     virCheckConnectReturn(conn, NULL);
     virCheckNonNegativeArgGoto(id, error);
 
+    /*通过id查询每个domain*/
     if (conn->driver->domainLookupByID) {
         virDomainPtr ret;
         ret = conn->driver->domainLookupByID(conn, id);
@@ -6541,6 +6544,7 @@ virConnectListAllDomains(virConnectPtr conn,
 int
 virDomainCreate(virDomainPtr domain)
 {
+    /*创建domain*/
     virConnectPtr conn;
 
     VIR_DOMAIN_DEBUG(domain);
@@ -6552,6 +6556,7 @@ virDomainCreate(virDomainPtr domain)
 
     virCheckReadOnlyGoto(conn->flags, error);
 
+    /*使用driver进行domainCreate*/
     if (conn->driver->domainCreate) {
         int ret;
         ret = conn->driver->domainCreate(domain);

@@ -102,6 +102,7 @@ virEventGLibConditionToEvents(GIOCondition cond)
     return events;
 }
 
+/*提供event处理统一处理，会回调各virEventGLibHandle对应的cb回调*/
 static gboolean
 virEventGLibHandleDispatch(int fd G_GNUC_UNUSED,
                            GIOCondition condition,
@@ -117,6 +118,7 @@ virEventGLibHandleDispatch(int fd G_GNUC_UNUSED,
           "watch=%d events=%d cb=%p opaque=%p",
           data->watch, events, data->cb, data->opaque);
 
+    /*event事件触发*/
     (data->cb)(data->watch, data->fd, events, data->opaque);
 
     return TRUE;
@@ -124,9 +126,9 @@ virEventGLibHandleDispatch(int fd G_GNUC_UNUSED,
 
 
 static int
-virEventGLibHandleAdd(int fd,
-                      int events,
-                      virEventHandleCallback cb,
+virEventGLibHandleAdd(int fd,/*关注事件的fd*/
+                      int events,/*关注的事件*/
+                      virEventHandleCallback cb/*事件触发时此回调将被调用*/,
                       void *opaque,
                       virFreeCallback ff)
 {
@@ -473,6 +475,7 @@ static gpointer virEventGLibRegisterOnce(gpointer data G_GNUC_UNUSED)
     eventlock = g_new0(GMutex, 1);
     timeouts = g_ptr_array_new_with_free_func(g_free);
     handles = g_ptr_array_new_with_free_func(g_free);
+    /*注册event处理回调函数*/
     virEventRegisterImpl(virEventGLibHandleAdd,
                          virEventGLibHandleUpdate,
                          virEventGLibHandleRemove,

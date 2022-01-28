@@ -47,6 +47,7 @@ remoteConfigGetAuth(virConfPtr conf,
 {
     char *authstr = NULL;
 
+    /*自配置文件中读取key对应的配置内容*/
     if (virConfGetValueString(conf, key, &authstr) < 0)
         return -1;
 
@@ -73,6 +74,7 @@ remoteConfigGetAuth(virConfPtr conf,
     return 0;
 }
 
+/*取daemon配置文件路径*/
 int
 daemonConfigFilePath(bool privileged, char **configfile)
 {
@@ -387,6 +389,7 @@ daemonConfigLoadFile(struct daemonConfig *data,
         errno == ENOENT)
         return 0;
 
+    /*读取配置文件并生成config变量*/
     conf = virConfReadFile(filename, 0);
     if (!conf)
         return -1;

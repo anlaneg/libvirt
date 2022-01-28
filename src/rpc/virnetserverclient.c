@@ -329,6 +329,7 @@ static void virNetServerClientDispatchMessage(virNetServerClientPtr client,
 {
     virObjectLock(client);
     if (!client->dispatchFunc) {
+        /*client没有消息分发函数，直接丢弃*/
         virNetMessageFree(msg);
         client->wantClose = true;
         virObjectUnlock(client);
@@ -928,6 +929,7 @@ void virNetServerClientSetCloseHook(virNetServerClientPtr client,
 }
 
 
+/**/
 void virNetServerClientSetDispatcher(virNetServerClientPtr client,
                                      virNetServerClientDispatchFunc func,
                                      void *opaque)
@@ -937,6 +939,7 @@ void virNetServerClientSetDispatcher(virNetServerClientPtr client,
      * with dispatch code that runs without locks held
      */
     if (!client->dispatchFunc) {
+        /*设置client的消息分发函数*/
         client->dispatchFunc = func;
         client->dispatchOpaque = opaque;
     }
@@ -1496,6 +1499,7 @@ virNetServerClientDispatchEvent(virNetSocketPtr sock, int events, void *opaque)
     virObjectUnlock(client);
 
     if (msg)
+        /*client消息处理*/
         virNetServerClientDispatchMessage(client, msg);
 }
 

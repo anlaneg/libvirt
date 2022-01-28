@@ -46,6 +46,7 @@ struct _virNetServerService {
 
     virNetTLSContextPtr tls;
 
+    /*指定新接入的client的处理函数*/
     virNetServerServiceDispatchFunc dispatchFunc;
     void *dispatchOpaque;
 };
@@ -65,6 +66,7 @@ static int virNetServerServiceOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virNetServerService);
 
 
+/*sock新连接接入处理*/
 static void virNetServerServiceAccept(virNetSocketPtr sock,
                                       int events G_GNUC_UNUSED,
                                       void *opaque)
@@ -89,8 +91,8 @@ static void virNetServerServiceAccept(virNetSocketPtr sock,
 
 
 static virNetServerServicePtr
-virNetServerServiceNewSocket(virNetSocketPtr *socks,
-                             size_t nsocks,
+virNetServerServiceNewSocket(virNetSocketPtr *socks/*要监听的socket*/,
+                             size_t nsocks,/*socket数目*/
                              int auth,
                              virNetTLSContextPtr tls,
                              bool readonly,
@@ -118,6 +120,7 @@ virNetServerServiceNewSocket(virNetSocketPtr *socks,
     svc->nrequests_client_max = nrequests_client_max;
     svc->tls = virObjectRef(tls);
 
+    /*serivce 多个socket监听及事件回调注册*/
     for (i = 0; i < svc->nsocks; i++) {
         if (virNetSocketListen(svc->socks[i], max_queued_clients) < 0)
             goto error;
@@ -127,7 +130,7 @@ virNetServerServiceNewSocket(virNetSocketPtr *socks,
         virObjectRef(svc);
         if (virNetSocketAddIOCallback(svc->socks[i],
                                       0,
-                                      virNetServerServiceAccept,
+                                      virNetServerServiceAccept,/*新连接连入*/
                                       svc,
                                       virObjectFreeCallback) < 0) {
             virObjectUnref(svc);
@@ -158,13 +161,14 @@ virNetServerServicePtr virNetServerServiceNewTCP(const char *nodename,
     virNetSocketPtr *socks;
     size_t nsocks;
 
+    /*创建tcp socket*/
     VIR_DEBUG("Creating new TCP server nodename='%s' service='%s'",
               NULLSTR(nodename), NULLSTR(service));
     if (virNetSocketNewListenTCP(nodename,
                                  service,
                                  family,
-                                 &socks,
-                                 &nsocks) < 0)
+                                 &socks/*出参，对应的socket*/,
+                                 &nsocks/*出参，socket数目*/) < 0)
         return NULL;
 
     svc = virNetServerServiceNewSocket(socks,
@@ -183,7 +187,7 @@ virNetServerServicePtr virNetServerServiceNewTCP(const char *nodename,
 }
 
 
-virNetServerServicePtr virNetServerServiceNewUNIX(const char *path,
+virNetServerServicePtr virNetServerServiceNewUNIX(const char *path,/*unix socket路径*/
                                                   mode_t mask,
                                                   gid_t grp,
                                                   int auth,
@@ -197,6 +201,7 @@ virNetServerServicePtr virNetServerServiceNewUNIX(const char *path,
 
     VIR_DEBUG("Creating new UNIX server path='%s' mask=%o gid=%u",
               path, mask, grp);
+    /*监听unix socket*/
     if (virNetSocketNewListenUNIX(path,
                                   mask,
                                   -1,
@@ -204,6 +209,7 @@ virNetServerServicePtr virNetServerServiceNewUNIX(const char *path,
                                   &sock) < 0)
         return NULL;
 
+    /*为其指定socket处理函数*/
     svc = virNetServerServiceNewSocket(&sock,
                                        1,
                                        auth,
@@ -233,6 +239,7 @@ virNetServerServicePtr virNetServerServiceNewFDs(int *fds,
     if (VIR_ALLOC_N(socks, nfds) < 0)
         goto cleanup;
 
+    /*针对这组fd创建socket*/
     for (i = 0; i < nfds; i++) {
         if (virNetSocketNewListenFD(fds[i],
                                     unlinkUNIX,
@@ -240,6 +247,7 @@ virNetServerServicePtr virNetServerServiceNewFDs(int *fds,
             goto cleanup;
     }
 
+    /*监听这组socket,并指定相应的处理函数*/
     svc = virNetServerServiceNewSocket(socks,
                                        nfds,
                                        auth,
@@ -406,6 +414,7 @@ virNetTLSContextPtr virNetServerServiceGetTLSContext(virNetServerServicePtr svc)
     return svc->tls;
 }
 
+/*设置serivce 分发函数*/
 void virNetServerServiceSetDispatcher(virNetServerServicePtr svc,
                                       virNetServerServiceDispatchFunc func,
                                       void *opaque)

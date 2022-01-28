@@ -50,7 +50,7 @@ struct _virNetServer {
     char *name;
 
     /* Immutable pointer, self-locking APIs */
-    virThreadPoolPtr workers;
+    virThreadPoolPtr workers;/*rpc 消息worker*/
 
     size_t nservices;
     virNetServerServicePtr *services;
@@ -134,6 +134,7 @@ static int virNetServerProcessMsg(virNetServerPtr srv,
         return 0;
     }
 
+    /*执行程序分发及执行*/
     if (virNetServerProgramDispatch(prog,
                                     srv,
                                     client,
@@ -143,6 +144,7 @@ static int virNetServerProcessMsg(virNetServerPtr srv,
     return 0;
 }
 
+/*worker的job处理函数*/
 static void virNetServerHandleJob(void *jobOpaque, void *opaque)
 {
     virNetServerPtr srv = opaque;
@@ -151,6 +153,7 @@ static void virNetServerHandleJob(void *jobOpaque, void *opaque)
     VIR_DEBUG("server=%p client=%p message=%p prog=%p",
               srv, job->client, job->msg, job->prog);
 
+    /*server消息处理函数*/
     if (virNetServerProcessMsg(srv, job->client, job->prog, job->msg) < 0)
         goto error;
 
@@ -201,6 +204,7 @@ virNetServerDispatchNewMessage(virNetServerClientPtr client,
               srv, client, msg);
 
     virObjectLock(srv);
+    /*遍历此server上所有注册的prog,确定此消息由哪个prog进行处理*/
     prog = virNetServerGetProgramLocked(srv, msg);
     /* we can unlock @srv since @prog can only become invalid in case
      * of disposing @srv, but let's grab a ref first to ensure nothing
@@ -208,6 +212,7 @@ virNetServerDispatchNewMessage(virNetServerClientPtr client,
     virObjectRef(srv);
     virObjectUnlock(srv);
 
+    /*有多个worker处理job,创建job,关联此msg,交给worker去处理*/
     if (virThreadPoolGetMaxWorkers(srv->workers) > 0)  {
         virNetServerJobPtr job;
 
@@ -219,9 +224,11 @@ virNetServerDispatchNewMessage(virNetServerClientPtr client,
 
         if (prog) {
             job->prog = virObjectRef(prog);
+            /*是否为优先job*/
             priority = virNetServerProgramGetPriority(prog, msg->header.proc);
         }
 
+        /*send job入队*/
         if (virThreadPoolSendJob(srv->workers, priority, job) < 0) {
             virObjectUnref(client);
             VIR_FREE(job);
@@ -229,6 +236,7 @@ virNetServerDispatchNewMessage(virNetServerClientPtr client,
             goto error;
         }
     } else {
+        /*没有worker处理，直接在此处处理*/
         if (virNetServerProcessMsg(srv, client, prog, msg) < 0)
             goto error;
     }
@@ -283,6 +291,7 @@ virNetServerCheckLimits(virNetServerPtr srv)
     }
 }
 
+/*添加client,并指定client对应的消息处理函数*/
 int virNetServerAddClient(virNetServerPtr srv,
                           virNetServerClientPtr client)
 {
@@ -303,7 +312,7 @@ int virNetServerAddClient(virNetServerPtr srv,
     virNetServerCheckLimits(srv);
 
     virNetServerClientSetDispatcher(client,
-                                    virNetServerDispatchNewMessage,
+                                    virNetServerDispatchNewMessage,/*client消息处理函数*/
                                     srv);
 
     if (virNetServerClientInitKeepAlive(client, srv->keepaliveInterval,
@@ -325,6 +334,7 @@ static int virNetServerDispatchNewClient(virNetServerServicePtr svc,
     virNetServerPtr srv = opaque;
     virNetServerClientPtr client;
 
+    /*创建对应的client*/
     if (!(client = virNetServerClientNew(virNetServerNextClientID(srv),
                                          clientsock,
                                          virNetServerServiceGetAuth(svc),
@@ -369,9 +379,10 @@ virNetServerPtr virNetServerNew(const char *name,
     if (!(srv = virObjectLockableNew(virNetServerClass)))
         return NULL;
 
+    /*创建rpc工作组，负责rpc 接收请求，执行响应*/
     if (!(srv->workers = virThreadPoolNewFull(min_workers, max_workers,
                                               priority_workers,
-                                              virNetServerHandleJob,
+                                              virNetServerHandleJob,/*pool的job执行函数*/
                                               "rpc-worker",
                                               srv)))
         goto error;
@@ -650,7 +661,7 @@ virJSONValuePtr virNetServerPreExecRestart(virNetServerPtr srv)
 }
 
 
-
+/*添加service，并执行service的执行函数*/
 int virNetServerAddService(virNetServerPtr srv,
                            virNetServerServicePtr svc)
 {
@@ -773,7 +784,7 @@ int virNetServerAddServiceTCP(virNetServerPtr srv,
 int virNetServerAddServiceUNIX(virNetServerPtr srv,
                                virSystemdActivationPtr act,
                                const char *actname,
-                               const char *path,
+                               const char *path,/*unix socket路径*/
                                mode_t mask,
                                gid_t grp,
                                int auth,
@@ -797,7 +808,7 @@ int virNetServerAddServiceUNIX(virNetServerPtr srv,
     if (ret == 1)
         return 0;
 
-    if (!(svc = virNetServerServiceNewUNIX(path,
+    if (!(svc = virNetServerServiceNewUNIX(path,/*unix路径*/
                                            mask,
                                            grp,
                                            auth,
@@ -818,6 +829,7 @@ int virNetServerAddServiceUNIX(virNetServerPtr srv,
 }
 
 
+/*添加programs*/
 int virNetServerAddProgram(virNetServerPtr srv,
                            virNetServerProgramPtr prog)
 {

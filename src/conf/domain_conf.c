@@ -22518,7 +22518,7 @@ virDomainDefParseFile(const char *filename,
                       void *parseOpaque,
                       unsigned int flags)
 {
-    return virDomainDefParse(NULL, filename, xmlopt, parseOpaque, flags);
+    return virDomainDefParse(NULL, filename/*xml文件*/, xmlopt, parseOpaque, flags);
 }
 
 

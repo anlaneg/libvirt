@@ -1944,6 +1944,7 @@ static const vshCmdOptDef opts_list[] = {
 #define FILTER(NAME, FLAG) \
     if (vshCommandOptBool(cmd, NAME)) \
         flags |= (FLAG)
+
 //显示所有domain
 static bool
 cmdList(vshControl *ctl, const vshCmd *cmd)

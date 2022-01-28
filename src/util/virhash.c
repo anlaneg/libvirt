@@ -444,6 +444,7 @@ virHashAtomicUpdate(virHashAtomicPtr table,
 }
 
 
+/*通过名称查询hashentry*/
 static virHashEntryPtr
 virHashGetEntry(const virHashTable *table,
                 const void *name)
@@ -476,6 +477,7 @@ virHashGetEntry(const virHashTable *table,
 void *
 virHashLookup(const virHashTable *table, const void *name)
 {
+    /*通过name查询hashEntry*/
     virHashEntryPtr entry = virHashGetEntry(table, name);
 
     if (!entry)
@@ -755,6 +757,7 @@ void *virHashSearch(const virHashTable *ctable,
         virHashEntryPtr entry;
         for (entry = table->table[i]; entry; entry = entry->next) {
             if (iter(entry->payload, entry->name, data)) {
+                /*匹配成功，立即返回entry*/
                 if (name)
                     *name = table->keyCopy(entry->name);
                 return entry->payload;

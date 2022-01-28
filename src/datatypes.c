@@ -299,9 +299,9 @@ virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackDataPtr closeData)
  */
 virDomainPtr
 virGetDomain(virConnectPtr conn,
-             const char *name,
-             const unsigned char *uuid,
-             int id)
+             const char *name,/*domain名称*/
+             const unsigned char *uuid,/*domain对应的uuid*/
+             int id/*domain对应的id*/)
 {
     virDomainPtr ret = NULL;
 

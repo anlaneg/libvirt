@@ -34,6 +34,8 @@
 
 VIR_LOG_INIT("rpc.netmessage");
 
+
+/*申请virNetMessage*/
 virNetMessagePtr virNetMessageNew(bool tracked)
 {
     virNetMessagePtr msg;

@@ -266,7 +266,7 @@ int virNetClientProgramDispatch(virNetClientProgramPtr prog,
 int virNetClientProgramCall(virNetClientProgramPtr prog,
                             virNetClientPtr client,
                             unsigned serial,
-                            int proc,
+                            int proc/*要调用的过程编号*/,
                             size_t noutfds,
                             int *outfds,
                             size_t *ninfds,
@@ -282,9 +282,11 @@ int virNetClientProgramCall(virNetClientProgramPtr prog,
     if (ninfds)
         *ninfds = 0;
 
+    /*申请消息体*/
     if (!(msg = virNetMessageNew(false)))
         return -1;
 
+    /*填充消息头*/
     msg->header.prog = prog->program;
     msg->header.vers = prog->version;
     msg->header.status = VIR_NET_OK;
@@ -371,6 +373,8 @@ int virNetClientProgramCall(virNetClientProgramPtr prog,
             }
 
         }
+
+        /*解码payload*/
         if (virNetMessageDecodePayload(msg, ret_filter, ret) < 0)
             goto error;
         break;

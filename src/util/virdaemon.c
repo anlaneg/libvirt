@@ -220,6 +220,7 @@ virDaemonUnixSocketPaths(const char *sock_prefix,
                                                unix_sock_dir, sock_prefix);
         }
     } else {
+        /*未提供unix_sock_dir时，使用以下socket路径*/
         if (privileged) {
             if (sockfile)
                 *sockfile = g_strdup_printf("%s/libvirt/%s-sock",

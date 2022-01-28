@@ -51,20 +51,29 @@ struct _virThreadPoolJobList {
 
 
 struct _virThreadPool {
+    /*标记此pool需要整体退出*/
     bool quit;
 
+    /*此线程池下每个线程的工作函数*/
     virThreadPoolJobFunc jobFunc;
+    /*线程池名称*/
     const char *jobName;
+    /*线程工作函数参数*/
     void *jobOpaque;
+    /*用于串连job*/
     virThreadPoolJobList jobList;
+    /*在queue中的job总数*/
     size_t jobQueueDepth;
 
     virMutex mutex;
+    /*非prio类型对应的条件变量*/
     virCond cond;
+    /*条件变量，用于检测pool退出*/
     virCond quit_cond;
 
     size_t maxWorkers;
     size_t minWorkers;
+    /*记录当前pool中空闲的worker数量*/
     size_t freeWorkers;
     size_t nWorkers;
     virThreadPtr workers;
@@ -72,13 +81,13 @@ struct _virThreadPool {
     size_t maxPrioWorkers;
     size_t nPrioWorkers;
     virThreadPtr prioWorkers;
-    virCond prioCond;
+    virCond prioCond;/*prio类型对应的条件变量*/
 };
 
 struct virThreadPoolWorkerData {
-    virThreadPoolPtr pool;
-    virCondPtr cond;
-    bool priority;
+    virThreadPoolPtr pool;/*所属线程池*/
+    virCondPtr cond;/*条件变量指针*/
+    bool priority;/*是否priority*/
 };
 
 /* Test whether the worker needs to quit if the current number of workers @count
@@ -89,18 +98,23 @@ static inline bool virThreadPoolWorkerQuitHelper(size_t count, size_t limit)
     return count > limit;
 }
 
+/*线程池worker*/
 static void virThreadPoolWorker(void *opaque)
 {
     struct virThreadPoolWorkerData *data = opaque;
+    /*取此线程worker从属于哪个thread pool*/
     virThreadPoolPtr pool = data->pool;
     virCondPtr cond = data->cond;
     bool priority = data->priority;
+
+    /*如果此线程priority为真，则取相应的Worker*/
     size_t *curWorkers = priority ? &pool->nPrioWorkers : &pool->nWorkers;
     size_t *maxLimit = priority ? &pool->maxPrioWorkers : &pool->maxWorkers;
     virThreadPoolJobPtr job = NULL;
 
     VIR_FREE(data);
 
+    /*防止同一线程池中其它线程进入*/
     virMutexLock(&pool->mutex);
 
     while (1) {
@@ -115,8 +129,11 @@ static void virThreadPoolWorker(void *opaque)
         while (!pool->quit &&
                ((!priority && !pool->jobList.head) ||
                 (priority && !pool->jobList.firstPrio))) {
+            /*pool未要求退出，但队列为空，增加freeworker数量*/
             if (!priority)
                 pool->freeWorkers++;
+
+            /*等待job*/
             if (virCondWait(cond, &pool->mutex) < 0) {
                 if (!priority)
                     pool->freeWorkers--;
@@ -130,24 +147,29 @@ static void virThreadPoolWorker(void *opaque)
         }
 
         if (pool->quit)
+            /*pool需要退出，跳出*/
             break;
 
+        /*取首个job*/
         if (priority) {
             job = pool->jobList.firstPrio;
         } else {
             job = pool->jobList.head;
         }
 
+        /*选择下一个priority类型的job*/
         if (job == pool->jobList.firstPrio) {
             virThreadPoolJobPtr tmp = job->next;
             while (tmp) {
                 if (tmp->priority)
+                    /*必须为标记为priority的job*/
                     break;
                 tmp = tmp->next;
             }
             pool->jobList.firstPrio = tmp;
         }
 
+        /*将job自jobList中移除*/
         if (job->prev)
             job->prev->next = job->next;
         else
@@ -157,9 +179,11 @@ static void virThreadPoolWorker(void *opaque)
         else
             pool->jobList.tail = job->prev;
 
+        /*job数减一*/
         pool->jobQueueDepth--;
 
         virMutexUnlock(&pool->mutex);
+        /*执行job回调*/
         (pool->jobFunc)(job->data, pool->jobOpaque);
         VIR_FREE(job);
         virMutexLock(&pool->mutex);
@@ -171,6 +195,7 @@ static void virThreadPoolWorker(void *opaque)
     else
         pool->nWorkers--;
     if (pool->nWorkers == 0 && pool->nPrioWorkers == 0)
+        /*pool中所有worker均已退出，触发条件变量，知会等待者*/
         virCondSignal(&pool->quit_cond);
     virMutexUnlock(&pool->mutex);
 }
@@ -186,8 +211,10 @@ virThreadPoolExpand(virThreadPoolPtr pool, size_t gain, bool priority)
     if (VIR_EXPAND_N(*workers, *curWorkers, gain) < 0)
         return -1;
 
+    /*开启gain个线程*/
     for (i = 0; i < gain; i++) {
         g_autofree char *name = NULL;
+        /*为线程申请私有数据*/
         if (VIR_ALLOC(data) < 0)
             goto error;
 
@@ -195,15 +222,17 @@ virThreadPoolExpand(virThreadPoolPtr pool, size_t gain, bool priority)
         data->cond = priority ? &pool->prioCond : &pool->cond;
         data->priority = priority;
 
+        /*如果线程为priority,则名称添加相应前缀*/
         if (priority)
             name = g_strdup_printf("prio-%s", pool->jobName);
         else
             name = g_strdup(pool->jobName);
 
+        /*创建i号线程*/
         if (virThreadCreateFull(&(*workers)[i],
                                 false,
-                                virThreadPoolWorker,
-                                name,
+                                virThreadPoolWorker,/*线程工作函数*/
+                                name/*线程名称*/,
                                 true,
                                 data) < 0) {
             VIR_FREE(data);
@@ -219,12 +248,13 @@ virThreadPoolExpand(virThreadPoolPtr pool, size_t gain, bool priority)
     return -1;
 }
 
+/*新建线程池*/
 virThreadPoolPtr
-virThreadPoolNewFull(size_t minWorkers,
-                     size_t maxWorkers,
+virThreadPoolNewFull(size_t minWorkers/*最小的worker数*/,
+                     size_t maxWorkers/*最大的worker数*/,
                      size_t prioWorkers,
-                     virThreadPoolJobFunc func,
-                     const char *name,
+                     virThreadPoolJobFunc func,/*job工作函数，pool会共用此函数*/
+                     const char *name/*线程池名称*/,
                      void *opaque)
 {
     virThreadPoolPtr pool;
@@ -280,6 +310,7 @@ void virThreadPoolFree(virThreadPoolPtr pool)
         return;
 
     virMutexLock(&pool->mutex);
+    /*标记此pool需要退出，此标记被打后，各worker会检查并进行退出*/
     pool->quit = true;
     if (pool->nWorkers > 0)
         virCondBroadcast(&pool->cond);
@@ -288,6 +319,7 @@ void virThreadPoolFree(virThreadPoolPtr pool)
         virCondBroadcast(&pool->prioCond);
     }
 
+    /*等待pool中所有worker退出*/
     while (pool->nWorkers > 0 || pool->nPrioWorkers > 0)
         ignore_value(virCondWait(&pool->quit_cond, &pool->mutex));
 
@@ -380,9 +412,10 @@ size_t virThreadPoolGetJobQueueDepth(virThreadPoolPtr pool)
  * Return: 0 on success, -1 otherwise
  */
 int virThreadPoolSendJob(virThreadPoolPtr pool,
-                         unsigned int priority,
+                         unsigned int priority/*是否优先job*/,
                          void *jobData)
 {
+    /*添加sendJob*/
     virThreadPoolJobPtr job;
 
     virMutexLock(&pool->mutex);
@@ -411,8 +444,10 @@ int virThreadPoolSendJob(virThreadPoolPtr pool,
     if (priority && !pool->jobList.firstPrio)
         pool->jobList.firstPrio = job;
 
+    /*pool中job数量增加*/
     pool->jobQueueDepth++;
 
+    /*知会pool中线程，防止有线程在等待*/
     virCondSignal(&pool->cond);
     if (priority)
         virCondSignal(&pool->prioCond);

@@ -25,6 +25,7 @@
 #include "rpc/virnetserverclient.h"
 
 
+/*此结构体定义在remote/remote_daemon_dispatch_stubs.h*/
 extern virNetServerProgramProc remoteProcs[];
 extern size_t remoteNProcs;
 

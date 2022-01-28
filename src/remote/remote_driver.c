@@ -473,6 +473,7 @@ remoteConnectNotifyEventConnectionClosed(virNetClientProgramPtr prog G_GNUC_UNUS
                                          virNetClientPtr client G_GNUC_UNUSED,
                                          void *evdata, void *opaque);
 
+/*remoteEvent消息处理*/
 static virNetClientProgramEvent remoteEvents[] = {
     { REMOTE_PROC_DOMAIN_EVENT_LIFECYCLE,
       remoteDomainBuildEventLifecycle,
@@ -1287,7 +1288,8 @@ doRemoteOpen(virConnectPtr conn,
                                  remoteClientCloseFunc,
                                  priv->closeCallback, virObjectFreeCallback);
 
-    if (!(priv->remoteProgram = virNetClientProgramNew(REMOTE_PROGRAM,
+    /*初始化remoteProgram*/
+    if (!(priv->remoteProgram = virNetClientProgramNew(REMOTE_PROGRAM,/*list等命令走此Prog*/
                                                        REMOTE_PROTOCOL_VERSION,
                                                        remoteEvents,
                                                        G_N_ELEMENTS(remoteEvents),
@@ -1849,7 +1851,7 @@ remoteNodeGetCellsFreeMemory(virConnectPtr conn,
 }
 
 static int
-remoteConnectListDomains(virConnectPtr conn, int *ids, int maxids)
+remoteConnectListDomains(virConnectPtr conn, int *ids/*出参，各domain id*/, int maxids)
 {
     int rv = -1;
     size_t i;
@@ -1880,6 +1882,7 @@ remoteConnectListDomains(virConnectPtr conn, int *ids, int maxids)
         goto cleanup;
     }
 
+    /*填充获得的各domain id*/
     for (i = 0; i < ret.ids.ids_len; ++i)
         ids[i] = ret.ids.ids_val[i];
 
@@ -6739,9 +6742,9 @@ callFull(virConnectPtr conn G_GNUC_UNUSED,
          size_t fdinlen,
          int **fdout,
          size_t *fdoutlen,
-         int proc_nr,
+         int proc_nr/*过程编号*/,
          xdrproc_t args_filter, char *args,
-         xdrproc_t ret_filter, char *ret)
+         xdrproc_t ret_filter, char *ret/*出参，过程调用返回值*/)
 {
     int rv;
     virNetClientProgramPtr prog;
@@ -6775,13 +6778,14 @@ callFull(virConnectPtr conn G_GNUC_UNUSED,
     return rv;
 }
 
+/*针对此conn进行过程调用*/
 static int
 call(virConnectPtr conn,
      struct private_data *priv,
      unsigned int flags,
-     int proc_nr,
+     int proc_nr/*要call的过程编号*/,
      xdrproc_t args_filter, char *args,
-     xdrproc_t ret_filter, char *ret)
+     xdrproc_t ret_filter, char *ret/*返回值*/)
 {
     return callFull(conn, priv, flags,
                     NULL, 0,
@@ -8461,6 +8465,7 @@ static virHypervisorDriver hypervisor_driver = {
     .connectGetMaxVcpus = remoteConnectGetMaxVcpus, /* 0.3.0 */
     .nodeGetInfo = remoteNodeGetInfo, /* 0.3.0 */
     .connectGetCapabilities = remoteConnectGetCapabilities, /* 0.3.0 */
+    /*列出所有domain*/
     .connectListDomains = remoteConnectListDomains, /* 0.3.0 */
     .connectNumOfDomains = remoteConnectNumOfDomains, /* 0.3.0 */
     .connectListAllDomains = remoteConnectListAllDomains, /* 0.9.13 */

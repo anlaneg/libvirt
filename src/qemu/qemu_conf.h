@@ -253,6 +253,7 @@ struct _virQEMUDriver {
     void *inhibitOpaque;
 
     /* Immutable pointer, self-locking APIs */
+    /*罗列domain*/
     virDomainObjListPtr domains;
 
     /* Immutable pointer */

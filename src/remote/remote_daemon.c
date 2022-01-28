@@ -278,6 +278,7 @@ daemonSetupNetworking(virNetServerPtr srv,
         return -1;
     }
 
+    /*添加libvirtd.socket地址监听，并对外提供服务*/
     if (virNetServerAddServiceUNIX(srv,
                                    act,
                                    DAEMON_NAME ".socket",
@@ -759,6 +760,7 @@ daemonUsage(const char *argv0, bool privileged)
     fprintf(stderr, "\n");
 }
 
+/*libvirtd程序入口*/
 int main(int argc, char **argv) {
     virNetDaemonPtr dmn = NULL;
     virNetServerPtr srv = NULL;
@@ -886,6 +888,7 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    /*申请并初始化config对象*/
     if (!(config = daemonConfigNew(privileged))) {
         VIR_ERROR(_("Can't create initial configuration"));
         exit(EXIT_FAILURE);
@@ -902,6 +905,7 @@ int main(int argc, char **argv) {
     }
 
     /* Read the config file if it exists */
+    /*读取配置文件*/
     if (remote_config_file &&
         daemonConfigLoadFile(config, remote_config_file, implicit_conf) < 0) {
         VIR_ERROR(_("Can't load config file: %s: %s"),
@@ -950,7 +954,7 @@ int main(int argc, char **argv) {
     if (virDaemonUnixSocketPaths(SOCK_PREFIX,
                                  privileged,
                                  config->unix_sock_dir,
-                                 &sock_file,
+                                 &sock_file,/*获得sock路径*/
                                  &sock_file_ro,
                                  &sock_file_adm) < 0) {
         VIR_ERROR(_("Can't determine socket paths"));
@@ -991,6 +995,8 @@ int main(int argc, char **argv) {
         old_umask = umask(022);
     else
         old_umask = umask(077);
+
+    /*创建run_dir*/
     VIR_DEBUG("Ensuring run dir '%s' exists", run_dir);
     if (virFileMakePath(run_dir) < 0) {
         VIR_ERROR(_("unable to create rundir %s: %s"), run_dir,
@@ -1066,6 +1072,7 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
+    /*创建qemu program*/
     if (!(qemuProgram = virNetServerProgramNew(QEMU_PROGRAM,
                                                QEMU_PROTOCOL_VERSION,
                                                qemuProcs,

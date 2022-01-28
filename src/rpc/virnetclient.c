@@ -152,6 +152,7 @@ static void virNetClientIncomingEvent(virNetSocketPtr sock,
 static void virNetClientCallQueue(virNetClientCallPtr *head,
                                   virNetClientCallPtr call)
 {
+    /*当call添加到head队列的结尾*/
     virNetClientCallPtr tmp = *head;
     while (tmp && tmp->next)
         tmp = tmp->next;
@@ -1898,6 +1899,7 @@ static int virNetClientIO(virNetClientPtr client,
                   client->waitDispatch, thiscall);
         /* Go to sleep while other thread is working... */
         if (virCondWait(&thiscall->cond, &client->parent.lock) < 0) {
+            /*等待失败，将thiscall移除掉*/
             virNetClientCallRemove(&client->waitDispatch, thiscall);
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("failed to wait on condition"));

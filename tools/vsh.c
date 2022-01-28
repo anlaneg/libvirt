@@ -798,9 +798,10 @@ vshCommandFree(vshCmd *cmd)
  * is set. No error messages are issued if a value is returned.
  */
 static int
-vshCommandOpt(const vshCmd *cmd, const char *name, vshCmdOpt **opt,
+vshCommandOpt(const vshCmd *cmd, const char *name, vshCmdOpt **opt/*出参，对应的选项*/,
               bool needData)
 {
+    /*取cmd选项*/
     vshCmdOpt *candidate = cmd->opts;
     const vshCmdOptDef *valid = cmd->def->opts;
     int ret = 0;

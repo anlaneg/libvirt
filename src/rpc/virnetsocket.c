@@ -326,6 +326,7 @@ int virNetSocketNewListenTCP(const char *nodename,
           virSocketAddrIsWildcard(&tmp_addr)))
         hints.ai_flags |= AI_ADDRCONFIG;
 
+    /*取nodename对应的一组地址*/
     int e = getaddrinfo(nodename, service, &hints, &ai);
     if (e != 0) {
         virReportError(VIR_ERR_SYSTEM_ERROR,
@@ -334,12 +335,14 @@ int virNetSocketNewListenTCP(const char *nodename,
         return -1;
     }
 
+    /*绑定ai指定的每个地址*/
     struct addrinfo *runp = ai;
     while (runp) {
         virSocketAddr addr;
 
         memset(&addr, 0, sizeof(addr));
 
+        /*创建socket*/
         if ((fd = socket(runp->ai_family, runp->ai_socktype,
                          runp->ai_protocol)) < 0) {
             if (errno == EAFNOSUPPORT) {
@@ -351,6 +354,7 @@ int virNetSocketNewListenTCP(const char *nodename,
             goto error;
         }
 
+        /*地址重用*/
         if (virSetSockReuseAddr(fd, true) < 0)
             goto error;
 
@@ -390,6 +394,7 @@ int virNetSocketNewListenTCP(const char *nodename,
             VIR_DEBUG("Used saved port %d", port);
         }
 
+        /*地址绑定*/
         if (bind(fd, &addr.data.sa, addr.len) < 0) {
             if (errno != EADDRINUSE && errno != EADDRNOTAVAIL) {
                 virReportSystemError(errno, "%s", _("Unable to bind to port"));
@@ -421,6 +426,7 @@ int virNetSocketNewListenTCP(const char *nodename,
         if (VIR_EXPAND_N(socks, nsocks, 1) < 0)
             goto error;
 
+        /*构造socket*/
         if (!(socks[nsocks-1] = virNetSocketNew(&addr, NULL, false, fd, -1, 0, false)))
             goto error;
         runp = runp->ai_next;
@@ -2094,6 +2100,8 @@ int virNetSocketListen(virNetSocketPtr sock, int backlog)
     return 0;
 }
 
+
+/*完成新连接接入，生成clientSock*/
 int virNetSocketAccept(virNetSocketPtr sock, virNetSocketPtr *clientsock)
 {
     int fd = -1;
@@ -2145,6 +2153,7 @@ int virNetSocketAccept(virNetSocketPtr sock, virNetSocketPtr *clientsock)
 }
 
 
+/*针对virNetSocketPtr提供的统一事件处理函数*/
 static void virNetSocketEventHandle(int watch G_GNUC_UNUSED,
                                     int fd G_GNUC_UNUSED,
                                     int events,
@@ -2159,6 +2168,7 @@ static void virNetSocketEventHandle(int watch G_GNUC_UNUSED,
     eopaque = sock->opaque;
     virObjectUnlock(sock);
 
+    /*执行event处理回调*/
     if (func)
         func(sock, events, eopaque);
 }
@@ -2184,9 +2194,10 @@ static void virNetSocketEventFree(void *opaque)
     virObjectUnref(sock);
 }
 
-int virNetSocketAddIOCallback(virNetSocketPtr sock,
-                              int events,
-                              virNetSocketIOFunc func,
+/*sock指定事件处理函数*/
+int virNetSocketAddIOCallback(virNetSocketPtr sock,/*事件关联的socket*/
+                              int events,/*关注的事件*/
+                              virNetSocketIOFunc func/*socket事件处理回调*/,
                               void *opaque,
                               virFreeCallback ff)
 {
@@ -2199,6 +2210,7 @@ int virNetSocketAddIOCallback(virNetSocketPtr sock,
         goto cleanup;
     }
 
+    /*注册此socket的处理回调*/
     if ((sock->watch = virEventAddHandle(sock->fd,
                                          events,
                                          virNetSocketEventHandle,
@@ -2207,6 +2219,8 @@ int virNetSocketAddIOCallback(virNetSocketPtr sock,
         VIR_DEBUG("Failed to register watch on socket %p", sock);
         goto cleanup;
     }
+
+    /*最终virNetSocketEventHandle会触发此回调*/
     sock->func = func;
     sock->opaque = opaque;
     sock->ff = ff;

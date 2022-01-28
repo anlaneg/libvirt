@@ -1561,6 +1561,7 @@ static virDomainPtr qemuDomainLookupByID(virConnectPtr conn,
     return dom;
 }
 
+/*通过uuid查询domain*/
 static virDomainPtr qemuDomainLookupByUUID(virConnectPtr conn,
                                            const unsigned char *uuid)
 {
@@ -1588,6 +1589,7 @@ static virDomainPtr qemuDomainLookupByUUID(virConnectPtr conn,
     return dom;
 }
 
+/*通过name查询domain*/
 static virDomainPtr qemuDomainLookupByName(virConnectPtr conn,
                                            const char *name)
 {
@@ -1724,7 +1726,7 @@ static int qemuConnectNumOfDomains(virConnectPtr conn)
 
 
 static virDomainPtr qemuDomainCreateXML(virConnectPtr conn,
-                                        const char *xml,
+                                        const char *xml/*创建domain的xml*/,
                                         unsigned int flags)
 {
     virQEMUDriverPtr driver = conn->privateData;
@@ -7608,6 +7610,7 @@ qemuDomainCreateWithFlags(virDomainPtr dom, unsigned int flags)
     return ret;
 }
 
+/*qemu创建domain*/
 static int
 qemuDomainCreate(virDomainPtr dom)
 {
@@ -23205,12 +23208,12 @@ qemuDomainAgentSetResponseTimeout(virDomainPtr dom,
     return ret;
 }
 
-
+/*qemu对应的hypervisor对应的驱动*/
 static virHypervisorDriver qemuHypervisorDriver = {
     .name = QEMU_DRIVER_NAME,
     /*填充qemu支持的模式串*/
     .connectURIProbe = qemuConnectURIProbe,
-	//qemu连接
+	//qemu连接，设置驱动
     .connectOpen = qemuConnectOpen, /* 0.2.0 */
     .connectClose = qemuConnectClose, /* 0.2.0 */
     .connectSupportsFeature = qemuConnectSupportsFeature, /* 0.5.0 */
@@ -23221,12 +23224,14 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .connectGetMaxVcpus = qemuConnectGetMaxVcpus, /* 0.2.1 */
     .nodeGetInfo = qemuNodeGetInfo, /* 0.2.0 */
     .connectGetCapabilities = qemuConnectGetCapabilities, /* 0.2.1 */
+    /*qemu列出所有domains*/
     .connectListDomains = qemuConnectListDomains, /* 0.2.0 */
     .connectNumOfDomains = qemuConnectNumOfDomains, /* 0.2.0 */
 	//列出所有满足条件的domain
     .connectListAllDomains = qemuConnectListAllDomains, /* 0.9.13 */
     //通过xml创建domain
     .domainCreateXML = qemuDomainCreateXML, /* 0.2.0 */
+    /*通过id查询domain*/
     .domainLookupByID = qemuDomainLookupByID, /* 0.2.0 */
     //通过uuid查找domain
     .domainLookupByUUID = qemuDomainLookupByUUID, /* 0.2.0 */
