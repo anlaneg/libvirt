@@ -137,6 +137,7 @@ qemuInterfaceStartDevices(virDomainDefPtr def)
 {
     size_t i;
 
+    /*遍历并启动配置的每一个接口*/
     for (i = 0; i < def->nnets; i++) {
         if (qemuInterfaceStartDevice(def->nets[i]) < 0)
             return -1;

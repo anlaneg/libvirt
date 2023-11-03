@@ -204,6 +204,7 @@ virDeviceInfoPCIAddressExtensionIsPresent(const virDomainDeviceInfo *info)
            virZPCIDeviceAddressIsPresent(&info->addr.pci.zpci);
 }
 
+/*解析pci地址，例如：<address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>*/
 int
 virPCIDeviceAddressParseXML(xmlNodePtr node,
                             virPCIDeviceAddressPtr addr)
@@ -249,6 +250,7 @@ virPCIDeviceAddressParseXML(xmlNodePtr node,
         goto cleanup;
     }
 
+    /*指明是否为多function*/
     if (multi &&
         ((addr->multi = virTristateSwitchTypeFromString(multi)) <= 0)) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -258,8 +260,10 @@ virPCIDeviceAddressParseXML(xmlNodePtr node,
 
     }
     if (!virPCIDeviceAddressIsEmpty(addr) && !virPCIDeviceAddressIsValid(addr, true))
+    	/*遇到无效地址*/
         goto cleanup;
 
+    /*检查zpci标签*/
     cur = node->children;
     while (cur) {
         if (cur->type == XML_ELEMENT_NODE &&
@@ -363,6 +367,7 @@ virDomainDeviceCCWAddressParseXML(xmlNodePtr node,
     return ret;
 }
 
+/*解析driver对应的地址，例如：<address type='drive' controller='0' bus='1' target='0' unit='1'/>*/
 int
 virDomainDeviceDriveAddressParseXML(xmlNodePtr node,
                                     virDomainDeviceDriveAddressPtr addr)
@@ -515,6 +520,7 @@ virDomainDeviceUSBAddressParsePort(virDomainDeviceUSBAddressPtr addr,
     return -1;
 }
 
+/*解析usb对应的地址类型，例如：<address type='usb' bus='0' port='1'/>*/
 int
 virDomainDeviceUSBAddressParseXML(xmlNodePtr node,
                                   virDomainDeviceUSBAddressPtr addr)

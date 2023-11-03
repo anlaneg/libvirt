@@ -235,6 +235,7 @@ virHostdevGetPCIHostDevice(const virDomainHostdevDef *hostdev,
         hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI)
         return 0;
 
+    /*构造pci设备*/
     actual = virPCIDeviceNew(pcisrc->addr.domain, pcisrc->addr.bus,
                              pcisrc->addr.slot, pcisrc->addr.function);
 
@@ -244,6 +245,7 @@ virHostdevGetPCIHostDevice(const virDomainHostdevDef *hostdev,
     virPCIDeviceSetManaged(actual, hostdev->managed);
 
     if (pcisrc->backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO) {
+    	/*指明使用vfio驱动*/
         virPCIDeviceSetStubDriver(actual, VIR_PCI_STUB_DRIVER_VFIO);
     } else if (pcisrc->backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_XEN) {
         virPCIDeviceSetStubDriver(actual, VIR_PCI_STUB_DRIVER_XEN);
@@ -276,8 +278,10 @@ virHostdevGetPCIHostDeviceList(virDomainHostdevDefPtr *hostdevs, int nhostdevs)
             return NULL;
 
         if (!pci)
+        	/*跳过非pci设备*/
             continue;
 
+        /*收集此pci设备到pcidevs列表*/
         if (virPCIDeviceListAdd(pcidevs, pci) < 0)
             return NULL;
         pci = NULL;
@@ -430,6 +434,7 @@ virHostdevSaveNetConfig(virDomainHostdevDefPtr hostdev,
        return 0;
 
     if (virHostdevIsVirtualFunction(hostdev) != 1) {
+    	/*当前只支持vf接口*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("Interface type hostdev is currently supported on"
                          " SR-IOV Virtual Functions only"));
@@ -1097,6 +1102,7 @@ virHostdevReAttachPCIDevices(virHostdevManagerPtr mgr,
     if (!nhostdevs)
         return;
 
+    /*收集此集合中所有pci设备（pcidevs)*/
     if (!(pcidevs = virHostdevGetPCIHostDeviceList(hostdevs, nhostdevs))) {
         VIR_ERROR(_("Failed to allocate PCI device list: %s"),
                   virGetLastErrorMessage());
@@ -1104,6 +1110,7 @@ virHostdevReAttachPCIDevices(virHostdevManagerPtr mgr,
         return;
     }
 
+    /*attach这一组pci设备*/
     virHostdevReAttachPCIDevicesImpl(mgr, drv_name, dom_name, pcidevs,
                                      hostdevs, nhostdevs, oldStateDir);
 }
@@ -1111,8 +1118,8 @@ virHostdevReAttachPCIDevices(virHostdevManagerPtr mgr,
 
 int
 virHostdevUpdateActivePCIDevices(virHostdevManagerPtr mgr,
-                                 virDomainHostdevDefPtr *hostdevs,
-                                 int nhostdevs,
+                                 virDomainHostdevDefPtr *hostdevs/*一组设备*/,
+                                 int nhostdevs/*设备数目*/,
                                  const char *drv_name,
                                  const char *dom_name)
 {

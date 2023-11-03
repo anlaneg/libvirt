@@ -1660,6 +1660,7 @@ virNetDevParseVfConfig(struct nlattr **tb, int32_t vf, virMacAddrPtr mac,
     int rem;
 
     if (!tb[IFLA_VFINFO_LIST]) {
+    	/*netlink消息中不包含VFINFO*/
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing IFLA_VF_INFO in netlink response"));
         return rc;

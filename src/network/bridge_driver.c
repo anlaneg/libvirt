@@ -3487,6 +3487,7 @@ networkValidate(virNetworkDriverStatePtr driver,
                 return -1;
 
             if (!virPCIIsVirtualFunction(sysfs_path)) {
+            	/*设备必须为vf*/
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                                _("device '%s' in network '%s' is not "
                                  "an SR-IOV Virtual Function"),

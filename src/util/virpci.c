@@ -1293,6 +1293,7 @@ virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
                            bool report)
 {
     if (addr->bus > 0xFF) {
+    	/*最多容许255条bus(8bits)*/
         if (report)
             virReportError(VIR_ERR_XML_ERROR,
                            _("Invalid PCI address bus='0x%x', "
@@ -1301,6 +1302,7 @@ virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
         return false;
     }
     if (addr->slot > 0x1F) {
+    	/*最多容许31个slot(5bits)*/
         if (report)
             virReportError(VIR_ERR_XML_ERROR,
                            _("Invalid PCI address slot='0x%x', "
@@ -1309,6 +1311,7 @@ virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
         return false;
     }
     if (addr->function > 7) {
+    	/*最多容许7个function(3bits)*/
         if (report)
             virReportError(VIR_ERR_XML_ERROR,
                            _("Invalid PCI address function=0x%x, "
@@ -1317,6 +1320,7 @@ virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
         return false;
     }
     if (virPCIDeviceAddressIsEmpty(addr)) {
+    	/*地址不能全为0*/
         if (report)
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("Invalid PCI address 0000:00:00, at least "
@@ -1329,6 +1333,7 @@ virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
 bool
 virPCIDeviceAddressIsEmpty(const virPCIDeviceAddress *addr)
 {
+	/*domin,bus,slot为0时，认为为空*/
     return !(addr->domain || addr->bus || addr->slot);
 }
 
@@ -1391,18 +1396,23 @@ virPCIDeviceNew(unsigned int domain,
     dev->address.slot = slot;
     dev->address.function = function;
 
+    /*构造pci设备在sysfs中的目录名称*/
     dev->name = g_strdup_printf(VIR_PCI_DEVICE_ADDRESS_FMT, domain, bus, slot,
                                 function);
 
+    /*取此设备配置,例如/sys/bus/pci/devices/0000\:d8\:00.1/config
+     */
     dev->path = g_strdup_printf(PCI_SYSFS "devices/%s/config", dev->name);
 
     if (!virFileExists(dev->path)) {
+    	/*设备不存在*/
         virReportSystemError(errno,
                              _("Device %s not found: could not access %s"),
                              dev->name, dev->path);
         return NULL;
     }
 
+    /*取vendor,product文件*/
     vendor  = virPCIDeviceReadID(dev, "vendor");
     product = virPCIDeviceReadID(dev, "device");
 
@@ -2345,6 +2355,7 @@ virPCIIsVirtualFunction(const char *vf_sysfs_device_link)
 {
     g_autofree char *vf_sysfs_physfn_link = NULL;
 
+    /*通过检查physfn来确认此接口是否为VF*/
     vf_sysfs_physfn_link = g_strdup_printf("%s/physfn", vf_sysfs_device_link);
 
     return virFileExists(vf_sysfs_physfn_link);

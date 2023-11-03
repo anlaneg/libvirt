@@ -135,9 +135,10 @@ typedef struct _virDomainDeviceInfo virDomainDeviceInfo;
 typedef virDomainDeviceInfo *virDomainDeviceInfoPtr;
 struct _virDomainDeviceInfo {
     char *alias;
+    /*设备类型，例如pci,usb,依不同类型取以下不同成员*/
     int type; /* virDomainDeviceAddressType */
     union {
-        virPCIDeviceAddress pci;
+        virPCIDeviceAddress pci;/*pci地址类型*/
         virDomainDeviceDriveAddress drive;
         virDomainDeviceVirtioSerialAddress vioserial;
         virDomainDeviceCcidAddress ccid;

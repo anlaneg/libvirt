@@ -3553,6 +3553,7 @@ qemuBuildNicDevStr(virDomainDefPtr def,
 
     if (qemuBuildDeviceAddressStr(&buf, def, &net->info, qemuCaps) < 0)
         return NULL;
+    /*添加rom*/
     if (qemuBuildRomStr(&buf, &net->info) < 0)
         return NULL;
     if (bootindex)
@@ -7764,7 +7765,7 @@ qemuBuildInterfaceCommandLine(virQEMUDriverPtr driver,
                               virLogManagerPtr logManager,
                               virSecurityManagerPtr secManager,
                               virCommandPtr cmd,
-                              virDomainNetDefPtr net,
+                              virDomainNetDefPtr net/*网络设备配置*/,
                               virQEMUCapsPtr qemuCaps,
                               unsigned int bootindex,
                               virNetDevVPortProfileOp vmop,
@@ -8005,6 +8006,7 @@ qemuBuildInterfaceCommandLine(virQEMUDriverPtr driver,
                                                        (flags & QEMU_BUILD_COMMANDLINE_VALIDATE_KEEP_JSON))))
         goto cleanup;
 
+    /*添加-netdev配置*/
     virCommandAddArgList(cmd, "-netdev", host, NULL);
 
     /* Possible combinations:
@@ -8102,6 +8104,7 @@ qemuBuildNetCommandLine(virQEMUDriverPtr driver,
         for (i = 0; i < def->nnets; i++) {
             virDomainNetDefPtr net = def->nets[i];
 
+            /*依据此网络设备构造cmdline*/
             if (qemuBuildInterfaceCommandLine(driver, vm, logManager, secManager, cmd/*命令行*/, net/*网络设备*/,
                                               qemuCaps, bootNet/*可自网络boot的设备序号*/, vmop,
                                               standalone, nnicindexes,

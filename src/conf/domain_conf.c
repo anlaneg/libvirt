@@ -2950,6 +2950,7 @@ void virDomainVideoDefFree(virDomainVideoDefPtr def)
 }
 
 
+/*创建一个hostdev设备*/
 virDomainHostdevDefPtr
 virDomainHostdevDefNew(void)
 {
@@ -7722,6 +7723,7 @@ static int
 virDomainDeviceAddressParseXML(xmlNodePtr address,
                                virDomainDeviceInfoPtr info)
 {
+	/*取address标答的type属性*/
     g_autofree char *type = virXMLPropString(address, "type");
 
     if (type) {
@@ -7731,6 +7733,7 @@ virDomainDeviceAddressParseXML(xmlNodePtr address,
             return -1;
         }
     } else {
+    	/*必须指明type*/
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("No type specified for device address"));
         return -1;
@@ -7738,11 +7741,13 @@ virDomainDeviceAddressParseXML(xmlNodePtr address,
 
     switch ((virDomainDeviceAddressType) info->type) {
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI:
+    	/*解析pci地址类型*/
         if (virPCIDeviceAddressParseXML(address, &info->addr.pci) < 0)
             return -1;
         break;
 
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE:
+    	/*解析driver对应的地址类型*/
         if (virDomainDeviceDriveAddressParseXML(address, &info->addr.drive) < 0)
             return -1;
         break;
@@ -7759,6 +7764,7 @@ virDomainDeviceAddressParseXML(xmlNodePtr address,
         break;
 
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_USB:
+    	/*解析usb对应的地址类型*/
         if (virDomainDeviceUSBAddressParseXML(address, &info->addr.usb) < 0)
             return -1;
         break;
@@ -7837,9 +7843,10 @@ virDomainDeviceInfoParseXML(virDomainXMLOptionPtr xmlopt,
         if (cur->type == XML_ELEMENT_NODE) {
             if (alias == NULL &&
                 virXMLNodeNameEqual(cur, "alias")) {
-                alias = cur;
+                alias = cur;/*记录<alias>标签对应的node*/
             } else if (address == NULL &&
                        virXMLNodeNameEqual(cur, "address")) {
+            	/*记录<address>标答对应的node,例如指明pci地址*/
                 address = cur;
             } else if (master == NULL &&
                        virXMLNodeNameEqual(cur, "master")) {
@@ -7858,6 +7865,7 @@ virDomainDeviceInfoParseXML(virDomainXMLOptionPtr xmlopt,
     }
 
     if (alias) {
+    	/*处理<alias>标签，例如：<alias name='net0'/>*/
         aliasStr = virXMLPropString(alias, "name");
 
         if (!(flags & VIR_DOMAIN_DEF_PARSE_INACTIVE) ||
@@ -7879,6 +7887,7 @@ virDomainDeviceInfoParseXML(virDomainXMLOptionPtr xmlopt,
     }
 
     if (rom) {
+    	/*<rom>标签处理*/
         if ((romenabled = virXMLPropString(rom, "enabled")) &&
             ((info->romenabled = virTristateBoolTypeFromString(romenabled)) <= 0)) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -7901,6 +7910,7 @@ virDomainDeviceInfoParseXML(virDomainXMLOptionPtr xmlopt,
         }
     }
 
+    /*解析interface <address>标签*/
     if (address &&
         virDomainDeviceAddressParseXML(address, info) < 0)
         goto cleanup;
@@ -8084,6 +8094,7 @@ virDomainHostdevSubsysPCIDefParseXML(xmlNodePtr node,
     while (cur != NULL) {
         if (cur->type == XML_ELEMENT_NODE) {
             if (virXMLNodeNameEqual(cur, "address")) {
+            	/*解析pci地址*/
                 virPCIDeviceAddressPtr addr =
                     &def->source.subsys.u.pci.addr;
 
@@ -8459,7 +8470,7 @@ virDomainHostdevSubsysMediatedDevDefParseXML(virDomainHostdevDefPtr def,
 static int
 virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
                                   xmlXPathContextPtr ctxt,
-                                  const char *type,
+                                  const char *type/*<hostdev>,<address>标签对应的type*/,
                                   virDomainHostdevDefPtr def,
                                   unsigned int flags)
 {
@@ -8500,6 +8511,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
      * type to already be known).
      */
     if (type) {
+    	/*解析并填充子系统类型*/
         if ((def->source.subsys.type
              = virDomainHostdevSubsysTypeFromString(type)) < 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -8513,12 +8525,14 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
         return -1;
     }
 
+    /*取此节点下source标签*/
     if (!(sourcenode = virXPathNode("./source", ctxt))) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("Missing <source> element in hostdev device"));
         return -1;
     }
 
+    /*startupPolicy仅用于usb*/
     if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB &&
         virXPathBoolean("boolean(./source/@startupPolicy)", ctxt)) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -8528,6 +8542,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
     }
 
     if (sgio) {
+    	/*sgio属性仅用于scsi*/
         if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("sgio is only supported for scsi host device"));
@@ -8542,6 +8557,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
     }
 
     if (rawio) {
+    	/*rawio属性仅用于scsi*/
         if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("rawio is only supported for scsi host device"));
@@ -8556,6 +8572,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
         }
     }
 
+    /*仅mdev,scsi-host支持model属性*/
     if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV &&
         def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST) {
         if (model) {
@@ -8611,9 +8628,11 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
 
     switch (def->source.subsys.type) {
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+    	/*解析pci类型对应的<source>标签*/
         if (virDomainHostdevSubsysPCIDefParseXML(sourcenode, def, flags) < 0)
             return -1;
 
+        /*解析驱动名称*/
         backend = VIR_DOMAIN_HOSTDEV_PCI_BACKEND_DEFAULT;
         if ((backendStr = virXPathString("string(./driver/@name)", ctxt)) &&
             (((backend = virDomainHostdevSubsysPCIBackendTypeFromString(backendStr)) < 0) ||
@@ -8733,6 +8752,7 @@ virDomainNetIPInfoParseXML(const char *source,
     g_autofree virNetDevIPAddrPtr ip = NULL;
 
     if ((nnodes = virXPathNodeSet("./ip", ctxt, &nodes)) < 0)
+    	/*无<ip>标签，退出*/
         goto cleanup;
 
     for (i = 0; i < nnodes; i++) {
@@ -11458,6 +11478,7 @@ virDomainControllerDefParseXML(virDomainXMLOptionPtr xmlopt,
 }
 
 
+/*生成mac地址*/
 void
 virDomainNetGenerateMAC(virDomainXMLOptionPtr xmlopt,
                         virMacAddrPtr mac)
@@ -11962,6 +11983,7 @@ virDomainChrSourceReconnectDefParseXML(virDomainChrSourceReconnectDefPtr def,
 }
 
 
+/*解析device下的<interface>标签*/
 static virDomainNetDefPtr
 virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                         xmlNodePtr node,
@@ -12023,7 +12045,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
 
     ctxt->node = node;
 
-    /*取type属性*/
+    /*取<interface> type属性,例如<interface type='hostdev' managed='yes'>*/
     type = virXMLPropString(node, "type");
     if (type != NULL) {
     	//type字符串取值转对应枚举
@@ -12041,18 +12063,19 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
     if (trustGuestRxFilters &&
         ((def->trustGuestRxFilters
           = virTristateBoolTypeFromString(trustGuestRxFilters)) <= 0)) {
+    	/*trustGuestRxFilters属性必须是bool类型*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("unknown trustGuestRxFilters value '%s'"),
                        trustGuestRxFilters);
         goto error;
     }
 
-    //遍历interface对应的子节点
+    //遍历<interface>标签的子节点
     cur = node->children;
     while (cur != NULL) {
         if (cur->type == XML_ELEMENT_NODE) {
             if (virXMLNodeNameEqual(cur, "source")) {
-                //处理source节点
+                /*处理source节点*/
                 xmlNodePtr tmpnode = ctxt->node;
 
                 ctxt->node = cur;
@@ -12062,7 +12085,9 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                 ctxt->node = tmpnode;
             }
             if (!macaddr && virXMLNodeNameEqual(cur, "mac")) {
-                //处理mac节点
+                /*处理mac节点
+                 * 例如：<mac address='00:33:33:33:33:21'/>
+                 * */
                 macaddr = virXMLPropString(cur, "address");
             } else if (!network &&
                        def->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
@@ -12078,6 +12103,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
             } else if (!bridge &&
                        def->type == VIR_DOMAIN_NET_TYPE_BRIDGE &&
                        virXMLNodeNameEqual(cur, "source")) {
+            	/*桥类型时，在source中取桥名称，例如<source bridge='net-br0'/>*/
                 bridge = virXMLPropString(cur, "bridge");
             } else if (!dev && def->type == VIR_DOMAIN_NET_TYPE_DIRECT &&
                        virXMLNodeNameEqual(cur, "source")) {
@@ -12107,6 +12133,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
             } else if (!vhostuser_path && !vhostuser_mode && !vhostuser_type
                        && def->type == VIR_DOMAIN_NET_TYPE_VHOSTUSER
                        && virXMLNodeNameEqual(cur, "source")) {
+            	/*vhostuser模式时，取type,path,mode*/
                 vhostuser_type = virXMLPropString(cur, "type");
                 vhostuser_path = virXMLPropString(cur, "path");
                 vhostuser_mode = virXMLPropString(cur, "mode");
@@ -12156,6 +12183,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                 }
             } else if (!ifname &&
                        virXMLNodeNameEqual(cur, "target")) {
+            	/*没有设置ifname,且遇到target标签，例如样式：<target dev='recv_eth1'/>*/
                 ifname = virXMLPropString(cur, "dev");
                 managed_tap = virXMLPropString(cur, "managed");
             } else if ((!ifname_guest || !ifname_guest_actual) &&
@@ -12175,8 +12203,10 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                        virXMLNodeNameEqual(cur, "backenddomain")) {
                 domain_name = virXMLPropString(cur, "name");
             } else if (virXMLNodeNameEqual(cur, "model")) {
+            	/*指定model,例如<model type='e1000'/>，指明e1000*/
                 model = virXMLPropString(cur, "type");
             } else if (virXMLNodeNameEqual(cur, "driver")) {
+            	/*指定后端驱动，例如：<driver name='vhost' queues='8'/>*/
                 backend = virXMLPropString(cur, "name");
                 txmode = virXMLPropString(cur, "txmode");
                 ioeventfd = virXMLPropString(cur, "ioeventfd");
@@ -12189,6 +12219,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
                     goto error;
             } else if (virXMLNodeNameEqual(cur, "filterref")) {
                 if (filter) {
+                	/*不容许多次配置*/
                     virReportError(VIR_ERR_XML_ERROR, "%s",
                                    _("Invalid specification of multiple <filterref>s "
                                      "in a single <interface>"));
@@ -12243,6 +12274,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
             goto error;
         }
         if (virMacAddrIsMulticast(&def->mac)) {
+        	/*设置的mac是组播mac,报错*/
             virReportError(VIR_ERR_XML_ERROR,
                            _("expected unicast mac address, found multicast '%s'"),
                            (const char *)macaddr);
@@ -12253,12 +12285,14 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
         def->mac_generated = true;
     }
 
+    /*解析此node的其它设备属性*/
     if (virDomainDeviceInfoParseXML(xmlopt, node, &def->info,
                                     flags | VIR_DOMAIN_DEF_PARSE_ALLOW_BOOT
                                     | VIR_DOMAIN_DEF_PARSE_ALLOW_ROM) < 0) {
         goto error;
     }
 
+    /*有model标签，处理*/
     if (model != NULL &&
         virDomainNetSetModelString(def, model) < 0)
         goto error;
@@ -12349,6 +12383,7 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
         break;
 
     case VIR_DOMAIN_NET_TYPE_BRIDGE:
+    	/*bridge类型时，必须指定bridge*/
         if (bridge == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("No <source> 'bridge' attribute "
@@ -12455,18 +12490,20 @@ virDomainNetDefParseXML(virDomainXMLOptionPtr xmlopt,
         break;
 
     case VIR_DOMAIN_NET_TYPE_HOSTDEV:
-        hostdev = &def->data.hostdev.def;
+        hostdev = &def->data.hostdev.def;/*取hostdev对应的配置结构体*/
         hostdev->parentnet = def;
         hostdev->info = &def->info;
         /* The helper function expects type to already be found and
          * passed in as a string, since it is in a different place in
          * NetDef vs HostdevDef.
          */
-        addrtype = virXPathString("string(./source/address/@type)", ctxt);
+        addrtype = virXPathString("string(./source/address/@type)", ctxt);/*hostdev对应的源地址类型*/
         /* if not explicitly stated, source/vendor implies usb device */
         if (!addrtype && virXPathNode("./source/vendor", ctxt))
+        	/*指定vendor时，可默认是usb地址类型*/
             addrtype = g_strdup("usb");
         hostdev->mode = VIR_DOMAIN_HOSTDEV_MODE_SUBSYS;
+        /*按照此地址类型，解析节点*/
         if (virDomainHostdevDefParseXMLSubsys(node, ctxt, addrtype,
                                               hostdev, flags) < 0) {
             goto error;
@@ -16192,6 +16229,16 @@ virDomainVideoDefParseXML(virDomainXMLOptionPtr xmlopt,
     return NULL;
 }
 
+/*解析hostdev标签，例如
+ * <hostdev mode='subsystem' type='pci' managed='yes'>
+      <driver name='vfio'/>
+      <source>
+        <address domain='0x0000' bus='0xd8' slot='0x00' function='0x1'/>
+      </source>
+      <alias name='hostdev1'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x09' function='0x0'/>
+    </hostdev>
+ * */
 static virDomainHostdevDefPtr
 virDomainHostdevDefParseXML(virDomainXMLOptionPtr xmlopt,
                             xmlNodePtr node,
@@ -16209,12 +16256,14 @@ virDomainHostdevDefParseXML(virDomainXMLOptionPtr xmlopt,
         goto error;
 
     if (mode) {
+    	/*执行mode解析*/
         if ((def->mode = virDomainHostdevModeTypeFromString(mode)) < 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unknown hostdev mode '%s'"), mode);
             goto error;
         }
     } else {
+    	/*默认为subsystem mode*/
         def->mode = VIR_DOMAIN_HOSTDEV_MODE_SUBSYS;
     }
 
@@ -17254,6 +17303,7 @@ virDomainHostdevMatchSubsysUSB(virDomainHostdevDefPtr first,
     return 0;
 }
 
+/*检查first与second addr是否一致*/
 static int
 virDomainHostdevMatchSubsysPCI(virDomainHostdevDefPtr first,
                                virDomainHostdevDefPtr second)
@@ -17324,6 +17374,7 @@ virDomainHostdevMatchSubsys(virDomainHostdevDefPtr a,
 
     switch ((virDomainHostdevSubsysType) a->source.subsys.type) {
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+    	/*pci地址匹配*/
         return virDomainHostdevMatchSubsysPCI(a, b);
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
         return virDomainHostdevMatchSubsysUSB(a, b);
@@ -17432,6 +17483,7 @@ virDomainHostdevFind(virDomainDefPtr def,
         found = &local_found;
     *found = NULL;
 
+    /*检查hostdevs中设备是否与match一致*/
     for (i = 0; i < def->nhostdevs; i++) {
         if (virDomainHostdevMatch(match, def->hostdevs[i])) {
             *found = def->hostdevs[i];
@@ -20849,27 +20901,36 @@ virDomainDefParseCaps(virDomainDefPtr def,
     g_autofree char *arch = NULL;
     g_autofree char *ostype = NULL;
 
+    /*获取type属性，例如：<domain type='kvm' id='276'>*/
     virttype = virXPathString("string(./@type)", ctxt);
+    /*自os中尝试获取type标签，例如：<type arch='x86_64' machine='pc-i440fx-2.8'>hvm</type>*/
     ostype = virXPathString("string(./os/type[1])", ctxt);
+    /*自os中尝试获取arch属性*/
     arch = virXPathString("string(./os/type[1]/@arch)", ctxt);
 
+    /*尝试获取bootloader,可能没有*/
     def->os.bootloader = virXPathString("string(./bootloader)", ctxt);
     def->os.bootloaderArgs = virXPathString("string(./bootloader_args)", ctxt);
+    /*自os中尝试获取machine属性*/
     def->os.machine = virXPathString("string(./os/type[1]/@machine)", ctxt);
+    /*取模拟器：<emulator>/usr/bin/qemu-system-x86_64</emulator>*/
     def->emulator = virXPathString("string(./devices/emulator[1])", ctxt);
 
     if (!virttype) {
+    	/*必须指明属性type*/
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("missing domain type attribute"));
         return -1;
     }
     if ((def->virtType = virDomainVirtTypeFromString(virttype)) < 0) {
+    	/*遇到不认识的虚拟化类型*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("invalid domain type %s"), virttype);
         return -1;
     }
 
     if (!ostype) {
+    	/*xen情况下可能不提供os类型*/
         if (def->os.bootloader) {
             def->os.type = VIR_DOMAIN_OSTYPE_XEN;
         } else {
@@ -20879,6 +20940,7 @@ virDomainDefParseCaps(virDomainDefPtr def,
         }
     } else {
         if ((def->os.type = virDomainOSTypeFromString(ostype)) < 0) {
+        	/*os type解析出错*/
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unknown OS type '%s'"), ostype);
             return -1;
@@ -20896,6 +20958,7 @@ virDomainDefParseCaps(virDomainDefPtr def,
     }
 
     if (arch && !(def->os.arch = virArchFromString(arch))) {
+    	/*arch解析出错*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("Unknown architecture %s"), arch);
         return -1;
@@ -21051,7 +21114,7 @@ virDomainDefParseXML(xmlDocPtr xml,
     int n;
     long id = -1;
     virDomainDefPtr def;
-    bool uuid_generated = false;
+    bool uuid_generated = false;/*指明是否生成了uuid*/
     bool usb_none = false;
     bool usb_other = false;
     bool usb_master = false;
@@ -21075,14 +21138,15 @@ virDomainDefParseXML(xmlDocPtr xml,
 
     if (!(flags & VIR_DOMAIN_DEF_PARSE_INACTIVE))
         if (virXPathLong("string(./@id)", ctxt, &id) < 0)
-            id = -1;
-    def->id = (int)id;
+            id = -1;/*如无id,则置为-1*/
+    def->id = (int)id;/*设置domain id号*/
 
     if (virDomainDefParseCaps(def, ctxt, xmlopt) < 0)
         goto error;
 
     /* Extract domain name */
     if (!(def->name = virXPathString("string(./name[1])", ctxt))) {
+    	/*必须指明domain名称*/
         virReportError(VIR_ERR_NO_NAME, NULL);
         goto error;
     }
@@ -21092,6 +21156,7 @@ virDomainDefParseXML(xmlDocPtr xml,
      * also serve as the uuid. */
     tmp = virXPathString("string(./uuid[1])", ctxt);
     if (!tmp) {
+    	/*xml中未给出uuid,则生成一个uuid*/
         if (virUUIDGenerate(def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("Failed to generate UUID"));
@@ -21099,6 +21164,7 @@ virDomainDefParseXML(xmlDocPtr xml,
         }
         uuid_generated = true;
     } else {
+    	/*xml中给出了uuid,则解析并填充*/
         if (virUUIDParse(tmp, def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("malformed uuid element"));
@@ -21772,6 +21838,7 @@ virDomainDefParseXML(xmlDocPtr xml,
     //2.申请n个def->nets对象
     if (n && VIR_ALLOC_N(def->nets, n) < 0)
         goto error;
+    //3。解析并填充各interface配置
     for (i = 0; i < n; i++) {
         virDomainNetDefPtr net = virDomainNetDefParseXML(xmlopt,
                                                          nodes[i],
@@ -22001,10 +22068,13 @@ virDomainDefParseXML(xmlDocPtr xml,
     VIR_FREE(nodes);
 
     /* analysis of the host devices */
+    /*取devices下所有hostdev设备配置*/
     if ((n = virXPathNodeSet("./devices/hostdev", ctxt, &nodes)) < 0)
         goto error;
+    /*分析得到n个设备，先扩充def->hostdevs数组*/
     if (n && VIR_REALLOC_N(def->hostdevs, def->nhostdevs + n) < 0)
         goto error;
+    /*遍历每个配置的hostdev设备*/
     for (i = 0; i < n; i++) {
         virDomainHostdevDefPtr hostdev;
 
@@ -22495,7 +22565,7 @@ virDomainDefParse(const char *xmlStr/*xml文件内容*/,
         goto cleanup;
     }
 
-    def = virDomainDefParseNode(xml, root, xmlopt, parseOpaque, flags);
+    def = virDomainDefParseNode(xml, root/*domain节点*/, xmlopt, parseOpaque, flags);
 
  cleanup:
     xmlFreeDoc(xml);
@@ -22524,7 +22594,7 @@ virDomainDefParseFile(const char *filename,
 
 virDomainDefPtr
 virDomainDefParseNode(xmlDocPtr xml/*xml对象*/,
-                      xmlNodePtr root/*xml根元素*/,
+                      xmlNodePtr root/*xml根元素，domain节点*/,
                       virDomainXMLOptionPtr xmlopt,
                       void *parseOpaque,
                       unsigned int flags)
@@ -30749,6 +30819,7 @@ virDomainStateReasonFromString(virDomainState state, const char *reason)
 virDomainNetType
 virDomainNetGetActualType(const virDomainNetDef *iface)
 {
+	/*获取此网络设备的类型*/
     if (iface->type != VIR_DOMAIN_NET_TYPE_NETWORK)
         return iface->type;
     if (!iface->data.network.actual)
@@ -30808,7 +30879,7 @@ virDomainHostdevDefPtr
 virDomainNetGetActualHostdev(virDomainNetDefPtr iface)
 {
     if (iface->type == VIR_DOMAIN_NET_TYPE_HOSTDEV)
-        return &iface->data.hostdev.def;
+        return &iface->data.hostdev.def;/*返回hostdev对应的配置*/
     if (iface->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
         iface->data.network.actual &&
         iface->data.network.actual->type == VIR_DOMAIN_NET_TYPE_HOSTDEV)
@@ -30919,6 +30990,7 @@ virDomainNetSetModelString(virDomainNetDefPtr net,
     if (!model)
         return 0;
 
+    /*检查是哪种model*/
     for (i = 0; i < G_N_ELEMENTS(virDomainNetModelTypeList); i++) {
         if (STRCASEEQ(virDomainNetModelTypeList[i], model)) {
             net->model = i;

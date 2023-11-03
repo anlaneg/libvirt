@@ -773,7 +773,7 @@ catchXMLError(void *ctx, const char *msg G_GNUC_UNUSED, ...)
  */
 xmlDocPtr
 virXMLParseHelper(int domcode,
-                  const char *filename,/*xml文件*/
+                  const char *filename,/*xml文件,不为空时自此文件加载*/
                   const char *xmlStr,/*文件内容*/
                   const char *url,
                   xmlXPathContextPtr *ctxt)
