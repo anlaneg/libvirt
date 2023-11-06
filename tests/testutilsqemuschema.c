@@ -22,20 +22,62 @@
 #include "qemu/qemu_qapi.h"
 
 struct testQEMUSchemaValidateCtxt {
-    virHashTablePtr schema;
-    virBufferPtr debug;
+    GHashTable *schema;
+    virBuffer *debug;
     bool allowDeprecated;
+    bool allowIncomplete; /* allow members not (yet) covered by the schema */
 };
 
 
 static int
-testQEMUSchemaValidateRecurse(virJSONValuePtr obj,
-                              virJSONValuePtr root,
+testQEMUSchemaValidateDeprecated(virJSONValue *root,
+                                 const char *name,
+                                 struct testQEMUSchemaValidateCtxt *ctxt)
+{
+    virJSONValue *features = virJSONValueObjectGetArray(root, "features");
+    size_t nfeatures;
+    size_t i;
+
+    if (!features)
+        return 0;
+
+    nfeatures = virJSONValueArraySize(features);
+
+    for (i = 0; i < nfeatures; i++) {
+        virJSONValue *cur = virJSONValueArrayGet(features, i);
+        const char *curstr;
+
+        if (!cur ||
+            !(curstr = virJSONValueGetString(cur))) {
+            virBufferAsprintf(ctxt->debug, "ERROR: features of '%s' are malformed", name);
+            return -2;
+        }
+
+        if (STREQ(curstr, "deprecated")) {
+            if (ctxt->allowDeprecated) {
+                virBufferAsprintf(ctxt->debug, "WARNING: '%s' is deprecated", name);
+                if (virTestGetVerbose())
+                    g_fprintf(stderr, "\nWARNING: '%s' is deprecated\n", name);
+                return 0;
+            } else {
+                virBufferAsprintf(ctxt->debug, "ERROR: '%s' is deprecated", name);
+                return -1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+
+static int
+testQEMUSchemaValidateRecurse(virJSONValue *obj,
+                              virJSONValue *root,
                               struct testQEMUSchemaValidateCtxt *ctxt);
 
 static int
-testQEMUSchemaValidateBuiltin(virJSONValuePtr obj,
-                              virJSONValuePtr root,
+testQEMUSchemaValidateBuiltin(virJSONValue *obj,
+                              virJSONValue *root,
                               struct testQEMUSchemaValidateCtxt *ctxt)
 {
     const char *t = virJSONValueObjectGetString(root, "json-type");
@@ -95,18 +137,18 @@ testQEMUSchemaValidateBuiltin(virJSONValuePtr obj,
 }
 
 struct testQEMUSchemaValidateObjectMemberData {
-    virJSONValuePtr rootmembers;
+    virJSONValue *rootmembers;
     struct testQEMUSchemaValidateCtxt *ctxt;
     bool missingMandatory;
 };
 
 
-static virJSONValuePtr
+static virJSONValue *
 testQEMUSchemaStealObjectMemberByName(const char *name,
-                                      virJSONValuePtr members)
+                                      virJSONValue *members)
 {
-    virJSONValuePtr member;
-    virJSONValuePtr ret = NULL;
+    virJSONValue *member;
+    virJSONValue *ret = NULL;
     size_t i;
 
     for (i = 0; i < virJSONValueArraySize(members); i++) {
@@ -124,22 +166,30 @@ testQEMUSchemaStealObjectMemberByName(const char *name,
 
 static int
 testQEMUSchemaValidateObjectMember(const char *key,
-                                   virJSONValuePtr value,
+                                   virJSONValue *value,
                                    void *opaque)
 {
     struct testQEMUSchemaValidateObjectMemberData *data = opaque;
     g_autoptr(virJSONValue) keymember = NULL;
     const char *keytype;
-    virJSONValuePtr keyschema = NULL;
+    virJSONValue *keyschema = NULL;
     int rc;
 
     virBufferStrcat(data->ctxt->debug, key, ": ", NULL);
 
     /* lookup 'member' entry for key */
     if (!(keymember = testQEMUSchemaStealObjectMemberByName(key, data->rootmembers))) {
+        if (data->ctxt->allowIncomplete) {
+            virBufferAddLit(data->ctxt->debug, " schema missing - OK(waived)\n");
+            return 0;
+        }
         virBufferAddLit(data->ctxt->debug, "ERROR: attribute not in schema\n");
         return -1;
     }
+
+    /* validate that the member is not deprecated */
+    if ((rc = testQEMUSchemaValidateDeprecated(keymember, key, data->ctxt)) < 0)
+        return rc;
 
     /* lookup schema entry for keytype */
     if (!(keytype = virJSONValueObjectGetString(keymember, "type")) ||
@@ -159,16 +209,16 @@ testQEMUSchemaValidateObjectMember(const char *key,
 
 static int
 testQEMUSchemaValidateObjectMergeVariantMember(size_t pos G_GNUC_UNUSED,
-                                               virJSONValuePtr item,
+                                               virJSONValue *item,
                                                void *opaque)
 {
-    virJSONValuePtr array = opaque;
-    virJSONValuePtr copy;
+    virJSONValue *array = opaque;
+    g_autoptr(virJSONValue) copy = NULL;
 
     if (!(copy = virJSONValueCopy(item)))
         return -1;
 
-    if (virJSONValueArrayAppend(array, copy) < 0)
+    if (virJSONValueArrayAppend(array, &copy) < 0)
         return -1;
 
     return 1;
@@ -182,17 +232,17 @@ testQEMUSchemaValidateObjectMergeVariantMember(size_t pos G_GNUC_UNUSED,
  * 'variants' array from @root.
  */
 static int
-testQEMUSchemaValidateObjectMergeVariant(virJSONValuePtr root,
+testQEMUSchemaValidateObjectMergeVariant(virJSONValue *root,
                                          const char *variantfield,
                                          const char *variantname,
                                          struct testQEMUSchemaValidateCtxt *ctxt)
 {
     size_t i;
     g_autoptr(virJSONValue) variants = NULL;
-    virJSONValuePtr variant;
-    virJSONValuePtr variantschema;
-    virJSONValuePtr variantschemamembers;
-    virJSONValuePtr rootmembers;
+    virJSONValue *variant;
+    virJSONValue *variantschema;
+    virJSONValue *variantschemamembers;
+    virJSONValue *rootmembers;
     const char *varianttype = NULL;
 
     if (!(variants = virJSONValueObjectStealArray(root, "variants"))) {
@@ -238,12 +288,12 @@ testQEMUSchemaValidateObjectMergeVariant(virJSONValuePtr root,
 
 static int
 testQEMUSchemaValidateObjectMandatoryMember(size_t pos G_GNUC_UNUSED,
-                                            virJSONValuePtr item,
+                                            virJSONValue *item,
                                             void *opaque G_GNUC_UNUSED)
 {
     struct testQEMUSchemaValidateObjectMemberData *data = opaque;
 
-    if (virJSONValueObjectHasKey(item, "default") != 1) {
+    if (!virJSONValueObjectHasKey(item, "default")) {
         virBufferAsprintf(data->ctxt->debug, "ERROR: missing mandatory attribute '%s'\n",
                           NULLSTR(virJSONValueObjectGetString(item, "name")));
         data->missingMandatory = true;
@@ -254,8 +304,8 @@ testQEMUSchemaValidateObjectMandatoryMember(size_t pos G_GNUC_UNUSED,
 
 
 static int
-testQEMUSchemaValidateObject(virJSONValuePtr obj,
-                             virJSONValuePtr root,
+testQEMUSchemaValidateObject(virJSONValue *obj,
+                             virJSONValue *root,
                              struct testQEMUSchemaValidateCtxt *ctxt)
 {
     struct testQEMUSchemaValidateObjectMemberData data = { NULL, ctxt, false };
@@ -313,13 +363,13 @@ testQEMUSchemaValidateObject(virJSONValuePtr obj,
 
 
 static int
-testQEMUSchemaValidateEnum(virJSONValuePtr obj,
-                           virJSONValuePtr root,
+testQEMUSchemaValidateEnum(virJSONValue *obj,
+                           virJSONValue *root,
                            struct testQEMUSchemaValidateCtxt *ctxt)
 {
     const char *objstr;
-    virJSONValuePtr values = NULL;
-    virJSONValuePtr value;
+    virJSONValue *values = NULL;
+    virJSONValue *members = NULL;
     size_t i;
 
     if (virJSONValueGetType(obj) != VIR_JSON_TYPE_STRING) {
@@ -329,35 +379,57 @@ testQEMUSchemaValidateEnum(virJSONValuePtr obj,
 
     objstr = virJSONValueGetString(obj);
 
-    if (!(values = virJSONValueObjectGetArray(root, "values"))) {
-        virBufferAsprintf(ctxt->debug, "ERROR: missing enum values in schema '%s'",
-                          NULLSTR(virJSONValueObjectGetString(root, "name")));
-        return -2;
-    }
+    /* qemu-6.2 added a "members" array superseding "values" */
+    if ((members = virJSONValueObjectGetArray(root, "members"))) {
+        for (i = 0; i < virJSONValueArraySize(members); i++) {
+            virJSONValue *member = virJSONValueArrayGet(members, i);
 
-    for (i = 0; i < virJSONValueArraySize(values); i++) {
-        value = virJSONValueArrayGet(values, i);
+            if (STREQ_NULLABLE(objstr, virJSONValueObjectGetString(member, "name"))) {
+                int rc;
 
-        if (STREQ_NULLABLE(objstr, virJSONValueGetString(value))) {
-            virBufferAsprintf(ctxt->debug, "'%s' OK", NULLSTR(objstr));
-            return 0;
+                /* the new 'members' array allows us to check deprecations */
+                if ((rc = testQEMUSchemaValidateDeprecated(member, objstr, ctxt)) < 0)
+                    return rc;
+
+                virBufferAsprintf(ctxt->debug, "'%s' OK", NULLSTR(objstr));
+                return 0;
+            }
         }
+
+        virBufferAsprintf(ctxt->debug, "ERROR: enum value '%s' is not in schema",
+                          NULLSTR(objstr));
+        return -1;
     }
 
-    virBufferAsprintf(ctxt->debug, "ERROR: enum value '%s' is not in schema",
-                      NULLSTR(objstr));
-    return -1;
+    if ((values = virJSONValueObjectGetArray(root, "values"))) {
+        for (i = 0; i < virJSONValueArraySize(values); i++) {
+            virJSONValue *value = virJSONValueArrayGet(values, i);
+
+            if (STREQ_NULLABLE(objstr, virJSONValueGetString(value))) {
+                virBufferAsprintf(ctxt->debug, "'%s' OK", NULLSTR(objstr));
+                return 0;
+            }
+        }
+
+        virBufferAsprintf(ctxt->debug, "ERROR: enum value '%s' is not in schema",
+                          NULLSTR(objstr));
+        return -1;
+    }
+
+    virBufferAsprintf(ctxt->debug, "ERROR: missing enum values in schema '%s'",
+                      NULLSTR(virJSONValueObjectGetString(root, "name")));
+    return -2;
 }
 
 
 static int
-testQEMUSchemaValidateArray(virJSONValuePtr objs,
-                            virJSONValuePtr root,
+testQEMUSchemaValidateArray(virJSONValue *objs,
+                            virJSONValue *root,
                             struct testQEMUSchemaValidateCtxt *ctxt)
 {
     const char *elemtypename = virJSONValueObjectGetString(root, "element-type");
-    virJSONValuePtr elementschema;
-    virJSONValuePtr obj;
+    virJSONValue *elementschema;
+    virJSONValue *obj;
     size_t i;
 
     if (virJSONValueGetType(objs) != VIR_JSON_TYPE_ARRAY) {
@@ -389,16 +461,16 @@ testQEMUSchemaValidateArray(virJSONValuePtr objs,
 }
 
 static int
-testQEMUSchemaValidateAlternate(virJSONValuePtr obj,
-                                virJSONValuePtr root,
+testQEMUSchemaValidateAlternate(virJSONValue *obj,
+                                virJSONValue *root,
                                 struct testQEMUSchemaValidateCtxt *ctxt)
 {
-    virJSONValuePtr members;
-    virJSONValuePtr member;
+    virJSONValue *members;
+    virJSONValue *member;
     size_t i;
     size_t n;
     const char *membertype;
-    virJSONValuePtr memberschema;
+    virJSONValue *memberschema;
     int indent;
     int rc;
 
@@ -446,49 +518,8 @@ testQEMUSchemaValidateAlternate(virJSONValuePtr obj,
 
 
 static int
-testQEMUSchemaValidateDeprecated(virJSONValuePtr root,
-                                 const char *name,
-                                 struct testQEMUSchemaValidateCtxt *ctxt)
-{
-    virJSONValuePtr features = virJSONValueObjectGetArray(root, "features");
-    size_t nfeatures;
-    size_t i;
-
-    if (!features)
-        return 0;
-
-    nfeatures = virJSONValueArraySize(features);
-
-    for (i = 0; i < nfeatures; i++) {
-        virJSONValuePtr cur = virJSONValueArrayGet(features, i);
-        const char *curstr;
-
-        if (!cur ||
-            !(curstr = virJSONValueGetString(cur))) {
-            virBufferAsprintf(ctxt->debug, "ERROR: features of '%s' are malformed", name);
-            return -2;
-        }
-
-        if (STREQ(curstr, "deprecated")) {
-            if (ctxt->allowDeprecated) {
-                virBufferAsprintf(ctxt->debug, "WARNING: '%s' is deprecated", name);
-                if (virTestGetVerbose())
-                    g_fprintf(stderr, "\nWARNING: '%s' is deprecated\n", name);
-                return 0;
-            } else {
-                virBufferAsprintf(ctxt->debug, "ERROR: '%s' is deprecated", name);
-                return -1;
-            }
-        }
-    }
-
-    return 0;
-}
-
-
-static int
-testQEMUSchemaValidateRecurse(virJSONValuePtr obj,
-                              virJSONValuePtr root,
+testQEMUSchemaValidateRecurse(virJSONValue *obj,
+                              virJSONValue *root,
                               struct testQEMUSchemaValidateCtxt *ctxt)
 {
     const char *n = virJSONValueObjectGetString(root, "name");
@@ -531,11 +562,11 @@ testQEMUSchemaValidateRecurse(virJSONValuePtr obj,
  * @debug is filled with information regarding the validation process
  */
 int
-testQEMUSchemaValidate(virJSONValuePtr obj,
-                       virJSONValuePtr root,
-                       virHashTablePtr schema,
+testQEMUSchemaValidate(virJSONValue *obj,
+                       virJSONValue *root,
+                       GHashTable *schema,
                        bool allowDeprecated,
-                       virBufferPtr debug)
+                       virBuffer *debug)
 {
     struct testQEMUSchemaValidateCtxt ctxt = { .schema = schema,
                                                .debug = debug,
@@ -553,6 +584,8 @@ testQEMUSchemaValidate(virJSONValuePtr obj,
  * @allowDeprecated: don't fails schema validation if @command or one of @arguments
  *                   is deprecated
  * @allowRemoved: skip validation fully if @command was not found
+ * @allowIncomplete: don't fail validation if members not covered by schema are present
+ *                   (for waiving commands with incomplete schema)
  * @debug: a virBuffer which will be filled with debug information if provided
  *
  * Validates whether @command and its @arguments conform to the QAPI schema
@@ -567,19 +600,21 @@ testQEMUSchemaValidate(virJSONValuePtr obj,
  */
 int
 testQEMUSchemaValidateCommand(const char *command,
-                              virJSONValuePtr arguments,
-                              virHashTablePtr schema,
+                              virJSONValue *arguments,
+                              GHashTable *schema,
                               bool allowDeprecated,
                               bool allowRemoved,
-                              virBufferPtr debug)
+                              bool allowIncomplete,
+                              virBuffer *debug)
 {
     struct testQEMUSchemaValidateCtxt ctxt = { .schema = schema,
                                                .debug = debug,
-                                               .allowDeprecated = allowDeprecated };
+                                               .allowDeprecated = allowDeprecated,
+                                               .allowIncomplete = allowIncomplete };
     g_autofree char *schemapatharguments = g_strdup_printf("%s/arg-type", command);
     g_autoptr(virJSONValue) emptyargs = NULL;
-    virJSONValuePtr schemarootcommand;
-    virJSONValuePtr schemarootarguments;
+    virJSONValue *schemarootcommand;
+    virJSONValue *schemarootarguments;
     int rc;
 
     if (virQEMUQAPISchemaPathGet(command, schema, &schemarootcommand) < 0 ||
@@ -607,14 +642,129 @@ testQEMUSchemaValidateCommand(const char *command,
 }
 
 
-static virJSONValuePtr
+/**
+ * testQEMUSchemaEntryMatchTemplate:
+ *
+ * @schemaentry: a JSON object representing a 'object' node in the QAPI schema
+ * ...: a NULL terminated list of strings representing the template of properties
+ *      which the QMP object needs to have.
+ *
+ *      The strings have following format:
+ *
+ *      "type:name"
+ *      "?type:name"
+ *
+ *      "type" corresponds to the 'type' property of the member to check (str, bool, any ...)
+ *      "name" corresponds to the name of the member to check
+ *
+ *      If the query string starts with an '?' and member 'name' may be missing.
+ *
+ * This function matches that @schemaentry has all expected members and the
+ * members have expected types. @schemaentry also must not have any unknown
+ * members.
+ */
+int
+testQEMUSchemaEntryMatchTemplate(virJSONValue *schemaentry,
+                                 ...)
+{
+    g_autoptr(virJSONValue) members = NULL;
+    va_list ap;
+    const char *next;
+    int ret = -1;
+
+    if (STRNEQ_NULLABLE(virJSONValueObjectGetString(schemaentry, "meta-type"), "object")) {
+        VIR_TEST_VERBOSE("schemaentry is not an object");
+        return -1;
+    }
+
+    if (!(members = virJSONValueCopy(virJSONValueObjectGetArray(schemaentry, "members")))) {
+        VIR_TEST_VERBOSE("failed to copy 'members'");
+        return -1;
+    }
+
+    va_start(ap, schemaentry);
+
+    /* pass 1 */
+
+    while ((next = va_arg(ap, const char *))) {
+        char modifier = *next;
+        g_autofree char *type = NULL;
+        char *name;
+        size_t i;
+        bool found = false;
+        bool optional = false;
+
+        if (!g_ascii_isalpha(modifier))
+            next++;
+
+        if (modifier == '?')
+            optional = true;
+
+        type = g_strdup(next);
+
+        if ((name = strchr(type, ':'))) {
+            *(name++) = '\0';
+        } else {
+            VIR_TEST_VERBOSE("malformed template string '%s'", next);
+            goto cleanup;
+        }
+
+        for (i = 0; i < virJSONValueArraySize(members); i++) {
+            virJSONValue *member = virJSONValueArrayGet(members, i);
+            const char *membername = virJSONValueObjectGetString(member, "name");
+            const char *membertype = virJSONValueObjectGetString(member, "type");
+
+            if (STRNEQ_NULLABLE(name, membername))
+                continue;
+
+            if (STRNEQ_NULLABLE(membertype, type)) {
+                VIR_TEST_VERBOSE("member '%s' is of unexpected type '%s' (expected '%s')",
+                                 NULLSTR(membername), NULLSTR(membertype), type);
+                goto cleanup;
+            }
+
+            found = true;
+            break;
+        }
+
+        if (found) {
+            virJSONValueFree(virJSONValueArraySteal(members, i));
+        } else {
+            if (!optional) {
+                VIR_TEST_VERBOSE("mandatory member '%s' not found", name);
+                goto cleanup;
+            }
+        }
+    }
+
+    /* pass 2 - check any unexpected members */
+    if (virJSONValueArraySize(members) > 0) {
+        size_t i;
+
+        for (i = 0; i < virJSONValueArraySize(members); i++) {
+            VIR_TEST_VERBOSE("unexpected member '%s'",
+                             NULLSTR(virJSONValueObjectGetString(virJSONValueArrayGet(members, i), "name")));
+        }
+
+        goto cleanup;
+    }
+
+    ret = 0;
+
+ cleanup:
+    va_end(ap);
+    return ret;
+}
+
+
+static virJSONValue *
 testQEMUSchemaLoadReplies(const char *filename)
 {
     g_autofree char *caps = NULL;
     char *schemaReply;
     char *end;
     g_autoptr(virJSONValue) reply = NULL;
-    virJSONValuePtr schema = NULL;
+    virJSONValue *schema = NULL;
 
     if (virTestLoadFile(filename, &caps) < 0)
         return NULL;
@@ -652,7 +802,7 @@ testQEMUSchemaLoadReplies(const char *filename)
  * Returns the schema data as the qemu monitor would reply from the latest
  * replies file used for qemucapabilitiestest for the x86_64 architecture.
  */
-virJSONValuePtr
+virJSONValue *
 testQEMUSchemaGetLatest(const char *arch)
 {
     g_autofree char *capsLatestFile = NULL;
@@ -668,10 +818,10 @@ testQEMUSchemaGetLatest(const char *arch)
 }
 
 
-virHashTablePtr
+GHashTable *
 testQEMUSchemaLoadLatest(const char *arch)
 {
-    virJSONValuePtr schema;
+    virJSONValue *schema;
 
     if (!(schema = testQEMUSchemaGetLatest(arch)))
         return NULL;
@@ -680,10 +830,10 @@ testQEMUSchemaLoadLatest(const char *arch)
 }
 
 
-virHashTablePtr
+GHashTable *
 testQEMUSchemaLoad(const char *filename)
 {
-    virJSONValuePtr schema;
+    virJSONValue *schema;
 
     if (!(schema = testQEMUSchemaLoadReplies(filename)))
         return NULL;

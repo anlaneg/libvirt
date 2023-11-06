@@ -17,20 +17,57 @@
 #include <config.h>
 
 #include "virhostcpu.h"
-#ifdef WITH_LIBXL
-# include "libxl/libxl_capabilities.h"
-#endif
+#include "virhostmem.h"
 
-#ifdef WITH_LIBXL
-bool
-libxlCapsHasPVUSB(void)
-{
-    return true;
-}
+#if WITH_QEMU
+# include "virmock.h"
+# include "qemu/qemu_capabilities.h"
 #endif
 
 int
 virHostCPUGetKVMMaxVCPUs(void)
 {
     return INT_MAX;
+}
+
+unsigned int
+virHostCPUGetMicrocodeVersion(virArch hostArch G_GNUC_UNUSED)
+{
+    return 0;
+}
+
+int
+virHostCPUGetPhysAddrSize(const virArch hostArch,
+                          unsigned int *size)
+{
+    if (ARCH_IS_S390(hostArch))
+        *size = 0;
+    else
+        *size = 64;
+    return 0;
+}
+
+#if WITH_QEMU
+static bool (*real_virQEMUCapsGetKVMSupportsSecureGuest)(virQEMUCaps *qemuCaps);
+
+bool
+virQEMUCapsGetKVMSupportsSecureGuest(virQEMUCaps *qemuCaps)
+{
+    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_MACHINE_CONFIDENTAL_GUEST_SUPPORT) &&
+        virQEMUCapsGet(qemuCaps, QEMU_CAPS_S390_PV_GUEST))
+        return true;
+
+    if (!real_virQEMUCapsGetKVMSupportsSecureGuest)
+        VIR_MOCK_REAL_INIT(virQEMUCapsGetKVMSupportsSecureGuest);
+
+    return real_virQEMUCapsGetKVMSupportsSecureGuest(qemuCaps);
+}
+#endif
+
+int
+virHostMemGetTHPSize(unsigned long long *size)
+{
+    /* Pretend Transparent Huge Page size is 2MiB. */
+    *size = 2048;
+    return 0;
 }

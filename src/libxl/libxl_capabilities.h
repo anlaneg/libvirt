@@ -22,8 +22,6 @@
 
 #include <libxl.h>
 
-#include "virobject.h"
-#include "capabilities.h"
 #include "domain_capabilities.h"
 #include "virfirmware.h"
 
@@ -39,16 +37,14 @@
  * by libvirt for Xen, and cannot be used for a persistent network name.  */
 #define LIBXL_GENERATED_PREFIX_XEN "vif"
 
-bool libxlCapsHasPVUSB(void);
-
-virCapsPtr
+virCaps *
 libxlMakeCapabilities(libxl_ctx *ctx);
 
 int
-libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
-                            virFirmwarePtr *firmwares,
+libxlMakeDomainCapabilities(virDomainCaps *domCaps,
+                            virFirmware **firmwares,
                             size_t nfirmwares);
 
 int
 libxlDomainGetEmulatorType(const virDomainDef *def)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;

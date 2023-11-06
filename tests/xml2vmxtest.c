@@ -9,19 +9,18 @@
 # include "internal.h"
 # include "viralloc.h"
 # include "vmx/vmx.h"
-# include "virstring.h"
 
 # define VIR_FROM_THIS VIR_FROM_VMWARE
 
-static virCapsPtr caps;
+static virCaps *caps;
 static virVMXContext ctx;
-static virDomainXMLOptionPtr xmlopt;
+static virDomainXMLOption *xmlopt;
 
 
 static void
 testCapsInit(void)
 {
-    virCapsGuestPtr guest = NULL;
+    virCapsGuest *guest = NULL;
 
     caps = virCapabilitiesNew(VIR_ARCH_I686, true, true);
 
@@ -32,73 +31,47 @@ testCapsInit(void)
 
 
     /* i686 guest */
-    guest =
-      virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
-                              VIR_ARCH_I686,
-                              NULL, NULL, 0, NULL);
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
+                                    VIR_ARCH_I686,
+                                    NULL, NULL, 0, NULL);
 
-    if (guest == NULL)
-        goto failure;
-
-    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_VMWARE, NULL, NULL, 0,
-                                      NULL) == NULL) {
-        goto failure;
-    }
+    virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_VMWARE,
+                                  NULL, NULL, 0, NULL);
 
     /* x86_64 guest */
-    guest =
-      virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
-                              VIR_ARCH_X86_64,
-                              NULL, NULL, 0, NULL);
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
+                                    VIR_ARCH_X86_64,
+                                    NULL, NULL, 0, NULL);
 
-    if (guest == NULL)
-        goto failure;
-
-    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_VMWARE, NULL, NULL, 0,
-                                      NULL) == NULL) {
-        goto failure;
-    }
-
-    return;
-
- failure:
-    virObjectUnref(caps);
-    virObjectUnref(xmlopt);
-    caps = NULL;
+    virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_VMWARE,
+                                  NULL, NULL, 0, NULL);
 }
 
 static int
 testCompareFiles(const char *xml, const char *vmx, int virtualHW_version)
 {
-    int result = -1;
-    char *formatted = NULL;
-    virDomainDefPtr def = NULL;
+    g_autofree char *formatted = NULL;
+    g_autoptr(virDomainDef) def = NULL;
 
     def = virDomainDefParseFile(xml, xmlopt, NULL,
                                 VIR_DOMAIN_DEF_PARSE_INACTIVE);
 
     if (def == NULL)
-        goto failure;
+        return -1;
 
     if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
         fprintf(stderr, "ABI stability check failed on %s", xml);
-        goto failure;
+        return -1;
     }
 
     formatted = virVMXFormatConfig(&ctx, xmlopt, def, virtualHW_version);
     if (formatted == NULL)
-        goto failure;
+        return -1;
 
     if (virTestCompareToFile(formatted, vmx) < 0)
-        goto failure;
+        return -1;
 
-    result = 0;
-
- failure:
-    VIR_FREE(formatted);
-    virDomainDefFree(def);
-
-    return result;
+    return 0;
 }
 
 struct testInfo {
@@ -112,8 +85,8 @@ testCompareHelper(const void *data)
 {
     int result = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *vmx = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *vmx = NULL;
 
     xml = g_strdup_printf("%s/xml2vmxdata/xml2vmx-%s.xml", abs_srcdir,
                           info->input);
@@ -122,14 +95,11 @@ testCompareHelper(const void *data)
 
     result = testCompareFiles(xml, vmx, info->virtualHW_version);
 
-    VIR_FREE(xml);
-    VIR_FREE(vmx);
-
     return result;
 }
 
 static int
-testAutodetectSCSIControllerModel(virDomainDiskDefPtr def G_GNUC_UNUSED,
+testAutodetectSCSIControllerModel(virDomainDiskDef *def G_GNUC_UNUSED,
                                   int *model, void *opaque G_GNUC_UNUSED)
 {
     *model = VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC;
@@ -141,7 +111,7 @@ static char *
 testFormatVMXFileName(const char *src, void *opaque G_GNUC_UNUSED)
 {
     bool success = false;
-    char *copyOfDatastorePath = NULL;
+    g_autofree char *copyOfDatastorePath = NULL;
     char *tmp = NULL;
     char *saveptr = NULL;
     char *datastoreName = NULL;
@@ -181,8 +151,6 @@ testFormatVMXFileName(const char *src, void *opaque G_GNUC_UNUSED)
  cleanup:
     if (! success)
         VIR_FREE(absolutePath);
-
-    VIR_FREE(copyOfDatastorePath);
 
     return absolutePath;
 }
@@ -255,6 +223,10 @@ mymain(void)
     DO_TEST("ethernet-static", "ethernet-static", 4);
     DO_TEST("ethernet-vpx", "ethernet-vpx", 4);
     DO_TEST("ethernet-other", "ethernet-other", 4);
+    DO_TEST("ethernet-mac-type", "ethernet-mac-type", 4);
+
+    DO_TEST("ethernet-null", "ethernet-null", 4);
+    DO_TEST("ethernet-vds", "ethernet-vds", 4);
 
     DO_TEST("serial-file", "serial-file", 4);
     DO_TEST("serial-device", "serial-device", 4);

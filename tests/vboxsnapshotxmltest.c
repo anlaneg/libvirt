@@ -18,14 +18,13 @@ GRegex *testSnapshotXMLVariableLineRegex = NULL;
 static char *
 testFilterXML(char *xml)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char **xmlLines = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_auto(GStrv) xmlLines = NULL;
     char **xmlLine;
-    char *ret = NULL;
 
-    if (!(xmlLines = virStringSplit(xml, "\n", 0))) {
+    if (!(xmlLines = g_strsplit(xml, "\n", 0))) {
         VIR_FREE(xml);
-        goto cleanup;
+        return NULL;
     }
     VIR_FREE(xml);
 
@@ -36,26 +35,21 @@ testFilterXML(char *xml)
         virBufferStrcat(&buf, *xmlLine, "\n", NULL);
     }
 
-    ret = virBufferContentAndReset(&buf);
-
- cleanup:
-   virBufferFreeAndReset(&buf);
-   virStringListFree(xmlLines);
-   return ret;
+    return virBufferContentAndReset(&buf);
 }
 
 static int
 testCompareXMLtoXMLFiles(const char *xml)
 {
-    char *xmlData = NULL;
-    char *actual = NULL;
-    char *pathResult = NULL;
+    g_autofree char *xmlData = NULL;
+    g_autofree char *actual = NULL;
+    g_autofree char *pathResult = NULL;
     int ret = -1;
-    virVBoxSnapshotConfMachinePtr machine = NULL;
+    virVBoxSnapshotConfMachine *machine = NULL;
 
     pathResult = g_strdup(abs_builddir "/vboxsnapshotxmldata/testResult.vbox");
 
-    if (virFileMakePath(abs_builddir "/vboxsnapshotxmldata") < 0)
+    if (g_mkdir_with_parents(abs_builddir "/vboxsnapshotxmldata", 0777) < 0)
         goto cleanup;
 
     if (virTestLoadFile(xml, &xmlData) < 0)
@@ -75,8 +69,7 @@ testCompareXMLtoXMLFiles(const char *xml)
     if (!(xmlData = testFilterXML(xmlData)))
         goto cleanup;
 
-    if (STRNEQ(actual, xmlData)) {
-        virTestDifference(stderr, xmlData, actual);
+    if (virTestCompareToString(xmlData, actual) < 0) {
         goto cleanup;
     }
 
@@ -85,10 +78,7 @@ testCompareXMLtoXMLFiles(const char *xml)
  cleanup:
     unlink(pathResult);
     rmdir(abs_builddir "/vboxsnapshotxmldata");
-    VIR_FREE(xmlData);
-    VIR_FREE(actual);
     virVBoxSnapshotConfMachineFree(machine);
-    VIR_FREE(pathResult);
 
     return ret;
 }
@@ -97,14 +87,13 @@ static int
 testCompareXMLToXMLHelper(const void *data)
 {
     int result = -1;
-    char *xml = NULL;
+    g_autofree char *xml = NULL;
 
     xml = g_strdup_printf("%s/vboxsnapshotxmldata/%s.vbox", abs_srcdir,
                           (const char *)data);
 
     result = testCompareXMLtoXMLFiles(xml);
 
-    VIR_FREE(xml);
     return result;
 }
 
@@ -136,7 +125,8 @@ mymain(void)
     DO_TEST("2disks-3snap-brother");
 
  cleanup:
-    g_regex_unref(testSnapshotXMLVariableLineRegex);
+    if (testSnapshotXMLVariableLineRegex)
+        g_regex_unref(testSnapshotXMLVariableLineRegex);
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

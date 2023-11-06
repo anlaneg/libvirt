@@ -28,7 +28,7 @@
 #endif
 #include <unistd.h>
 
-#if HAVE_LINUX_KVM_H
+#if WITH_LINUX_KVM_H
 # include <linux/kvm.h>
 #endif
 
@@ -45,9 +45,7 @@
 #include "virerror.h"
 #include "virarch.h"
 #include "virfile.h"
-#include "virtypedparam.h"
 #include "virstring.h"
-#include "virnuma.h"
 #include "virlog.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -87,10 +85,10 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
                           int *nparams)
 {
     const char *sysctl_name;
-    long *cpu_times;
+    g_autofree long *cpu_times = NULL;
     struct clockinfo clkinfo;
     size_t i, j, cpu_times_size, clkinfo_size;
-    int cpu_times_num, offset, hz, stathz, ret = -1;
+    int cpu_times_num, offset, hz, stathz;
     struct field_cpu_map {
         const char *field;
         int idx[CPUSTATES];
@@ -109,7 +107,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 
     if ((*nparams) != BSD_CPU_STATS_ALL) {
         virReportInvalidArg(*nparams,
-                            _("nparams in %s must be equal to %d"),
+                            _("nparams in %1$s must be equal to %2$d"),
                             __FUNCTION__, BSD_CPU_STATS_ALL);
         return -1;
     }
@@ -117,7 +115,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
     clkinfo_size = sizeof(clkinfo);
     if (sysctlbyname("kern.clockrate", &clkinfo, &clkinfo_size, NULL, 0) < 0) {
         virReportSystemError(errno,
-                             _("sysctl failed for '%s'"),
+                             _("sysctl failed for '%1$s'"),
                              "kern.clockrate");
         return -1;
     }
@@ -135,7 +133,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 
         if (cpuNum >= cpu_times_num) {
             virReportInvalidArg(cpuNum,
-                                _("Invalid cpuNum in %s"),
+                                _("Invalid cpuNum in %1$s"),
                                 __FUNCTION__);
             return -1;
         }
@@ -145,14 +143,13 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 
     cpu_times_size = sizeof(long) * cpu_times_num * CPUSTATES;
 
-    if (VIR_ALLOC_N(cpu_times, cpu_times_num * CPUSTATES) < 0)
-        goto cleanup;
+    cpu_times = g_new0(long, cpu_times_num * CPUSTATES);
 
     if (sysctlbyname(sysctl_name, cpu_times, &cpu_times_size, NULL, 0) < 0) {
         virReportSystemError(errno,
-                             _("sysctl failed for '%s'"),
+                             _("sysctl failed for '%1$s'"),
                              sysctl_name);
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; cpu_map[i].field != NULL; i++) {
@@ -160,9 +157,9 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 
         if (virStrcpyStatic(param->field, cpu_map[i].field) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Field '%s' too long for destination"),
+                           _("Field '%1$s' too long for destination"),
                            cpu_map[i].field);
-            goto cleanup;
+            return -1;
         }
 
         param->value = 0;
@@ -170,12 +167,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
             param->value += cpu_times[offset + cpu_map[i].idx[j]] * TICK_TO_NSEC;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(cpu_times);
-
-    return ret;
+    return 0;
 }
 
 #endif /* __FreeBSD__ */
@@ -256,10 +248,10 @@ virHostCPUGetCore(unsigned int cpu, unsigned int *core)
     return 0;
 }
 
-virBitmapPtr
+virBitmap *
 virHostCPUGetSiblingsList(unsigned int cpu)
 {
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
     int rv = -1;
 
     rv = virFileReadValueBitmap(&ret,
@@ -268,8 +260,7 @@ virHostCPUGetSiblingsList(unsigned int cpu)
     if (rv == -2) {
         /* If the file doesn't exist, the threadis its only sibling */
         ret = virBitmapNew(cpu + 1);
-        if (ret)
-            ignore_value(virBitmapSetBit(ret, cpu));
+        ignore_value(virBitmapSetBit(ret, cpu));
     }
 
     return ret;
@@ -278,17 +269,12 @@ virHostCPUGetSiblingsList(unsigned int cpu)
 static unsigned long
 virHostCPUCountThreadSiblings(unsigned int cpu)
 {
-    virBitmapPtr siblings_map;
-    unsigned long ret = 0;
+    g_autoptr(virBitmap) siblings_map = NULL;
 
     if (!(siblings_map = virHostCPUGetSiblingsList(cpu)))
-        goto cleanup;
+        return 0;
 
-    ret = virBitmapCountBits(siblings_map);
-
- cleanup:
-    virBitmapFree(siblings_map);
-    return ret;
+    return virBitmapCountBits(siblings_map);
 }
 
 /* parses a node entry, returning number of processors in the node and
@@ -300,8 +286,8 @@ ATTRIBUTE_NONNULL(7) ATTRIBUTE_NONNULL(8)
 ATTRIBUTE_NONNULL(9)
 virHostCPUParseNode(const char *node,
                     virArch arch,
-                    virBitmapPtr present_cpus_map,
-                    virBitmapPtr online_cpus_map,
+                    virBitmap *present_cpus_map,
+                    virBitmap *online_cpus_map,
                     int threads_per_subcore,
                     int *sockets,
                     int *cores,
@@ -310,12 +296,12 @@ virHostCPUParseNode(const char *node,
 {
     int ret = -1;
     int processors = 0;
-    DIR *cpudir = NULL;
+    g_autoptr(DIR) cpudir = NULL;
     struct dirent *cpudirent = NULL;
-    virBitmapPtr node_cpus_map = NULL;
-    virBitmapPtr sockets_map = NULL;
-    virBitmapPtr *cores_maps = NULL;
+    g_autoptr(virBitmap) sockets_map = virBitmapNew(0);
+    virBitmap **cores_maps = NULL;
     int npresent_cpus = virBitmapSize(present_cpus_map);
+    g_autoptr(virBitmap) node_cpus_map = virBitmapNew(npresent_cpus);
     unsigned int sock_max = 0;
     unsigned int sock;
     unsigned int core;
@@ -330,13 +316,6 @@ virHostCPUParseNode(const char *node,
 
     if (virDirOpen(&cpudir, node) < 0)
         goto cleanup;
-
-    /* Keep track of the CPUs that belong to the current node */
-    if (!(node_cpus_map = virBitmapNew(npresent_cpus)))
-        goto cleanup;
-
-    /* enumerate sockets in the node */
-    sockets_map = virBitmapNewEmpty();
 
     while ((direrr = virDirRead(cpudir, &cpudirent, node)) > 0) {
         if (sscanf(cpudirent->d_name, "cpu%u", &cpu) != 1)
@@ -355,8 +334,7 @@ virHostCPUParseNode(const char *node,
         if (virHostCPUGetSocket(cpu, &sock) < 0)
             goto cleanup;
 
-        if (virBitmapSetBitExpand(sockets_map, sock) < 0)
-            goto cleanup;
+        virBitmapSetBitExpand(sockets_map, sock);
 
         if (sock > sock_max)
             sock_max = sock;
@@ -368,11 +346,10 @@ virHostCPUParseNode(const char *node,
     sock_max++;
 
     /* allocate cores maps for each socket */
-    if (VIR_ALLOC_N(cores_maps, sock_max) < 0)
-        goto cleanup;
+    cores_maps = g_new0(virBitmap *, sock_max);
 
     for (i = 0; i < sock_max; i++)
-        cores_maps[i] = virBitmapNewEmpty();
+        cores_maps[i] = virBitmapNew(0);
 
     /* Iterate over all CPUs in the node, in ascending order */
     for (cpu = 0; cpu < npresent_cpus; cpu++) {
@@ -416,8 +393,7 @@ virHostCPUParseNode(const char *node,
                 goto cleanup;
         }
 
-        if (virBitmapSetBitExpand(cores_maps[sock], core) < 0)
-            goto cleanup;
+        virBitmapSetBitExpand(cores_maps[sock], core);
 
         if (!(siblings = virHostCPUCountThreadSiblings(cpu)))
             goto cleanup;
@@ -447,13 +423,10 @@ virHostCPUParseNode(const char *node,
     ret = processors;
 
  cleanup:
-    VIR_DIR_CLOSE(cpudir);
     if (cores_maps)
         for (i = 0; i < sock_max; i++)
             virBitmapFree(cores_maps[i]);
     VIR_FREE(cores_maps);
-    virBitmapFree(sockets_map);
-    virBitmapFree(node_cpus_map);
 
     return ret;
 }
@@ -465,31 +438,25 @@ virHostCPUParseNode(const char *node,
 static bool
 virHostCPUHasValidSubcoreConfiguration(int threads_per_subcore)
 {
-    virBitmapPtr online_cpus = NULL;
+    g_autoptr(virBitmap) online_cpus = NULL;
     int cpu = -1;
-    bool ret = false;
 
     /* No point in checking if subcores are not in use */
     if (threads_per_subcore <= 0)
-        goto cleanup;
+        return false;
 
     if (!(online_cpus = virHostCPUGetOnlineBitmap()))
-        goto cleanup;
+        return false;
 
     while ((cpu = virBitmapNextSetBit(online_cpus, cpu)) >= 0) {
 
         /* A single online secondary thread is enough to
          * make the configuration invalid */
         if (cpu % threads_per_subcore != 0)
-            goto cleanup;
+            return false;
     }
 
-    ret = true;
-
- cleanup:
-    virBitmapFree(online_cpus);
-
-    return ret;
+    return true;
 }
 
 
@@ -562,7 +529,7 @@ virHostCPUParseFrequencyString(const char *str,
 
  error:
     virReportError(VIR_ERR_INTERNAL_ERROR,
-                   _("Missing or invalid CPU frequency in %s"),
+                   _("Missing or invalid CPU frequency in %1$s"),
                    CPUINFO_PATH);
     return -1;
 }
@@ -603,6 +570,38 @@ virHostCPUParseFrequency(FILE *cpuinfo,
 }
 
 
+static int
+virHostCPUParsePhysAddrSize(FILE *cpuinfo, unsigned int *addrsz)
+{
+    char line[1024];
+
+    while (fgets(line, sizeof(line), cpuinfo) != NULL) {
+        char *str;
+        char *endptr;
+
+        if (!(str = STRSKIP(line, "address sizes")))
+            continue;
+
+        /* Skip the colon. */
+        if ((str = strstr(str, ":")) == NULL)
+            goto error;
+        str++;
+
+        /* Parse the number of physical address bits */
+        if (virStrToLong_ui(str, &endptr, 10, addrsz) < 0)
+            goto error;
+
+        return 0;
+    }
+
+ error:
+    virReportError(VIR_ERR_INTERNAL_ERROR,
+                   _("Missing or invalid CPU address size in %1$s"),
+                   CPUINFO_PATH);
+    return -1;
+}
+
+
 int
 virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
                                virArch arch,
@@ -613,9 +612,9 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
                                unsigned int *cores,
                                unsigned int *threads)
 {
-    virBitmapPtr present_cpus_map = NULL;
-    virBitmapPtr online_cpus_map = NULL;
-    DIR *nodedir = NULL;
+    g_autoptr(virBitmap) present_cpus_map = NULL;
+    g_autoptr(virBitmap) online_cpus_map = NULL;
+    g_autoptr(DIR) nodedir = NULL;
     struct dirent *nodedirent = NULL;
     int nodecpus, nodecores, nodesockets, nodethreads, offline = 0;
     int threads_per_subcore = 0;
@@ -663,7 +662,7 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
      * subcore will vary accordingly to 8, 4 and 2 respectively.
      * So, On host threads_per_core what is arrived at from sysfs in the
      * current logic is actually the subcores_per_core. Threads per subcore
-     * can only be obtained from the kvm device. For example, on P8 wih 1
+     * can only be obtained from the kvm device. For example, on P8 with 1
      * core having 8 threads, sub_cores_percore=4, the threads 0,2,4 & 6
      * will be online. The sysfs reflects this and in the current logic
      * variable 'threads' will be 4 which is nothing but subcores_per_core.
@@ -776,9 +775,6 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
     ret = 0;
 
  cleanup:
-    VIR_DIR_CLOSE(nodedir);
-    virBitmapFree(present_cpus_map);
-    virBitmapFree(online_cpus_map);
     VIR_FREE(sysfs_nodedir);
     VIR_FREE(sysfs_cpudir);
     return ret;
@@ -795,7 +791,7 @@ virHostCPUGetStatsLinux(FILE *procstat,
     char line[1024];
     unsigned long long usr, ni, sys, idle, iowait;
     unsigned long long irq, softirq, steal, guest, guest_nice;
-    char cpu_header[4 + VIR_INT64_STR_BUFLEN];
+    g_autofree char *cpu_header = NULL;
 
     if ((*nparams) == 0) {
         /* Current number of cpu stats supported by linux */
@@ -805,15 +801,15 @@ virHostCPUGetStatsLinux(FILE *procstat,
 
     if ((*nparams) != LINUX_NB_CPU_STATS) {
         virReportInvalidArg(*nparams,
-                            _("nparams in %s must be equal to %d"),
+                            _("nparams in %1$s must be equal to %2$d"),
                             __FUNCTION__, LINUX_NB_CPU_STATS);
         return -1;
     }
 
     if (cpuNum == VIR_NODE_CPU_STATS_ALL_CPUS) {
-        strcpy(cpu_header, "cpu ");
+        cpu_header = g_strdup("cpu ");
     } else {
-        g_snprintf(cpu_header, sizeof(cpu_header), "cpu%d ", cpuNum);
+        cpu_header = g_strdup_printf("cpu%d ", cpuNum);
     }
 
     while (fgets(line, sizeof(line), procstat) != NULL) {
@@ -849,40 +845,24 @@ virHostCPUGetStatsLinux(FILE *procstat,
     }
 
     virReportInvalidArg(cpuNum,
-                        _("Invalid cpuNum in %s"),
+                        _("Invalid cpuNum in %1$s"),
                         __FUNCTION__);
 
     return -1;
 }
 
 
-/* Determine the number of CPUs (maximum CPU id + 1) from a file containing
- * a list of CPU ids, like the Linux sysfs cpu/present file */
+/* Determine the number of CPUs (maximum CPU id + 1) present in
+ * the host. */
 static int
-virHostCPUParseCountLinux(void)
+virHostCPUCountLinux(void)
 {
-    char *str = NULL;
-    char *tmp;
-    int ret = -1;
+    g_autoptr(virBitmap) present = virHostCPUGetPresentBitmap();
 
-    if (virFileReadValueString(&str, "%s/cpu/present", SYSFS_SYSTEM_PATH) < 0)
+    if (!present)
         return -1;
 
-    tmp = str;
-    do {
-        if (virStrToLong_i(tmp, &tmp, 10, &ret) < 0 ||
-            !strchr(",-", *tmp)) {
-            virReportError(VIR_ERR_NO_SUPPORT,
-                           _("failed to parse %s"), str);
-            ret = -1;
-            goto cleanup;
-        }
-    } while (*tmp++ && *tmp);
-    ret++;
-
- cleanup:
-    VIR_FREE(str);
-    return ret;
+    return virBitmapSize(present);
 }
 #endif
 
@@ -912,8 +892,7 @@ virHostCPUStatsAssign(virNodeCPUStatsPtr param,
 {
     if (virStrcpyStatic(param->field, name) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "%s", _("kernel cpu time field is too long"
-                               " for the destination"));
+                       "%s", _("kernel cpu time field is too long for the destination"));
         return -1;
     }
     param->value = value;
@@ -936,7 +915,7 @@ virHostCPUGetInfo(virArch hostarch G_GNUC_UNUSED,
 
     if (!cpuinfo) {
         virReportSystemError(errno,
-                             _("cannot open %s"), CPUINFO_PATH);
+                             _("cannot open %1$s"), CPUINFO_PATH);
         return -1;
     }
 
@@ -978,8 +957,14 @@ virHostCPUGetInfo(virArch hostarch G_GNUC_UNUSED,
     *mhz = cpu_freq;
 # else
     if (sysctlbyname("hw.cpufrequency", &cpu_freq, &cpu_freq_len, NULL, 0) < 0) {
-        virReportSystemError(errno, "%s", _("cannot obtain CPU freq"));
-        return -1;
+        if (errno == ENOENT) {
+            /* The hw.cpufrequency sysctl is not implemented on Apple Silicon.
+             * In that case, we report 0 instead of erroring out */
+            cpu_freq = 0;
+        } else {
+            virReportSystemError(errno, "%s", _("cannot obtain CPU freq"));
+            return -1;
+        }
     }
 
     *mhz = cpu_freq / 1000000;
@@ -1009,7 +994,7 @@ virHostCPUGetStats(int cpuNum G_GNUC_UNUSED,
         FILE *procstat = fopen(PROCSTAT_PATH, "r");
         if (!procstat) {
             virReportSystemError(errno,
-                                 _("cannot open %s"), PROCSTAT_PATH);
+                                 _("cannot open %1$s"), PROCSTAT_PATH);
             return -1;
         }
         ret = virHostCPUGetStatsLinux(procstat, cpuNum, params, nparams);
@@ -1031,7 +1016,7 @@ int
 virHostCPUGetCount(void)
 {
 #if defined(__linux__)
-    return virHostCPUParseCountLinux();
+    return virHostCPUCountLinux();
 #elif defined(__FreeBSD__) || defined(__APPLE__)
     return virHostCPUGetCountAppleFreeBSD();
 #else
@@ -1051,11 +1036,11 @@ virHostCPUHasBitmap(void)
 #endif
 }
 
-virBitmapPtr
+virBitmap *
 virHostCPUGetPresentBitmap(void)
 {
 #ifdef __linux__
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
     virFileReadValueBitmap(&ret, "%s/cpu/present", SYSFS_SYSTEM_PATH);
 
@@ -1067,11 +1052,11 @@ virHostCPUGetPresentBitmap(void)
 #endif
 }
 
-virBitmapPtr
+virBitmap *
 virHostCPUGetOnlineBitmap(void)
 {
 #ifdef __linux__
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
     virFileReadValueBitmap(&ret, "%s/cpu/online", SYSFS_SYSTEM_PATH);
 
@@ -1089,7 +1074,7 @@ virHostCPUGetMap(unsigned char **cpumap,
                  unsigned int *online,
                  unsigned int flags)
 {
-    virBitmapPtr cpus = NULL;
+    g_autoptr(virBitmap) cpus = NULL;
     int ret = -1;
     int dummy;
 
@@ -1111,12 +1096,39 @@ virHostCPUGetMap(unsigned char **cpumap,
  cleanup:
     if (ret < 0 && cpumap)
         VIR_FREE(*cpumap);
-    virBitmapFree(cpus);
     return ret;
 }
 
 
-#if HAVE_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT)
+/* virHostCPUGetAvailableCPUsBitmap():
+ *
+ * Returns a virBitmap object with all available host CPUs.
+ *
+ * This is a glorified wrapper of virHostCPUGetOnlineBitmap()
+ * that, instead of returning NULL when 'ifndef __linux__' and
+ * the caller having to handle it outside the function, returns
+ * a virBitmap with all the possible CPUs in the host, up to
+ * virHostCPUGetCount(). */
+virBitmap *
+virHostCPUGetAvailableCPUsBitmap(void)
+{
+    g_autoptr(virBitmap) bitmap = NULL;
+
+    if (!(bitmap = virHostCPUGetOnlineBitmap())) {
+        int hostcpus;
+
+        if ((hostcpus = virHostCPUGetCount()) < 0)
+            return NULL;
+
+        bitmap = virBitmapNew(hostcpus);
+        virBitmapSetAll(bitmap);
+    }
+
+    return g_steal_pointer(&bitmap);
+}
+
+
+#if WITH_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT)
 
 /* Get the number of threads per subcore.
  *
@@ -1147,7 +1159,7 @@ virHostCPUGetThreadsPerSubcore(virArch arch)
              * is better than silently falling back and reporting
              * different nodeinfo depending on the user */
             virReportSystemError(errno,
-                                 _("Failed to open '%s'"),
+                                 _("Failed to open '%1$s'"),
                                  KVM_DEVICE);
             return -1;
         }
@@ -1175,9 +1187,9 @@ virHostCPUGetThreadsPerSubcore(virArch arch G_GNUC_UNUSED)
     return 0;
 }
 
-#endif /* HAVE_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT) */
+#endif /* WITH_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT) */
 
-#if HAVE_LINUX_KVM_H
+#if WITH_LINUX_KVM_H
 int
 virHostCPUGetKVMMaxVCPUs(void)
 {
@@ -1185,7 +1197,7 @@ virHostCPUGetKVMMaxVCPUs(void)
     int ret;
 
     if ((fd = open(KVM_DEVICE, O_RDONLY)) < 0) {
-        virReportSystemError(errno, _("Unable to open %s"), KVM_DEVICE);
+        virReportSystemError(errno, _("Unable to open %1$s"), KVM_DEVICE);
         return -1;
     }
 
@@ -1216,7 +1228,7 @@ virHostCPUGetKVMMaxVCPUs(void)
                          _("KVM is not supported on this platform"));
     return -1;
 }
-#endif /* HAVE_LINUX_KVM_H */
+#endif /* WITH_LINUX_KVM_H */
 
 
 #ifdef __linux__
@@ -1226,11 +1238,14 @@ virHostCPUGetKVMMaxVCPUs(void)
  * some reason.
  */
 unsigned int
-virHostCPUGetMicrocodeVersion(void)
+virHostCPUGetMicrocodeVersion(virArch hostArch)
 {
-    char *outbuf = NULL;
+    g_autofree char *outbuf = NULL;
     char *cur;
     unsigned int version = 0;
+
+    if (!ARCH_IS_X86(hostArch))
+        return 0;
 
     if (virFileReadHeaderQuiet(CPUINFO_PATH, 4096, &outbuf) < 0) {
         VIR_DEBUG("Failed to read microcode version from %s: %s",
@@ -1241,23 +1256,21 @@ virHostCPUGetMicrocodeVersion(void)
     /* Account for format 'microcode    : XXXX'*/
     if (!(cur = strstr(outbuf, "microcode")) ||
         !(cur = strchr(cur, ':')))
-        goto cleanup;
+        return 0;
     cur++;
 
     /* Linux places the microcode revision in a 32-bit integer, so
      * ui is fine for us too.  */
     if (virStrToLong_ui(cur, &cur, 0, &version) < 0)
-        goto cleanup;
+        return 0;
 
- cleanup:
-    VIR_FREE(outbuf);
     return version;
 }
 
 #else
 
 unsigned int
-virHostCPUGetMicrocodeVersion(void)
+virHostCPUGetMicrocodeVersion(virArch hostArch G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -1265,7 +1278,7 @@ virHostCPUGetMicrocodeVersion(void)
 #endif /* __linux__ */
 
 
-#if HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+#if WITH_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
     (defined(__i386__) || defined(__x86_64__)) && \
     (defined(__linux__) || defined(__FreeBSD__))
 static int
@@ -1273,25 +1286,22 @@ virHostCPUGetMSRFromKVM(unsigned long index,
                         uint64_t *result)
 {
     VIR_AUTOCLOSE fd = -1;
-    struct {
-        struct kvm_msrs header;
-        struct kvm_msr_entry entry;
-    } msr = {
-        .header = { .nmsrs = 1 },
-        .entry = { .index = index },
-    };
+    g_autofree struct kvm_msrs *msr = g_malloc0(sizeof(struct kvm_msrs) +
+                                                sizeof(struct kvm_msr_entry));
+    msr->nmsrs = 1;
+    msr->entries[0].index = index;
 
     if ((fd = open(KVM_DEVICE, O_RDONLY)) < 0) {
-        virReportSystemError(errno, _("Unable to open %s"), KVM_DEVICE);
+        virReportSystemError(errno, _("Unable to open %1$s"), KVM_DEVICE);
         return -1;
     }
 
-    if (ioctl(fd, KVM_GET_MSRS, &msr) < 0) {
+    if (ioctl(fd, KVM_GET_MSRS, msr) < 0) {
         VIR_DEBUG("Cannot get MSR 0x%lx from KVM", index);
         return 1;
     }
 
-    *result = msr.entry.data;
+    *result = msr->entries[0].data;
     return 0;
 }
 
@@ -1332,8 +1342,118 @@ virHostCPUGetMSR(unsigned long index,
 }
 
 
-# define VMX_PROCBASED_CTLS2_MSR 0x48b
-# define VMX_USE_TSC_SCALING (1 << 25)
+/**
+ * virHostCPUGetCPUIDFilterVolatile:
+ *
+ * Filters the 'kvm_cpuid2' struct and removes data which may change depending
+ * on the CPU core this was run on.
+ *
+ * Currently filtered fields:
+ * - local APIC ID
+ * - topology ids and information on AMD cpus
+ */
+static void
+virHostCPUGetCPUIDFilterVolatile(struct kvm_cpuid2 *kvm_cpuid)
+{
+    size_t i;
+    bool isAMD = false;
+
+    for (i = 0; i < kvm_cpuid->nent; ++i) {
+        struct kvm_cpuid_entry2 *entry = &kvm_cpuid->entries[i];
+
+        /* filter out local apic id */
+        if (entry->function == 0x01 && entry->index == 0x00)
+            entry->ebx &= 0x00ffffff;
+        if (entry->function == 0x0b)
+            entry->edx &= 0xffffff00;
+
+        /* Match AMD hosts */
+        if (entry->function == 0x00 && entry->index == 0x00 &&
+            entry->ebx == 0x68747541 && /* Auth */
+            entry->edx == 0x69746e65 && /* enti */
+            entry->ecx == 0x444d4163)   /* cAMD */
+            isAMD = true;
+
+        /* AMD APIC ID and topology information:
+         *
+         * Leaf 0x8000001e
+         *
+         * CPUID Fn8000_001E_EAX Extended APIC ID
+         *  31:0 ExtendedApicId: extended APIC ID.
+         *
+         * CPUID Fn8000_001E_EBX Compute Unit Identifiers
+         *  31:10 Reserved.
+         *  9:8   CoresPerComputeUnit: cores per compute unit.
+         *        The number of cores per compute unit is CoresPerComputeUnit+1.
+         *  7:0   ComputeUnitId: compute unit ID. Identifies the processor compute unit ID.
+         *
+         * CPUID Fn8000_001E_ECX Node Identifiers
+         *  31:11 Reserved.
+         *  10:8  NodesPerProcessor. Specifies the number of nodes per processor.
+         *          000b      1  node per processor
+         *          001b      2  nodes per processor
+         *          111b-010b Reserved
+         *  7:0   NodeId. Specifies the node ID.
+         *
+         * CPUID Fn8000_001E_EDX Reserved
+         *  31:0 Reserved.
+         *
+         * For libvirt none of this information seems to be interesting, thus
+         * we clear all of it including reserved bits for future-proofing.
+         */
+        if (isAMD && entry->function == 0x8000001e) {
+            entry->eax = 0x00;
+            entry->ebx = 0x00;
+            entry->ecx = 0x00;
+            entry->edx = 0x00;
+        }
+    }
+}
+
+
+struct kvm_cpuid2 *
+virHostCPUGetCPUID(void)
+{
+    size_t alloc_size;
+    VIR_AUTOCLOSE fd = open(KVM_DEVICE, O_RDONLY);
+
+    if (fd < 0) {
+        virReportSystemError(errno, _("Unable to open %1$s"), KVM_DEVICE);
+        return NULL;
+    }
+
+    /* Userspace invokes KVM_GET_SUPPORTED_CPUID by passing a kvm_cpuid2 structure
+     * with the 'nent' field indicating the number of entries in the variable-size
+     * array 'entries'.  If the number of entries is too low to describe the cpu
+     * capabilities, an error (E2BIG) is returned.  If the number is too high,
+     * the 'nent' field is adjusted and an error (ENOMEM) is returned.  If the
+     * number is just right, the 'nent' field is adjusted to the number of valid
+     * entries in the 'entries' array, which is then filled. */
+    for (alloc_size = 64; alloc_size <= 65536; alloc_size *= 2) {
+        g_autofree struct kvm_cpuid2 *kvm_cpuid = NULL;
+
+        kvm_cpuid = g_malloc0(sizeof(struct kvm_cpuid2) +
+                              sizeof(struct kvm_cpuid_entry2) * alloc_size);
+        kvm_cpuid->nent = alloc_size;
+
+        if (ioctl(fd, KVM_GET_SUPPORTED_CPUID, kvm_cpuid) == 0) {
+            virHostCPUGetCPUIDFilterVolatile(kvm_cpuid);
+            return g_steal_pointer(&kvm_cpuid);
+        }
+
+        /* enlarge the buffer and try again */
+        if (errno == E2BIG) {
+            VIR_DEBUG("looping %zu", alloc_size);
+            continue;
+        }
+
+        /* we fail on any other error code to prevent pointless looping */
+        break;
+    }
+
+    virReportSystemError(errno, "%s", _("Cannot read host CPUID"));
+    return NULL;
+}
 
 /*
  * This function should only be called when the host CPU supports invariant TSC
@@ -1342,18 +1462,17 @@ virHostCPUGetMSR(unsigned long index,
  * Returns pointer to the TSC info structure on success,
  *         NULL when TSC cannot be probed otherwise.
  */
-virHostCPUTscInfoPtr
+virHostCPUTscInfo *
 virHostCPUGetTscInfo(void)
 {
-    virHostCPUTscInfoPtr info;
+    g_autofree virHostCPUTscInfo *info = g_new0(virHostCPUTscInfo, 1);
     VIR_AUTOCLOSE kvmFd = -1;
     VIR_AUTOCLOSE vmFd = -1;
     VIR_AUTOCLOSE vcpuFd = -1;
-    uint64_t msr = 0;
     int rc;
 
     if ((kvmFd = open(KVM_DEVICE, O_RDONLY)) < 0) {
-        virReportSystemError(errno, _("Unable to open %s"), KVM_DEVICE);
+        virReportSystemError(errno, _("Unable to open %1$s"), KVM_DEVICE);
         return NULL;
     }
 
@@ -1374,27 +1493,30 @@ virHostCPUGetTscInfo(void)
                              _("Unable to probe TSC frequency"));
         return NULL;
     }
-
-    if (VIR_ALLOC(info) < 0)
-        return NULL;
-
     info->frequency = rc * 1000ULL;
 
-    if (virHostCPUGetMSR(VMX_PROCBASED_CTLS2_MSR, &msr) == 0) {
-        /* High 32 bits of the MSR value indicate whether specific control
-         * can be set to 1. */
-        msr >>= 32;
-
-        info->scaling = virTristateBoolFromBool(!!(msr & VMX_USE_TSC_SCALING));
+    if ((rc = ioctl(kvmFd, KVM_CHECK_EXTENSION, KVM_CAP_TSC_CONTROL)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query TSC scaling support"));
+        return NULL;
     }
+    info->scaling = rc ? VIR_TRISTATE_BOOL_YES : VIR_TRISTATE_BOOL_NO;
 
     VIR_DEBUG("Detected TSC frequency %llu Hz, scaling %s",
               info->frequency, virTristateBoolTypeToString(info->scaling));
 
-    return info;
+    return g_steal_pointer(&info);
 }
 
 #else
+
+struct kvm_cpuid2 *
+virHostCPUGetCPUID(void)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Reading CPUID is not supported on this platform"));
+    return NULL;
+}
 
 int
 virHostCPUGetMSR(unsigned long index G_GNUC_UNUSED,
@@ -1405,7 +1527,7 @@ virHostCPUGetMSR(unsigned long index G_GNUC_UNUSED,
     return -1;
 }
 
-virHostCPUTscInfoPtr
+virHostCPUTscInfo *
 virHostCPUGetTscInfo(void)
 {
     virReportSystemError(ENOSYS, "%s",
@@ -1413,7 +1535,7 @@ virHostCPUGetTscInfo(void)
     return NULL;
 }
 
-#endif /* HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+#endif /* WITH_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
           (defined(__i386__) || defined(__x86_64__)) && \
           (defined(__linux__) || defined(__FreeBSD__)) */
 
@@ -1514,12 +1636,33 @@ virHostCPUGetSignature(char **signature)
     *signature = NULL;
 
     if (!(cpuinfo = fopen(CPUINFO_PATH, "r"))) {
-        virReportSystemError(errno, _("Failed to open cpuinfo file '%s'"),
+        virReportSystemError(errno, _("Failed to open cpuinfo file '%1$s'"),
                              CPUINFO_PATH);
         return -1;
     }
 
     return virHostCPUReadSignature(virArchFromHost(), cpuinfo, signature);
+}
+
+int
+virHostCPUGetPhysAddrSize(const virArch hostArch,
+                          unsigned int *size)
+{
+    g_autoptr(FILE) cpuinfo = NULL;
+
+    if (!(ARCH_IS_X86(hostArch) || ARCH_IS_SH4(hostArch))) {
+        /* Ensure size is set to 0 as physical address size is unknown */
+        *size = 0;
+        return 0;
+    }
+
+    if (!(cpuinfo = fopen(CPUINFO_PATH, "r"))) {
+        virReportSystemError(errno, _("Failed to open cpuinfo file '%1$s'"),
+                             CPUINFO_PATH);
+        return -1;
+    }
+
+    return virHostCPUParsePhysAddrSize(cpuinfo, size);
 }
 
 #else
@@ -1531,4 +1674,109 @@ virHostCPUGetSignature(char **signature)
     return 0;
 }
 
+int
+virHostCPUGetPhysAddrSize(const virArch hostArch G_GNUC_UNUSED,
+                          unsigned int *size G_GNUC_UNUSED)
+{
+    errno = ENOSYS;
+    return -1;
+}
+
 #endif /* __linux__ */
+
+int
+virHostCPUGetHaltPollTime(pid_t pid,
+                      unsigned long long *haltPollSuccess,
+                      unsigned long long *haltPollFail)
+{
+    g_autofree char *pidToStr = NULL;
+    g_autofree char *debugFsPath = NULL;
+    g_autofree char *kvmPath = NULL;
+    struct dirent *ent = NULL;
+    g_autoptr(DIR) dir = NULL;
+    bool found = false;
+
+    if (!(debugFsPath = virFileFindMountPoint("debugfs")))
+        return -1;
+
+    kvmPath = g_strdup_printf("%s/%s", debugFsPath, "kvm");
+    if (virDirOpenQuiet(&dir, kvmPath) != 1)
+        return -1;
+
+    pidToStr = g_strdup_printf("%lld-", (long long)pid);
+    while (virDirRead(dir, &ent, NULL) > 0) {
+        if (STRPREFIX(ent->d_name, pidToStr)) {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        return -1;
+
+    if (virFileReadValueUllongQuiet(haltPollSuccess, "%s/%s/%s", kvmPath,
+                                    ent->d_name, "halt_poll_success_ns") < 0 ||
+        virFileReadValueUllongQuiet(haltPollFail, "%s/%s/%s", kvmPath,
+                                    ent->d_name, "halt_poll_fail_ns") < 0)
+        return -1;
+
+    return 0;
+}
+
+void
+virHostCPUX86GetCPUID(uint32_t leaf G_GNUC_UNUSED,
+                      uint32_t extended G_GNUC_UNUSED,
+                      uint32_t *eax,
+                      uint32_t *ebx,
+                      uint32_t *ecx,
+                      uint32_t *edx)
+{
+#if defined(__i386__) || defined(__x86_64__)
+    uint32_t out[4];
+# if __x86_64__
+    asm("xor %%ebx, %%ebx;" /* clear the other registers as some cpuid */
+        "xor %%edx, %%edx;" /* functions may use them as additional arguments */
+        "cpuid;"
+        : "=a" (out[0]),
+          "=b" (out[1]),
+          "=c" (out[2]),
+          "=d" (out[3])
+        : "a" (leaf),
+          "c" (extended));
+# else
+    /* we need to avoid direct use of ebx for CPUID output as it is used
+     * for global offset table on i386 with -fPIC
+     */
+    asm("push %%ebx;"
+        "xor %%ebx, %%ebx;" /* clear the other registers as some cpuid */
+        "xor %%edx, %%edx;" /* functions may use them as additional arguments */
+        "cpuid;"
+        "mov %%ebx, %1;"
+        "pop %%ebx;"
+        : "=a" (out[0]),
+          "=r" (out[1]),
+          "=c" (out[2]),
+          "=d" (out[3])
+        : "a" (leaf),
+          "c" (extended)
+        : "cc");
+# endif
+    if (eax)
+        *eax = out[0];
+    if (ebx)
+        *ebx = out[1];
+    if (ecx)
+        *ecx = out[2];
+    if (edx)
+        *edx = out[3];
+#else
+    if (eax)
+        *eax = 0;
+    if (ebx)
+        *ebx = 0;
+    if (ecx)
+        *ecx = 0;
+    if (edx)
+        *edx = 0;
+#endif
+}

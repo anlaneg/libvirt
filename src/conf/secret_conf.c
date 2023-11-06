@@ -22,11 +22,8 @@
 
 #include "internal.h"
 #include "virbuffer.h"
-#include "datatypes.h"
 #include "virlog.h"
-#include "viralloc.h"
 #include "secret_conf.h"
-#include "virsecretobj.h"
 #include "virerror.h"
 #include "virsecret.h"
 #include "virstring.h"
@@ -38,21 +35,21 @@
 VIR_LOG_INIT("conf.secret_conf");
 
 void
-virSecretDefFree(virSecretDefPtr def)
+virSecretDefFree(virSecretDef *def)
 {
     if (def == NULL)
         return;
 
-    VIR_FREE(def->description);
-    VIR_FREE(def->usage_id);
-    VIR_FREE(def);
+    g_free(def->description);
+    g_free(def->usage_id);
+    g_free(def);
 }
 
 static int
 virSecretDefParseUsage(xmlXPathContextPtr ctxt,
-                       virSecretDefPtr def)
+                       virSecretDef *def)
 {
-    char *type_str;
+    g_autofree char *type_str = NULL;
     int type;
 
     type_str = virXPathString("string(./usage/@type)", ctxt);
@@ -64,11 +61,9 @@ virSecretDefParseUsage(xmlXPathContextPtr ctxt,
     type = virSecretUsageTypeFromString(type_str);
     if (type < 0) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("unknown secret usage type %s"), type_str);
-        VIR_FREE(type_str);
+                       _("unknown secret usage type %1$s"), type_str);
         return -1;
     }
-    VIR_FREE(type_str);
     def->usage_type = type;
     switch (def->usage_type) {
     case VIR_SECRET_USAGE_TYPE_NONE:
@@ -121,55 +116,38 @@ virSecretDefParseUsage(xmlXPathContextPtr ctxt,
 
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected secret usage type %d"),
+                       _("unexpected secret usage type %1$d"),
                        def->usage_type);
         return -1;
     }
     return 0;
 }
 
-static virSecretDefPtr
-secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
+
+static virSecretDef *
+virSecretParseXML(xmlXPathContext *ctxt)
 {
-    g_autoptr(xmlXPathContext) ctxt = NULL;
     g_autoptr(virSecretDef) def = NULL;
-    g_autofree char *prop = NULL;
+    g_autofree char *ephemeralstr = NULL;
+    g_autofree char *privatestr = NULL;
     g_autofree char *uuidstr = NULL;
 
-    if (!virXMLNodeNameEqual(root, "secret")) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("unexpected root element <%s>, "
-                         "expecting <secret>"),
-                       root->name);
-        return NULL;
-    }
+    def = g_new0(virSecretDef, 1);
 
-    if (!(ctxt = virXMLXPathContextNew(xml)))
-        return NULL;
-
-    ctxt->node = root;
-
-    if (VIR_ALLOC(def) < 0)
-        return NULL;
-
-    prop = virXPathString("string(./@ephemeral)", ctxt);
-    if (prop != NULL) {
-        if (virStringParseYesNo(prop, &def->isephemeral) < 0) {
+    if ((ephemeralstr = virXPathString("string(./@ephemeral)", ctxt))) {
+        if (virStringParseYesNo(ephemeralstr, &def->isephemeral) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("invalid value of 'ephemeral'"));
             return NULL;
         }
-        VIR_FREE(prop);
     }
 
-    prop = virXPathString("string(./@private)", ctxt);
-    if (prop != NULL) {
-        if (virStringParseYesNo(prop, &def->isprivate) < 0) {
+    if ((privatestr = virXPathString("string(./@private)", ctxt))) {
+        if (virStringParseYesNo(privatestr, &def->isprivate) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("invalid value of 'private'"));
             return NULL;
         }
-        VIR_FREE(prop);
     }
 
     uuidstr = virXPathString("string(./uuid)", ctxt);
@@ -185,7 +163,6 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
                            "%s", _("malformed uuid element"));
             return NULL;
         }
-        VIR_FREE(uuidstr);
     }
 
     def->description = virXPathString("string(./description)", ctxt);
@@ -196,35 +173,26 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
     return g_steal_pointer(&def);
 }
 
-static virSecretDefPtr
+
+virSecretDef *
 virSecretDefParse(const char *xmlStr,
-                  const char *filename)
+                  const char *filename,
+                  unsigned int flags)
 {
-    xmlDocPtr xml;
-    virSecretDefPtr ret = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    bool validate = flags & VIR_SECRET_DEFINE_VALIDATE;
 
-    if ((xml = virXMLParse(filename, xmlStr, _("(definition_of_secret)")))) {
-        ret = secretXMLParseNode(xml, xmlDocGetRootElement(xml));
-        xmlFreeDoc(xml);
-    }
+    if (!(xml = virXMLParse(filename, xmlStr, _("(definition_of_secret)"),
+                            "secret", &ctxt, "secret.rng", validate)))
+        return NULL;
 
-    return ret;
+    return virSecretParseXML(ctxt);
 }
 
-virSecretDefPtr
-virSecretDefParseString(const char *xmlStr)
-{
-    return virSecretDefParse(xmlStr, NULL);
-}
-
-virSecretDefPtr
-virSecretDefParseFile(const char *filename)
-{
-    return virSecretDefParse(NULL, filename);
-}
 
 static int
-virSecretDefFormatUsage(virBufferPtr buf,
+virSecretDefFormatUsage(virBuffer *buf,
                         const virSecretDef *def)
 {
     const char *type;
@@ -232,7 +200,7 @@ virSecretDefFormatUsage(virBufferPtr buf,
     type = virSecretUsageTypeToString(def->usage_type);
     if (type == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected secret usage type %d"),
+                       _("unexpected secret usage type %1$d"),
                        def->usage_type);
         return -1;
     }
@@ -264,7 +232,7 @@ virSecretDefFormatUsage(virBufferPtr buf,
 
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected secret usage type %d"),
+                       _("unexpected secret usage type %1$d"),
                        def->usage_type);
         return -1;
     }
@@ -277,7 +245,7 @@ virSecretDefFormatUsage(virBufferPtr buf,
 char *
 virSecretDefFormat(const virSecretDef *def)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     const unsigned char *uuid;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
@@ -294,13 +262,9 @@ virSecretDefFormat(const virSecretDef *def)
                               def->description);
     if (def->usage_type != VIR_SECRET_USAGE_TYPE_NONE &&
         virSecretDefFormatUsage(&buf, def) < 0)
-        goto error;
+        return NULL;
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</secret>\n");
 
     return virBufferContentAndReset(&buf);
-
- error:
-    virBufferFreeAndReset(&buf);
-    return NULL;
 }

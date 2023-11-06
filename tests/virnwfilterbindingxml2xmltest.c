@@ -28,23 +28,20 @@
 
 #include "internal.h"
 #include "testutils.h"
-#include "virxml.h"
 #include "virnwfilterbindingdef.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 static int
 testCompareXMLToXMLFiles(const char *xml)
 {
-    char *actual = NULL;
+    g_autofree char *actual = NULL;
     int ret = -1;
-    virNWFilterBindingDefPtr dev = NULL;
+    virNWFilterBindingDef *dev = NULL;
 
     virResetLastError();
 
-    if (!(dev = virNWFilterBindingDefParseFile(xml)))
+    if (!(dev = virNWFilterBindingDefParse(NULL, xml, 0)))
         goto fail;
 
     if (!(actual = virNWFilterBindingDefFormat(dev)))
@@ -56,7 +53,6 @@ testCompareXMLToXMLFiles(const char *xml)
     ret = 0;
 
  fail:
-    VIR_FREE(actual);
     virNWFilterBindingDefFree(dev);
     return ret;
 }
@@ -70,14 +66,12 @@ testCompareXMLToXMLHelper(const void *data)
 {
     int result = -1;
     const test_parms *tp = data;
-    char *xml = NULL;
+    g_autofree char *xml = NULL;
 
     xml = g_strdup_printf("%s/virnwfilterbindingxml2xmldata/%s.xml", abs_srcdir,
                           tp->name);
 
     result = testCompareXMLToXMLFiles(xml);
-
-    VIR_FREE(xml);
 
     return result;
 }

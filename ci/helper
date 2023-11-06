@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+#
+# Copyright (C) 2021 Red Hat, Inc.
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
+import argparse
+import os
+import pathlib
+import subprocess
+import sys
+import textwrap
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import util
+
+
+def required_deps(*deps):
+    module2pkg = {
+        "git": "GitPython"
+    }
+
+    def inner_decorator(func):
+        def wrapped(*args, **kwargs):
+            cmd = func.__name__[len('_action_'):]
+            for dep in deps:
+                try:
+                    import importlib
+                    importlib.import_module(dep)
+                except ImportError:
+                    pkg = module2pkg[dep]
+                    msg = f"'{pkg}' not found (required by the '{cmd}' command)"
+                    print(msg, file=sys.stderr)
+                    sys.exit(1)
+            func(*args, **kwargs)
+        return wrapped
+    return inner_decorator
+
+
+class Parser:
+    def __init__(self):
+        # Options that are common to all actions that use containers
+        containerparser = argparse.ArgumentParser(add_help=False)
+        containerparser.add_argument(
+            "target",
+            help="perform action on target OS",
+        )
+        containerparser.add_argument(
+            "--engine",
+            choices=["auto", "podman", "docker"],
+            default="auto",
+            help="container engine to use",
+        )
+        containerparser.add_argument(
+            "--login",
+            default=os.getlogin(),  # exempt from syntax-check
+            help="login to use inside the container",
+        )
+        containerparser.add_argument(
+            "--image-prefix",
+            default="registry.gitlab.com/libvirt/libvirt/ci-",
+            help="use container images from non-default location",
+        )
+        containerparser.add_argument(
+            "--image-tag",
+            default="latest",
+            help="use container images with non-default tags",
+        )
+        containerparser.add_argument(
+            "--lcitool-path",
+            dest="lcitool",
+            default="lcitool",
+            help="path to lcitool (default: $PATH)",
+        )
+
+        # Options that are common to actions communicating with a GitLab
+        # instance
+        gitlabparser = argparse.ArgumentParser(add_help=False)
+        gitlabparser.add_argument(
+            "--namespace",
+            default="libvirt/libvirt",
+            help="GitLab project namespace"
+        )
+        gitlabparser.add_argument(
+            "--gitlab-uri",
+            default="https://gitlab.com",
+            help="base GitLab URI"
+        )
+
+        # Main parser
+        self._parser = argparse.ArgumentParser()
+        subparsers = self._parser.add_subparsers(
+            dest="action",
+            metavar="ACTION",
+        )
+        subparsers.required = True
+
+        jobparser = subparsers.add_parser(
+            "run",
+            help="Run a GitLab CI job or 'shell' in a local environment",
+            parents=[containerparser],
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        jobparser.add_argument(
+            "--job",
+            choices=["build", "codestyle", "potfile", "rpmbuild",
+                     "shell", "test", "website"],
+            default="build",
+            help="Run a GitLab CI job or 'shell' in a local environment",
+        )
+        jobparser.set_defaults(func=Application._action_run)
+
+        # list-images action
+        listimagesparser = subparsers.add_parser(
+            "list-images",
+            help="list known container images",
+            parents=[gitlabparser],
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        listimagesparser.set_defaults(func=Application._action_list_images)
+
+        # check_stale action
+        check_staleparser = subparsers.add_parser(
+            "check-stale",
+            help="check for existence of stale images on the GitLab instance",
+            parents=[gitlabparser],
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        check_staleparser.set_defaults(func=Application._action_check_stale)
+
+    def parse(self):
+        return self._parser.parse_args()
+
+
+class Application:
+    @property
+    def repo(self):
+        if self._repo is None:
+            from git import Repo
+
+            self._repo = Repo(search_parent_directories=True)
+        return self._repo
+
+    def __init__(self):
+        self._basedir = pathlib.Path(__file__).resolve().parent
+        self._args = Parser().parse()
+        self._repo = None
+
+    @staticmethod
+    def _prepare_repo_copy(repo, dest):
+        return repo.clone(dest, local=True)
+
+    def _lcitool_run(self, args):
+        positional_args = ["container"]
+        opts = ["--user", self._args.login]
+        tmpdir = TemporaryDirectory(prefix="scratch",
+                                    dir=Path(self.repo.working_dir, "ci"))
+
+        repo_dest_path = Path(tmpdir.name, "libvirt.git").as_posix()
+        repo_clone = self._prepare_repo_copy(self.repo, repo_dest_path)
+        opts.extend(["--workload-dir", repo_clone.working_dir])
+
+        if self._args.job == "shell":
+            positional_args.append("shell")
+        else:
+            job2func = {
+                "test": "run_test",
+                "build": "run_build",
+                "codestyle": "run_codestyle",
+                "potfile": "run_potfile",
+                "rpmbuild": "run_rpmbuild",
+                "website": "run_website_build",
+            }
+
+            if self._args.engine != "auto":
+                positional_args.extend(["--engine", self._args.engine])
+
+            with open(Path(tmpdir.name, "script"), "w") as f:
+                script_path = f.name
+                contents = textwrap.dedent(f"""\
+                #!/bin/sh
+
+                cd datadir
+                . ci/jobs.sh
+
+                {job2func[self._args.job]}
+                """)
+
+                f.write(contents)
+
+            positional_args.append("run")
+            opts.extend(["--script", script_path])
+
+        opts.append(f"{self._args.image_prefix}{self._args.target}:{self._args.image_tag}")
+        proc = None
+        try:
+            proc = subprocess.run([self._args.lcitool] + positional_args + opts)
+        except KeyboardInterrupt:
+            sys.exit(1)
+        finally:
+            # this will take care of the generated script file above as well
+            tmpdir.cleanup()
+        return proc.returncode
+
+    def _check_stale_images(self):
+        namespace = self._args.namespace
+        gitlab_uri = self._args.gitlab_uri
+        registry_uri = util.get_registry_uri(namespace, gitlab_uri)
+
+        stale_images = util.get_registry_stale_images(registry_uri, self._basedir)
+        if stale_images:
+            spacing = "\n" + 4 * " "
+            stale_fmt = [f"{k} (ID: {v})" for k, v in stale_images.items()]
+            stale_details = spacing.join(stale_fmt)
+            stale_ids = ' '.join([str(id) for id in stale_images.values()])
+            registry_uri = util.get_registry_uri(namespace, gitlab_uri)
+
+            msg = textwrap.dedent(f"""
+                The following images are stale and can be purged from the registry:
+
+                    STALE_DETAILS
+
+                You can delete the images listed above using this shell snippet:
+
+                    $ for image_id in {stale_ids}; do
+                          curl --request DELETE --header "PRIVATE-TOKEN: <access_token>" \\
+                               {registry_uri}/$image_id;
+                      done
+
+                You can generate a personal access token here:
+
+                    {gitlab_uri}/-/profile/personal_access_tokens
+            """)
+            print(msg.replace("STALE_DETAILS", stale_details))
+
+    @required_deps("git")
+    def _action_run(self):
+        return self._lcitool_run(self._args.job)
+
+    def _action_list_images(self):
+        registry_uri = util.get_registry_uri(self._args.namespace,
+                                             self._args.gitlab_uri)
+        images = util.get_registry_images(registry_uri)
+
+        # skip the "ci-" prefix each of our container images' name has
+        name_prefix = "ci-"
+        names = [i["name"][len(name_prefix):] for i in images]
+        names.sort()
+
+        native = [name for name in names if "-cross-" not in name]
+        cross = [name for name in names if "-cross-" in name]
+
+        spacing = 4 * " "
+        print("Available x86 container images:\n")
+        print(spacing + ("\n" + spacing).join(native))
+
+        if cross:
+            print()
+            print("Available cross-compiler container images:\n")
+            print(spacing + ("\n" + spacing).join(cross))
+
+    def _action_check_stale(self):
+        self._check_stale_images()
+
+    def run(self):
+        self._args.func(self)
+
+
+if __name__ == "__main__":
+    Application().run()

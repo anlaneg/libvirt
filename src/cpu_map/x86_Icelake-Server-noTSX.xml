@@ -1,7 +1,7 @@
 <cpus>
   <model name='Icelake-Server-noTSX'>
     <decode host='on' guest='off'/>
-    <signature family='6' model='134'/> <!-- 080660 -->
+    <signature family='6' model='106'/> <!-- 0606A5 -->
     <vendor name='Intel'/>
     <feature name='3dnowprefetch'/>
     <feature name='abm'/>
@@ -37,7 +37,7 @@
     <feature name='fsgsbase'/>
     <feature name='fxsr'/>
     <feature name='gfni'/>
-    <feature name='intel-pt'/>
+    <feature name='intel-pt' removed='yes'/>
     <feature name='invpcid'/>
     <feature name='la57'/>
     <feature name='lahf_lm'/>

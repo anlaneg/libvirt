@@ -20,17 +20,18 @@
 
 #include <config.h>
 
-#ifdef HAVE_GETUTXID
+#ifdef WITH_GETUTXID
 # include <utmpx.h>
 #endif
 
 #include "virhostuptime.h"
-#include "viralloc.h"
 #include "virfile.h"
 #include "virlog.h"
 #include "virstring.h"
 #include "virtime.h"
 #include "virthread.h"
+
+#include <math.h>
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -62,7 +63,7 @@ virHostGetBootTimeProcfs(unsigned long long *btime)
      * We're interested only in the first one */
     if (!(tmp = strchr(buf, ' '))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("uptime file has unexpected format '%s'"),
+                       _("uptime file has unexpected format '%1$s'"),
                        buf);
         return -EINVAL;
     }
@@ -71,22 +72,22 @@ virHostGetBootTimeProcfs(unsigned long long *btime)
 
     if (virStrToDouble(buf, NULL, &up) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to parse uptime value '%s'"),
+                       _("Unable to parse uptime value '%1$s'"),
                        buf);
         return -EINVAL;
     }
 
-    *btime = now / 1000 - up + 0.5;
+    *btime = llround(now / 1000 - up);
 
     return 0;
 }
 #endif /* defined(__linux__) */
 
-#if defined(HAVE_GETUTXID) || defined(__linux__)
+#if defined(WITH_GETUTXID) || defined(__linux__)
 static void
 virHostGetBootTimeOnceInit(void)
 {
-# ifdef HAVE_GETUTXID
+# ifdef WITH_GETUTXID
     struct utmpx id = {.ut_type = BOOT_TIME};
     struct utmpx *res = NULL;
 
@@ -97,7 +98,7 @@ virHostGetBootTimeOnceInit(void)
     }
 
     endutxent();
-# endif /* HAVE_GETUTXID */
+# endif /* WITH_GETUTXID */
 
 # ifdef __linux__
     if (bootTimeErrno != 0 || bootTime == 0)
@@ -105,14 +106,14 @@ virHostGetBootTimeOnceInit(void)
 # endif /* __linux__ */
 }
 
-#else /* !defined(HAVE_GETUTXID) && !defined(__linux__) */
+#else /* !defined(WITH_GETUTXID) && !defined(__linux__) */
 
 static void
 virHostGetBootTimeOnceInit(void)
 {
     bootTimeErrno = ENOSYS;
 }
-#endif /* !defined(HAVE_GETUTXID) && !defined(__linux__) */
+#endif /* !defined(WITH_GETUTXID) && !defined(__linux__) */
 
 /**
  * virHostGetBootTime:

@@ -34,90 +34,29 @@
  */
 
 /* Don't call these directly - use the macros below */
-int virAlloc(void *ptrptr, size_t size)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-int virAllocN(void *ptrptr, size_t size, size_t count)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-int virReallocN(void *ptrptr, size_t size, size_t count)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-int virExpandN(void *ptrptr, size_t size, size_t *count, size_t add)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
-int virResizeN(void *ptrptr, size_t size, size_t *alloc, size_t count, size_t desired)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+void virReallocN(void *ptrptr, size_t size, size_t count)
+    ATTRIBUTE_NONNULL(1);
+void virExpandN(void *ptrptr, size_t size, size_t *count, size_t add)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+void virResizeN(void *ptrptr, size_t size, size_t *alloc, size_t count, size_t desired)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 void virShrinkN(void *ptrptr, size_t size, size_t *count, size_t toremove)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 int virInsertElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
-                       size_t add, void *newelem,
+                       size_t typematchDummy, void *newelem,
                        bool clearOriginal, bool inPlace)
     G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
+void virAppendElement(void *ptrptr,
+                      size_t size,
+                      size_t *countptr,
+                      size_t typematchDummy,
+                      void *newelem,
+                      bool clearOriginal,
+                      bool inPlace)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 int virDeleteElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
                        size_t toremove, bool inPlace)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
-int virAllocVar(void *ptrptr, size_t struct_size, size_t element_size, size_t count)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-
-void virDispose(void *ptrptr, size_t count, size_t element_size, size_t *countptr)
-    ATTRIBUTE_NONNULL(1);
-void virDisposeString(char **strptr)
-    ATTRIBUTE_NONNULL(1);
-
-/**
- * VIR_ALLOC:
- * @ptr: pointer to hold address of allocated memory
- *
- * Allocate sizeof(*ptr) bytes of memory and store
- * the address of allocated memory in 'ptr'. Fill the
- * newly allocated memory with zeros.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 on success, aborts on OOM
- */
-#define VIR_ALLOC(ptr) virAlloc(&(ptr), sizeof(*(ptr)))
-
-/**
- * VIR_ALLOC_QUIET:
- * @ptr: pointer to hold address of allocated memory
- *
- * Allocate sizeof(*ptr) bytes of memory and store
- * the address of allocated memory in 'ptr'. Fill the
- * newly allocated memory with zeros.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 on success, aborts on OOM
- */
-#define VIR_ALLOC_QUIET(ptr) VIR_ALLOC(ptr)
-
-/**
- * VIR_ALLOC_N:
- * @ptr: pointer to hold address of allocated memory
- * @count: number of elements to allocate
- *
- * Allocate an array of 'count' elements, each sizeof(*ptr)
- * bytes long and store the address of allocated memory in
- * 'ptr'. Fill the newly allocated memory with zeros.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 on success, aborts on OOM
- */
-#define VIR_ALLOC_N(ptr, count) virAllocN(&(ptr), sizeof(*(ptr)), (count))
-
-/**
- * VIR_ALLOC_N_QUIET:
- * @ptr: pointer to hold address of allocated memory
- * @count: number of elements to allocate
- *
- * Allocate an array of 'count' elements, each sizeof(*ptr)
- * bytes long and store the address of allocated memory in
- * 'ptr'. Fill the newly allocated memory with zeros.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 on success, aborts on OOM
- */
-#define VIR_ALLOC_N_QUIET(ptr, count) VIR_ALLOC_N(ptr, count)
 
 /**
  * VIR_REALLOC_N:
@@ -130,24 +69,9 @@ void virDisposeString(char **strptr)
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns 0 on success, aborts on OOM
+ * Aborts on OOM
  */
 #define VIR_REALLOC_N(ptr, count) virReallocN(&(ptr), sizeof(*(ptr)), (count))
-
-/**
- * VIR_REALLOC_N_QUIET:
- * @ptr: pointer to hold address of allocated memory
- * @count: number of elements to allocate
- *
- * Re-allocate an array of 'count' elements, each sizeof(*ptr)
- * bytes long and store the address of allocated memory in
- * 'ptr'. If 'ptr' grew, the added memory is uninitialized.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 on success, aborts on OOM
- */
-#define VIR_REALLOC_N_QUIET(ptr, count) VIR_REALLOC_N(ptr, count)
 
 /**
  * VIR_EXPAND_N:
@@ -162,7 +86,7 @@ void virDisposeString(char **strptr)
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns 0 on success, aborts on OOM
+ * Aborts on OOM
  */
 #define VIR_EXPAND_N(ptr, count, add) virExpandN(&(ptr), sizeof(*(ptr)), &(count), add)
 
@@ -186,7 +110,7 @@ void virDisposeString(char **strptr)
  *
  * This macro is safe to use on arguments with side effects.
  *
- * Returns 0 on success, aborts on OOM
+ * Aborts on OOM
  */
 #define VIR_RESIZE_N(ptr, alloc, count, add) \
     virResizeN(&(ptr), sizeof(*(ptr)), &(alloc), count, add)
@@ -249,7 +173,7 @@ void virDisposeString(char **strptr)
     sizeof(char[2 * (sizeof(*(a) = *(b)) == sizeof(*(b))) - 1])
 
 /**
- * VIR_INSERT_ELEMENT:
+ * VIR_INSERT_ELEMENT, VIR_INSERT_ELEMENT_INPLACE:
  * @ptr:     pointer to array of objects (*not* ptr to ptr)
  * @at:      index within array where new elements should be added
  * @count:   variable tracking number of elements currently allocated
@@ -263,22 +187,8 @@ void virDisposeString(char **strptr)
  * item 'newelem' into ptr[at], then store the address of
  * allocated memory in 'ptr' and the new size in 'count'.
  *
- * VIR_INSERT_ELEMENT_COPY is identical, but doesn't clear out the
- *   original element to 0 on success, so there are two copies of the
- *   element. This is useful if the "element" is actually just a
- *   pointer to the real data, and you want to maintain a reference to
- *   it for use after the insert is completed; but if the "element" is
- *   an object that points to other allocated memory, having multiple
- *   copies can cause problems (e.g. double free).
- *
- * VIR_INSERT_ELEMENT_*INPLACE are identical, but assume any necessary
- *   memory re-allocation has already been done.
- *
- * VIR_INSERT_ELEMENT_* all need to send "1" as the "add" argument to
- * virInsertElementsN (which has the currently-unused capability of
- * inserting multiple items at once). We use this to our advantage by
- * replacing it with VIR_TYPECHECK(ptr, &newelem) so that we can be
- * assured ptr and &newelem are of compatible types.
+ * VIR_INSERT_ELEMENT_INPLACE is identical, but assumes any necessary
+ * memory re-allocation has already been done.
  *
  * These macros are safe to use on arguments with side effects.
  *
@@ -287,15 +197,9 @@ void virDisposeString(char **strptr)
 #define VIR_INSERT_ELEMENT(ptr, at, count, newelem) \
     virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
                        VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, false)
-#define VIR_INSERT_ELEMENT_COPY(ptr, at, count, newelem) \
-    virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
-                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, false)
 #define VIR_INSERT_ELEMENT_INPLACE(ptr, at, count, newelem) \
     virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
                        VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, true)
-#define VIR_INSERT_ELEMENT_COPY_INPLACE(ptr, at, count, newelem) \
-    virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
-                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, true)
 
 /**
  * VIR_APPEND_ELEMENT:
@@ -322,34 +226,22 @@ void virDisposeString(char **strptr)
  * VIR_APPEND_ELEMENT_*INPLACE are identical, but assume any
  *   necessary memory re-allocation has already been done.
  *
- * VIR_APPEND_ELEMENT_* all need to send "1" as the "add" argument to
- * virInsertElementsN (which has the currently-unused capability of
- * inserting multiple items at once). We use this to our advantage by
- * replacing it with VIR_TYPECHECK(ptr, &newelem) so that we can be
- * assured ptr and &newelem are of compatible types.
- *
  * These macros are safe to use on arguments with side effects.
- *
- * Returns -1 on failure (with OOM error reported), 0 on success
  */
 #define VIR_APPEND_ELEMENT(ptr, count, newelem) \
-    virInsertElementsN(&(ptr), sizeof(*(ptr)), -1, &(count), \
-                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, false)
+    virAppendElement(&(ptr), sizeof(*(ptr)), &(count), \
+                     VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, false)
 #define VIR_APPEND_ELEMENT_COPY(ptr, count, newelem) \
-    virInsertElementsN(&(ptr), sizeof(*(ptr)), -1, &(count), \
-                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, false)
+    virAppendElement(&(ptr), sizeof(*(ptr)), &(count), \
+                     VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, false)
 #define VIR_APPEND_ELEMENT_INPLACE(ptr, count, newelem) \
-    ignore_value(virInsertElementsN(&(ptr), sizeof(*(ptr)), -1, &(count), \
-                                    VIR_TYPEMATCH(ptr, &(newelem)), \
-                                    &(newelem), true, true))
+    virAppendElement(&(ptr), sizeof(*(ptr)), &(count), \
+                     VIR_TYPEMATCH(ptr, &(newelem)), \
+                     &(newelem), true, true)
 #define VIR_APPEND_ELEMENT_COPY_INPLACE(ptr, count, newelem) \
-    ignore_value(virInsertElementsN(&(ptr), sizeof(*(ptr)), -1, &(count), \
-                                    VIR_TYPEMATCH(ptr, &(newelem)), \
-                                    &(newelem), false, true))
-
-/* Quiet version of macros above */
-#define VIR_APPEND_ELEMENT_QUIET(ptr, count, newelem) \
-    VIR_APPEND_ELEMENT(ptr, count, newelem)
+    virAppendElement(&(ptr), sizeof(*(ptr)), &(count), \
+                     VIR_TYPEMATCH(ptr, &(newelem)), \
+                     &(newelem), false, true)
 
 /**
  * VIR_DELETE_ELEMENT:
@@ -375,39 +267,6 @@ void virDisposeString(char **strptr)
     virDeleteElementsN(&(ptr), sizeof(*(ptr)), at, &(count), 1, true)
 
 /**
- * VIR_ALLOC_VAR_OVERSIZED:
- * @M: size of base structure
- * @N: number of array elements in trailing array
- * @S: size of trailing array elements
- *
- * Check to make sure that the requested allocation will not cause
- * arithmetic overflow in the allocation size.
- */
-#define VIR_ALLOC_VAR_OVERSIZED(M, N, S) ((((size_t)-1) - (M)) / (S) < (N))
-
-/**
- * VIR_ALLOC_VAR:
- * @ptr: pointer to hold address of allocated memory
- * @type: element type of trailing array
- * @count: number of array elements to allocate
- *
- * Allocate sizeof(*ptr) bytes plus an array of 'count' elements, each
- * sizeof('type').  This sort of allocation is useful for receiving
- * the data of certain ioctls and other APIs which return a struct in
- * which the last element is an array of undefined length.  The caller
- * of this type of API is expected to know the length of the array
- * that will be returned and allocate a suitable buffer to contain the
- * returned data.  C99 refers to these variable length objects as
- * structs containing flexible array members.
- *
- * This macro is safe to use on arguments with side effects.
- *
- * Returns 0 on success, aborts on OOM
- */
-#define VIR_ALLOC_VAR(ptr, type, count) \
-    virAllocVar(&(ptr), sizeof(*(ptr)), sizeof(type), (count))
-
-/**
  * VIR_FREE:
  * @ptr: pointer holding address to be freed
  *
@@ -417,49 +276,3 @@ void virDisposeString(char **strptr)
  * This macro is safe to use on arguments with side effects.
  */
 #define VIR_FREE(ptr) g_clear_pointer(&(ptr), g_free)
-
-
-/**
- * VIR_DISPOSE_N:
- * @ptr: pointer holding address to be cleared and freed
- * @count: count of elements in @ptr
- *
- * Clear the memory of the array of elements pointed to by 'ptr' of 'count'
- * elements and free it. Update the pointer/count to NULL/0.
- *
- * This macro is safe to use on arguments with side effects.
- */
-#define VIR_DISPOSE_N(ptr, count) virDispose(1 ? (void *) &(ptr) : (ptr), 0, \
-                                             sizeof(*(ptr)), &(count))
-
-
-/**
- * VIR_DISPOSE_STRING:
- * @ptr: pointer to a string to be cleared and freed
- *
- * Clears the string and frees the corresponding memory.
- *
- * This macro is not safe to be used on arguments with side effects.
- */
-#define VIR_DISPOSE_STRING(ptr) virDisposeString(&(ptr))
-
-/**
- * VIR_AUTODISPOSE_STR:
- *
- * Macro to automatically free and clear the memory allocated to
- * the string variable declared with it by calling virDisposeString
- * when the variable goes out of scope.
- */
-#define VIR_AUTODISPOSE_STR \
-    __attribute__((cleanup(virDisposeString))) char *
-
-/**
- * VIR_DISPOSE:
- * @ptr: pointer to memory to be cleared and freed
- *
- * Clears and frees the corresponding memory.
- *
- * This macro is safe to be used on arguments with side effects.
- */
-#define VIR_DISPOSE(ptr) virDispose(1 ? (void *) &(ptr) : (ptr), 1, \
-                                    sizeof(*(ptr)), NULL)

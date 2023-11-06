@@ -20,10 +20,12 @@
 #include <dlfcn.h>
 
 #include "internal.h"
-#include "viralloc.h"
 #include "virjson.h"
 #include "qemu/qemu_monitor.h"
 #include "qemu/qemu_monitor_json.h"
+
+#define LIBVIRT_QEMU_MONITOR_PRIV_H_ALLOW
+#include "qemu/qemu_monitor_priv.h"
 
 #define REAL_SYM(realFunc) \
     do { \
@@ -51,14 +53,14 @@ printLineSkipEmpty(const char *line,
 }
 
 
-static int (*realQemuMonitorSend)(qemuMonitorPtr mon,
-                                  qemuMonitorMessagePtr msg);
+static int (*realQemuMonitorSend)(qemuMonitor *mon,
+                                  qemuMonitorMessage *msg);
 
 int
-qemuMonitorSend(qemuMonitorPtr mon,
-                qemuMonitorMessagePtr msg)
+qemuMonitorSend(qemuMonitor *mon,
+                qemuMonitorMessage *msg)
 {
-    char *reformatted;
+    g_autofree char *reformatted = NULL;
 
     REAL_SYM(realQemuMonitorSend);
 
@@ -73,23 +75,22 @@ qemuMonitorSend(qemuMonitorPtr mon,
         printLineSkipEmpty("\n", stdout);
 
     printLineSkipEmpty(reformatted, stdout);
-    VIR_FREE(reformatted);
 
     return realQemuMonitorSend(mon, msg);
 }
 
 
-static int (*realQemuMonitorJSONIOProcessLine)(qemuMonitorPtr mon,
+static int (*realQemuMonitorJSONIOProcessLine)(qemuMonitor *mon,
                                                const char *line,
-                                               qemuMonitorMessagePtr msg);
+                                               qemuMonitorMessage *msg);
 
 int
-qemuMonitorJSONIOProcessLine(qemuMonitorPtr mon,
+qemuMonitorJSONIOProcessLine(qemuMonitor *mon,
                              const char *line,
-                             qemuMonitorMessagePtr msg)
+                             qemuMonitorMessage *msg)
 {
-    virJSONValuePtr value = NULL;
-    char *json = NULL;
+    g_autoptr(virJSONValue) value = NULL;
+    g_autofree char *json = NULL;
     int ret;
 
     REAL_SYM(realQemuMonitorJSONIOProcessLine);
@@ -105,7 +106,7 @@ qemuMonitorJSONIOProcessLine(qemuMonitorPtr mon,
 
         /* Ignore QMP greeting */
         if (virJSONValueObjectHasKey(value, "QMP"))
-            goto cleanup;
+            return 0;
 
         if (first)
             first = false;
@@ -115,8 +116,5 @@ qemuMonitorJSONIOProcessLine(qemuMonitorPtr mon,
         printLineSkipEmpty(json, stdout);
     }
 
- cleanup:
-    VIR_FREE(json);
-    virJSONValueFree(value);
     return ret;
 }

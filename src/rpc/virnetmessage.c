@@ -28,20 +28,18 @@
 #include "virlog.h"
 #include "virfile.h"
 #include "virutil.h"
-#include "virstring.h"
+#include "virsecureerase.h"
 
 #define VIR_FROM_THIS VIR_FROM_RPC
 
 VIR_LOG_INIT("rpc.netmessage");
 
-
 /*申请virNetMessage*/
-virNetMessagePtr virNetMessageNew(bool tracked)
+virNetMessage *virNetMessageNew(bool tracked)
 {
-    virNetMessagePtr msg;
+    virNetMessage *msg;
 
-    if (VIR_ALLOC(msg) < 0)
-        return NULL;
+    msg = g_new0(virNetMessage, 1);
 
     msg->tracked = tracked;
     VIR_DEBUG("msg=%p tracked=%d", msg, tracked);
@@ -51,7 +49,7 @@ virNetMessagePtr virNetMessageNew(bool tracked)
 
 
 void
-virNetMessageClearPayload(virNetMessagePtr msg)
+virNetMessageClearFDs(virNetMessage *msg)
 {
     size_t i;
 
@@ -61,14 +59,22 @@ virNetMessageClearPayload(virNetMessagePtr msg)
     msg->donefds = 0;
     msg->nfds = 0;
     VIR_FREE(msg->fds);
+}
 
+
+void
+virNetMessageClearPayload(virNetMessage *msg)
+{
+    virNetMessageClearFDs(msg);
+
+    virSecureErase(msg->buffer, msg->bufferLength);
     msg->bufferOffset = 0;
     msg->bufferLength = 0;
     VIR_FREE(msg->buffer);
 }
 
 
-void virNetMessageClear(virNetMessagePtr msg)
+void virNetMessageClear(virNetMessage *msg)
 {
     bool tracked = msg->tracked;
 
@@ -80,7 +86,7 @@ void virNetMessageClear(virNetMessagePtr msg)
 }
 
 
-void virNetMessageFree(virNetMessagePtr msg)
+void virNetMessageFree(virNetMessage *msg)
 {
     if (!msg)
         return;
@@ -91,12 +97,14 @@ void virNetMessageFree(virNetMessagePtr msg)
         msg->cb(msg, msg->opaque);
 
     virNetMessageClearPayload(msg);
-    VIR_FREE(msg);
+    g_free(msg);
 }
 
-void virNetMessageQueuePush(virNetMessagePtr *queue, virNetMessagePtr msg)
+void virNetMessageQueuePush(virNetMessage **queue, virNetMessage *msg)
 {
-    virNetMessagePtr tmp = *queue;
+    virNetMessage *tmp = *queue;
+
+    VIR_DEBUG("queue=%p msg=%p", queue, msg);
 
     if (tmp) {
         while (tmp->next)
@@ -108,20 +116,22 @@ void virNetMessageQueuePush(virNetMessagePtr *queue, virNetMessagePtr msg)
 }
 
 
-virNetMessagePtr virNetMessageQueueServe(virNetMessagePtr *queue)
+virNetMessage *virNetMessageQueueServe(virNetMessage **queue)
 {
-    virNetMessagePtr tmp = *queue;
+    virNetMessage *tmp = *queue;
+
+    VIR_DEBUG("queue serve start queue=%p *queue=%p", queue, *queue);
 
     if (tmp) {
-        *queue = tmp->next;
-        tmp->next = NULL;
+        *queue = g_steal_pointer(&tmp->next);
     }
 
+    VIR_DEBUG("queue serve end queue=%p *queue=%p", queue, *queue);
     return tmp;
 }
 
 
-int virNetMessageDecodeLength(virNetMessagePtr msg)
+int virNetMessageDecodeLength(virNetMessage *msg)
 {
     XDR xdr;
     unsigned int len;
@@ -137,7 +147,7 @@ int virNetMessageDecodeLength(virNetMessagePtr msg)
 
     if (len < VIR_NET_MESSAGE_LEN_MAX) {
         virReportError(VIR_ERR_RPC,
-                       _("packet %d bytes received from server too small, want %d"),
+                       _("packet %1$d bytes received from server too small, want %2$d"),
                        len, VIR_NET_MESSAGE_LEN_MAX);
         goto cleanup;
     }
@@ -147,7 +157,7 @@ int virNetMessageDecodeLength(virNetMessagePtr msg)
 
     if (len > VIR_NET_MESSAGE_MAX) {
         virReportError(VIR_ERR_RPC,
-                       _("packet %d bytes received from server too large, want %d"),
+                       _("packet %1$d bytes received from server too large, want %2$d"),
                        len, VIR_NET_MESSAGE_MAX);
         goto cleanup;
     }
@@ -155,8 +165,7 @@ int virNetMessageDecodeLength(virNetMessagePtr msg)
     /* Extend our declared buffer length and carry
        on reading the header + payload */
     msg->bufferLength += len;
-    if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0)
-        goto cleanup;
+    VIR_REALLOC_N(msg->buffer, msg->bufferLength);
 
     VIR_DEBUG("Got length, now need %zu total (%u more)",
               msg->bufferLength, len);
@@ -180,7 +189,7 @@ int virNetMessageDecodeLength(virNetMessagePtr msg)
  *
  * returns 0 if successfully decoded, -1 upon fatal error
  */
-int virNetMessageDecodeHeader(virNetMessagePtr msg)
+int virNetMessageDecodeHeader(virNetMessage *msg)
 {
     XDR xdr;
     int ret = -1;
@@ -225,15 +234,14 @@ int virNetMessageDecodeHeader(virNetMessagePtr msg)
  *
  * returns 0 if successfully encoded, -1 upon fatal error
  */
-int virNetMessageEncodeHeader(virNetMessagePtr msg)
+int virNetMessageEncodeHeader(virNetMessage *msg)
 {
     XDR xdr;
     int ret = -1;
     unsigned int len = 0;
 
     msg->bufferLength = VIR_NET_MESSAGE_INITIAL + VIR_NET_MESSAGE_LEN_MAX;
-    if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0)
-        return ret;
+    VIR_REALLOC_N(msg->buffer, msg->bufferLength);
     msg->bufferOffset = 0;
 
     /* Format the header. */
@@ -274,7 +282,7 @@ int virNetMessageEncodeHeader(virNetMessagePtr msg)
 }
 
 
-int virNetMessageEncodeNumFDs(virNetMessagePtr msg)
+int virNetMessageEncodeNumFDs(virNetMessage *msg)
 {
     XDR xdr;
     unsigned int numFDs = msg->nfds;
@@ -285,7 +293,7 @@ int virNetMessageEncodeNumFDs(virNetMessagePtr msg)
 
     if (numFDs > VIR_NET_MESSAGE_NUM_FDS_MAX) {
         virReportError(VIR_ERR_RPC,
-                       _("Too many FDs to send %d, expected %d maximum"),
+                       _("Too many FDs to send %1$d, expected %2$d maximum"),
                        numFDs, VIR_NET_MESSAGE_NUM_FDS_MAX);
         goto cleanup;
     }
@@ -306,7 +314,7 @@ int virNetMessageEncodeNumFDs(virNetMessagePtr msg)
 }
 
 
-int virNetMessageDecodeNumFDs(virNetMessagePtr msg)
+int virNetMessageDecodeNumFDs(virNetMessage *msg)
 {
     XDR xdr;
     unsigned int numFDs;
@@ -323,15 +331,15 @@ int virNetMessageDecodeNumFDs(virNetMessagePtr msg)
 
     if (numFDs > VIR_NET_MESSAGE_NUM_FDS_MAX) {
         virReportError(VIR_ERR_RPC,
-                       _("Received too many FDs %d, expected %d maximum"),
+                       _("Received too many FDs %1$d, expected %2$d maximum"),
                        numFDs, VIR_NET_MESSAGE_NUM_FDS_MAX);
         goto cleanup;
     }
 
     if (msg->nfds == 0) {
         msg->nfds = numFDs;
-        if (VIR_ALLOC_N(msg->fds, msg->nfds) < 0)
-            goto cleanup;
+        msg->fds = g_new0(int, msg->nfds);
+
         for (i = 0; i < msg->nfds; i++)
             msg->fds[i] = -1;
     }
@@ -346,7 +354,7 @@ int virNetMessageDecodeNumFDs(virNetMessagePtr msg)
 }
 
 
-int virNetMessageEncodePayload(virNetMessagePtr msg,
+int virNetMessageEncodePayload(virNetMessage *msg,
                                xdrproc_t filter,
                                void *data)
 {
@@ -373,8 +381,7 @@ int virNetMessageEncodePayload(virNetMessagePtr msg,
 
         msg->bufferLength = newlen + VIR_NET_MESSAGE_LEN_MAX;
 
-        if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0)
-            goto error;
+        VIR_REALLOC_N(msg->buffer, msg->bufferLength);
 
         xdrmem_create(&xdr, msg->buffer + msg->bufferOffset,
                       msg->bufferLength - msg->bufferOffset, XDR_ENCODE);
@@ -406,7 +413,7 @@ int virNetMessageEncodePayload(virNetMessagePtr msg,
 }
 
 
-int virNetMessageDecodePayload(virNetMessagePtr msg,
+int virNetMessageDecodePayload(virNetMessage *msg,
                                xdrproc_t filter,
                                void *data)
 {
@@ -424,7 +431,7 @@ int virNetMessageDecodePayload(virNetMessagePtr msg,
     }
 
     /* Get the length stored in buffer. */
-    msg->bufferLength += xdr_getpos(&xdr);
+    msg->bufferOffset += xdr_getpos(&xdr);
     xdr_destroy(&xdr);
     return 0;
 
@@ -434,37 +441,46 @@ int virNetMessageDecodePayload(virNetMessagePtr msg,
 }
 
 
-int virNetMessageEncodePayloadRaw(virNetMessagePtr msg,
+/**
+ * virNetMessageEncodePayloadRaw:
+ * @msg: message to encode payload into
+ * @data: data to encode into @msg
+ * @len: length of @data
+ *
+ * Encodes message payload. If @data is NULL or @len is 0 an empty message is
+ * encoded.
+ */
+int virNetMessageEncodePayloadRaw(virNetMessage *msg,
                                   const char *data,
                                   size_t len)
 {
     XDR xdr;
     unsigned int msglen;
 
-    /* If the message buffer is too small for the payload increase it accordingly. */
-    if ((msg->bufferLength - msg->bufferOffset) < len) {
-        if ((msg->bufferOffset + len) >
-            (VIR_NET_MESSAGE_MAX + VIR_NET_MESSAGE_LEN_MAX)) {
-            virReportError(VIR_ERR_RPC,
-                           _("Stream data too long to send "
-                             "(%zu bytes needed, %zu bytes available)"),
-                           len,
-                           VIR_NET_MESSAGE_MAX +
-                           VIR_NET_MESSAGE_LEN_MAX -
-                           msg->bufferOffset);
-            return -1;
+    if (data && len > 0) {
+        /* If the message buffer is too small for the payload increase it accordingly. */
+        if ((msg->bufferLength - msg->bufferOffset) < len) {
+            if ((msg->bufferOffset + len) >
+                (VIR_NET_MESSAGE_MAX + VIR_NET_MESSAGE_LEN_MAX)) {
+                virReportError(VIR_ERR_RPC,
+                               _("Stream data too long to send (%1$zu bytes needed, %2$zu bytes available)"),
+                               len,
+                               VIR_NET_MESSAGE_MAX +
+                               VIR_NET_MESSAGE_LEN_MAX -
+                               msg->bufferOffset);
+                return -1;
+            }
+
+            msg->bufferLength = msg->bufferOffset + len;
+
+            VIR_REALLOC_N(msg->buffer, msg->bufferLength);
+
+            VIR_DEBUG("Increased message buffer length = %zu", msg->bufferLength);
         }
 
-        msg->bufferLength = msg->bufferOffset + len;
-
-        if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0)
-            return -1;
-
-        VIR_DEBUG("Increased message buffer length = %zu", msg->bufferLength);
+        memcpy(msg->buffer + msg->bufferOffset, data, len);
+        msg->bufferOffset += len;
     }
-
-    memcpy(msg->buffer + msg->bufferOffset, data, len);
-    msg->bufferOffset += len;
 
     /* Re-encode the length word. */
     VIR_DEBUG("Encode length as %zu", msg->bufferOffset);
@@ -486,33 +502,10 @@ int virNetMessageEncodePayloadRaw(virNetMessagePtr msg,
 }
 
 
-int virNetMessageEncodePayloadEmpty(virNetMessagePtr msg)
+void virNetMessageSaveError(struct virNetMessageError *rerr)
 {
-    XDR xdr;
-    unsigned int msglen;
+    virErrorPtr verr;
 
-    /* Re-encode the length word. */
-    VIR_DEBUG("Encode length as %zu", msg->bufferOffset);
-    xdrmem_create(&xdr, msg->buffer, VIR_NET_MESSAGE_HEADER_XDR_LEN, XDR_ENCODE);
-    msglen = msg->bufferOffset;
-    if (!xdr_u_int(&xdr, &msglen)) {
-        virReportError(VIR_ERR_RPC, "%s", _("Unable to encode message length"));
-        goto error;
-    }
-    xdr_destroy(&xdr);
-
-    msg->bufferLength = msg->bufferOffset;
-    msg->bufferOffset = 0;
-    return 0;
-
- error:
-    xdr_destroy(&xdr);
-    return -1;
-}
-
-
-void virNetMessageSaveError(virNetMessageErrorPtr rerr)
-{
     /* This func may be called several times & the first
      * error is the one we want because we don't want
      * cleanup code overwriting the first one.
@@ -521,78 +514,85 @@ void virNetMessageSaveError(virNetMessageErrorPtr rerr)
         return;
 
     memset(rerr, 0, sizeof(*rerr));
-    virErrorPtr verr = virGetLastError();
+    verr = virGetLastError();
     if (verr) {
         rerr->code = verr->code;
         rerr->domain = verr->domain;
-        if (verr->message && VIR_ALLOC(rerr->message) == 0)
+        if (verr->message) {
+            rerr->message = g_new0(char *, 1);
             *rerr->message = g_strdup(verr->message);
+        }
         rerr->level = verr->level;
-        if (verr->str1 && VIR_ALLOC(rerr->str1) == 0)
+        if (verr->str1) {
+            rerr->str1 = g_new0(char *, 1);
             *rerr->str1 = g_strdup(verr->str1);
-        if (verr->str2 && VIR_ALLOC(rerr->str2) == 0)
+        }
+        if (verr->str2) {
+            rerr->str2 = g_new0(char *, 1);
             *rerr->str2 = g_strdup(verr->str2);
-        if (verr->str3 && VIR_ALLOC(rerr->str3) == 0)
+        }
+        if (verr->str3) {
+            rerr->str3 = g_new0(char *, 1);
             *rerr->str3 = g_strdup(verr->str3);
+        }
         rerr->int1 = verr->int1;
         rerr->int2 = verr->int2;
     } else {
         rerr->code = VIR_ERR_INTERNAL_ERROR;
         rerr->domain = VIR_FROM_RPC;
-        if (VIR_ALLOC_QUIET(rerr->message) == 0)
-            *rerr->message = g_strdup(_("Library function returned error but did not set virError"));
+        rerr->message = g_new0(virNetMessageNonnullString, 1);
+        *rerr->message = g_strdup(_("Library function returned error but did not set virError"));
         rerr->level = VIR_ERR_ERROR;
     }
 }
 
 
-int virNetMessageDupFD(virNetMessagePtr msg,
+int virNetMessageDupFD(virNetMessage *msg,
                        size_t slot)
 {
     int fd;
 
     if (slot >= msg->nfds) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("No FD available at slot %zu"), slot);
+                       _("No FD available at slot %1$zu"), slot);
         return -1;
     }
 
     if ((fd = dup(msg->fds[slot])) < 0) {
         virReportSystemError(errno,
-                             _("Unable to duplicate FD %d"),
+                             _("Unable to duplicate FD %1$d"),
                              msg->fds[slot]);
         return -1;
     }
     if (virSetInherit(fd, false) < 0) {
         VIR_FORCE_CLOSE(fd);
         virReportSystemError(errno,
-                             _("Cannot set close-on-exec %d"),
+                             _("Cannot set close-on-exec %1$d"),
                              fd);
         return -1;
     }
     return fd;
 }
 
-int virNetMessageAddFD(virNetMessagePtr msg,
+int virNetMessageAddFD(virNetMessage *msg,
                        int fd)
 {
     int newfd = -1;
 
     if ((newfd = dup(fd)) < 0) {
         virReportSystemError(errno,
-                             _("Unable to duplicate FD %d"),
+                             _("Unable to duplicate FD %1$d"),
                              fd);
         goto error;
     }
 
     if (virSetInherit(newfd, false) < 0) {
         virReportSystemError(errno,
-                             _("Cannot set close-on-exec %d"),
+                             _("Cannot set close-on-exec %1$d"),
                              newfd);
         goto error;
     }
-    if (VIR_APPEND_ELEMENT(msg->fds, msg->nfds, newfd) < 0)
-        goto error;
+    VIR_APPEND_ELEMENT(msg->fds, msg->nfds, newfd);
     return 0;
  error:
     VIR_FORCE_CLOSE(newfd);

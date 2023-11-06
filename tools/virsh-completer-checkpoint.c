@@ -21,18 +21,16 @@
 #include <config.h>
 
 #include "virsh-completer-checkpoint.h"
-#include "viralloc.h"
 #include "virsh-util.h"
 #include "virsh.h"
-#include "virstring.h"
 
 char **
 virshCheckpointNameCompleter(vshControl *ctl,
                              const vshCmd *cmd,
                              unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
-    virDomainPtr dom = NULL;
+    virshControl *priv = ctl->privData;
+    g_autoptr(virshDomain) dom = NULL;
     virDomainCheckpointPtr *checkpoints = NULL;
     int ncheckpoints = 0;
     size_t i = 0;
@@ -50,8 +48,7 @@ virshCheckpointNameCompleter(vshControl *ctl,
                                                     flags)) < 0)
         goto error;
 
-    if (VIR_ALLOC_N(ret, ncheckpoints + 1) < 0)
-        goto error;
+    ret = g_new0(char *, ncheckpoints + 1);
 
     for (i = 0; i < ncheckpoints; i++) {
         const char *name = virDomainCheckpointGetName(checkpoints[i]);
@@ -60,18 +57,16 @@ virshCheckpointNameCompleter(vshControl *ctl,
 
         virshDomainCheckpointFree(checkpoints[i]);
     }
-    VIR_FREE(checkpoints);
-    virshDomainFree(dom);
+    g_free(checkpoints);
 
     return ret;
 
  error:
     for (; i < ncheckpoints; i++)
         virshDomainCheckpointFree(checkpoints[i]);
-    VIR_FREE(checkpoints);
+    g_free(checkpoints);
     for (i = 0; i < ncheckpoints; i++)
-        VIR_FREE(ret[i]);
-    VIR_FREE(ret);
-    virshDomainFree(dom);
+        g_free(ret[i]);
+    g_free(ret);
     return NULL;
 }

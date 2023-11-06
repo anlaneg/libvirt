@@ -21,12 +21,13 @@
 
 #include <config.h>
 
-#ifdef HAVE_LIBINTL_H
+#ifdef WITH_LIBINTL_H
 # include <libintl.h>
-#endif /* HAVE_LIBINTL_H */
+#endif /* WITH_LIBINTL_H */
 #include <getopt.h>
 
 #include "internal.h"
+#include "virerror.h"
 #include "virgettext.h"
 
 #include "virt-host-validate-common.h"
@@ -39,19 +40,23 @@
 #if WITH_BHYVE
 # include "virt-host-validate-bhyve.h"
 #endif
+#if WITH_CH
+# include "virt-host-validate-ch.h"
+#endif
 
 static void
 show_help(FILE *out, const char *argv0)
 {
     fprintf(out,
             _("\n"
-              "syntax: %s [OPTIONS] [HVTYPE]\n"
+              "syntax: %1$s [OPTIONS] [HVTYPE]\n"
               "\n"
               " Hypervisor types:\n"
               "\n"
               "   - qemu\n"
               "   - lxc\n"
               "   - bhyve\n"
+              "   - ch\n"
               "\n"
               " Options:\n"
               "   -h, --help     Display command line help\n"
@@ -68,10 +73,10 @@ show_version(FILE *out, const char *argv0)
 }
 
 static const struct option argOptions[] = {
-    { "help", 0, NULL, 'h', },
-    { "version", 0, NULL, 'v', },
-    { "quiet", 0, NULL, 'q', },
-    { NULL, 0, NULL, '\0', }
+    { "help", 0, NULL, 'h' },
+    { "version", 0, NULL, 'v' },
+    { "quiet", 0, NULL, 'q' },
+    { NULL, 0, NULL, '\0' },
 };
 
 int
@@ -83,8 +88,11 @@ main(int argc, char **argv)
     bool quiet = false;
     bool usedHvname = false;
 
-    if (virGettextInitialize() < 0)
+    if (virGettextInitialize() < 0 ||
+        virErrorInitialize() < 0) {
+        fprintf(stderr, _("%1$s: initialization failed\n"), argv[0]);
         return EXIT_FAILURE;
+    }
 
     while ((c = getopt_long(argc, argv, "hvq", argOptions, NULL)) != -1) {
         switch (c) {
@@ -108,7 +116,7 @@ main(int argc, char **argv)
     }
 
     if ((argc-optind) > 2) {
-        fprintf(stderr, _("%s: too many command line arguments\n"), argv[0]);
+        fprintf(stderr, _("%1$s: too many command line arguments\n"), argv[0]);
         show_help(stderr, argv[0]);
         return EXIT_FAILURE;
     }
@@ -142,8 +150,16 @@ main(int argc, char **argv)
     }
 #endif
 
+#if WITH_CH
+    if (!hvname || STREQ(hvname, "ch")) {
+        usedHvname = true;
+        if (virHostValidateCh() < 0)
+            ret = EXIT_FAILURE;
+    }
+#endif
+
     if (hvname && !usedHvname) {
-        fprintf(stderr, _("%s: unsupported hypervisor name %s\n"),
+        fprintf(stderr, _("%1$s: unsupported hypervisor name %2$s\n"),
                 argv[0], hvname);
         return EXIT_FAILURE;
     }

@@ -17,9 +17,9 @@
 static bhyveConn driver;
 
 typedef enum {
-    FLAG_EXPECT_FAILURE     = 1,
-    FLAG_EXPECT_PARSE_ERROR = 2,
-    FLAG_EXPECT_WARNING     = 4,
+    FLAG_EXPECT_FAILURE     = 1 << 0,
+    FLAG_EXPECT_PARSE_ERROR = 1 << 1,
+    FLAG_EXPECT_WARNING     = 1 << 2,
 } virBhyveArgv2XMLTestFlags;
 
 static int
@@ -28,14 +28,13 @@ testCompareXMLToArgvFiles(const char *xmlfile,
                           unsigned int flags)
 
 {
-    char *actualxml = NULL;
-    char *cmd = NULL;
-    char *log = NULL;
-    int ret = -1;
-    virDomainDefPtr vmdef = NULL;
+    g_autofree char *actualxml = NULL;
+    g_autofree char *cmd = NULL;
+    g_autofree char *log = NULL;
+    g_autoptr(virDomainDef) vmdef = NULL;
 
     if (virTestLoadFile(cmdfile, &cmd) < 0)
-        goto fail;
+        return -1;
 
     if (!(vmdef = bhyveParseCommandLineString(cmd, driver.bhyvecaps,
                                               driver.xmlopt))) {
@@ -43,16 +42,16 @@ testCompareXMLToArgvFiles(const char *xmlfile,
             VIR_TEST_DEBUG("Got expected failure from "
                            "bhyveParseCommandLineString.");
         } else {
-            goto fail;
+            return -1;
         }
     } else if ((flags & FLAG_EXPECT_FAILURE)) {
         VIR_TEST_DEBUG("Did not get expected failure from "
                        "bhyveParseCommandLineString.");
-        goto fail;
+        return -1;
     }
 
     if ((log = virTestLogContentAndReset()) == NULL)
-        goto fail;
+        return -1;
     if (flags & FLAG_EXPECT_WARNING) {
         if (*log) {
             VIR_TEST_DEBUG("Got expected warning from "
@@ -61,36 +60,29 @@ testCompareXMLToArgvFiles(const char *xmlfile,
         } else {
             VIR_TEST_DEBUG("bhyveParseCommandLineString "
                            "should have logged a warning");
-            goto fail;
+            return -1;
         }
     } else { /* didn't expect a warning */
         if (*log) {
             VIR_TEST_DEBUG("Got unexpected warning from "
                            "bhyveParseCommandLineString:\n%s",
                            log);
-            goto fail;
+            return -1;
         }
     }
 
     if (vmdef && !virDomainDefCheckABIStability(vmdef, vmdef, driver.xmlopt)) {
         VIR_TEST_DEBUG("ABI stability check failed on %s", xmlfile);
-        goto fail;
+        return -1;
     }
 
-    if (vmdef && !(actualxml = virDomainDefFormat(vmdef, driver.xmlopt, 0)))
-        goto fail;
+    if (vmdef && !(actualxml = virDomainDefFormat(vmdef, driver.xmlopt, VIR_DOMAIN_DEF_FORMAT_SECURE)))
+        return -1;
 
     if (vmdef && virTestCompareToFile(actualxml, xmlfile) < 0)
-        goto fail;
+        return -1;
 
-    ret = 0;
-
- fail:
-    VIR_FREE(actualxml);
-    VIR_FREE(cmd);
-    VIR_FREE(log);
-    virDomainDefFree(vmdef);
-    return ret;
+    return 0;
 }
 
 struct testInfo {
@@ -101,21 +93,16 @@ struct testInfo {
 static int
 testCompareXMLToArgvHelper(const void *data)
 {
-    int result = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *args = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *args = NULL;
 
     xml = g_strdup_printf("%s/bhyveargv2xmldata/bhyveargv2xml-%s.xml",
                           abs_srcdir, info->name);
     args = g_strdup_printf("%s/bhyveargv2xmldata/bhyveargv2xml-%s.args",
                            abs_srcdir, info->name);
 
-    result = testCompareXMLToArgvFiles(xml, args, info->flags);
-
-    VIR_FREE(xml);
-    VIR_FREE(args);
-    return result;
+    return testCompareXMLToArgvFiles(xml, args, info->flags);
 }
 
 static int
@@ -126,7 +113,7 @@ mymain(void)
     if ((driver.caps = virBhyveCapsBuild()) == NULL)
         return EXIT_FAILURE;
 
-    if ((driver.xmlopt = virDomainXMLOptionNew(NULL, NULL,
+    if ((driver.xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL,
                                                NULL, NULL, NULL)) == NULL)
         return EXIT_FAILURE;
 
@@ -144,16 +131,16 @@ mymain(void)
     DO_TEST_FULL(name, 0)
 
 # define DO_TEST_FAIL(name) \
-    DO_TEST_FULL(name, 5)
+    DO_TEST_FULL(name, FLAG_EXPECT_FAILURE | FLAG_EXPECT_WARNING)
 
 # define DO_TEST_WARN(name) \
-    DO_TEST_FULL(name, 4)
+    DO_TEST_FULL(name, FLAG_EXPECT_WARNING)
 
 # define DO_TEST_FAIL_SILENT(name) \
-    DO_TEST_FULL(name, 1)
+    DO_TEST_FULL(name, FLAG_EXPECT_FAILURE)
 
 # define DO_TEST_PARSE_ERROR(name) \
-    DO_TEST_FULL(name, 2)
+    DO_TEST_FULL(name, FLAG_EXPECT_PARSE_ERROR)
 
     driver.grubcaps = BHYVE_GRUB_CAP_CONSDEV;
     driver.bhyvecaps = BHYVE_CAP_RTC_UTC;
@@ -194,6 +181,13 @@ mymain(void)
     DO_TEST_FAIL("bhyveload-memsize-fail");
     DO_TEST("bhyveload-bootorder");
     DO_TEST_FAIL("extraargs");
+    DO_TEST("vnc");
+    DO_TEST("vnc-listen");
+    DO_TEST("vnc-vga-on");
+    DO_TEST("vnc-vga-off");
+    DO_TEST("vnc-vga-io");
+    DO_TEST("vnc-resolution");
+    DO_TEST("vnc-password");
 
     virObjectUnref(driver.caps);
     virObjectUnref(driver.xmlopt);

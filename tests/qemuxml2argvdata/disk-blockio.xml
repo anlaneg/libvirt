@@ -5,7 +5,7 @@
   <currentMemory unit='KiB'>219136</currentMemory>
   <vcpu placement='static'>1</vcpu>
   <os>
-    <type arch='i686' machine='pc'>hvm</type>
+    <type arch='x86_64' machine='pc'>hvm</type>
     <boot dev='hd'/>
   </os>
   <clock offset='utc'/>
@@ -13,7 +13,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i386</emulator>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <disk type='block' device='cdrom'>
       <source dev='/dev/HostVG/QEMUGuest1'/>
       <target dev='hda' bus='ide'/>
@@ -23,7 +23,7 @@
       <source file='/tmp/idedisk.img'/>
       <target dev='hdc' bus='ide'/>
       <address type='drive' controller='0' bus='0' target='0' unit='2'/>
-      <blockio logical_block_size='512' physical_block_size='512'/>
+      <blockio logical_block_size='512' physical_block_size='512' discard_granularity='4096'/>
     </disk>
     <controller type='usb' index='0'/>
     <controller type='ide' index='0'/>

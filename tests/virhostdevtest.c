@@ -57,11 +57,11 @@ static const char *dom_name = "test_domain";
 static const unsigned char *uuid =
             (unsigned char *)("f92360b0-2541-8791-fb32-d1f838811541");
 static int nhostdevs = 3;
-static virDomainHostdevDefPtr hostdevs[] = {NULL, NULL, NULL};
-static virPCIDevicePtr dev[] = {NULL, NULL, NULL};
-static virHostdevManagerPtr mgr;
+static virDomainHostdevDef *hostdevs[] = {NULL, NULL, NULL};
+static virPCIDevice *dev[] = {NULL, NULL, NULL};
+static virHostdevManager *mgr;
 static const size_t ndisks = 3;
-static virDomainDiskDefPtr disks[] = {NULL, NULL, NULL};
+static virDomainDiskDef *disks[] = {NULL, NULL, NULL};
 static const char *diskXML[] = {
     "<disk type='nvme' device='disk'>"
     "  <driver name='qemu' type='raw'/>"
@@ -123,25 +123,26 @@ myInit(void)
     size_t i;
 
     for (i = 0; i < nhostdevs; i++) {
-        virDomainHostdevSubsys subsys;
+        virDomainHostdevSubsys *subsys;
         hostdevs[i] = virDomainHostdevDefNew();
         if (!hostdevs[i])
             goto cleanup;
         hostdevs[i]->mode = VIR_DOMAIN_HOSTDEV_MODE_SUBSYS;
-        subsys.type = VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI;
-        subsys.u.pci.addr.domain = 0;
-        subsys.u.pci.addr.bus = 0;
-        subsys.u.pci.addr.slot = i + 1;
-        subsys.u.pci.addr.function = 0;
-        subsys.u.pci.backend = VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO;
-        hostdevs[i]->source.subsys = subsys;
+        subsys = &hostdevs[i]->source.subsys;
+        subsys->type = VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI;
+        subsys->u.pci.addr.domain = 0;
+        subsys->u.pci.addr.bus = 0;
+        subsys->u.pci.addr.slot = i + 1;
+        subsys->u.pci.addr.function = 0;
+        subsys->u.pci.backend = VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO;
     }
 
     for (i = 0; i < nhostdevs; i++) {
-        if (!(dev[i] = virPCIDeviceNew(0, 0, i + 1, 0)))
+        virDomainHostdevSubsys *subsys = &hostdevs[i]->source.subsys;
+        if (!(dev[i] = virPCIDeviceNew(&subsys->u.pci.addr)))
             goto cleanup;
 
-        virPCIDeviceSetStubDriver(dev[i], VIR_PCI_STUB_DRIVER_VFIO);
+        virPCIDeviceSetStubDriverType(dev[i], VIR_PCI_STUB_DRIVER_VFIO);
     }
 
     for (i = 0; i < ndisks; i++) {
@@ -149,8 +150,7 @@ myInit(void)
             goto cleanup;
     }
 
-    if (VIR_ALLOC(mgr) < 0)
-        goto cleanup;
+    mgr = g_new0(virHostdevManager, 1);
     if ((mgr->activePCIHostdevs = virPCIDeviceListNew()) == NULL)
         goto cleanup;
     if ((mgr->activeUSBHostdevs = virUSBDeviceListNew()) == NULL)
@@ -162,7 +162,7 @@ myInit(void)
     if ((mgr->activeNVMeHostdevs = virNVMeDeviceListNew()) == NULL)
         goto cleanup;
     mgr->stateDir = g_strdup(TEST_STATE_DIR);
-    if (virFileMakePath(mgr->stateDir) < 0)
+    if (g_mkdir_with_parents(mgr->stateDir, 0777) < 0)
         goto cleanup;
 
     return 0;
@@ -245,13 +245,13 @@ testVirHostdevReAttachPCIHostdevs_unmanaged(void)
     inactive_count = virPCIDeviceListCount(mgr->inactivePCIHostdevs);
 
     VIR_TEST_DEBUG("Test 0 hostdevs");
-    virHostdevReAttachPCIDevices(mgr, drv_name, dom_name, NULL, 0, NULL);
+    virHostdevReAttachPCIDevices(mgr, drv_name, dom_name, NULL, 0);
     CHECK_PCI_LIST_COUNT(mgr->activePCIHostdevs, active_count);
     CHECK_PCI_LIST_COUNT(mgr->inactivePCIHostdevs, inactive_count);
 
     VIR_TEST_DEBUG("Test >=1 unmanaged hostdevs");
     virHostdevReAttachPCIDevices(mgr, drv_name, dom_name,
-                                  hostdevs, nhostdevs, NULL);
+                                  hostdevs, nhostdevs);
     CHECK_PCI_LIST_COUNT(mgr->activePCIHostdevs, active_count - nhostdevs);
     CHECK_PCI_LIST_COUNT(mgr->inactivePCIHostdevs, inactive_count + nhostdevs);
 
@@ -329,13 +329,13 @@ testVirHostdevReAttachPCIHostdevs_managed(bool mixed)
     inactive_count = virPCIDeviceListCount(mgr->inactivePCIHostdevs);
 
     VIR_TEST_DEBUG("Test 0 hostdevs");
-    virHostdevReAttachPCIDevices(mgr, drv_name, dom_name, NULL, 0, NULL);
+    virHostdevReAttachPCIDevices(mgr, drv_name, dom_name, NULL, 0);
     CHECK_PCI_LIST_COUNT(mgr->activePCIHostdevs, active_count);
     CHECK_PCI_LIST_COUNT(mgr->inactivePCIHostdevs, inactive_count);
 
     VIR_TEST_DEBUG("Test >=1 hostdevs");
     virHostdevReAttachPCIDevices(mgr, drv_name, dom_name,
-                                  hostdevs, nhostdevs, NULL);
+                                  hostdevs, nhostdevs);
     CHECK_PCI_LIST_COUNT(mgr->activePCIHostdevs, active_count - nhostdevs);
     /* If testing a mixed roundtrip, devices are added back to the inactive
      * list as soon as we detach from the guest */
@@ -542,7 +542,7 @@ testNVMeDiskRoundtrip(const void *opaque G_GNUC_UNUSED)
     /* Don't rely on a state that previous test cases might have
      * left the manager in. Start with a clean slate. */
     virHostdevReAttachPCIDevices(mgr, drv_name, dom_name,
-                                 hostdevs, nhostdevs, NULL);
+                                 hostdevs, nhostdevs);
 
     CHECK_NVME_LIST_COUNT(mgr->activeNVMeHostdevs, 0);
     CHECK_PCI_LIST_COUNT(mgr->activePCIHostdevs, 0);
@@ -584,22 +584,10 @@ testNVMeDiskRoundtrip(const void *opaque G_GNUC_UNUSED)
 }
 
 
-# define FAKEROOTDIRTEMPLATE abs_builddir "/fakerootdir-XXXXXX"
-
 static int
 mymain(void)
 {
     int ret = 0;
-    g_autofree char *fakerootdir = NULL;
-
-    fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
-
-    if (!g_mkdtemp(fakerootdir)) {
-        fprintf(stderr, "Cannot create fakerootdir");
-        abort();
-    }
-
-    g_setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, TRUE);
 
 # define DO_TEST(fnc) \
     do { \
@@ -609,7 +597,6 @@ mymain(void)
 
     if (myInit() < 0) {
         fprintf(stderr, "Init data structures failed.");
-        virFileDeleteTree(fakerootdir);
         return EXIT_FAILURE;
     }
 
@@ -621,9 +608,6 @@ mymain(void)
     DO_TEST(testNVMeDiskRoundtrip);
 
     myCleanup();
-
-    if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
-        virFileDeleteTree(fakerootdir);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

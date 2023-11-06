@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include "lxc_conf.h"
 #include "lxc_domain.h"
 #include "security/security_manager.h"
 
@@ -44,8 +43,8 @@
 int lxcContainerSendContinue(int control);
 int lxcContainerWaitForContinue(int control);
 
-int lxcContainerStart(virDomainDefPtr def,
-                      virSecurityManagerPtr securityDriver,
+int lxcContainerStart(virDomainDef *def,
+                      virSecurityManager *securityDriver,
                       size_t nveths,
                       char **veths,
                       size_t npassFDs,
@@ -60,6 +59,6 @@ int lxcContainerSetupHostdevCapsMakePath(const char *dev);
 
 virArch lxcContainerGetAlt32bitArch(virArch arch);
 
-int lxcContainerChown(virDomainDefPtr def, const char *path);
+int lxcContainerChown(virDomainDef *def, const char *path);
 
 bool lxcIsBasicMountLocation(const char *path);

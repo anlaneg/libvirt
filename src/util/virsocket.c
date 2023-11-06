@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2020 Red Hat, Inc.
+ * Copyright (C) 2011-2021 Free Software Foundation, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -388,12 +389,11 @@ virSocketSendFD(int sock, int fd)
 {
     char byte = 0;
     struct iovec iov;
-    struct msghdr msg;
+    struct msghdr msg = { 0 };
     struct cmsghdr *cmsg;
     char buf[CMSG_SPACE(sizeof(fd))];
 
     /* send at least one char */
-    memset(&msg, 0, sizeof(msg));
     iov.iov_base = &byte;
     iov.iov_len = 1;
     msg.msg_iov = &iov;
@@ -427,7 +427,7 @@ virSocketRecvFD(int sock, int fdflags)
 {
     char byte = 0;
     struct iovec iov;
-    struct msghdr msg;
+    struct msghdr msg = { 0 };
     int fd = -1;
     ssize_t len;
     struct cmsghdr *cmsg;
@@ -440,7 +440,6 @@ virSocketRecvFD(int sock, int fdflags)
     }
 
     /* send at least one char */
-    memset(&msg, 0, sizeof(msg));
     iov.iov_base = &byte;
     iov.iov_len = 1;
     msg.msg_iov = &iov;
@@ -456,7 +455,7 @@ virSocketRecvFD(int sock, int fdflags)
     cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
     /* Initialize the payload: */
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
-    msg.msg_controllen = cmsg->cmsg_len;
+    msg.msg_controllen = CMSG_SPACE(sizeof(fd));
 
     len = recvmsg(sock, &msg, fdflags_recvmsg);
     if (len < 0)
@@ -476,9 +475,7 @@ virSocketRecvFD(int sock, int fdflags)
     /* set close-on-exec flag */
     if (!MSG_CMSG_CLOEXEC && (fdflags & O_CLOEXEC)) {
         if (virSetCloseExec(fd) < 0) {
-            int saved_errno = errno;
             VIR_FORCE_CLOSE(fd);
-            errno = saved_errno;
             return -1;
         }
     }

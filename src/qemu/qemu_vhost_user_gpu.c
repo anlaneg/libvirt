@@ -27,11 +27,8 @@
 #include "conf/domain_conf.h"
 #include "configmake.h"
 #include "vircommand.h"
-#include "viralloc.h"
 #include "virlog.h"
 #include "virfile.h"
-#include "virstring.h"
-#include "virtime.h"
 #include "virpidfile.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -54,7 +51,6 @@ qemuVhostUserGPUCreatePidFilename(const char *stateDir,
 
 /*
  * qemuVhostUserGPUGetPid:
- * @binpath: path of executable associated with the pidfile
  * @stateDir: the directory where vhost-user-gpu writes the pidfile into
  * @shortName: short name of the domain
  * @alias: video device alias
@@ -65,8 +61,7 @@ qemuVhostUserGPUCreatePidFilename(const char *stateDir,
  * set to -1;
  */
 static int
-qemuVhostUserGPUGetPid(const char *binPath,
-                       const char *stateDir,
+qemuVhostUserGPUGetPid(const char *stateDir,
                        const char *shortName,
                        const char *alias,
                        pid_t *pid)
@@ -76,15 +71,15 @@ qemuVhostUserGPUGetPid(const char *binPath,
     if (!(pidfile = qemuVhostUserGPUCreatePidFilename(stateDir, shortName, alias)))
         return -1;
 
-    if (virPidFileReadPathIfAlive(pidfile, pid, binPath) < 0)
+    if (virPidFileReadPathIfLocked(pidfile, pid) < 0)
         return -1;
 
     return 0;
 }
 
 
-int qemuExtVhostUserGPUPrepareDomain(virQEMUDriverPtr driver,
-                                     virDomainVideoDefPtr video)
+int qemuExtVhostUserGPUPrepareDomain(virQEMUDriver *driver,
+                                     virDomainVideoDef *video)
 {
     return qemuVhostUserFillDomainGPU(driver, video);
 }
@@ -101,17 +96,16 @@ int qemuExtVhostUserGPUPrepareDomain(virQEMUDriverPtr driver,
  * - have the command line built
  * - start the external process and sync with it before QEMU start
  */
-int qemuExtVhostUserGPUStart(virQEMUDriverPtr driver,
-                             virDomainObjPtr vm,
-                             virDomainVideoDefPtr video)
+int qemuExtVhostUserGPUStart(virQEMUDriver *driver,
+                             virDomainObj *vm,
+                             virDomainVideoDef *video)
 {
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autofree char *shortname = NULL;
     g_autofree char *pidfile = NULL;
     g_autoptr(virCommand) cmd = NULL;
     int pair[2] = { -1, -1 };
-    int cmdret = 0, rc;
-    int exitstatus = 0;
+    int rc;
     pid_t pid;
     int ret = -1;
 
@@ -138,8 +132,6 @@ int qemuExtVhostUserGPUStart(virQEMUDriverPtr driver,
         goto error;
 
     cmd = virCommandNew(video->driver->vhost_user_binary);
-    if (!cmd)
-        goto error;
 
     virCommandClearCaps(cmd);
     virCommandSetPidFile(cmd, pidfile);
@@ -160,20 +152,13 @@ int qemuExtVhostUserGPUStart(virQEMUDriverPtr driver,
             virCommandAddArgFormat(cmd, "--render-node=%s", video->accel->rendernode);
     }
 
-    if (qemuSecurityStartVhostUserGPU(driver, vm, cmd,
-                                      &exitstatus, &cmdret) < 0)
+    if (qemuSecurityCommandRun(driver, vm, cmd, -1, -1, false, NULL) < 0)
         goto error;
-
-    if (cmdret < 0 || exitstatus != 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not start 'vhost-user-gpu'. exitstatus: %d"), exitstatus);
-        goto cleanup;
-    }
 
     rc = virPidFileReadPath(pidfile, &pid);
     if (rc < 0) {
         virReportSystemError(-rc,
-                             _("Unable to read vhost-user-gpu pidfile '%s'"),
+                             _("Unable to read vhost-user-gpu pidfile '%1$s'"),
                              pidfile);
         goto cleanup;
     }
@@ -205,9 +190,9 @@ int qemuExtVhostUserGPUStart(virQEMUDriverPtr driver,
  * Check if vhost-user process pidfile is around, kill the process,
  * and remove the pidfile.
  */
-void qemuExtVhostUserGPUStop(virQEMUDriverPtr driver,
-                             virDomainObjPtr vm,
-                             virDomainVideoDefPtr video)
+void qemuExtVhostUserGPUStop(virQEMUDriver *driver,
+                             virDomainObj *vm,
+                             virDomainVideoDef *video)
 {
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autofree char *pidfile = NULL;
@@ -239,10 +224,10 @@ void qemuExtVhostUserGPUStop(virQEMUDriverPtr driver,
  * Add the vhost-user-gpu PID to the given cgroup.
  */
 int
-qemuExtVhostUserGPUSetupCgroup(virQEMUDriverPtr driver,
-                               virDomainDefPtr def,
-                               virDomainVideoDefPtr video,
-                               virCgroupPtr cgroup)
+qemuExtVhostUserGPUSetupCgroup(virQEMUDriver *driver,
+                               virDomainDef *def,
+                               virDomainVideoDef *video,
+                               virCgroup *cgroup)
 {
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autofree char *shortname = NULL;
@@ -253,8 +238,7 @@ qemuExtVhostUserGPUSetupCgroup(virQEMUDriverPtr driver,
     if (!shortname)
         return -1;
 
-    rc = qemuVhostUserGPUGetPid(video->driver->vhost_user_binary,
-                                cfg->stateDir, shortname, video->info.alias, &pid);
+    rc = qemuVhostUserGPUGetPid(cfg->stateDir, shortname, video->info.alias, &pid);
     if (rc < 0 || (rc == 0 && pid == (pid_t)-1)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Could not get process id of vhost-user-gpu"));

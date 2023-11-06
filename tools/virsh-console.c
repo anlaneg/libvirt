@@ -33,11 +33,12 @@
 # include "internal.h"
 # include "virsh.h"
 # include "virsh-console.h"
+# include "virsh-util.h"
 # include "virlog.h"
-# include "virfile.h"
 # include "viralloc.h"
 # include "virthread.h"
 # include "virerror.h"
+# include "virobject.h"
 
 VIR_LOG_INIT("tools.virsh-console");
 
@@ -57,7 +58,6 @@ struct virConsoleBuffer {
 
 
 typedef struct virConsole virConsole;
-typedef virConsole *virConsolePtr;
 struct virConsole {
     virObjectLockable parent;
 
@@ -75,7 +75,7 @@ struct virConsole {
     virError error;
 };
 
-static virClassPtr virConsoleClass;
+static virClass *virConsoleClass;
 static void virConsoleDispose(void *obj);
 
 static int
@@ -96,7 +96,7 @@ virConsoleHandleSignal(int sig G_GNUC_UNUSED)
 
 
 static void
-virConsoleShutdown(virConsolePtr con,
+virConsoleShutdown(virConsole *con,
                    bool graceful)
 {
     virErrorPtr err = virGetLastError();
@@ -117,8 +117,8 @@ virConsoleShutdown(virConsolePtr con,
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("cannot terminate console stream"));
         }
-        virStreamFree(con->st);
-        con->st = NULL;
+
+        g_clear_pointer(&con->st, virshStreamFree);
     }
     VIR_FREE(con->streamToTerminal.data);
     VIR_FREE(con->terminalToStream.data);
@@ -138,10 +138,9 @@ virConsoleShutdown(virConsolePtr con,
 static void
 virConsoleDispose(void *obj)
 {
-    virConsolePtr con = obj;
+    virConsole *con = obj;
 
-    if (con->st)
-        virStreamFree(con->st);
+    virshStreamFree(con->st);
 
     virCondDestroy(&con->cond);
     virResetError(&con->error);
@@ -152,7 +151,7 @@ static void
 virConsoleEventOnStream(virStreamPtr st,
                         int events, void *opaque)
 {
-    virConsolePtr con = opaque;
+    virConsole *con = opaque;
 
     virObjectLock(con);
 
@@ -166,11 +165,8 @@ virConsoleEventOnStream(virStreamPtr st,
         int got;
 
         if (avail < 1024) {
-            if (VIR_REALLOC_N(con->streamToTerminal.data,
-                              con->streamToTerminal.length + 1024) < 0) {
-                virConsoleShutdown(con, false);
-                goto cleanup;
-            }
+            VIR_REALLOC_N(con->streamToTerminal.data,
+                          con->streamToTerminal.length + 1024);
             con->streamToTerminal.length += 1024;
             avail += 1024;
         }
@@ -211,8 +207,8 @@ virConsoleEventOnStream(virStreamPtr st,
 
         avail = con->terminalToStream.length - con->terminalToStream.offset;
         if (avail > 1024) {
-            ignore_value(VIR_REALLOC_N(con->terminalToStream.data,
-                                       con->terminalToStream.offset + 1024));
+            VIR_REALLOC_N(con->terminalToStream.data,
+                          con->terminalToStream.offset + 1024);
             con->terminalToStream.length = con->terminalToStream.offset + 1024;
         }
     }
@@ -236,7 +232,7 @@ virConsoleEventOnStdin(int watch G_GNUC_UNUSED,
                        int events,
                        void *opaque)
 {
-    virConsolePtr con = opaque;
+    virConsole *con = opaque;
 
     virObjectLock(con);
 
@@ -250,11 +246,8 @@ virConsoleEventOnStdin(int watch G_GNUC_UNUSED,
         int got;
 
         if (avail < 1024) {
-            if (VIR_REALLOC_N(con->terminalToStream.data,
-                              con->terminalToStream.length + 1024) < 0) {
-                virConsoleShutdown(con, false);
-                goto cleanup;
-            }
+            VIR_REALLOC_N(con->terminalToStream.data,
+                          con->terminalToStream.length + 1024);
             con->terminalToStream.length += 1024;
             avail += 1024;
         }
@@ -310,7 +303,7 @@ virConsoleEventOnStdout(int watch G_GNUC_UNUSED,
                         int events,
                         void *opaque)
 {
-    virConsolePtr con = opaque;
+    virConsole *con = opaque;
 
     virObjectLock(con);
 
@@ -322,7 +315,7 @@ virConsoleEventOnStdout(int watch G_GNUC_UNUSED,
         con->streamToTerminal.offset) {
         ssize_t done;
         size_t avail;
-        done = write(fd,
+        done = write(fd, /* sc_avoid_write */
                      con->streamToTerminal.data,
                      con->streamToTerminal.offset);
         if (done < 0) {
@@ -339,8 +332,8 @@ virConsoleEventOnStdout(int watch G_GNUC_UNUSED,
 
         avail = con->streamToTerminal.length - con->streamToTerminal.offset;
         if (avail > 1024) {
-            ignore_value(VIR_REALLOC_N(con->streamToTerminal.data,
-                                       con->streamToTerminal.offset + 1024));
+            VIR_REALLOC_N(con->streamToTerminal.data,
+                          con->streamToTerminal.offset + 1024);
             con->streamToTerminal.length = con->streamToTerminal.offset + 1024;
         }
     }
@@ -365,10 +358,10 @@ virConsoleEventOnStdout(int watch G_GNUC_UNUSED,
 }
 
 
-static virConsolePtr
+static virConsole *
 virConsoleNew(void)
 {
-    virConsolePtr con;
+    virConsole *con;
 
     if (virConsoleInitialize() < 0)
         return NULL;
@@ -408,10 +401,11 @@ int
 virshRunConsole(vshControl *ctl,
                 virDomainPtr dom,
                 const char *dev_name,
+                const bool resume_domain,
                 unsigned int flags)
 {
-    virConsolePtr con = NULL;
-    virshControlPtr priv = ctl->privData;
+    virConsole *con = NULL;
+    virshControl *priv = ctl->privData;
     int ret = -1;
 
     struct sigaction old_sigquit;
@@ -458,7 +452,7 @@ virshRunConsole(vshControl *ctl,
                                              VIR_EVENT_HANDLE_READABLE,
                                              virConsoleEventOnStdin,
                                              con,
-                                             virObjectFreeCallback)) < 0) {
+                                             virObjectUnref)) < 0) {
         virObjectUnref(con);
         goto cleanup;
     }
@@ -468,7 +462,7 @@ virshRunConsole(vshControl *ctl,
                                               0,
                                               virConsoleEventOnStdout,
                                               con,
-                                              virObjectFreeCallback)) < 0) {
+                                              virObjectUnref)) < 0) {
         virObjectUnref(con);
         goto cleanup;
     }
@@ -478,9 +472,17 @@ virshRunConsole(vshControl *ctl,
                                   VIR_STREAM_EVENT_READABLE,
                                   virConsoleEventOnStream,
                                   con,
-                                  virObjectFreeCallback) < 0) {
+                                  virObjectUnref) < 0) {
         virObjectUnref(con);
         goto cleanup;
+    }
+
+    if (resume_domain) {
+        if (virDomainResume(dom) != 0) {
+            vshError(ctl, _("Failed to resume domain '%1$s'"),
+                     virDomainGetName(dom));
+            goto cleanup;
+        }
     }
 
     while (!con->quit) {

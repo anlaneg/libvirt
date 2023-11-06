@@ -24,7 +24,6 @@
 
 #include "virlog.h"
 #include "virerror.h"
-#include "virstring.h"
 #include "viralloc.h"
 
 struct _virAuthConfig {
@@ -36,70 +35,56 @@ struct _virAuthConfig {
 
 VIR_LOG_INIT("util.authconfig");
 
-virAuthConfigPtr virAuthConfigNew(const char *path)
+virAuthConfig *
+virAuthConfigNew(const char *path)
 {
-    virAuthConfigPtr auth;
-
-    if (VIR_ALLOC(auth) < 0)
-        goto error;
+    g_autoptr(virAuthConfig) auth = g_new0(virAuthConfig, 1);
 
     auth->path = g_strdup(path);
-
-    if (!(auth->keyfile = g_key_file_new()))
-        goto error;
+    auth->keyfile = g_key_file_new();
 
     if (!g_key_file_load_from_file(auth->keyfile, path, 0, NULL))
-        goto error;
+        return NULL;
 
-    return auth;
-
- error:
-    virAuthConfigFree(auth);
-    return NULL;
+    return g_steal_pointer(&auth);
 }
 
 
-virAuthConfigPtr virAuthConfigNewData(const char *path,
-                                      const char *data,
-                                      size_t len)
+virAuthConfig *
+virAuthConfigNewData(const char *path,
+                     const char *data,
+                     size_t len)
 {
-    virAuthConfigPtr auth;
-
-    if (VIR_ALLOC(auth) < 0)
-        goto error;
+    g_autoptr(virAuthConfig) auth = g_new0(virAuthConfig, 1);
 
     auth->path = g_strdup(path);
-
-    if (!(auth->keyfile = g_key_file_new()))
-        goto error;
+    auth->keyfile = g_key_file_new();
 
     if (!g_key_file_load_from_data(auth->keyfile, data, len, 0, NULL))
-        goto error;
+        return NULL;
 
-    return auth;
-
- error:
-    virAuthConfigFree(auth);
-    return NULL;
+    return g_steal_pointer(&auth);
 }
 
 
-void virAuthConfigFree(virAuthConfigPtr auth)
+void
+virAuthConfigFree(virAuthConfig *auth)
 {
     if (!auth)
         return;
 
     g_key_file_free(auth->keyfile);
-    VIR_FREE(auth->path);
-    VIR_FREE(auth);
+    g_free(auth->path);
+    g_free(auth);
 }
 
 
-int virAuthConfigLookup(virAuthConfigPtr auth,
-                        const char *service,
-                        const char *hostname,
-                        const char *credname,
-                        char **value)
+int
+virAuthConfigLookup(virAuthConfig *auth,
+                    const char *service,
+                    const char *hostname,
+                    const char *credname,
+                    char **value)
 {
     g_autofree char *authgroup = NULL;
     g_autofree char *credgroup = NULL;
@@ -124,7 +109,7 @@ int virAuthConfigLookup(virAuthConfigPtr auth,
 
     if (!(authcred = g_key_file_get_string(auth->keyfile, authgroup, "credentials", NULL))) {
         virReportError(VIR_ERR_CONF_SYNTAX,
-                       _("Missing item 'credentials' in group '%s' in '%s'"),
+                       _("Missing item 'credentials' in group '%1$s' in '%2$s'"),
                        authgroup, auth->path);
         return -1;
     }
@@ -133,7 +118,7 @@ int virAuthConfigLookup(virAuthConfigPtr auth,
 
     if (!g_key_file_has_group(auth->keyfile, credgroup)) {
         virReportError(VIR_ERR_CONF_SYNTAX,
-                       _("Missing group 'credentials-%s' referenced from group '%s' in '%s'"),
+                       _("Missing group 'credentials-%1$s' referenced from group '%2$s' in '%3$s'"),
                        authcred, authgroup, auth->path);
         return -1;
     }

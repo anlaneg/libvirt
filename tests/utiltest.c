@@ -3,7 +3,6 @@
 #include <unistd.h>
 
 #include "internal.h"
-#include "viralloc.h"
 #include "testutils.h"
 #include "virutil.h"
 
@@ -42,22 +41,16 @@ static int
 testIndexToDiskName(const void *data G_GNUC_UNUSED)
 {
     size_t i;
-    char *diskName = NULL;
 
     for (i = 0; i < G_N_ELEMENTS(diskNames); ++i) {
-        VIR_FREE(diskName);
+        g_autofree char *diskName = NULL;
 
         diskName = virIndexToDiskName(i, "sd");
 
-        if (STRNEQ(diskNames[i], diskName)) {
-            virTestDifference(stderr, diskNames[i], diskName);
-            VIR_FREE(diskName);
-
+        if (virTestCompareToString(diskNames[i], diskName) < 0) {
             return -1;
         }
     }
-
-    VIR_FREE(diskName);
 
     return 0;
 }
@@ -69,10 +62,9 @@ testDiskNameToIndex(const void *data G_GNUC_UNUSED)
 {
     size_t i;
     int idx;
-    char *diskName = NULL;
 
     for (i = 0; i < 100000; ++i) {
-        VIR_FREE(diskName);
+        g_autofree char *diskName = NULL;
 
         diskName = virIndexToDiskName(i, "sd");
         idx = virDiskNameToIndex(diskName);
@@ -80,14 +72,9 @@ testDiskNameToIndex(const void *data G_GNUC_UNUSED)
         if (idx < 0 || idx != i) {
             VIR_TEST_DEBUG("\nExpect [%zu]", i);
             VIR_TEST_DEBUG("Actual [%d]", idx);
-
-            VIR_FREE(diskName);
-
             return -1;
         }
     }
-
-    VIR_FREE(diskName);
 
     return 0;
 }
@@ -137,7 +124,7 @@ struct testVersionString
     const char *string;
     bool allowMissing;
     int result;
-    unsigned long version;
+    unsigned long long version;
 };
 
 static struct testVersionString versions[] = {
@@ -159,10 +146,10 @@ testParseVersionString(const void *data G_GNUC_UNUSED)
 {
     int result;
     size_t i;
-    unsigned long version;
+    unsigned long long version;
 
     for (i = 0; i < G_N_ELEMENTS(versions); ++i) {
-        result = virParseVersionString(versions[i].string, &version,
+        result = virStringParseVersion(&version, versions[i].string,
                                        versions[i].allowMissing);
 
         if (result != versions[i].result) {
@@ -178,8 +165,8 @@ testParseVersionString(const void *data G_GNUC_UNUSED)
 
         if (version != versions[i].version) {
             VIR_TEST_DEBUG("\nVersion string [%s]", versions[i].string);
-            VIR_TEST_DEBUG("Expect version [%lu]", versions[i].version);
-            VIR_TEST_DEBUG("Actual version [%lu]", version);
+            VIR_TEST_DEBUG("Expect version [%llu]", versions[i].version);
+            VIR_TEST_DEBUG("Actual version [%llu]", version);
 
             return -1;
         }

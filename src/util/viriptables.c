@@ -28,14 +28,9 @@
 
 #include "internal.h"
 #include "viriptables.h"
-#include "vircommand.h"
-#include "viralloc.h"
+#include "virfirewalld.h"
 #include "virerror.h"
-#include "virfile.h"
 #include "virlog.h"
-#include "virthread.h"
-#include "virstring.h"
-#include "virutil.h"
 #include "virhash.h"
 
 VIR_LOG_INIT("util.iptables");
@@ -43,11 +38,9 @@ VIR_LOG_INIT("util.iptables");
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 enum {
-    ADD = 0,
-    REMOVE
+    VIR_NETFILTER_INSERT = 0,
+    VIR_NETFILTER_DELETE
 };
-
-static bool deletePrivate = true;
 
 typedef struct {
     const char *parent;
@@ -64,29 +57,22 @@ typedef struct {
 
 
 static int
-iptablesPrivateChainCreate(virFirewallPtr fw,
+iptablesPrivateChainCreate(virFirewall *fw,
                            virFirewallLayer layer,
                            const char *const *lines,
                            void *opaque)
 {
     iptablesGlobalChainData *data = opaque;
-    virHashTablePtr chains = NULL;
-    virHashTablePtr links = NULL;
+    g_autoptr(GHashTable) chains = virHashNew(NULL);
+    g_autoptr(GHashTable) links = virHashNew(NULL);
     const char *const *tmp;
-    int ret = -1;
     size_t i;
-
-    /*创建chain,link*/
-    if (!(chains = virHashCreate(50, NULL)))
-        goto cleanup;
-    if (!(links = virHashCreate(50, NULL)))
-        goto cleanup;
 
     tmp = lines;
     while (tmp && *tmp) {
         if (STRPREFIX(*tmp, "-N ")) { /* eg "-N LIBVIRT_INP" */
             if (virHashUpdateEntry(chains, *tmp + 3, (void *)0x1) < 0)
-                goto cleanup;
+                return -1;
         } else if (STRPREFIX(*tmp, "-A ")) { /* eg "-A INPUT -j LIBVIRT_INP" */
             char *sep = strchr(*tmp + 3, ' ');
             if (sep) {
@@ -94,7 +80,7 @@ iptablesPrivateChainCreate(virFirewallPtr fw,
                 if (STRPREFIX(sep + 1, "-j ")) {
                     if (virHashUpdateEntry(links, sep + 4,
                                            (char *)*tmp + 3) < 0)
-                        goto cleanup;
+                        return -1;
                 }
             }
         }
@@ -118,19 +104,14 @@ iptablesPrivateChainCreate(virFirewallPtr fw,
                                "--jump", data->chains[i].child, NULL);
     }
 
-    ret = 0;
- cleanup:
-    virHashFree(chains);
-    virHashFree(links);
-    return ret;
+    return 0;
 }
 
 
 int
 iptablesSetupPrivateChains(virFirewallLayer layer)
 {
-    virFirewallPtr fw = NULL;
-    int ret = -1;
+    g_autoptr(virFirewall) fw = virFirewallNew();
     iptablesGlobalChain filter_chains[] = {
         {"INPUT", "LIBVIRT_INP"},
         {"OUTPUT", "LIBVIRT_OUT"},
@@ -152,7 +133,12 @@ iptablesSetupPrivateChains(virFirewallLayer layer)
     };
     size_t i;
 
-    fw = virFirewallNew();
+    /* When firewalld.service is active, we need to make sure that
+     * firewalld has been fully started and completed its
+     * initialization, otherwise it might delete our rules soon after
+     * we add them!
+     */
+    virFirewallDSynchronize();
 
     virFirewallStartTransaction(fw, 0);
 
@@ -164,42 +150,26 @@ iptablesSetupPrivateChains(virFirewallLayer layer)
                                "--list-rules", NULL);
 
     if (virFirewallApply(fw) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = changed ? 1 : 0;
-
- cleanup:
-
-    virFirewallFree(fw);
-    return ret;
-}
-
-
-void
-iptablesSetDeletePrivate(bool pvt)
-{
-    deletePrivate = pvt;
+    return changed ? 1 : 0;
 }
 
 
 static void
-iptablesInput(virFirewallPtr fw,
+iptablesInput(virFirewall *fw,
               virFirewallLayer layer,
-              bool pvt,
               const char *iface,
               int port,
               int action,
               int tcp)
 {
-    char portstr[32];
-
-    g_snprintf(portstr, sizeof(portstr), "%d", port);
-    portstr[sizeof(portstr) - 1] = '\0';
+    g_autofree char *portstr = g_strdup_printf("%d", port);
 
     virFirewallAddRule(fw, layer,
                        "--table", "filter",
-                       action == ADD ? "--insert" : "--delete",
-                       pvt ? "LIBVIRT_INP" : "INPUT",
+                       action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                       "LIBVIRT_INP",
                        "--in-interface", iface,
                        "--protocol", tcp ? "tcp" : "udp",
                        "--destination-port", portstr,
@@ -208,23 +178,19 @@ iptablesInput(virFirewallPtr fw,
 }
 
 static void
-iptablesOutput(virFirewallPtr fw,
+iptablesOutput(virFirewall *fw,
                virFirewallLayer layer,
-               bool pvt,
                const char *iface,
                int port,
                int action,
                int tcp)
 {
-    char portstr[32];
-
-    g_snprintf(portstr, sizeof(portstr), "%d", port);
-    portstr[sizeof(portstr) - 1] = '\0';
+    g_autofree char *portstr = g_strdup_printf("%d", port);
 
     virFirewallAddRule(fw, layer,
                        "--table", "filter",
-                       action == ADD ? "--insert" : "--delete",
-                       pvt ? "LIBVIRT_OUT" : "OUTPUT",
+                       action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                       "LIBVIRT_OUT",
                        "--out-interface", iface,
                        "--protocol", tcp ? "tcp" : "udp",
                        "--destination-port", portstr,
@@ -242,12 +208,12 @@ iptablesOutput(virFirewallPtr fw,
  * the given @iface interface for TCP packets
  */
 void
-iptablesAddTcpInput(virFirewallPtr fw,
+iptablesAddTcpInput(virFirewall *fw,
                     virFirewallLayer layer,
                     const char *iface,
                     int port)
 {
-    iptablesInput(fw, layer, true, iface, port, ADD, 1);
+    iptablesInput(fw, layer, iface, port, VIR_NETFILTER_INSERT, 1);
 }
 
 /**
@@ -260,12 +226,12 @@ iptablesAddTcpInput(virFirewallPtr fw,
  * @port on the given @iface interface for TCP packets
  */
 void
-iptablesRemoveTcpInput(virFirewallPtr fw,
+iptablesRemoveTcpInput(virFirewall *fw,
                        virFirewallLayer layer,
                        const char *iface,
                        int port)
 {
-    iptablesInput(fw, layer, deletePrivate, iface, port, REMOVE, 1);
+    iptablesInput(fw, layer, iface, port, VIR_NETFILTER_DELETE, 1);
 }
 
 /**
@@ -278,12 +244,12 @@ iptablesRemoveTcpInput(virFirewallPtr fw,
  * the given @iface interface for UDP packets
  */
 void
-iptablesAddUdpInput(virFirewallPtr fw,
+iptablesAddUdpInput(virFirewall *fw,
                     virFirewallLayer layer,
                     const char *iface,
                     int port)
 {
-    iptablesInput(fw, layer, true, iface, port, ADD, 0);
+    iptablesInput(fw, layer, iface, port, VIR_NETFILTER_INSERT, 0);
 }
 
 /**
@@ -296,12 +262,12 @@ iptablesAddUdpInput(virFirewallPtr fw,
  * @port on the given @iface interface for UDP packets
  */
 void
-iptablesRemoveUdpInput(virFirewallPtr fw,
+iptablesRemoveUdpInput(virFirewall *fw,
                        virFirewallLayer layer,
                        const char *iface,
                        int port)
 {
-    iptablesInput(fw, layer, deletePrivate, iface, port, REMOVE, 0);
+    iptablesInput(fw, layer, iface, port, VIR_NETFILTER_DELETE, 0);
 }
 
 /**
@@ -314,12 +280,12 @@ iptablesRemoveUdpInput(virFirewallPtr fw,
  * the given @iface interface for TCP packets
  */
 void
-iptablesAddTcpOutput(virFirewallPtr fw,
+iptablesAddTcpOutput(virFirewall *fw,
                      virFirewallLayer layer,
                      const char *iface,
                      int port)
 {
-    iptablesOutput(fw, layer, true, iface, port, ADD, 1);
+    iptablesOutput(fw, layer, iface, port, VIR_NETFILTER_INSERT, 1);
 }
 
 /**
@@ -332,12 +298,12 @@ iptablesAddTcpOutput(virFirewallPtr fw,
  * @port from the given @iface interface for TCP packets
  */
 void
-iptablesRemoveTcpOutput(virFirewallPtr fw,
+iptablesRemoveTcpOutput(virFirewall *fw,
                         virFirewallLayer layer,
                         const char *iface,
                         int port)
 {
-    iptablesOutput(fw, layer, deletePrivate, iface, port, REMOVE, 1);
+    iptablesOutput(fw, layer, iface, port, VIR_NETFILTER_DELETE, 1);
 }
 
 /**
@@ -350,12 +316,12 @@ iptablesRemoveTcpOutput(virFirewallPtr fw,
  * the given @iface interface for UDP packets
  */
 void
-iptablesAddUdpOutput(virFirewallPtr fw,
+iptablesAddUdpOutput(virFirewall *fw,
                      virFirewallLayer layer,
                      const char *iface,
                      int port)
 {
-    iptablesOutput(fw, layer, true, iface, port, ADD, 0);
+    iptablesOutput(fw, layer, iface, port, VIR_NETFILTER_INSERT, 0);
 }
 
 /**
@@ -368,43 +334,12 @@ iptablesAddUdpOutput(virFirewallPtr fw,
  * @port from the given @iface interface for UDP packets
  */
 void
-iptablesRemoveUdpOutput(virFirewallPtr fw,
+iptablesRemoveUdpOutput(virFirewall *fw,
                         virFirewallLayer layer,
                         const char *iface,
                         int port)
 {
-    iptablesOutput(fw, layer, deletePrivate, iface, port, REMOVE, 0);
-}
-
-
-static char *iptablesFormatNetwork(virSocketAddr *netaddr,
-                                   unsigned int prefix)
-{
-    virSocketAddr network;
-    g_autofree char *netstr = NULL;
-    char *ret;
-
-    if (!(VIR_SOCKET_ADDR_IS_FAMILY(netaddr, AF_INET) ||
-          VIR_SOCKET_ADDR_IS_FAMILY(netaddr, AF_INET6))) {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Only IPv4 or IPv6 addresses can be used with iptables"));
-        return NULL;
-    }
-
-    if (virSocketAddrMaskByPrefix(netaddr, prefix, &network) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Failure to mask address"));
-        return NULL;
-    }
-
-    netstr = virSocketAddrFormat(&network);
-
-    if (!netstr)
-        return NULL;
-
-    ret = g_strdup_printf("%s/%d", netstr, prefix);
-
-    return ret;
+    iptablesOutput(fw, layer, iface, port, VIR_NETFILTER_DELETE, 0);
 }
 
 
@@ -412,8 +347,7 @@ static char *iptablesFormatNetwork(virSocketAddr *netaddr,
  * to proceed to WAN
  */
 static int
-iptablesForwardAllowOut(virFirewallPtr fw,
-                        bool pvt,
+iptablesForwardAllowOut(virFirewall *fw,
                         virSocketAddr *netaddr,
                         unsigned int prefix,
                         const char *iface,
@@ -424,14 +358,14 @@ iptablesForwardAllowOut(virFirewallPtr fw,
     virFirewallLayer layer = VIR_SOCKET_ADDR_FAMILY(netaddr) == AF_INET ?
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
 
-    if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
+    if (!(networkstr = virSocketAddrFormatWithPrefix(netaddr, prefix, true)))
         return -1;
 
     if (physdev && physdev[0])
         virFirewallAddRule(fw, layer,
                            "--table", "filter",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_FWO" : "FORWARD",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_FWO",
                            "--source", networkstr,
                            "--in-interface", iface,
                            "--out-interface", physdev,
@@ -440,8 +374,8 @@ iptablesForwardAllowOut(virFirewallPtr fw,
     else
         virFirewallAddRule(fw, layer,
                            "--table", "filter",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_FWO" : "FORWARD",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_FWO",
                            "--source", networkstr,
                            "--in-interface", iface,
                            "--jump", "ACCEPT",
@@ -464,13 +398,14 @@ iptablesForwardAllowOut(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesAddForwardAllowOut(virFirewallPtr fw,
+iptablesAddForwardAllowOut(virFirewall *fw,
                            virSocketAddr *netaddr,
                            unsigned int prefix,
                            const char *iface,
                            const char *physdev)
 {
-    return iptablesForwardAllowOut(fw, true, netaddr, prefix, iface, physdev, ADD);
+    return iptablesForwardAllowOut(fw, netaddr, prefix, iface, physdev,
+                                   VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -487,13 +422,14 @@ iptablesAddForwardAllowOut(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesRemoveForwardAllowOut(virFirewallPtr fw,
+iptablesRemoveForwardAllowOut(virFirewall *fw,
                               virSocketAddr *netaddr,
                               unsigned int prefix,
                               const char *iface,
                               const char *physdev)
 {
-    return iptablesForwardAllowOut(fw, deletePrivate, netaddr, prefix, iface, physdev, REMOVE);
+    return iptablesForwardAllowOut(fw, netaddr, prefix, iface, physdev,
+                                   VIR_NETFILTER_DELETE);
 }
 
 
@@ -501,8 +437,7 @@ iptablesRemoveForwardAllowOut(virFirewallPtr fw,
  * and associated with an existing connection
  */
 static int
-iptablesForwardAllowRelatedIn(virFirewallPtr fw,
-                              bool pvt,
+iptablesForwardAllowRelatedIn(virFirewall *fw,
                               virSocketAddr *netaddr,
                               unsigned int prefix,
                               const char *iface,
@@ -513,14 +448,14 @@ iptablesForwardAllowRelatedIn(virFirewallPtr fw,
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
     g_autofree char *networkstr = NULL;
 
-    if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
+    if (!(networkstr = virSocketAddrFormatWithPrefix(netaddr, prefix, true)))
         return -1;
 
     if (physdev && physdev[0])
         virFirewallAddRule(fw, layer,
                            "--table", "filter",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_FWI" : "FORWARD",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_FWI",
                            "--destination", networkstr,
                            "--in-interface", physdev,
                            "--out-interface", iface,
@@ -531,8 +466,8 @@ iptablesForwardAllowRelatedIn(virFirewallPtr fw,
     else
         virFirewallAddRule(fw, layer,
                            "--table", "filter",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_FWI" : "FORWARD",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_FWI",
                            "--destination", networkstr,
                            "--out-interface", iface,
                            "--match", "conntrack",
@@ -557,13 +492,14 @@ iptablesForwardAllowRelatedIn(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesAddForwardAllowRelatedIn(virFirewallPtr fw,
+iptablesAddForwardAllowRelatedIn(virFirewall *fw,
                                  virSocketAddr *netaddr,
                                  unsigned int prefix,
                                  const char *iface,
                                  const char *physdev)
 {
-    return iptablesForwardAllowRelatedIn(fw, true, netaddr, prefix, iface, physdev, ADD);
+    return iptablesForwardAllowRelatedIn(fw, netaddr, prefix, iface, physdev,
+                                         VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -580,20 +516,20 @@ iptablesAddForwardAllowRelatedIn(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesRemoveForwardAllowRelatedIn(virFirewallPtr fw,
+iptablesRemoveForwardAllowRelatedIn(virFirewall *fw,
                                     virSocketAddr *netaddr,
                                     unsigned int prefix,
                                     const char *iface,
                                     const char *physdev)
 {
-    return iptablesForwardAllowRelatedIn(fw, deletePrivate, netaddr, prefix, iface, physdev, REMOVE);
+    return iptablesForwardAllowRelatedIn(fw, netaddr, prefix, iface, physdev,
+                                         VIR_NETFILTER_DELETE);
 }
 
 /* Allow all traffic destined to the bridge, with a valid network address
  */
 static int
-iptablesForwardAllowIn(virFirewallPtr fw,
-                       bool pvt,
+iptablesForwardAllowIn(virFirewall *fw,
                        virSocketAddr *netaddr,
                        unsigned int prefix,
                        const char *iface,
@@ -604,14 +540,14 @@ iptablesForwardAllowIn(virFirewallPtr fw,
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
     g_autofree char *networkstr = NULL;
 
-    if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
+    if (!(networkstr = virSocketAddrFormatWithPrefix(netaddr, prefix, true)))
         return -1;
 
     if (physdev && physdev[0])
         virFirewallAddRule(fw, layer,
                            "--table", "filter",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_FWI" : "FORWARD",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_FWI",
                            "--destination", networkstr,
                            "--in-interface", physdev,
                            "--out-interface", iface,
@@ -620,8 +556,8 @@ iptablesForwardAllowIn(virFirewallPtr fw,
     else
         virFirewallAddRule(fw, layer,
                            "--table", "filter",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_FWI" : "FORWARD",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_FWI",
                            "--destination", networkstr,
                            "--out-interface", iface,
                            "--jump", "ACCEPT",
@@ -643,13 +579,14 @@ iptablesForwardAllowIn(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesAddForwardAllowIn(virFirewallPtr fw,
+iptablesAddForwardAllowIn(virFirewall *fw,
                           virSocketAddr *netaddr,
                           unsigned int prefix,
                           const char *iface,
                           const char *physdev)
 {
-    return iptablesForwardAllowIn(fw, true, netaddr, prefix, iface, physdev, ADD);
+    return iptablesForwardAllowIn(fw, netaddr, prefix, iface, physdev,
+                                  VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -666,26 +603,26 @@ iptablesAddForwardAllowIn(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesRemoveForwardAllowIn(virFirewallPtr fw,
+iptablesRemoveForwardAllowIn(virFirewall *fw,
                              virSocketAddr *netaddr,
                              unsigned int prefix,
                              const char *iface,
                              const char *physdev)
 {
-    return iptablesForwardAllowIn(fw, deletePrivate, netaddr, prefix, iface, physdev, REMOVE);
+    return iptablesForwardAllowIn(fw, netaddr, prefix, iface, physdev,
+                                  VIR_NETFILTER_DELETE);
 }
 
 static void
-iptablesForwardAllowCross(virFirewallPtr fw,
+iptablesForwardAllowCross(virFirewall *fw,
                           virFirewallLayer layer,
-                          bool pvt,
                           const char *iface,
                           int action)
 {
     virFirewallAddRule(fw, layer,
                        "--table", "filter",
-                       action == ADD ? "--insert" : "--delete",
-                       pvt ? "LIBVIRT_FWX" : "FORWARD",
+                       action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                       "LIBVIRT_FWX",
                        "--in-interface", iface,
                        "--out-interface", iface,
                        "--jump", "ACCEPT",
@@ -704,11 +641,11 @@ iptablesForwardAllowCross(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 void
-iptablesAddForwardAllowCross(virFirewallPtr fw,
+iptablesAddForwardAllowCross(virFirewall *fw,
                              virFirewallLayer layer,
                              const char *iface)
 {
-    iptablesForwardAllowCross(fw, layer, true, iface, ADD);
+    iptablesForwardAllowCross(fw, layer, iface, VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -723,24 +660,23 @@ iptablesAddForwardAllowCross(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 void
-iptablesRemoveForwardAllowCross(virFirewallPtr fw,
+iptablesRemoveForwardAllowCross(virFirewall *fw,
                                 virFirewallLayer layer,
                                 const char *iface)
 {
-    iptablesForwardAllowCross(fw, layer, deletePrivate, iface, REMOVE);
+    iptablesForwardAllowCross(fw, layer, iface, VIR_NETFILTER_DELETE);
 }
 
 static void
-iptablesForwardRejectOut(virFirewallPtr fw,
+iptablesForwardRejectOut(virFirewall *fw,
                          virFirewallLayer layer,
-                         bool pvt,
                          const char *iface,
                          int action)
 {
     virFirewallAddRule(fw, layer,
                        "--table", "filter",
-                       action == ADD ? "--insert" : "--delete",
-                       pvt ? "LIBVIRT_FWO" : "FORWARD",
+                       action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                       "LIBVIRT_FWO",
                        "--in-interface", iface,
                        "--jump", "REJECT",
                        NULL);
@@ -757,11 +693,11 @@ iptablesForwardRejectOut(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 void
-iptablesAddForwardRejectOut(virFirewallPtr fw,
+iptablesAddForwardRejectOut(virFirewall *fw,
                             virFirewallLayer layer,
                             const char *iface)
 {
-    iptablesForwardRejectOut(fw, layer, true, iface, ADD);
+    iptablesForwardRejectOut(fw, layer, iface, VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -775,25 +711,24 @@ iptablesAddForwardRejectOut(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 void
-iptablesRemoveForwardRejectOut(virFirewallPtr fw,
+iptablesRemoveForwardRejectOut(virFirewall *fw,
                                virFirewallLayer layer,
                                const char *iface)
 {
-    iptablesForwardRejectOut(fw, layer, deletePrivate, iface, REMOVE);
+    iptablesForwardRejectOut(fw, layer, iface, VIR_NETFILTER_DELETE);
 }
 
 
 static void
-iptablesForwardRejectIn(virFirewallPtr fw,
+iptablesForwardRejectIn(virFirewall *fw,
                         virFirewallLayer layer,
-                        bool pvt,
                         const char *iface,
                         int action)
 {
     virFirewallAddRule(fw, layer,
                        "--table", "filter",
-                       action == ADD ? "--insert" : "--delete",
-                       pvt ? "LIBVIRT_FWI" : "FORWARD",
+                       action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                       "LIBVIRT_FWI",
                        "--out-interface", iface,
                        "--jump", "REJECT",
                        NULL);
@@ -810,11 +745,11 @@ iptablesForwardRejectIn(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 void
-iptablesAddForwardRejectIn(virFirewallPtr fw,
+iptablesAddForwardRejectIn(virFirewall *fw,
                            virFirewallLayer layer,
                            const char *iface)
 {
-    iptablesForwardRejectIn(fw, layer, true, iface, ADD);
+    iptablesForwardRejectIn(fw, layer, iface, VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -828,11 +763,11 @@ iptablesAddForwardRejectIn(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 void
-iptablesRemoveForwardRejectIn(virFirewallPtr fw,
+iptablesRemoveForwardRejectIn(virFirewall *fw,
                               virFirewallLayer layer,
                               const char *iface)
 {
-    iptablesForwardRejectIn(fw, layer, deletePrivate, iface, REMOVE);
+    iptablesForwardRejectIn(fw, layer, iface, VIR_NETFILTER_DELETE);
 }
 
 
@@ -840,13 +775,12 @@ iptablesRemoveForwardRejectIn(virFirewallPtr fw,
  * with the bridge
  */
 static int
-iptablesForwardMasquerade(virFirewallPtr fw,
-                          bool pvt,
+iptablesForwardMasquerade(virFirewall *fw,
                           virSocketAddr *netaddr,
                           unsigned int prefix,
                           const char *physdev,
-                          virSocketAddrRangePtr addr,
-                          virPortRangePtr port,
+                          virSocketAddrRange *addr,
+                          virPortRange *port,
                           const char *protocol,
                           int action)
 {
@@ -855,12 +789,12 @@ iptablesForwardMasquerade(virFirewallPtr fw,
     g_autofree char *addrEndStr = NULL;
     g_autofree char *portRangeStr = NULL;
     g_autofree char *natRangeStr = NULL;
-    virFirewallRulePtr rule;
+    virFirewallRule *rule;
     int af = VIR_SOCKET_ADDR_FAMILY(netaddr);
     virFirewallLayer layer = af == AF_INET ?
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
 
-    if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
+    if (!(networkstr = virSocketAddrFormatWithPrefix(netaddr, prefix, true)))
         return -1;
 
     if (VIR_SOCKET_ADDR_IS_FAMILY(&addr->start, af)) {
@@ -875,8 +809,8 @@ iptablesForwardMasquerade(virFirewallPtr fw,
     if (protocol && protocol[0]) {
         rule = virFirewallAddRule(fw, layer,
                                   "--table", "nat",
-                                  action == ADD ? "--insert" : "--delete",
-                                  pvt ? "LIBVIRT_PRT" : "POSTROUTING",
+                                  action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                                  "LIBVIRT_PRT",
                                   "--source", networkstr,
                                   "-p", protocol,
                                   "!", "--destination", networkstr,
@@ -884,8 +818,8 @@ iptablesForwardMasquerade(virFirewallPtr fw,
     } else {
         rule = virFirewallAddRule(fw, layer,
                                   "--table", "nat",
-                                  action == ADD ? "--insert" : "--delete",
-                                  pvt ? "LIBVIRT_PRT" : "POSTROUTING",
+                                  action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                                  "LIBVIRT_PRT",
                                   "--source", networkstr,
                                   "!", "--destination", networkstr,
                                   NULL);
@@ -904,7 +838,7 @@ iptablesForwardMasquerade(virFirewallPtr fw,
             portRangeStr = g_strdup_printf(":%u-%u", port->start, port->end);
         } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Invalid port range '%u-%u'."),
+                           _("Invalid port range '%1$u-%2$u'."),
                            port->start, port->end);
             return -1;
         }
@@ -949,16 +883,17 @@ iptablesForwardMasquerade(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesAddForwardMasquerade(virFirewallPtr fw,
+iptablesAddForwardMasquerade(virFirewall *fw,
                              virSocketAddr *netaddr,
                              unsigned int prefix,
                              const char *physdev,
-                             virSocketAddrRangePtr addr,
-                             virPortRangePtr port,
+                             virSocketAddrRange *addr,
+                             virPortRange *port,
                              const char *protocol)
 {
-    return iptablesForwardMasquerade(fw, true, netaddr, prefix,
-                                     physdev, addr, port, protocol, ADD);
+    return iptablesForwardMasquerade(fw, netaddr, prefix,
+                                     physdev, addr, port, protocol,
+                                     VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -975,16 +910,17 @@ iptablesAddForwardMasquerade(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise
  */
 int
-iptablesRemoveForwardMasquerade(virFirewallPtr fw,
+iptablesRemoveForwardMasquerade(virFirewall *fw,
                                 virSocketAddr *netaddr,
                                 unsigned int prefix,
                                 const char *physdev,
-                                virSocketAddrRangePtr addr,
-                                virPortRangePtr port,
+                                virSocketAddrRange *addr,
+                                virPortRange *port,
                                 const char *protocol)
 {
-    return iptablesForwardMasquerade(fw, deletePrivate, netaddr, prefix,
-                                     physdev, addr, port, protocol, REMOVE);
+    return iptablesForwardMasquerade(fw, netaddr, prefix,
+                                     physdev, addr, port, protocol,
+                                     VIR_NETFILTER_DELETE);
 }
 
 
@@ -992,8 +928,7 @@ iptablesRemoveForwardMasquerade(virFirewallPtr fw,
  * if said traffic targets @destaddr.
  */
 static int
-iptablesForwardDontMasquerade(virFirewallPtr fw,
-                              bool pvt,
+iptablesForwardDontMasquerade(virFirewall *fw,
                               virSocketAddr *netaddr,
                               unsigned int prefix,
                               const char *physdev,
@@ -1004,14 +939,14 @@ iptablesForwardDontMasquerade(virFirewallPtr fw,
     virFirewallLayer layer = VIR_SOCKET_ADDR_FAMILY(netaddr) == AF_INET ?
         VIR_FIREWALL_LAYER_IPV4 : VIR_FIREWALL_LAYER_IPV6;
 
-    if (!(networkstr = iptablesFormatNetwork(netaddr, prefix)))
+    if (!(networkstr = virSocketAddrFormatWithPrefix(netaddr, prefix, true)))
         return -1;
 
     if (physdev && physdev[0])
         virFirewallAddRule(fw, layer,
                            "--table", "nat",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_PRT" : "POSTROUTING",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_PRT",
                            "--out-interface", physdev,
                            "--source", networkstr,
                            "--destination", destaddr,
@@ -1020,8 +955,8 @@ iptablesForwardDontMasquerade(virFirewallPtr fw,
     else
         virFirewallAddRule(fw, layer,
                            "--table", "nat",
-                           action == ADD ? "--insert" : "--delete",
-                           pvt ? "LIBVIRT_PRT" : "POSTROUTING",
+                           action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                           "LIBVIRT_PRT",
                            "--source", networkstr,
                            "--destination", destaddr,
                            "--jump", "RETURN",
@@ -1045,14 +980,14 @@ iptablesForwardDontMasquerade(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise.
  */
 int
-iptablesAddDontMasquerade(virFirewallPtr fw,
+iptablesAddDontMasquerade(virFirewall *fw,
                           virSocketAddr *netaddr,
                           unsigned int prefix,
                           const char *physdev,
                           const char *destaddr)
 {
-    return iptablesForwardDontMasquerade(fw, true, netaddr, prefix,
-                                         physdev, destaddr, ADD);
+    return iptablesForwardDontMasquerade(fw, netaddr, prefix,
+                                         physdev, destaddr, VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -1070,33 +1005,30 @@ iptablesAddDontMasquerade(virFirewallPtr fw,
  * Returns 0 in case of success or an error code otherwise.
  */
 int
-iptablesRemoveDontMasquerade(virFirewallPtr fw,
+iptablesRemoveDontMasquerade(virFirewall *fw,
                              virSocketAddr *netaddr,
                              unsigned int prefix,
                              const char *physdev,
                              const char *destaddr)
 {
-    return iptablesForwardDontMasquerade(fw, deletePrivate, netaddr, prefix,
-                                         physdev, destaddr, REMOVE);
+    return iptablesForwardDontMasquerade(fw, netaddr, prefix,
+                                         physdev, destaddr,
+                                         VIR_NETFILTER_DELETE);
 }
 
 
 static void
-iptablesOutputFixUdpChecksum(virFirewallPtr fw,
-                             bool pvt,
+iptablesOutputFixUdpChecksum(virFirewall *fw,
                              const char *iface,
                              int port,
                              int action)
 {
-    char portstr[32];
-
-    g_snprintf(portstr, sizeof(portstr), "%d", port);
-    portstr[sizeof(portstr) - 1] = '\0';
+    g_autofree char *portstr = g_strdup_printf("%d", port);
 
     virFirewallAddRule(fw, VIR_FIREWALL_LAYER_IPV4,
                        "--table", "mangle",
-                       action == ADD ? "--insert" : "--delete",
-                       pvt ? "LIBVIRT_PRT" : "POSTROUTING",
+                       action == VIR_NETFILTER_INSERT ? "--insert" : "--delete",
+                       "LIBVIRT_PRT",
                        "--out-interface", iface,
                        "--protocol", "udp",
                        "--destination-port", portstr,
@@ -1116,11 +1048,11 @@ iptablesOutputFixUdpChecksum(virFirewallPtr fw,
  *
  */
 void
-iptablesAddOutputFixUdpChecksum(virFirewallPtr fw,
+iptablesAddOutputFixUdpChecksum(virFirewall *fw,
                                 const char *iface,
                                 int port)
 {
-    iptablesOutputFixUdpChecksum(fw, true, iface, port, ADD);
+    iptablesOutputFixUdpChecksum(fw, iface, port, VIR_NETFILTER_INSERT);
 }
 
 /**
@@ -1133,9 +1065,9 @@ iptablesAddOutputFixUdpChecksum(virFirewallPtr fw,
  * iptablesAddOutputFixUdpChecksum.
  */
 void
-iptablesRemoveOutputFixUdpChecksum(virFirewallPtr fw,
+iptablesRemoveOutputFixUdpChecksum(virFirewall *fw,
                                    const char *iface,
                                    int port)
 {
-    iptablesOutputFixUdpChecksum(fw, deletePrivate, iface, port, REMOVE);
+    iptablesOutputFixUdpChecksum(fw, iface, port, VIR_NETFILTER_DELETE);
 }

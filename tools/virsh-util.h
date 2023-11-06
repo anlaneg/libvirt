@@ -40,21 +40,59 @@ virshCommandOptDomain(vshControl *ctl,
                       const char **name);
 
 typedef virDomain virshDomain;
-
 void
 virshDomainFree(virDomainPtr dom);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshDomain, virshDomainFree);
+
+typedef virDomainCheckpoint virshDomainCheckpoint;
+void
+virshDomainCheckpointFree(virDomainCheckpointPtr chk);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshDomainCheckpoint, virshDomainCheckpointFree);
+
+typedef virDomainSnapshot virshDomainSnapshot;
+void
+virshDomainSnapshotFree(virDomainSnapshotPtr snap);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshDomainSnapshot, virshDomainSnapshotFree);
+
+typedef virInterface virshInterface;
+void
+virshInterfaceFree(virInterfacePtr iface);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshInterface, virshInterfaceFree);
+
+typedef virNetwork virshNetwork;
+void
+virshNetworkFree(virNetworkPtr network);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshNetwork, virshNetworkFree);
+
+typedef virNodeDevice virshNodeDevice;
+void
+virshNodeDeviceFree(virNodeDevicePtr device);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshNodeDevice, virshNodeDeviceFree);
+
+typedef virNWFilter virshNWFilter;
+void
+virshNWFilterFree(virNWFilterPtr nwfilter);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshNWFilter, virshNWFilterFree);
 
 typedef virSecret virshSecret;
 void
 virshSecretFree(virSecretPtr secret);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshSecret, virshSecretFree);
 
+typedef virStoragePool virshStoragePool;
 void
-virshDomainCheckpointFree(virDomainCheckpointPtr chk);
+virshStoragePoolFree(virStoragePoolPtr pool);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshStoragePool, virshStoragePoolFree);
 
+typedef virStorageVol virshStorageVol;
 void
-virshDomainSnapshotFree(virDomainSnapshotPtr snap);
+virshStorageVolFree(virStorageVolPtr vol);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshStorageVol, virshStorageVolFree);
+
+typedef virStream virshStream;
+void
+virshStreamFree(virStreamPtr stream);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshStream, virshStreamFree);
 
 int
 virshDomainState(vshControl *ctl,
@@ -68,10 +106,10 @@ virshStreamSink(virStreamPtr st,
                 void *opaque);
 
 typedef struct _virshStreamCallbackData virshStreamCallbackData;
-typedef virshStreamCallbackData *virshStreamCallbackDataPtr;
 struct _virshStreamCallbackData {
     vshControl *ctl;
     int fd;
+    bool isBlock;
 };
 
 int
@@ -106,6 +144,15 @@ virshDomainGetXMLFromDom(vshControl *ctl,
     ATTRIBUTE_NONNULL(5) G_GNUC_WARN_UNUSED_RESULT;
 
 int
+virshNetworkGetXMLFromNet(vshControl *ctl,
+                          virNetworkPtr net,
+                          unsigned int flags,
+                          xmlDocPtr *xml,
+                          xmlXPathContextPtr *ctxt)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4)
+    ATTRIBUTE_NONNULL(5) G_GNUC_WARN_UNUSED_RESULT;
+
+int
 virshDomainGetXML(vshControl *ctl,
                   const vshCmd *cmd,
                   unsigned int flags,
@@ -113,3 +160,15 @@ virshDomainGetXML(vshControl *ctl,
                   xmlXPathContextPtr *ctxt)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4)
     ATTRIBUTE_NONNULL(5) G_GNUC_WARN_UNUSED_RESULT;
+
+VIR_ENUM_DECL(virshDomainBlockJob);
+
+const char *
+virshDomainBlockJobToString(int type);
+
+bool
+virshDumpXML(vshControl *ctl,
+             const char *xml,
+             const char *url,
+             const char *xpath,
+             bool wrap);

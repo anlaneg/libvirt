@@ -4,8 +4,6 @@
 #include "internal.h"
 #include "testutils.h"
 #include "virbuffer.h"
-#include "viralloc.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -17,10 +15,11 @@ struct testBufAddStrData {
 
 static int testBufAutoIndent(const void *data G_GNUC_UNUSED)
 {
-    virBuffer bufinit = VIR_BUFFER_INITIALIZER;
-    virBufferPtr buf = &bufinit;
+    g_auto(virBuffer) bufinit = VIR_BUFFER_INITIALIZER;
+    virBuffer *buf = &bufinit;
     const char expected[] =
-        "  1\n  2\n  3\n  4\n  5\n  6\n  7\n  &amp;\n  8\n  9\n  10\n  ' 11'\n";
+        "  1\n  2\n  3\n  4\n  5\n  6\n  7\n  &amp;\n  8\n  9\n  10\n"
+        "  ' 11'\n  ''\\''12'\n  '\"13'\n  ''\n";
     g_autofree char *result = NULL;
     int ret = 0;
 
@@ -85,10 +84,15 @@ static int testBufAutoIndent(const void *data G_GNUC_UNUSED)
     virBufferAddChar(buf, '\n');
     virBufferEscapeShell(buf, " 11");
     virBufferAddChar(buf, '\n');
+    virBufferEscapeShell(buf, "'12");
+    virBufferAddChar(buf, '\n');
+    virBufferEscapeShell(buf, "\"13");
+    virBufferAddChar(buf, '\n');
+    virBufferEscapeShell(buf, "");
+    virBufferAddChar(buf, '\n');
 
     result = virBufferContentAndReset(buf);
-    if (!result || STRNEQ(result, expected)) {
-        virTestDifference(stderr, expected, result);
+    if (virTestCompareToString(expected, result) < 0) {
         ret = -1;
     }
     return ret;
@@ -96,11 +100,10 @@ static int testBufAutoIndent(const void *data G_GNUC_UNUSED)
 
 static int testBufTrim(const void *data G_GNUC_UNUSED)
 {
-    virBuffer bufinit = VIR_BUFFER_INITIALIZER;
-    virBufferPtr buf = NULL;
+    g_auto(virBuffer) bufinit = VIR_BUFFER_INITIALIZER;
+    virBuffer *buf = NULL;
     g_autofree char *result = NULL;
     const char *expected = "a,b";
-    int ret = -1;
 
     virBufferTrim(buf, "");
     buf = &bufinit;
@@ -118,23 +121,18 @@ static int testBufTrim(const void *data G_GNUC_UNUSED)
     virBufferTrim(buf, ",,");
 
     result = virBufferContentAndReset(buf);
-    if (!result || STRNEQ(result, expected)) {
-        virTestDifference(stderr, expected, result);
-        goto cleanup;
+    if (virTestCompareToString(expected, result) < 0) {
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virBufferFreeAndReset(buf);
-    return ret;
+    return 0;
 }
 
 static int
 testBufTrimChars(const void *opaque)
 {
     const struct testBufAddStrData *data = opaque;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     g_autofree char *actual = NULL;
 
     virBufferAddStr(&buf, data->data);
@@ -145,9 +143,7 @@ testBufTrimChars(const void *opaque)
         return -1;
     }
 
-    if (STRNEQ_NULLABLE(actual, data->expect)) {
-        VIR_TEST_DEBUG("testBufEscapeStr(): Strings don't match:");
-        virTestDifference(stderr, data->expect, actual);
+    if (virTestCompareToString(data->expect, actual) < 0) {
         return -1;
     }
 
@@ -156,10 +152,9 @@ testBufTrimChars(const void *opaque)
 
 static int testBufAddBuffer(const void *data G_GNUC_UNUSED)
 {
-    virBuffer buf1 = VIR_BUFFER_INITIALIZER;
-    virBuffer buf2 = VIR_BUFFER_INITIALIZER;
-    virBuffer buf3 = VIR_BUFFER_INITIALIZER;
-    int ret = -1;
+    g_auto(virBuffer) buf1 = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf2 = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf3 = VIR_BUFFER_INITIALIZER;
     g_autofree char *result = NULL;
     const char *expected = \
 "  A long time ago, in a galaxy far,\n" \
@@ -179,17 +174,17 @@ static int testBufAddBuffer(const void *data G_GNUC_UNUSED)
 
     if (virBufferUse(&buf1)) {
         VIR_TEST_DEBUG("buf1 already in use");
-        goto cleanup;
+        return -1;
     }
 
     if (virBufferUse(&buf2)) {
         VIR_TEST_DEBUG("buf2 already in use");
-        goto cleanup;
+        return -1;
     }
 
     if (virBufferUse(&buf3)) {
         VIR_TEST_DEBUG("buf3 already in use");
-        goto cleanup;
+        return -1;
     }
 
     virBufferAdjustIndent(&buf1, 2);
@@ -214,61 +209,56 @@ static int testBufAddBuffer(const void *data G_GNUC_UNUSED)
 
     if (!virBufferUse(&buf1)) {
         VIR_TEST_DEBUG("Error adding to buf1");
-        goto cleanup;
+        return -1;
     }
 
     if (!virBufferUse(&buf2)) {
         VIR_TEST_DEBUG("Error adding to buf2");
-        goto cleanup;
+        return -1;
     }
 
     if (!virBufferUse(&buf3)) {
         VIR_TEST_DEBUG("Error adding to buf3");
-        goto cleanup;
+        return -1;
     }
 
     virBufferAddBuffer(&buf2, &buf3);
 
     if (!virBufferUse(&buf2)) {
         VIR_TEST_DEBUG("buf2 cleared mistakenly");
-        goto cleanup;
+        return -1;
     }
 
     if (virBufferUse(&buf3)) {
         VIR_TEST_DEBUG("buf3 is not clear even though it should be");
-        goto cleanup;
+        return -1;
     }
 
     virBufferAddBuffer(&buf1, &buf2);
 
     if (!virBufferUse(&buf1)) {
         VIR_TEST_DEBUG("buf1 cleared mistakenly");
-        goto cleanup;
+        return -1;
     }
 
     if (virBufferUse(&buf2)) {
         VIR_TEST_DEBUG("buf2 is not clear even though it should be");
-        goto cleanup;
+        return -1;
     }
 
     result = virBufferContentAndReset(&buf1);
-    if (STRNEQ_NULLABLE(result, expected)) {
-        virTestDifference(stderr, expected, result);
-        goto cleanup;
+    if (virTestCompareToString(expected, result) < 0) {
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    virBufferFreeAndReset(&buf1);
-    virBufferFreeAndReset(&buf2);
-    return ret;
+    return 0;
 }
 
 static int
 testBufAddStr(const void *opaque)
 {
     const struct testBufAddStrData *data = opaque;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     g_autofree char *actual = NULL;
 
     virBufferAddLit(&buf, "<c>\n");
@@ -282,9 +272,7 @@ testBufAddStr(const void *opaque)
         return -1;
     }
 
-    if (STRNEQ_NULLABLE(actual, data->expect)) {
-        VIR_TEST_DEBUG("testBufAddStr(): Strings don't match:");
-        virTestDifference(stderr, data->expect, actual);
+    if (virTestCompareToString(data->expect, actual) < 0) {
         return -1;
     }
 
@@ -296,7 +284,7 @@ static int
 testBufEscapeStr(const void *opaque)
 {
     const struct testBufAddStrData *data = opaque;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     g_autofree char *actual = NULL;
 
     virBufferAddLit(&buf, "<c>\n");
@@ -310,9 +298,7 @@ testBufEscapeStr(const void *opaque)
         return -1;
     }
 
-    if (STRNEQ_NULLABLE(actual, data->expect)) {
-        VIR_TEST_DEBUG("testBufEscapeStr(): Strings don't match:");
-        virTestDifference(stderr, data->expect, actual);
+    if (virTestCompareToString(data->expect, actual) < 0) {
         return -1;
     }
 
@@ -324,7 +310,7 @@ static int
 testBufEscapeRegex(const void *opaque)
 {
     const struct testBufAddStrData *data = opaque;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     g_autofree char *actual = NULL;
 
     virBufferEscapeRegex(&buf, "%s", data->data);
@@ -334,9 +320,7 @@ testBufEscapeRegex(const void *opaque)
         return -1;
     }
 
-    if (STRNEQ_NULLABLE(actual, data->expect)) {
-        VIR_TEST_DEBUG("testBufEscapeRegex: Strings don't match:");
-        virTestDifference(stderr, data->expect, actual);
+    if (virTestCompareToString(data->expect, actual) < 0) {
         return -1;
     }
 
@@ -347,7 +331,7 @@ testBufEscapeRegex(const void *opaque)
 static int
 testBufSetIndent(const void *opaque G_GNUC_UNUSED)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     g_autofree char *actual = NULL;
 
     virBufferSetIndent(&buf, 11);

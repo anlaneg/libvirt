@@ -37,7 +37,7 @@
 
 #include <sys/types.h>
 
-#ifdef HAVE_GETPWUID_R
+#ifdef WITH_GETPWUID_R
 # include <pwd.h>
 # include <grp.h>
 #endif
@@ -48,11 +48,9 @@
 
 #include "virerror.h"
 #include "virlog.h"
-#include "virbuffer.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "virprocess.h"
 #include "virstring.h"
 #include "virutil.h"
 #include "virsocket.h"
@@ -140,7 +138,7 @@ int virSetSockReuseAddr(int fd G_GNUC_UNUSED, bool fatal G_GNUC_UNUSED)
      * Win32 sockets have Linux/BSD-like SO_REUSEADDR behaviour
      * by default, so we can be a no-op.
      *
-     * http://msdn.microsoft.com/en-us/library/windows/desktop/ms740621.aspx
+     * https://msdn.microsoft.com/en-us/library/windows/desktop/ms740621.aspx
      */
     return 0;
 }
@@ -175,7 +173,7 @@ virScaleInteger(unsigned long long *value, const char *suffix,
     if (!suffix || !*suffix) {
         if (!scale) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("invalid scale %llu"), scale);
+                           _("invalid scale %1$llu"), scale);
             return -1;
         }
         suffix = "";
@@ -193,7 +191,7 @@ virScaleInteger(unsigned long long *value, const char *suffix,
             base = 1000;
         } else {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("unknown suffix '%s'"), suffix);
+                           _("unknown suffix '%1$s'"), suffix);
             return -1;
         }
 
@@ -220,13 +218,13 @@ virScaleInteger(unsigned long long *value, const char *suffix,
             break;
         default:
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("unknown suffix '%s'"), suffix);
+                           _("unknown suffix '%1$s'"), suffix);
             return -1;
         }
     }
 
     if (*value && *value > (limit / scale)) {
-        virReportError(VIR_ERR_OVERFLOW, _("value too large: %llu%s"),
+        virReportError(VIR_ERR_OVERFLOW, _("value too large: %1$llu%2$s"),
                        *value, suffix);
         return -1;
     }
@@ -234,52 +232,6 @@ virScaleInteger(unsigned long long *value, const char *suffix,
     return 0;
 }
 
-
-/**
- * virParseVersionString:
- * @str: const char pointer to the version string
- * @version: unsigned long pointer to output the version number
- * @allowMissing: true to treat 3 like 3.0.0, false to error out on
- * missing minor or micro
- *
- * Parse an unsigned version number from a version string. Expecting
- * 'major.minor.micro' format, ignoring an optional suffix.
- *
- * The major, minor and micro numbers are encoded into a single version number:
- *
- *   1000000 * major + 1000 * minor + micro
- *
- * Returns the 0 for success, -1 for error.
- */
-int
-virParseVersionString(const char *str, unsigned long *version,
-                      bool allowMissing)
-{
-    unsigned int major, minor = 0, micro = 0;
-    char *tmp;
-
-    if (virStrToLong_ui(str, &tmp, 10, &major) < 0)
-        return -1;
-
-    if (!allowMissing && *tmp != '.')
-        return -1;
-
-    if ((*tmp == '.') && virStrToLong_ui(tmp + 1, &tmp, 10, &minor) < 0)
-        return -1;
-
-    if (!allowMissing && *tmp != '.')
-        return -1;
-
-    if ((*tmp == '.') && virStrToLong_ui(tmp + 1, &tmp, 10, &micro) < 0)
-        return -1;
-
-    if (major > UINT_MAX / 1000000 || minor > 999 || micro > 999)
-        return -1;
-
-    *version = 1000000 * major + 1000 * minor + micro;
-
-    return 0;
-}
 
 /**
  * Format @val as a base-10 decimal number, in the
@@ -375,6 +327,7 @@ int virDiskNameParse(const char *name, int *disk, int *partition)
     int idx = 0;
     static char const* const drive_prefix[] = {"fd", "hd", "vd", "sd", "xvd", "ubd"};
     size_t i;
+    size_t n_digits;
 
     for (i = 0; i < G_N_ELEMENTS(drive_prefix); i++) {
         if (STRPREFIX(name, drive_prefix[i])) {
@@ -395,8 +348,8 @@ int virDiskNameParse(const char *name, int *disk, int *partition)
         ptr++;
     }
 
-    /* Count the trailing digits.  */
-    size_t n_digits = strspn(ptr, "0123456789");
+    /* Count the trailing digits */
+    n_digits = strspn(ptr, "0123456789");
     if (ptr[n_digits] != '\0')
         return -1;
 
@@ -433,33 +386,17 @@ int virDiskNameToIndex(const char *name)
     return idx;
 }
 
-char *virIndexToDiskName(int idx, const char *prefix)
+char *virIndexToDiskName(unsigned int idx, const char *prefix)
 {
-    char *name = NULL;
-    size_t i;
-    int ctr;
-    int offset;
+    GString *str = g_string_new(NULL);
+    long long ctr;
 
-    if (idx < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Disk index %d is negative"), idx);
-        return NULL;
-    }
+    for (ctr = idx; ctr >= 0; ctr = ctr / 26 - 1)
+        g_string_prepend_c(str, 'a' + (ctr % 26));
 
-    for (i = 0, ctr = idx; ctr >= 0; ++i, ctr = ctr / 26 - 1) { }
+    g_string_prepend(str, prefix);
 
-    offset = strlen(prefix);
-
-    if (VIR_ALLOC_N(name, offset + i + 1))
-        return NULL;
-
-    strcpy(name, prefix);
-    name[offset + i] = '\0';
-
-    for (i = i - 1, ctr = idx; ctr >= 0; --i, ctr = ctr / 26 - 1)
-        name[offset + i] = 'a' + (ctr % 26);
-
-    return name;
+    return g_string_free(str, false);
 }
 
 #ifndef AI_CANONIDN
@@ -494,11 +431,18 @@ static char *
 virGetHostnameImpl(bool quiet)
 {
     int r;
-    const char *hostname;
-    char *result = NULL;
-    struct addrinfo hints, *info;
+    char hostname[HOST_NAME_MAX+1], *result = NULL;
+    struct addrinfo hints = { 0 };
+    struct addrinfo *info;
 
-    hostname = g_get_host_name();
+    r = gethostname(hostname, sizeof(hostname));
+    if (r == -1) {
+        if (!quiet)
+            virReportSystemError(errno,
+                                 "%s", _("failed to determine host name"));
+        return NULL;
+    }
+    hostname[sizeof(hostname) - 1] = '\0';
 
     if (STRPREFIX(hostname, "localhost") || strchr(hostname, '.')) {
         /* in this case, gethostname returned localhost (meaning we can't
@@ -507,15 +451,13 @@ virGetHostnameImpl(bool quiet)
          * string as-is; it's up to callers to check whether "localhost"
          * is allowed.
          */
-        result = g_strdup(hostname);
-        goto cleanup;
+        return g_strdup(hostname);
     }
 
     /* otherwise, it's a shortened, non-localhost, hostname.  Attempt to
      * canonicalize the hostname by running it through getaddrinfo
      */
 
-    memset(&hints, 0, sizeof(hints));
     hints.ai_flags = AI_CANONNAME|AI_CANONIDN;
     hints.ai_family = AF_UNSPEC;
     r = getaddrinfo(hostname, NULL, &hints, &info);
@@ -523,12 +465,8 @@ virGetHostnameImpl(bool quiet)
         if (!quiet)
             VIR_WARN("getaddrinfo failed for '%s': %s",
                      hostname, gai_strerror(r));
-        result = g_strdup(hostname);
-        goto cleanup;
+        return g_strdup(hostname);
     }
-
-    /* Tell static analyzers about getaddrinfo semantics.  */
-    sa_assert(info);
 
     if (info->ai_canonname == NULL ||
         STRPREFIX(info->ai_canonname, "localhost"))
@@ -542,10 +480,6 @@ virGetHostnameImpl(bool quiet)
         result = g_strdup(info->ai_canonname);
 
     freeaddrinfo(info);
-
- cleanup:
-    if (!result)
-        virReportOOMError();
     return result;
 }
 
@@ -601,7 +535,7 @@ char *virGetUserRuntimeDirectory(void)
 }
 
 
-#ifdef HAVE_GETPWUID_R
+#ifdef WITH_GETPWUID_R
 /* Look up fields from the user database for the given user.  On
  * error, set errno, report the error if not instructed otherwise via @quiet,
  * and return -1.  */
@@ -627,8 +561,7 @@ virGetUserEnt(uid_t uid, char **name, gid_t *group, char **dir, char **shell, bo
     if (val < 0)
         strbuflen = 1024;
 
-    if (VIR_ALLOC_N(strbuf, strbuflen) < 0)
-        return -1;
+    strbuf = g_new0(char, strbuflen);
 
     /*
      * From the manpage (terrifying but true):
@@ -638,8 +571,7 @@ virGetUserEnt(uid_t uid, char **name, gid_t *group, char **dir, char **shell, bo
      *        The given name or uid was not found.
      */
     while ((rc = getpwuid_r(uid, &pwbuf, strbuf, strbuflen, &pw)) == ERANGE) {
-        if (VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen) < 0)
-            goto cleanup;
+        VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen);
     }
 
     if (rc != 0) {
@@ -647,7 +579,7 @@ virGetUserEnt(uid_t uid, char **name, gid_t *group, char **dir, char **shell, bo
             goto cleanup;
 
         virReportSystemError(rc,
-                             _("Failed to find user record for uid '%u'"),
+                             _("Failed to find user record for uid '%1$u'"),
                              (unsigned int) uid);
         goto cleanup;
     } else if (pw == NULL) {
@@ -655,7 +587,7 @@ virGetUserEnt(uid_t uid, char **name, gid_t *group, char **dir, char **shell, bo
             goto cleanup;
 
         virReportError(VIR_ERR_SYSTEM_ERROR,
-                       _("Failed to find user record for uid '%u'"),
+                       _("Failed to find user record for uid '%1$u'"),
                        (unsigned int) uid);
         goto cleanup;
     }
@@ -697,8 +629,7 @@ static char *virGetGroupEnt(gid_t gid)
     if (val < 0)
         strbuflen = 1024;
 
-    if (VIR_ALLOC_N(strbuf, strbuflen) < 0)
-        return NULL;
+    strbuf = g_new0(char, strbuflen);
 
     /*
      * From the manpage (terrifying but true):
@@ -708,19 +639,16 @@ static char *virGetGroupEnt(gid_t gid)
      *        The given name or gid was not found.
      */
     while ((rc = getgrgid_r(gid, &grbuf, strbuf, strbuflen, &gr)) == ERANGE) {
-        if (VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen) < 0) {
-            VIR_FREE(strbuf);
-            return NULL;
-        }
+        VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen);
     }
     if (rc != 0 || gr == NULL) {
         if (rc != 0) {
             virReportSystemError(rc,
-                                 _("Failed to find group record for gid '%u'"),
+                                 _("Failed to find group record for gid '%1$u'"),
                                  (unsigned int) gid);
         } else {
             virReportError(VIR_ERR_SYSTEM_ERROR,
-                           _("Failed to find group record for gid '%u'"),
+                           _("Failed to find group record for gid '%1$u'"),
                            (unsigned int) gid);
         }
 
@@ -783,12 +711,10 @@ virGetUserIDByName(const char *name, uid_t *uid, bool missing_ok)
     if (val < 0)
         strbuflen = 1024;
 
-    if (VIR_ALLOC_N(strbuf, strbuflen) < 0)
-        goto cleanup;
+    strbuf = g_new0(char, strbuflen);
 
     while ((rc = getpwnam_r(name, &pwbuf, strbuf, strbuflen, &pw)) == ERANGE) {
-        if (VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen) < 0)
-            goto cleanup;
+        VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen);
     }
 
     if (!pw) {
@@ -835,7 +761,7 @@ virGetUserID(const char *user, uid_t *uid)
 
     if (virStrToLong_ui(user, NULL, 10, &uint_uid) < 0 ||
         ((uid_t) uint_uid) != uint_uid) {
-        virReportError(VIR_ERR_INVALID_ARG, _("Failed to parse user '%s'"),
+        virReportError(VIR_ERR_INVALID_ARG, _("Failed to parse user '%1$s'"),
                        user);
         return -1;
     }
@@ -865,12 +791,10 @@ virGetGroupIDByName(const char *name, gid_t *gid, bool missing_ok)
     if (val < 0)
         strbuflen = 1024;
 
-    if (VIR_ALLOC_N(strbuf, strbuflen) < 0)
-        goto cleanup;
+    strbuf = g_new0(char, strbuflen);
 
     while ((rc = getgrnam_r(name, &grbuf, strbuf, strbuflen, &gr)) == ERANGE) {
-        if (VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen) < 0)
-            goto cleanup;
+        VIR_RESIZE_N(strbuf, strbuflen, strbuflen, strbuflen);
     }
 
     if (!gr) {
@@ -917,7 +841,7 @@ virGetGroupID(const char *group, gid_t *gid)
 
     if (virStrToLong_ui(group, NULL, 10, &uint_gid) < 0 ||
         ((gid_t) uint_gid) != uint_gid) {
-        virReportError(VIR_ERR_INVALID_ARG, _("Failed to parse group '%s'"),
+        virReportError(VIR_ERR_INVALID_ARG, _("Failed to parse group '%1$s'"),
                        group);
         return -1;
     }
@@ -947,9 +871,11 @@ virDoesGroupExist(const char *name)
 
 
 
-/* Work around an incompatibility of OS X 10.11: getgrouplist
+/* Work around an incompatibility of macOS: getgrouplist
    accepts int *, not gid_t *, and int and gid_t differ in sign.  */
+# ifdef __APPLE__
 VIR_WARNINGS_NO_POINTER_SIGN
+# endif
 
 /* Compute the list of primary and supplementary groups associated
  * with @uid, and including @gid in the list (unless it is -1),
@@ -972,7 +898,7 @@ virGetGroupList(uid_t uid, gid_t gid, gid_t **list)
     if (uid != (uid_t)-1 &&
         virGetUserEnt(uid, &user, &primary, NULL, NULL, true) >= 0) {
         int nallocgrps = 10;
-        gid_t *grps = g_new(gid_t, nallocgrps);
+        gid_t *grps = g_new0(gid_t, nallocgrps);
 
         while (1) {
             int nprevallocgrps = nallocgrps;
@@ -1003,13 +929,8 @@ virGetGroupList(uid_t uid, gid_t gid, gid_t **list)
             if ((*list)[i] == gid)
                 goto cleanup;
         }
-        if (VIR_APPEND_ELEMENT(*list, i, gid) < 0) {
-            ret = -1;
-            VIR_FREE(*list);
-            goto cleanup;
-        } else {
-            ret = i;
-        }
+        VIR_APPEND_ELEMENT(*list, i, gid);
+        ret = i;
     }
 
  cleanup:
@@ -1017,7 +938,9 @@ virGetGroupList(uid_t uid, gid_t gid, gid_t **list)
     return ret;
 }
 
+# ifdef __APPLE__
 VIR_WARNINGS_RESET
+# endif
 
 
 /* Set the real and effective uid and gid to the given values, as well
@@ -1031,12 +954,12 @@ virSetUIDGID(uid_t uid, gid_t gid, gid_t *groups G_GNUC_UNUSED,
 {
     if (gid != (gid_t)-1 && setregid(gid, gid) < 0) {
         virReportSystemError(errno,
-                             _("cannot change to '%u' group"),
+                             _("cannot change to '%1$u' group"),
                              (unsigned int) gid);
         return -1;
     }
 
-# if HAVE_SETGROUPS
+# if WITH_SETGROUPS
     if (gid != (gid_t)-1 && setgroups(ngroups, groups) < 0) {
         virReportSystemError(errno, "%s",
                              _("cannot set supplemental groups"));
@@ -1046,7 +969,7 @@ virSetUIDGID(uid_t uid, gid_t gid, gid_t *groups G_GNUC_UNUSED,
 
     if (uid != (uid_t)-1 && setreuid(uid, uid) < 0) {
         virReportSystemError(errno,
-                             _("cannot change to uid to '%u'"),
+                             _("cannot change to uid to '%1$u'"),
                              (unsigned int) uid);
         return -1;
     }
@@ -1054,7 +977,7 @@ virSetUIDGID(uid_t uid, gid_t gid, gid_t *groups G_GNUC_UNUSED,
     return 0;
 }
 
-#else /* ! HAVE_GETPWUID_R */
+#else /* ! WITH_GETPWUID_R */
 
 int
 virGetGroupList(uid_t uid G_GNUC_UNUSED, gid_t gid G_GNUC_UNUSED,
@@ -1096,7 +1019,7 @@ virGetUserShell(uid_t uid G_GNUC_UNUSED)
     return NULL;
 }
 
-# else /* !HAVE_GETPWUID_R && !WIN32 */
+# else /* !WITH_GETPWUID_R && !WIN32 */
 char *
 virGetUserDirectoryByUID(uid_t uid G_GNUC_UNUSED)
 {
@@ -1114,7 +1037,7 @@ virGetUserShell(uid_t uid G_GNUC_UNUSED)
 
     return NULL;
 }
-# endif /* ! HAVE_GETPWUID_R && ! WIN32 */
+# endif /* ! WITH_GETPWUID_R && ! WIN32 */
 
 char *
 virGetUserName(uid_t uid G_GNUC_UNUSED)
@@ -1163,7 +1086,7 @@ virGetGroupName(gid_t gid G_GNUC_UNUSED)
 
     return NULL;
 }
-#endif /* HAVE_GETPWUID_R */
+#endif /* WITH_GETPWUID_R */
 
 #if WITH_CAPNG
 /* Set the real and effective uid and gid to the given values, while
@@ -1214,15 +1137,12 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
         need_setuid = true;
         capng_update(CAPNG_ADD, CAPNG_EFFECTIVE|CAPNG_PERMITTED, CAP_SETUID);
     }
-# ifdef PR_CAPBSET_DROP
-    /* If newer kernel, we need also need setpcap to change the bounding set */
-    if ((capBits || need_setgid || need_setuid) &&
-        !capng_have_capability(CAPNG_EFFECTIVE, CAP_SETPCAP)) {
+
+    /* We need also need setpcap to change the bounding set */
+    if (!capng_have_capability(CAPNG_EFFECTIVE, CAP_SETPCAP)) {
         need_setpcap = true;
-    }
-    if (need_setpcap)
         capng_update(CAPNG_ADD, CAPNG_EFFECTIVE|CAPNG_PERMITTED, CAP_SETPCAP);
-# endif
+    }
 
     /* Tell system we want to keep caps across uid change */
     if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)) {
@@ -1245,7 +1165,7 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
             capng_clear(CAPNG_SELECT_CAPS);
         } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("cannot apply process capabilities %d"), capng_ret);
+                           _("cannot apply process capabilities %1$d"), capng_ret);
             return -1;
         }
     }
@@ -1272,8 +1192,7 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
         if (capBits & (1ULL << i)) {
             if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, i, 0, 0) < 0) {
                 virReportSystemError(errno,
-                                     _("prctl failed to enable '%s' in the "
-                                       "AMBIENT set"),
+                                     _("prctl failed to enable '%1$s' in the AMBIENT set"),
                                      capstr);
                 return -1;
             }
@@ -1285,7 +1204,12 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
      * do this if we failed to get the capability above, so ignore the
      * return value.
      */
-    capng_apply(CAPNG_SELECT_BOUNDS);
+    if (!need_setpcap &&
+        (capng_ret = capng_apply(CAPNG_SELECT_BOUNDS)) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("cannot apply process capabilities: %1$d"), capng_ret);
+        return -1;
+    }
 
     /* Drop the caps that allow setuid/gid (unless they were requested) */
     if (need_setgid)
@@ -1296,9 +1220,9 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
     if (need_setpcap)
         capng_update(CAPNG_DROP, CAPNG_EFFECTIVE|CAPNG_PERMITTED, CAP_SETPCAP);
 
-    if (((capng_ret = capng_apply(CAPNG_SELECT_CAPS)) < 0)) {
+    if ((capng_ret = capng_apply(CAPNG_SELECT_CAPS)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("cannot apply process capabilities %d"), capng_ret);
+                       _("cannot apply process capabilities %1$d"), capng_ret);
         return -1;
     }
 
@@ -1356,133 +1280,11 @@ virValidateWWN(const char *wwn)
 
     if (i != 16 || p[i]) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Malformed wwn: %s"), wwn);
+                       _("Malformed wwn: %1$s"), wwn);
         return false;
     }
 
     return true;
-}
-
-#if defined(major) && defined(minor)
-int
-virGetDeviceID(const char *path, int *maj, int *min)
-{
-    struct stat sb;
-
-    if (stat(path, &sb) < 0)
-        return -errno;
-
-    if (!S_ISBLK(sb.st_mode))
-        return -EINVAL;
-
-    if (maj)
-        *maj = major(sb.st_rdev);
-    if (min)
-        *min = minor(sb.st_rdev);
-
-    return 0;
-}
-#else
-int
-virGetDeviceID(const char *path G_GNUC_UNUSED,
-               int *maj,
-               int *min)
-{
-    *maj = *min = 0;
-    return -ENOSYS;
-}
-#endif
-
-#define SYSFS_DEV_BLOCK_PATH "/sys/dev/block"
-
-char *
-virGetUnprivSGIOSysfsPath(const char *path,
-                          const char *sysfs_dir)
-{
-    int maj, min;
-    int rc;
-
-    if ((rc = virGetDeviceID(path, &maj, &min)) < 0) {
-        virReportSystemError(-rc,
-                             _("Unable to get device ID '%s'"),
-                             path);
-        return NULL;
-    }
-
-    return g_strdup_printf("%s/%d:%d/queue/unpriv_sgio",
-                           sysfs_dir ? sysfs_dir : SYSFS_DEV_BLOCK_PATH, maj,
-                           min);
-}
-
-int
-virSetDeviceUnprivSGIO(const char *path,
-                       const char *sysfs_dir,
-                       int unpriv_sgio)
-{
-    char *sysfs_path = NULL;
-    char *val = NULL;
-    int ret = -1;
-    int rc;
-
-    if (!(sysfs_path = virGetUnprivSGIOSysfsPath(path, sysfs_dir)))
-        return -1;
-
-    if (!virFileExists(sysfs_path)) {
-        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
-                       _("unpriv_sgio is not supported by this kernel"));
-        goto cleanup;
-    }
-
-    val = g_strdup_printf("%d", unpriv_sgio);
-
-    if ((rc = virFileWriteStr(sysfs_path, val, 0)) < 0) {
-        virReportSystemError(-rc, _("failed to set %s"), sysfs_path);
-        goto cleanup;
-    }
-
-    ret = 0;
- cleanup:
-    VIR_FREE(sysfs_path);
-    VIR_FREE(val);
-    return ret;
-}
-
-int
-virGetDeviceUnprivSGIO(const char *path,
-                       const char *sysfs_dir,
-                       int *unpriv_sgio)
-{
-    char *sysfs_path = NULL;
-    char *buf = NULL;
-    char *tmp = NULL;
-    int ret = -1;
-
-    if (!(sysfs_path = virGetUnprivSGIOSysfsPath(path, sysfs_dir)))
-        return -1;
-
-    if (!virFileExists(sysfs_path)) {
-        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
-                       _("unpriv_sgio is not supported by this kernel"));
-        goto cleanup;
-    }
-
-    if (virFileReadAll(sysfs_path, 1024, &buf) < 0)
-        goto cleanup;
-
-    if ((tmp = strchr(buf, '\n')))
-        *tmp = '\0';
-
-    if (virStrToLong_i(buf, NULL, 10, unpriv_sgio) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("failed to parse value of %s"), sysfs_path);
-        goto cleanup;
-    }
-
-    ret = 0;
- cleanup:
-    VIR_FREE(sysfs_path);
-    VIR_FREE(buf);
-    return ret;
 }
 
 
@@ -1513,7 +1315,7 @@ virParseOwnershipIds(const char *label, uid_t *uidPtr, gid_t *gidPtr)
     sep = strchr(tmp_label, ':');
     if (sep == NULL) {
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("Failed to parse uid and gid from '%s'"),
+                       _("Failed to parse uid and gid from '%1$s'"),
                        label);
         goto cleanup;
     }
@@ -1635,27 +1437,18 @@ virMemoryMaxValue(bool capped)
 bool
 virHostHasIOMMU(void)
 {
-    DIR *iommuDir = NULL;
+    g_autoptr(DIR) iommuDir = NULL;
     struct dirent *iommuGroup = NULL;
-    bool ret = false;
-    int direrr;
 
     /*此目录必须存在*/
     if (virDirOpenQuiet(&iommuDir, "/sys/kernel/iommu_groups/") < 0)
-        goto cleanup;
+        return false;
 
     /*此目录下必须有成员*/
-    while ((direrr = virDirRead(iommuDir, &iommuGroup, NULL)) > 0)
-        break;
+    if (virDirRead(iommuDir, &iommuGroup, NULL) < 0 || !iommuGroup)
+        return false;
 
-    if (direrr < 0 || !iommuGroup)
-        goto cleanup;
-
-    ret = true;
-
- cleanup:
-    VIR_DIR_CLOSE(iommuDir);
-    return ret;
+    return true;
 }
 
 
@@ -1673,8 +1466,7 @@ virHostHasIOMMU(void)
 char *
 virHostGetDRMRenderNode(void)
 {
-    char *ret = NULL;
-    DIR *driDir = NULL;
+    g_autoptr(DIR) driDir = NULL;
     const char *driPath = "/dev/dri";
     struct dirent *ent = NULL;
     int dirErr = 0;
@@ -1691,20 +1483,16 @@ virHostGetDRMRenderNode(void)
     }
 
     if (dirErr < 0)
-        goto cleanup;
+        return NULL;
 
     /* even if /dev/dri exists, there might be no renderDX nodes available */
     if (!have_rendernode) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("No DRM render nodes available"));
-        goto cleanup;
+        return NULL;
     }
 
-    ret = g_strdup_printf("%s/%s", driPath, ent->d_name);
-
- cleanup:
-    VIR_DIR_CLOSE(driDir);
-    return ret;
+    return g_strdup_printf("%s/%s", driPath, ent->d_name);
 }
 
 
@@ -1922,18 +1710,19 @@ char *virGetPassword(void)
 static int
 virPipeImpl(int fds[2], bool nonblock, bool errreport)
 {
-#ifdef HAVE_PIPE2
+#ifdef WITH_PIPE2
+    int rv;
     int flags = O_CLOEXEC;
     if (nonblock)
         flags |= O_NONBLOCK;
-    int rv = pipe2(fds, flags);
-#else /* !HAVE_PIPE2 */
+    rv = pipe2(fds, flags);
+#else /* !WITH_PIPE2 */
 # ifdef WIN32
     int rv = _pipe(fds, 4096, _O_BINARY);
 # else /* !WIN32 */
     int rv = pipe(fds);
 # endif /* !WIN32 */
-#endif /* !HAVE_PIPE2 */
+#endif /* !WITH_PIPE2 */
 
     if (rv < 0) {
         if (errreport)
@@ -1942,21 +1731,19 @@ virPipeImpl(int fds[2], bool nonblock, bool errreport)
         return rv;
     }
 
-#ifndef HAVE_PIPE2
+#ifndef WITH_PIPE2
     if (nonblock) {
         if (virSetNonBlock(fds[0]) < 0 ||
             virSetNonBlock(fds[1]) < 0) {
             if (errreport)
                 virReportSystemError(errno, "%s",
                                      _("Unable to set pipes to non-blocking"));
-            virReportSystemError(errno, "%s",
-                                 _("Unable to create pipes"));
             VIR_FORCE_CLOSE(fds[0]);
             VIR_FORCE_CLOSE(fds[1]);
             return -1;
         }
     }
-#endif /* !HAVE_PIPE2 */
+#endif /* !WITH_PIPE2 */
 
     return 0;
 }

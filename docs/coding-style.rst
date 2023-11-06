@@ -53,14 +53,16 @@ Struct type names
    All structs should have a 'vir' prefix in their typedef name,
    and each following word should have its first letter in
    uppercase. The struct name should be the same as the typedef
-   name with a leading underscore. A second typedef should be
-   given for a pointer to the struct with a 'Ptr' suffix.
+   name with a leading underscore. For types that are part of the
+   public API, a second typedef should be given for a pointer to
+   the struct with a 'Ptr' suffix. Do not introduce new such
+   typedefs for internal types.
 
    ::
 
-     typedef struct _virHashTable virHashTable;
-     typedef virHashTable *virHashTablePtr;
-     struct _virHashTable {
+     typedef struct _virSomeType virSomeType;
+     typedef virSomeType *virSomeTypePtr;
+     struct _virSomeType {
          ...
      };
 
@@ -72,8 +74,8 @@ Function names
    name prefix should match the object typedef name, otherwise it
    should match the filename. Following this comes the verb /
    action name, and finally an optional subject name. For example,
-   given an object 'virHashTable', all functions should have a
-   name 'virHashTable$VERB' or 'virHashTable$VERB$SUBJECT", e.g.
+   given an object 'virSomeType', all functions should have a
+   name 'virSomeType$VERB' or 'virSomeType$VERB$SUBJECT", e.g.
    'virHashTableLookup' or 'virHashTableGetValue'.
 
 Macro names
@@ -116,7 +118,7 @@ following to your ~/.vimrc file:
 Or if you don't want to mess your ~/.vimrc up, you can save the
 above into a file called .lvimrc (not .vimrc) located at the root
 of libvirt source, then install a vim script from
-http://www.vim.org/scripts/script.php?script_id=1408, which will
+https://www.vim.org/scripts/script.php?script_id=1408, which will
 load the .lvimrc only when you edit libvirt code.
 
 Code formatting (especially for new code)
@@ -131,7 +133,7 @@ around operators and keywords:
 
   indent-libvirt()
   {
-    indent -bad -bap -bbb -bli4 -br -ce -brs -cs -i4 -l75 -lc75 \
+    indent -bad -bap -bbb -bli4 -br -ce -brs -cs -i4 -l100 -lc100 \
            -sbi4 -psl -saf -sai -saw -sbi4 -ss -sc -cdw -cli4 -npcs -nbc \
            --no-tabs "$@"
   }
@@ -140,6 +142,9 @@ Note that sometimes you'll have to post-process that output
 further, by piping it through ``expand -i``, since some leading
 TABs can get through. Usually they're in macro definitions or
 strings, and should be converted anyhow.
+
+The maximum permitted line length is 100 characters, but lines
+should aim to be approximately 80 characters.
 
 Libvirt requires a C99 compiler for various reasons. However, most
 of the code base prefers to stick to C89 syntax unless there is a
@@ -156,24 +161,24 @@ a single space following them before the opening bracket. E.g.
 
 ::
 
-  if(foo)   // Bad
-  if (foo)  // Good
+  if(foo)   /* Bad */
+  if (foo)  /* Good */
 
 Function implementations must **not** have any whitespace between
 the function name and the opening bracket. E.g.
 
 ::
 
-  int foo (int wizz)  // Bad
-  int foo(int wizz)   // Good
+  int foo (int wizz)  /* Bad */
+  int foo(int wizz)   /* Good */
 
 Function calls must **not** have any whitespace between the
 function name and the opening bracket. E.g.
 
 ::
 
-  bar = foo (wizz);  // Bad
-  bar = foo(wizz);   // Good
+  bar = foo (wizz);  /* Bad */
+  bar = foo(wizz);   /* Good */
 
 Function typedefs must **not** have any whitespace between the
 closing bracket of the function name and opening bracket of the
@@ -181,16 +186,16 @@ arg list. E.g.
 
 ::
 
-  typedef int (*foo) (int wizz);  // Bad
-  typedef int (*foo)(int wizz);   // Good
+  typedef int (*foo) (int wizz);  /* Bad */
+  typedef int (*foo)(int wizz);   /* Good */
 
 There must not be any whitespace immediately following any opening
 bracket, or immediately prior to any closing bracket. E.g.
 
 ::
 
-  int foo( int wizz );  // Bad
-  int foo(int wizz);    // Good
+  int foo( int wizz );  /* Bad */
+  int foo(int wizz);    /* Good */
 
 Commas
 ------
@@ -201,8 +206,8 @@ syntax-check'.
 
 ::
 
-  call(a,b ,c);// Bad
-  call(a, b, c); // Good
+  call(a,b ,c);     /* Bad */
+  call(a, b, c);    /* Good */
 
 When declaring an enum or using a struct initializer that occupies
 more than one line, use a trailing comma. That way, future edits
@@ -220,11 +225,11 @@ C99 allows trailing commas, remember that JSON and XDR do not.
 
   enum {
       VALUE_ONE,
-      VALUE_TWO // Bad
+      VALUE_TWO     /* Bad */
   };
   enum {
       VALUE_THREE,
-      VALUE_FOUR, // Good
+      VALUE_FOUR,   /* Good */
   };
 
 Semicolons
@@ -238,10 +243,10 @@ not enforced, loop counters generally use post-increment.
 
 ::
 
-  for (i = 0 ;i < limit ; ++i) { // Bad
-  for (i = 0; i < limit; i++) { // Good
-  for (;;) { // ok
-  while (1) { // Better
+  for (i = 0 ;i < limit ; ++i) {    /* Bad */
+  for (i = 0; i < limit; i++) {     /* Good */
+  for (;;) {                        /* ok */
+  while (1) {                       /* Better */
 
 Empty loop bodies are better represented with curly braces and a
 comment, although use of a semicolon is not currently rejected.
@@ -249,36 +254,36 @@ comment, although use of a semicolon is not currently rejected.
 ::
 
   while ((rc = waitpid(pid, &st, 0) == -1) &&
-         errno == EINTR); // ok
+         errno == EINTR);           /* ok */
   while ((rc = waitpid(pid, &st, 0) == -1) &&
-         errno == EINTR) { // Better
+         errno == EINTR) {          /* Better */
       /* nothing */
   }
 
 Curly braces
 ------------
 
-Omit the curly braces around an ``if``, ``while``, ``for`` etc.
-body only when both that body and the condition itself occupy a
-single line. In every other case we require the braces. This
+Curly braces around an ``if``, ``while``, ``for`` etc. can be omitted if the
+body and the condition itself occupy only a single line.
+In every other case we require the braces. This
 ensures that it is trivially easy to identify a
 single-\ *statement* loop: each has only one *line* in its body.
 
 ::
 
-  while (expr)             // single line body; {} is forbidden
+  while (expr)              /* single line body; {} is optional */
       single_line_stmt();
 
 ::
 
   while (expr(arg1,
-              arg2))      // indentation makes it obvious it is single line,
-      single_line_stmt(); // {} is optional (not enforced either way)
+              arg2))        /* indentation makes it obvious it is single line, */
+      single_line_stmt();   /* {} is optional (not enforced either way) */
 
 ::
 
   while (expr1 &&
-         expr2) {         // multi-line, at same indentation, {} required
+         expr2) {           /* multi-line, at same indentation, {} required */
       single_line_stmt();
   }
 
@@ -290,7 +295,7 @@ braces), thinking it is already a multi-statement loop:
 
 ::
 
-  while (true) // BAD! multi-line body with no braces
+  while (true)              /* BAD! multi-line body with no braces */
       /* comment... */
       single_line_stmt();
 
@@ -298,7 +303,7 @@ Do this instead:
 
 ::
 
-  while (true) { // Always put braces around a multi-line body.
+  while (true) {            /* Always put braces around a multi-line body. */
       /* comment... */
       single_line_stmt();
   }
@@ -320,8 +325,8 @@ To reiterate, don't do this:
 
 ::
 
-  if (expr)            // BAD: no braces around...
-      while (expr_2) { // ... a multi-line body
+  if (expr)                 /* BAD: no braces around... */
+      while (expr_2) {      /* ... a multi-line body */
           ...
       }
 
@@ -351,11 +356,11 @@ longer, multi-line block be the ``else`` block.
       ...
   }
   else
-      x = y;    // BAD: braceless "else" with braced "then",
-                // and short block last
+      x = y;    /* BAD: braceless "else" with braced "then",
+                 * and short block last */
 
   if (expr)
-      x = y;    // BAD: braceless "if" with braced "else"
+      x = y;    /* BAD: braceless "if" with braced "else" */
   else {
       ...
       ...
@@ -370,7 +375,7 @@ rather than after the more involved block:
 ::
 
   if (!expr) {
-    x = y; // putting the smaller block first is more readable
+    x = y;      /* putting the smaller block first is more readable */
   } else {
       ...
       ...
@@ -398,19 +403,19 @@ itself.
 
   void
   foo(int a, int b)
-  {                          // correct - function body
+  {                          /* correct - function body */
       int 2d[][] = {
-        {                    // correct - complex initialization
+        {                    /* correct - complex initialization */
           1, 2,
         },
       };
       if (a)
-      {                      // BAD: compound brace on its own line
+      {                      /* BAD: compound brace on its own line */
           do_stuff();
       }
-      {                      // correct - nested scope
+      {                      /* correct - nested scope */
           int tmp;
-          if (a < b) {       // correct - hanging brace
+          if (a < b) {       /* correct - hanging brace */
               tmp = b;
               b = a;
               a = tmp;
@@ -422,28 +427,52 @@ Conditional expressions
 -----------------------
 
 For readability reasons new code should avoid shortening
-comparisons to 0 for numeric types. Boolean and pointer
-comparisions may be shortened. All long forms are okay:
+comparisons to 0 for numeric types:
 
 ::
 
-  virFooPtr foos = NULL;
   size nfoos = 0;
+
+  GOOD:
+    if (nfoos != 0)
+    if (nfoos == 0)
+
+  BAD:
+    if (nfoos)
+    if (!nfoos)
+
+Prefer the shortened version for boolean values. Boolean values
+should never be compared against the literal ``true``, as a
+logical non-false value need not be ``1``.
+
+::
+
   bool hasFoos = false;
 
   GOOD:
-    if (!foos)
+    if (hasFoos)
     if (!hasFoos)
-    if (nfoos == 0)
-    if (foos == NULL)
-    if (hasFoos == true)
 
   BAD:
-    if (!nfoos)
-    if (nfoos)
+    if (hasFoos == true)
+    if (hasFoos != false)
+    if (hasFoos == false)
+    if (hasFoos != true)
+
+Pointer comparisons may be shortened. All long forms are okay.
+
+::
+
+  virFoo *foo = NULL;
+
+  GOOD:
+    if (foo)                 # or: if (foo != NULL)
+    if (!foo)                # or: if (foo == NULL)
 
 New code should avoid the ternary operator as much as possible.
-Specifically it must never span more than one line or nest:
+Its usage in basic cases is warranted (e.g. when deciding between
+two constant strings), however, it must never span more than one
+line or nest.
 
 ::
 
@@ -453,6 +482,9 @@ Specifically it must never span more than one line or nest:
                 NULL;
 
     char *foo = bar ? bar->baz ? bar->baz->foo : "nobaz" : "nobar";
+
+  GOOD:
+    virBufferAsprintf(buf, "<element>%s</element>\n", boolVar ? "yes" : "no");
 
 Preprocessor
 ------------
@@ -474,7 +506,7 @@ indentation to track nesting:
 
 ::
 
-  #if defined(HAVE_POSIX_FALLOCATE) && !defined(HAVE_FALLOCATE)
+  #if defined(WITH_POSIX_FALLOCATE) && !defined(WITH_FALLOCATE)
   # define fallocate(a, ignored, b, c) posix_fallocate(a, b, c)
   #endif
 
@@ -502,19 +534,13 @@ Scalars
 -  In the unusual event that you require a specific width, use a
    standard type like ``int32_t``, ``uint32_t``, ``uint64_t``,
    etc.
--  While using ``bool`` is good for readability, it comes with
-   minor caveats:
-
-   -  Don't use ``bool`` in places where the type size must be
-      constant across all systems, like public interfaces and
-      on-the-wire protocols. Note that it would be possible
-      (albeit wasteful) to use ``bool`` in libvirt's logical wire
-      protocol, since XDR maps that to its lower-level ``bool_t``
-      type, which **is** fixed-size.
-   -  Don't compare a bool variable against the literal, ``true``,
-      since a value with a logical non-false value need not be
-      ``1``. I.e., don't write ``if (seen == true) ...``. Rather,
-      write ``if (seen)...``.
+-  While using ``bool`` is good for readability, it comes with a
+   minor caveat: Don't use ``bool`` in places where the type size
+   must be constant across all systems, like public interfaces and
+   on-the-wire protocols. Note that it would be possible (albeit
+   wasteful) to use ``bool`` in libvirt's logical wire protocol,
+   since XDR maps that to its lower-level ``bool_t`` type, which
+   **is** fixed-size.
 
 Of course, take all of the above with a grain of salt. If you're
 about to use some system interface that requires a type like
@@ -541,6 +567,57 @@ diligent about this, when you see a non-const pointer, you're
 guaranteed that it is used to modify the storage it points to, or
 it is aliased to another pointer that is.
 
+Defining Local Variables
+------------------------
+
+Always define local variables at the top of the block in which they
+are used (before any pure code). Although modern C compilers allow
+defining a local variable in the middle of a block of code, this
+practice can lead to bugs, and must be avoided in all libvirt
+code. As indicated in these examples, it is okay to initialize
+variables where they are defined, even if the initialization involves
+calling another function.
+
+::
+
+  GOOD:
+    int
+    bob(char *loblaw)
+    {
+        int x;
+        int y = lawBlog();
+        char *z = NULL;
+
+        x = y + 20;
+        ...
+    }
+
+  BAD:
+    int
+    bob(char *loblaw)
+    {
+        int x;
+        int y = lawBlog();
+
+        x = y + 20;
+
+        char *z = NULL; /* <=== */
+        ...
+    }
+
+Prefer variable definitions on separate lines. This allows for smaller,
+easier to understand diffs when changing them. Define variables in the
+smallest possible scope.
+
+::
+
+  GOOD:
+    int count = 0;
+    int nnodes;
+
+  BAD:
+    int count = 0, nnodes;
+
 Attribute annotations
 ---------------------
 
@@ -556,7 +633,7 @@ analysis tools understand the code better:
 ``G_GNUC_FALLTHROUGH``
    allow code reuse by multiple switch cases
 
-``G_GNUC_NO_INLINE``
+``G_NO_INLINE``
    the function is mocked in the test suite
 
 ``G_GNUC_NORETURN``
@@ -628,35 +705,59 @@ use one of the following semantically named macros
 
    ::
 
-     STREQ(a,b)
-     STRNEQ(a,b)
+     STREQ(a, b)
+     STRNEQ(a, b)
 
 -  For case insensitive equality:
 
    ::
 
-     STRCASEEQ(a,b)
-     STRCASENEQ(a,b)
+     STRCASEEQ(a, b)
+     STRCASENEQ(a, b)
 
 -  For strict equality of a substring:
 
    ::
 
-     STREQLEN(a,b,n)
-     STRNEQLEN(a,b,n)
+     STREQLEN(a, b, n)
+     STRNEQLEN(a, b, n)
 
 -  For case insensitive equality of a substring:
 
    ::
 
-     STRCASEEQLEN(a,b,n)
-     STRCASENEQLEN(a,b,n)
+     STRCASEEQLEN(a, b, n)
+     STRCASENEQLEN(a, b, n)
 
 -  For strict equality of a prefix:
 
    ::
 
-     STRPREFIX(a,b)
+     STRPREFIX(a, b)
+
+-  For case insensitive equality of a prefix:
+
+   ::
+
+     STRCASEPREFIX(a, b)
+
+-  For skipping prefix:
+
+   ::
+
+     /* Instead of:
+      *   STRPREFIX(a, b) ? a + strlen(b) : NULL
+      * use: */
+     STRSKIP(a, b)
+
+-  For skipping prefix case insensitively:
+
+   ::
+
+     /* Instead of:
+      *   STRCASEPREFIX(a, b) ? a + strlen(b) : NULL
+      * use: */
+     STRCASESKIP(a, b)
 
 -  To avoid having to check if a or b are NULL:
 
@@ -672,19 +773,6 @@ Do not use the strncpy function. According to the man page, it
 does **not** guarantee a NULL-terminated buffer, which makes it
 extremely dangerous to use. Instead, use one of the replacement
 functions provided by libvirt:
-
-::
-
-  virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
-
-The first two arguments have the same meaning as for strncpy,
-namely the destination and source of the copy operation. Unlike
-strncpy, the function will always copy exactly the number of bytes
-requested and make sure the destination is NULL-terminated, as the
-source is required to be; sanity checks are performed to ensure
-the size of the destination, as specified by the last argument, is
-sufficient for the operation to succeed. On success, 0 is
-returned; on failure, a value <0 is returned instead.
 
 ::
 
@@ -811,7 +899,7 @@ vircommand.h:
 
 ::
 
-  void virCommandAddEnvFormat(virCommandPtr cmd, const char *format, ...)
+  void virCommandAddEnvFormat(virCommand *cmd, const char *format, ...)
       G_GNUC_PRINTF(2, 3);
 
 This makes it so gcc's -Wformat and -Wformat-security options can
@@ -830,24 +918,28 @@ Error messages visible to the user should be short and
 descriptive. All error messages are translated using gettext and
 thus must be wrapped in ``_()`` macro. To simplify the translation
 work, the error message must not be concatenated from various
-parts. To simplify searching for the error message in the code the
-strings should not be broken even if they result into a line
-longer than 80 columns and any formatting modifier should be
-enclosed by quotes or other obvious separator. If a string used
-with ``%s`` can be NULL the NULLSTR macro must be used.
+parts and all format strings must be permutable by directly
+addressing each argument using ``%N$...`` syntax. For example,
+``%1$s``, ``%2$llu`` or ``%4$s`` to format the first argument as
+string, the second argument as unsigned long long, and the fourth
+argument as string, respectively. To simplify searching for the error
+message in the code the strings should not be broken even if they
+result into a line longer than 80 columns and any formatting modifier
+should be enclosed by quotes or other obvious separator. If a string
+used with ``%N$s`` can be NULL the NULLSTR macro must be used.
 
 ::
 
   GOOD: virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to connect to remote host '%s'"), hostname)
+                       _("Failed to connect to remote host '%1$s'"), hostname)
 
   BAD: virReportError(VIR_ERR_INTERNAL_ERROR,
-                      _("Failed to %s to remote host '%s'"),
+                      _("Failed to %1$s to remote host '%2$s'"),
                       "connect", hostname);
 
   BAD: virReportError(VIR_ERR_INTERNAL_ERROR,
                       _("Failed to connect "
-                      "to remote host '%s'),
+                      "to remote host '%1$s'),
                       hostname);
 
 Use of goto
@@ -898,7 +990,7 @@ ok:
 Although libvirt does not encourage the Linux kernel wind/unwind
 style of multiple labels, there's a good general discussion of the
 issue archived at
-`KernelTrap <http://kerneltrap.org/node/553/2131>`__
+`KernelTrap <https://web.archive.org/web/20130521051957/http://kerneltrap.org/node/553/2131>`__
 
 When using goto, please use one of these standard labels if it
 makes sense:
@@ -907,7 +999,6 @@ makes sense:
 
   error:     A path only taken upon return with an error code
   cleanup:   A path taken upon return with success code + optional error
-  no_memory: A path only taken upon return with an OOM error code
   retry:     If needing to jump upwards (e.g., retry on EINTR)
 
 Top-level labels should be indented by one space (putting them on
@@ -922,3 +1013,18 @@ git):
    cleanup:
       /* ... do other stuff ... */
   }
+
+
+XML element and attribute naming
+--------------------------------
+
+New elements and/or attributes should be short and descriptive.
+In general, they should reflect what the feature does instead of
+how exactly it is named in given hypervisor because this creates
+an abstraction that other drivers can benefit from (for instance
+if the same feature is named differently in two hypervisors).
+That is not to say an element or attribute can't have the same
+name as in a hypervisor, but proceed with caution.
+
+Single worded names are preferred, but if more words must be
+used then they shall be joined in camelCase style.

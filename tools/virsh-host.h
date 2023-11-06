@@ -20,6 +20,9 @@
 
 #pragma once
 
-#include "virsh.h"
+#include "vsh.h"
+#include "virenum.h"
 
 extern const vshCmdDef hostAndHypervisorCmds[];
+
+VIR_ENUM_DECL(virshNodeSuspendTarget);

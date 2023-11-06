@@ -29,6 +29,10 @@
 #include <stdlib.h>
 #include "glibcompat.h"
 
+#if defined __clang_analyzer__ || defined __COVERITY__
+# define STATIC_ANALYSIS 1
+#endif
+
 #if STATIC_ANALYSIS
 # undef NDEBUG /* Don't let a prior NDEBUG definition cause trouble.  */
 # include <assert.h>
@@ -49,13 +53,13 @@
 /* The library itself needs to know enum sizes.  */
 #define VIR_ENUM_SENTINELS
 
-#ifdef HAVE_LIBINTL_H
+#ifdef WITH_LIBINTL_H
 # define DEFAULT_TEXT_DOMAIN PACKAGE
 # include <libintl.h>
 # define _(str) dgettext(PACKAGE, str)
-#else /* HAVE_LIBINTL_H */
+#else /* WITH_LIBINTL_H */
 # define _(str) str
-#endif /* HAVE_LIBINTL_H */
+#endif /* WITH_LIBINTL_H */
 #define N_(str) str
 
 #include "libvirt/libvirt.h"
@@ -83,28 +87,28 @@
 #define STRPREFIX(a, b) (strncmp(a, b, strlen(b)) == 0)
 #define STRCASEPREFIX(a, b) (g_ascii_strncasecmp(a, b, strlen(b)) == 0)
 #define STRSKIP(a, b) (STRPREFIX(a, b) ? (a) + strlen(b) : NULL)
+#define STRCASESKIP(a, b) (STRCASEPREFIX(a, b) ? (a) + strlen(b) : NULL)
+
+/**
+ * STRLIM
+ * @str: pointer to a string (evaluated once)
+ * @lim: length limit (evaluated twice)
+ *
+ * Evaluates as true if length of @str doesn't exceed the limit @lim. Note
+ * that @lim + 1 characters may be accessed.
+ */
+#define STRLIM(str, lim) (strnlen((str), (lim) + 1) <= (lim))
 
 #define STREQ_NULLABLE(a, b) (g_strcmp0(a, b) == 0)
 #define STRNEQ_NULLABLE(a, b) (g_strcmp0(a, b) != 0)
 
-#define NUL_TERMINATE(buf) do { (buf)[sizeof(buf)-1] = '\0'; } while (0)
+#define CONCAT_(a, b) a ## b
+#define CONCAT(a, b) CONCAT_(a, b)
 
 #ifdef WIN32
 # ifndef O_CLOEXEC
 #  define O_CLOEXEC _O_NOINHERIT
 # endif
-#endif
-
-/**
- * G_GNUC_NO_INLINE:
- *
- * Force compiler not to inline a method. Should be used if
- * the method need to be overridable by test mocks.
- *
- * TODO: Remove after upgrading to GLib >= 2.58
- */
-#ifndef G_GNUC_NO_INLINE
-# define G_GNUC_NO_INLINE __attribute__((__noinline__))
 #endif
 
 /**
@@ -128,7 +132,7 @@
  * whether a parameter is nonnull.  Make this attribute conditional
  * based on whether we are compiling for real or for analysis, while
  * still requiring correct gcc syntax when it is turned off.  See also
- * http://gcc.gnu.org/bugzilla/show_bug.cgi?id=17308 */
+ * https://gcc.gnu.org/bugzilla/show_bug.cgi?id=17308 */
 #ifndef ATTRIBUTE_NONNULL
 # if STATIC_ANALYSIS
 #  define ATTRIBUTE_NONNULL(m) __attribute__((__nonnull__(m)))
@@ -143,8 +147,17 @@
  *
  * silence the compiler warning when falling through a switch case
  *
- * TODO: Remove after upgrading to GLib >= 2.60
+ * Note: GLib 2.69.0 introduced version checks on the
+ * macro usage. Thus an app setting GLIB_VERSION_MAX_ALLOWED
+ * to less than 2.60 will trigger a warning using G_GNUC_FALLTHROUGH
+ * Normally the warning is a good thing, but we want to use our
+ * fallback impl, so we have to temporarily cull the GLib macro.
+ *
+ * All this should be removed once updating to min GLib >= 2.60
  */
+#if GLIB_CHECK_VERSION(2, 69, 0)
+# undef G_GNUC_FALLTHROUGH
+#endif
 #ifndef G_GNUC_FALLTHROUGH
 # if __GNUC_PREREQ (7, 0)
 #  define G_GNUC_FALLTHROUGH __attribute__((fallthrough))
@@ -165,7 +178,7 @@
     _Pragma ("GCC diagnostic push") \
     _Pragma ("GCC diagnostic ignored \"-Wpointer-sign\"")
 
-#if HAVE_SUGGEST_ATTRIBUTE_FORMAT
+#if WITH_SUGGEST_ATTRIBUTE_FORMAT
 # define VIR_WARNINGS_NO_PRINTF \
     _Pragma ("GCC diagnostic push") \
     _Pragma ("GCC diagnostic ignored \"-Wsuggest-attribute=format\"")
@@ -173,6 +186,10 @@
 # define VIR_WARNINGS_NO_PRINTF \
     _Pragma ("GCC diagnostic push")
 #endif
+
+#define VIR_WARNINGS_NO_UNUSED_FUNCTION \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wunused-function\"")
 
 /* Workaround bogus GCC 6.0 for logical 'or' equal expression warnings.
  * (GCC bz 69602) */
@@ -184,6 +201,15 @@
 # define VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR \
      _Pragma ("GCC diagnostic push")
 #endif
+
+/* Where ignore_value cannot be used because it's a statement */
+#define VIR_WARNINGS_NO_UNUSED_VARIABLE \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wunused-variable\"")
+
+#define VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wdeclaration-after-statement\"")
 
 #define VIR_WARNINGS_RESET \
     _Pragma ("GCC diagnostic pop")
@@ -220,6 +246,16 @@
         (a) = (a) ^ (b); \
     } while (0)
 
+
+/**
+ * VIR_IS_POW2:
+ *
+ * Returns true if given number is a power of two
+ */
+#define VIR_IS_POW2(x) \
+    ((x) && !((x) & ((x) - 1)))
+
+
 /**
  * virCheckFlags:
  * @supported: an OR'ed set of supported flags
@@ -233,10 +269,17 @@
  */
 #define virCheckFlags(supported, retval) \
     do { \
-        unsigned long __unsuppflags = flags & ~(supported); \
+        unsigned int __uiflags = flags; \
+        unsigned int __unsuppflags = flags & ~(supported); \
+        if (__uiflags != flags) { \
+            virReportInvalidArg(flags, \
+                                _("unsupported use of long flags in function %1$s"), \
+                                __FUNCTION__); \
+            return retval; \
+        } \
         if (__unsuppflags) { \
             virReportInvalidArg(flags, \
-                                _("unsupported flags (0x%lx) in function %s"), \
+                                _("unsupported flags (0x%1$x) in function %2$s"), \
                                 __unsuppflags, __FUNCTION__); \
             return retval; \
         } \
@@ -255,10 +298,17 @@
  */
 #define virCheckFlagsGoto(supported, label) \
     do { \
-        unsigned long __unsuppflags = flags & ~(supported); \
+        unsigned int __uiflags = flags; \
+        unsigned int __unsuppflags = flags & ~(supported); \
+        if (__uiflags != flags) { \
+            virReportInvalidArg(flags, \
+                                _("unsupported use of long flags in function %1$s"), \
+                                __FUNCTION__); \
+            goto label; \
+        } \
         if (__unsuppflags) { \
             virReportInvalidArg(flags, \
-                                _("unsupported flags (0x%lx) in function %s"), \
+                                _("unsupported flags (0x%1$x) in function %2$s"), \
                                 __unsuppflags, __FUNCTION__); \
             goto label; \
         } \
@@ -283,8 +333,7 @@
     do { \
         if ((flags & FLAG1) && (flags & FLAG2)) { \
             virReportInvalidArg(ctl, \
-                                _("Flags '%s' and '%s' are mutually " \
-                                  "exclusive"), \
+                                _("Flags '%1$s' and '%2$s' are mutually exclusive"), \
                                 #FLAG1, #FLAG2); \
             return RET; \
         } \
@@ -307,8 +356,7 @@
     do { \
         if ((flags & FLAG1) && (flags & FLAG2)) { \
             virReportInvalidArg(ctl, \
-                                _("Flags '%s' and '%s' are mutually " \
-                                  "exclusive"), \
+                                _("Flags '%1$s' and '%2$s' are mutually exclusive"), \
                                 #FLAG1, #FLAG2); \
             goto LABEL; \
         } \
@@ -331,9 +379,9 @@
  */
 #define VIR_REQUIRE_FLAG_RET(FLAG1, FLAG2, RET) \
     do { \
-        if ((flags & FLAG1) && !(flags & FLAG2)) { \
+        if ((flags & (FLAG1)) && !(flags & (FLAG2))) { \
             virReportInvalidArg(ctl, \
-                                _("Flag '%s' is required by flag '%s'"), \
+                                _("Flag '%1$s' is required by flag '%2$s'"), \
                                 #FLAG2, #FLAG1); \
             return RET; \
         } \
@@ -353,9 +401,9 @@
  */
 #define VIR_REQUIRE_FLAG_GOTO(FLAG1, FLAG2, LABEL) \
     do { \
-        if ((flags & FLAG1) && !(flags & FLAG2)) { \
+        if ((flags & (FLAG1)) && !(flags & (FLAG2))) { \
             virReportInvalidArg(ctl, \
-                                _("Flag '%s' is required by flag '%s'"), \
+                                _("Flag '%1$s' is required by flag '%2$s'"), \
                                 #FLAG2, #FLAG1); \
             goto LABEL; \
         } \
@@ -434,7 +482,7 @@
 #define virCheckReadOnlyGoto(flags, label) \
     do { \
         if ((flags) & VIR_CONNECT_RO) { \
-            virReportRestrictedError(_("read only access prevents %s"), \
+            virReportRestrictedError(_("read only access prevents %1$s"), \
                                      __FUNCTION__); \
             goto label; \
         } \
@@ -493,7 +541,7 @@ enum {
 #endif
 
 /* Ideally callers would use the g_*printf
- * functions directly but there are alot to
+ * functions directly but there are a lot to
  * convert, so until then...
  */
 #ifndef VIR_NO_GLIB_STDIO

@@ -30,13 +30,11 @@
 #include "internal.h"
 #include "testutils.h"
 #include "testutilsqemu.h"
-#include "qemu/qemu_domain.h"
 #include "viralloc.h"
 #include "virerror.h"
 #include "virfile.h"
 #include "virlog.h"
 #include "security/security_manager.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -44,7 +42,7 @@ VIR_LOG_INIT("tests.securityselinuxlabeltest");
 
 static virQEMUDriver driver;
 
-static virSecurityManagerPtr mgr;
+static virSecurityManager *mgr;
 
 typedef struct testSELinuxFile testSELinuxFile;
 
@@ -59,10 +57,10 @@ testUserXattrEnabled(void)
     int ret = -1;
     ssize_t len;
     const char *con_value = "system_u:object_r:svirt_image_t:s0:c41,c264";
-    char *path = NULL;
+    g_autofree char *path = NULL;
     path = g_strdup_printf("%s/securityselinuxlabeldata/testxattr", abs_builddir);
 
-    if (virFileMakePath(abs_builddir "/securityselinuxlabeldata") < 0 ||
+    if (g_mkdir_with_parents(abs_builddir "/securityselinuxlabeldata", 0777) < 0 ||
         virFileTouch(path, 0600) < 0)
         goto cleanup;
 
@@ -79,20 +77,16 @@ testUserXattrEnabled(void)
  cleanup:
     unlink(path);
     rmdir(abs_builddir "/securityselinuxlabeldata");
-    VIR_FREE(path);
     return ret;
 }
 
-static int
+static void
 testSELinuxMungePath(char **path)
 {
-    char *tmp;
+    char *tmp = g_strdup_printf("%s/securityselinuxlabeldata%s", abs_builddir, *path);
 
-    tmp = g_strdup_printf("%s/securityselinuxlabeldata%s", abs_builddir, *path);
-
-    VIR_FREE(*path);
+    g_free(*path);
     *path = tmp;
-    return 0;
 }
 
 static int
@@ -100,10 +94,9 @@ testSELinuxLoadFileList(const char *testname,
                         testSELinuxFile **files,
                         size_t *nfiles)
 {
-    int ret = -1;
-    char *path = NULL;
-    FILE *fp = NULL;
-    char *line = NULL;
+    g_autofree char *path = NULL;
+    g_autoptr(FILE) fp = NULL;
+    g_autofree char *line = NULL;
 
     *files = NULL;
     *nfiles = 0;
@@ -112,16 +105,15 @@ testSELinuxLoadFileList(const char *testname,
                            testname);
 
     if (!(fp = fopen(path, "r")))
-        goto cleanup;
+        return -1;
 
-    if (VIR_ALLOC_N(line, 1024) < 0)
-        goto cleanup;
+    line = g_new0(char, 1024);
 
     while (!feof(fp)) {
         char *file = NULL, *context = NULL, *tmp;
         if (!fgets(line, 1024, fp)) {
             if (!feof(fp))
-                goto cleanup;
+                return -1;
             break;
         }
 
@@ -130,7 +122,7 @@ testSELinuxLoadFileList(const char *testname,
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "unexpected format for line '%s'",
                            line);
-            goto cleanup;
+            return -1;
         }
         *tmp = '\0';
         tmp++;
@@ -145,31 +137,20 @@ testSELinuxLoadFileList(const char *testname,
                 *tmp = '\0';
         }
 
-        if (VIR_EXPAND_N(*files, *nfiles, 1) < 0) {
-            VIR_FREE(file);
-            VIR_FREE(context);
-            goto cleanup;
-        }
-
+        VIR_EXPAND_N(*files, *nfiles, 1);
         (*files)[(*nfiles)-1].file = file;
         (*files)[(*nfiles)-1].context = context;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FORCE_FCLOSE(fp);
-    VIR_FREE(path);
-    VIR_FREE(line);
-    return ret;
+    return 0;
 }
 
 
-static virDomainDefPtr
+static virDomainDef *
 testSELinuxLoadDef(const char *testname)
 {
-    char *xmlfile = NULL;
-    virDomainDefPtr def = NULL;
+    g_autofree char *xmlfile = NULL;
+    virDomainDef *def = NULL;
     size_t i;
 
     xmlfile = g_strdup_printf("%s/securityselinuxlabeldata/%s.xml", abs_srcdir,
@@ -177,15 +158,14 @@ testSELinuxLoadDef(const char *testname)
 
     if (!(def = virDomainDefParseFile(xmlfile, driver.xmlopt,
                                       NULL, 0)))
-        goto cleanup;
+        return NULL;
 
     for (i = 0; i < def->ndisks; i++) {
         if (def->disks[i]->src->type != VIR_STORAGE_TYPE_FILE &&
             def->disks[i]->src->type != VIR_STORAGE_TYPE_BLOCK)
             continue;
 
-        if (testSELinuxMungePath(&def->disks[i]->src->path) < 0)
-            goto cleanup;
+        testSELinuxMungePath(&def->disks[i]->src->path);
     }
 
     for (i = 0; i < def->nserials; i++) {
@@ -196,23 +176,17 @@ testSELinuxLoadDef(const char *testname)
             continue;
 
         if (def->serials[i]->source->type == VIR_DOMAIN_CHR_TYPE_UNIX) {
-            if (testSELinuxMungePath(&def->serials[i]->source->data.nix.path) < 0)
-                goto cleanup;
+            testSELinuxMungePath(&def->serials[i]->source->data.nix.path);
         } else {
-            if (testSELinuxMungePath(&def->serials[i]->source->data.file.path) < 0)
-                goto cleanup;
+            testSELinuxMungePath(&def->serials[i]->source->data.file.path);
         }
     }
 
-    if (def->os.kernel &&
-        testSELinuxMungePath(&def->os.kernel) < 0)
-        goto cleanup;
-    if (def->os.initrd &&
-        testSELinuxMungePath(&def->os.initrd) < 0)
-        goto cleanup;
+    if (def->os.kernel)
+        testSELinuxMungePath(&def->os.kernel);
+    if (def->os.initrd)
+        testSELinuxMungePath(&def->os.initrd);
 
- cleanup:
-    VIR_FREE(xmlfile);
     return def;
 }
 
@@ -222,7 +196,7 @@ testSELinuxCreateDisks(testSELinuxFile *files, size_t nfiles)
 {
     size_t i;
 
-    if (virFileMakePath(abs_builddir "/securityselinuxlabeldata/nfs") < 0)
+    if (g_mkdir_with_parents(abs_builddir "/securityselinuxlabeldata/nfs", 0777) < 0)
         return -1;
 
     for (i = 0; i < nfiles; i++) {
@@ -252,10 +226,9 @@ static int
 testSELinuxCheckLabels(testSELinuxFile *files, size_t nfiles)
 {
     size_t i;
-    security_context_t ctx;
 
     for (i = 0; i < nfiles; i++) {
-        ctx = NULL;
+        g_autofree char *ctx = NULL;
         if (getfilecon(files[i].file, &ctx) < 0) {
             if (errno == ENODATA) {
                 /* nothing to do */
@@ -272,10 +245,8 @@ testSELinuxCheckLabels(testSELinuxFile *files, size_t nfiles)
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "File %s context '%s' did not match expected '%s'",
                            files[i].file, ctx, files[i].context);
-            VIR_FREE(ctx);
             return -1;
         }
-        VIR_FREE(ctx);
     }
     return 0;
 }
@@ -288,7 +259,7 @@ testSELinuxLabeling(const void *opaque)
     testSELinuxFile *files = NULL;
     size_t nfiles = 0;
     size_t i;
-    virDomainDefPtr def = NULL;
+    g_autoptr(virDomainDef) def = NULL;
 
     if (testSELinuxLoadFileList(testname, &files, &nfiles) < 0)
         goto cleanup;
@@ -311,7 +282,6 @@ testSELinuxLabeling(const void *opaque)
     if (testSELinuxDeleteDisks(files, nfiles) < 0)
         VIR_WARN("unable to fully clean up");
 
-    virDomainDefFree(def);
     for (i = 0; i < nfiles; i++) {
         VIR_FREE(files[i].file);
         VIR_FREE(files[i].context);
@@ -329,12 +299,18 @@ mymain(void)
 {
     int ret = 0;
     int rc = testUserXattrEnabled();
-    g_autoptr(virQEMUCaps) qemuCaps = NULL;
+    g_autoptr(GHashTable) capslatest = testQemuGetLatestCaps();
+    g_autoptr(GHashTable) capscache = virHashNew(virObjectUnref);
 
-    if (rc < 0)
+    if (rc < 0) {
+        VIR_TEST_VERBOSE("failed to determine xattr support");
         return EXIT_FAILURE;
-    if (!rc)
+    }
+
+    if (rc == 0) {
+        VIR_TEST_VERBOSE("xattr unsupported");
         return EXIT_AM_SKIP;
+    }
 
     if (!(mgr = virSecurityManagerNew("selinux", "QEMU",
                                       VIR_SECURITY_MANAGER_DEFAULT_CONFINED |
@@ -347,20 +323,17 @@ mymain(void)
     if (qemuTestDriverInit(&driver) < 0)
         return EXIT_FAILURE;
 
-    if (!(qemuCaps = virQEMUCapsNew()))
-        return EXIT_FAILURE;
+    qemuTestSetHostArch(&driver, VIR_ARCH_X86_64);
 
-    virQEMUCapsSet(qemuCaps, QEMU_CAPS_DEVICE_CIRRUS_VGA);
-    virQEMUCapsSet(qemuCaps, QEMU_CAPS_VNC);
-
-    if (qemuTestCapsCacheInsert(driver.qemuCapsCache, qemuCaps) < 0)
+    if (testQemuInsertRealCaps(driver.qemuCapsCache, "x86_64", "latest", "",
+                               capslatest, capscache, NULL, NULL) < 0)
         return EXIT_FAILURE;
 
 #define DO_TEST_LABELING(name) \
     if (virTestRun("Labelling " # name, testSELinuxLabeling, name) < 0) \
         ret = -1;
 
-    setcon((security_context_t)"system_r:system_u:libvirtd_t:s0:c0.c1023");
+    setcon("system_r:system_u:libvirtd_t:s0:c0.c1023");
 
     DO_TEST_LABELING("disks");
     DO_TEST_LABELING("kernel");
@@ -374,4 +347,4 @@ mymain(void)
 
 VIR_TEST_MAIN_PRELOAD(mymain,
                       VIR_TEST_MOCK("domaincaps"),
-                      abs_builddir "/.libs/libsecurityselinuxhelper.so")
+                      abs_builddir "/libsecurityselinuxhelper.so")

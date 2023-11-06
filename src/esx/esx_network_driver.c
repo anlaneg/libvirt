@@ -28,12 +28,10 @@
 #include "viruuid.h"
 #include "network_conf.h"
 #include "esx_private.h"
-#include "esx_network_driver.h"
 #include "esx_vi.h"
 #include "esx_vi_methods.h"
 #include "esx_util.h"
 #include "vircrypto.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_ESX
 
@@ -150,7 +148,7 @@ esxNetworkLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
         virUUIDFormat(uuid, uuid_string);
 
         virReportError(VIR_ERR_NO_NETWORK,
-                       _("Could not find HostVirtualSwitch with UUID '%s'"),
+                       _("Could not find HostVirtualSwitch with UUID '%1$s'"),
                        uuid_string);
 
         goto cleanup;
@@ -212,7 +210,7 @@ esxNetworkLookupByName(virConnectPtr conn, const char *name)
 
 
 static int
-esxBandwidthToShapingPolicy(virNetDevBandwidthPtr bandwidth,
+esxBandwidthToShapingPolicy(virNetDevBandwidth *bandwidth,
                             esxVI_HostNetworkTrafficShapingPolicy **shapingPolicy)
 {
     int result = -1;
@@ -274,11 +272,12 @@ esxBandwidthToShapingPolicy(virNetDevBandwidthPtr bandwidth,
 
 
 static virNetworkPtr
-esxNetworkDefineXML(virConnectPtr conn, const char *xml)
+esxNetworkDefineXMLFlags(virConnectPtr conn, const char *xml,
+                         unsigned int flags)
 {
     virNetworkPtr network = NULL;
     esxPrivate *priv = conn->privateData;
-    virNetworkDefPtr def = NULL;
+    g_autoptr(virNetworkDef) def = NULL;
     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
     esxVI_HostPortGroup *hostPortGroupList = NULL;
     esxVI_HostPortGroup *hostPortGroup = NULL;
@@ -291,11 +290,13 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
 
     unsigned char md5[VIR_CRYPTO_HASH_SIZE_MD5]; /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
 
+    virCheckFlags(VIR_NETWORK_DEFINE_VALIDATE, NULL);
+
     if (esxVI_EnsureSession(priv->primary) < 0)
         return NULL;
 
     /* Parse network XML */
-    def = virNetworkDefParseString(xml, NULL);
+    def = virNetworkDefParse(xml, NULL, NULL, !!(flags & VIR_NETWORK_DEFINE_VALIDATE));
 
     if (!def)
         return NULL;
@@ -310,8 +311,7 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
     if (hostVirtualSwitch) {
         /* FIXME */
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("HostVirtualSwitch already exists, editing existing "
-                         "ones is not supported yet"));
+                       _("HostVirtualSwitch already exists, editing existing ones is not supported yet"));
         goto cleanup;
     }
 
@@ -336,7 +336,7 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
     case VIR_NETWORK_FORWARD_PASSTHROUGH:
     case VIR_NETWORK_FORWARD_HOSTDEV:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Unsupported forward mode '%s'"),
+                       _("Unsupported forward mode '%1$s'"),
                        virNetworkForwardTypeToString(def->forward.type));
         goto cleanup;
 
@@ -355,8 +355,8 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
             for (hostPortGroup = hostPortGroupList; hostPortGroup;
                  hostPortGroup = hostPortGroup->_next) {
                 if (STREQ(def->portGroups[i].name, hostPortGroup->spec->name)) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("HostPortGroup with name '%s' exists already"),
+                    virReportError(VIR_ERR_NETWORK_EXIST,
+                                   _("HostPortGroup with name '%1$s' exists already"),
                                    def->portGroups[i].name);
                     goto cleanup;
                 }
@@ -388,9 +388,8 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
 
             if (def->forward.ifs[i].type !=
                 VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV) {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("unsupported device type in network %s "
-                                 "interface pool"),
+                virReportError(VIR_ERR_NO_SUPPORT,
+                               _("unsupported device type in network %1$s interface pool"),
                                def->name);
                 goto cleanup;
             }
@@ -411,7 +410,7 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
 
             if (! found) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Could not find PhysicalNic with name '%s'"),
+                               _("Could not find PhysicalNic with name '%1$s'"),
                                def->forward.ifs[i].device.dev);
                 goto cleanup;
             }
@@ -482,7 +481,6 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
     network = virGetNetwork(conn, hostVirtualSwitch->name, md5);
 
  cleanup:
-    virNetworkDefFree(def);
     esxVI_HostVirtualSwitch_Free(&hostVirtualSwitch);
     esxVI_HostPortGroup_Free(&hostPortGroupList);
     esxVI_HostVirtualSwitchSpec_Free(&hostVirtualSwitchSpec);
@@ -490,6 +488,14 @@ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
     esxVI_HostPortGroupSpec_Free(&hostPortGroupSpec);
 
     return network;
+}
+
+
+
+static virNetworkPtr
+esxNetworkDefineXML(virConnectPtr conn, const char *xml)
+{
+    return esxNetworkDefineXMLFlags(conn, xml, 0);
 }
 
 
@@ -529,7 +535,7 @@ esxNetworkUndefine(virNetworkPtr network)
                      hostPortGroupPort = hostPortGroupPort->_next) {
                     if (STRNEQ(hostPortGroupPort->type, "virtualMachine")) {
                         virReportError(VIR_ERR_OPERATION_INVALID,
-                                       _("Cannot undefine HostVirtualSwitch that has a '%s' port"),
+                                       _("Cannot undefine HostVirtualSwitch that has a '%1$s' port"),
                                        hostPortGroupPort->type);
                         goto cleanup;
                     }
@@ -542,7 +548,7 @@ esxNetworkUndefine(virNetworkPtr network)
 
         if (! found) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not find HostPortGroup for key '%s'"),
+                           _("Could not find HostPortGroup for key '%1$s'"),
                            hostPortGroupKey->value);
             goto cleanup;
         }
@@ -570,7 +576,7 @@ esxNetworkUndefine(virNetworkPtr network)
 
         if (! found) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not find HostPortGroup for key '%s'"),
+                           _("Could not find HostPortGroup for key '%1$s'"),
                            hostPortGroupKey->value);
             goto cleanup;
         }
@@ -597,17 +603,16 @@ esxNetworkUndefine(virNetworkPtr network)
 
 static int
 esxShapingPolicyToBandwidth(esxVI_HostNetworkTrafficShapingPolicy *shapingPolicy,
-                            virNetDevBandwidthPtr *bandwidth)
+                            virNetDevBandwidth **bandwidth)
 {
     ESX_VI_CHECK_ARG_LIST(bandwidth);
 
     if (!shapingPolicy || shapingPolicy->enabled != esxVI_Boolean_True)
         return 0;
 
-    if (VIR_ALLOC(*bandwidth) < 0 ||
-        VIR_ALLOC((*bandwidth)->in) < 0 ||
-        VIR_ALLOC((*bandwidth)->out) < 0)
-        return -1;
+    *bandwidth = g_new0(virNetDevBandwidth, 1);
+    (*bandwidth)->in = g_new0(virNetDevBandwidthRate, 1);
+    (*bandwidth)->out = g_new0(virNetDevBandwidthRate, 1);
 
     if (shapingPolicy->averageBandwidth) {
         /* Scale bits per second to kilobytes per second */
@@ -650,13 +655,12 @@ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
     esxVI_String *networkNameList = NULL;
     esxVI_String *hostPortGroupKey = NULL;
     esxVI_String *networkName = NULL;
-    virNetworkDefPtr def;
+    g_autoptr(virNetworkDef) def = NULL;
 
     if (esxVI_EnsureSession(priv->primary) < 0)
         return NULL;
 
-    if (VIR_ALLOC(def) < 0)
-        goto cleanup;
+    def = g_new0(virNetworkDef, 1);
 
     /* Lookup HostVirtualSwitch */
     if (esxVI_LookupHostVirtualSwitchByName(priv->primary, network_->name,
@@ -682,9 +686,7 @@ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
 
     if (count > 0) {
         def->forward.type = VIR_NETWORK_FORWARD_BRIDGE;
-
-        if (VIR_ALLOC_N(def->forward.ifs, count) < 0)
-            goto cleanup;
+        def->forward.ifs = g_new0(virNetworkForwardIfDef, count);
 
         /* Find PhysicalNic by key */
         if (esxVI_LookupPhysicalNicList(priv->primary, &physicalNicList) < 0)
@@ -710,7 +712,7 @@ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
 
             if (! found) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Could not find PhysicalNic with key '%s'"),
+                               _("Could not find PhysicalNic with key '%1$s'"),
                                physicalNicKey->value);
                 goto cleanup;
             }
@@ -726,8 +728,7 @@ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
     }
 
     if (count > 0) {
-        if (VIR_ALLOC_N(def->portGroups, count) < 0)
-            goto cleanup;
+        def->portGroups = g_new0(virPortGroupDef, count);
 
         /* Lookup Network list and create name list */
         if (esxVI_String_AppendValueToList(&propertyNameList, "name") < 0 ||
@@ -784,7 +785,7 @@ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
 
             if (! found) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Could not find HostPortGroup with key '%s'"),
+                               _("Could not find HostPortGroup with key '%1$s'"),
                                hostPortGroupKey->value);
                 goto cleanup;
             }
@@ -808,7 +809,6 @@ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
     esxVI_String_Free(&propertyNameList);
     esxVI_ObjectContent_Free(&networkList);
     esxVI_String_Free(&networkNameList);
-    virNetworkDefFree(def);
 
     return xml;
 }
@@ -863,6 +863,73 @@ esxNetworkIsPersistent(virNetworkPtr network G_GNUC_UNUSED)
 
 
 
+#define MATCH(FLAG) (flags & (FLAG))
+static int
+esxConnectListAllNetworks(virConnectPtr conn,
+                          virNetworkPtr **nets,
+                          unsigned int flags)
+{
+    int ret = -1;
+    esxPrivate *priv = conn->privateData;
+    esxVI_HostVirtualSwitch *hostVirtualSwitchList = NULL;
+    esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+    size_t count = 0;
+    size_t i;
+
+    virCheckFlags(VIR_CONNECT_LIST_NETWORKS_FILTERS_ALL, -1);
+
+    /*
+     * ESX networks are always active, persistent, and
+     * autostarted, so return zero elements in case we are asked
+     * for networks different than that.
+     */
+    if (MATCH(VIR_CONNECT_LIST_NETWORKS_FILTERS_ACTIVE) &&
+        !(MATCH(VIR_CONNECT_LIST_NETWORKS_ACTIVE)))
+        return 0;
+    if (MATCH(VIR_CONNECT_LIST_NETWORKS_FILTERS_PERSISTENT) &&
+        !(MATCH(VIR_CONNECT_LIST_NETWORKS_PERSISTENT)))
+        return 0;
+    if (MATCH(VIR_CONNECT_LIST_NETWORKS_FILTERS_AUTOSTART) &&
+        !(MATCH(VIR_CONNECT_LIST_NETWORKS_AUTOSTART)))
+        return 0;
+
+    if (esxVI_EnsureSession(priv->primary) < 0 ||
+        esxVI_LookupHostVirtualSwitchList(priv->primary,
+                                          &hostVirtualSwitchList) < 0) {
+        return -1;
+    }
+
+    for (hostVirtualSwitch = hostVirtualSwitchList; hostVirtualSwitch;
+         hostVirtualSwitch = hostVirtualSwitch->_next) {
+        if (nets) {
+            virNetworkPtr net = virtualswitchToNetwork(conn, hostVirtualSwitch);
+            if (!net)
+                goto cleanup;
+            VIR_APPEND_ELEMENT(*nets, count, net);
+        } else {
+            ++count;
+        }
+    }
+
+    ret = count;
+
+ cleanup:
+    if (ret < 0) {
+        if (nets && *nets) {
+            for (i = 0; i < count; ++i)
+                g_free((*nets)[i]);
+            g_clear_pointer(nets, g_free);
+        }
+    }
+
+    esxVI_HostVirtualSwitch_Free(&hostVirtualSwitchList);
+
+    return ret;
+}
+#undef MATCH
+
+
+
 virNetworkDriver esxNetworkDriver = {
     .connectNumOfNetworks = esxConnectNumOfNetworks, /* 0.10.0 */
     .connectListNetworks = esxConnectListNetworks, /* 0.10.0 */
@@ -871,10 +938,12 @@ virNetworkDriver esxNetworkDriver = {
     .networkLookupByUUID = esxNetworkLookupByUUID, /* 0.10.0 */
     .networkLookupByName = esxNetworkLookupByName, /* 0.10.0 */
     .networkDefineXML = esxNetworkDefineXML, /* 0.10.0 */
+    .networkDefineXMLFlags = esxNetworkDefineXMLFlags, /* 7.7.0 */
     .networkUndefine = esxNetworkUndefine, /* 0.10.0 */
     .networkGetXMLDesc = esxNetworkGetXMLDesc, /* 0.10.0 */
     .networkGetAutostart = esxNetworkGetAutostart, /* 0.10.0 */
     .networkSetAutostart = esxNetworkSetAutostart, /* 0.10.0 */
     .networkIsActive = esxNetworkIsActive, /* 0.10.0 */
     .networkIsPersistent = esxNetworkIsPersistent, /* 0.10.0 */
+    .connectListAllNetworks = esxConnectListAllNetworks, /* 6.8.0 */
 };

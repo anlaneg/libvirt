@@ -21,8 +21,6 @@
 #include <signal.h>
 
 #include "testutils.h"
-#include "virerror.h"
-#include "viralloc.h"
 #include "virlog.h"
 
 #include "virauthconfig.h"
@@ -32,7 +30,7 @@
 VIR_LOG_INIT("tests.authconfigtest");
 
 struct ConfigLookupData {
-    virAuthConfigPtr config;
+    virAuthConfig *config;
     const char *hostname;
     const char *service;
     const char *credname;
@@ -82,21 +80,7 @@ mymain(void)
 {
     int ret = 0;
 
-    virAuthConfigPtr config;
-
-#ifndef WIN32
-    signal(SIGPIPE, SIG_IGN);
-#endif /* WIN32 */
-
-#define TEST_LOOKUP(config, hostname, service, credname, expect) \
-    do  { \
-        const struct ConfigLookupData data = { \
-            config, hostname, service, credname, expect \
-        }; \
-        if (virTestRun("Test Lookup " hostname "-" service "-" credname, \
-                        testAuthLookup, &data) < 0) \
-            ret = -1; \
-    } while (0)
+    virAuthConfig *config;
 
     const char *confdata =
         "[credentials-test]\n"
@@ -118,6 +102,20 @@ mymain(void)
         "\n"
         "[auth-libvirt-prod1.example.com]\n"
         "credentials=prod\n";
+
+#define TEST_LOOKUP(config, hostname, service, credname, expect) \
+    do  { \
+        const struct ConfigLookupData data = { \
+            config, hostname, service, credname, expect \
+        }; \
+        if (virTestRun("Test Lookup " hostname "-" service "-" credname, \
+                        testAuthLookup, &data) < 0) \
+            ret = -1; \
+    } while (0)
+
+#ifndef WIN32
+    signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
     if (!(config = virAuthConfigNewData("auth.conf", confdata, strlen(confdata))))
         return EXIT_FAILURE;

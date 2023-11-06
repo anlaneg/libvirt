@@ -31,10 +31,10 @@
 VIR_LOG_INIT("lxc.lxc_hostdev");
 
 int
-virLXCUpdateActiveUSBHostdevs(virLXCDriverPtr driver,
-                              virDomainDefPtr def)
+virLXCUpdateActiveUSBHostdevs(virLXCDriver *driver,
+                              virDomainDef *def)
 {
-    virHostdevManagerPtr hostdev_mgr = driver->hostdevMgr;
+    virHostdevManager *hostdev_mgr = driver->hostdevMgr;
 
     if (!def->nhostdevs)
         return 0;
@@ -45,22 +45,22 @@ virLXCUpdateActiveUSBHostdevs(virLXCDriverPtr driver,
 }
 
 static int
-virLXCPrepareHostUSBDevices(virLXCDriverPtr driver,
-                            virDomainDefPtr def)
+virLXCPrepareHostUSBDevices(virLXCDriver *driver,
+                            virDomainDef *def)
 {
-    virDomainHostdevDefPtr *hostdevs = def->hostdevs;
+    virDomainHostdevDef **hostdevs = def->hostdevs;
     int nhostdevs = def->nhostdevs;
     const char *dom_name = def->name;
     unsigned int flags = 0;
-    virHostdevManagerPtr hostdev_mgr = driver->hostdevMgr;
+    virHostdevManager *hostdev_mgr = driver->hostdevMgr;
 
     return virHostdevPrepareUSBDevices(hostdev_mgr, LXC_DRIVER_NAME, dom_name,
                                        hostdevs, nhostdevs, flags);
 }
 
 
-int virLXCPrepareHostDevices(virLXCDriverPtr driver,
-                             virDomainDefPtr def)
+int virLXCPrepareHostDevices(virLXCDriver *driver,
+                             virDomainDef *def)
 {
     size_t i;
 
@@ -69,39 +69,46 @@ int virLXCPrepareHostDevices(virLXCDriverPtr driver,
 
     /* Sanity check for supported configurations only */
     for (i = 0; i < def->nhostdevs; i++) {
-        virDomainHostdevDefPtr dev = def->hostdevs[i];
+        virDomainHostdevDef *dev = def->hostdevs[i];
 
         switch (dev->mode) {
         case VIR_DOMAIN_HOSTDEV_MODE_SUBSYS:
             switch (dev->source.subsys.type) {
             case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
                 break;
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI:
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST:
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV:
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_LAST:
             default:
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("Unsupported hostdev type %s"),
+                               _("Unsupported hostdev type %1$s"),
                                virDomainHostdevSubsysTypeToString(dev->source.subsys.type));
                 return -1;
             }
             break;
 
         case VIR_DOMAIN_HOSTDEV_MODE_CAPABILITIES:
-            switch (dev->source.subsys.type) {
+            switch (dev->source.caps.type) {
             case VIR_DOMAIN_HOSTDEV_CAPS_TYPE_STORAGE:
             case VIR_DOMAIN_HOSTDEV_CAPS_TYPE_MISC:
             case VIR_DOMAIN_HOSTDEV_CAPS_TYPE_NET:
                 break;
+            case VIR_DOMAIN_HOSTDEV_CAPS_TYPE_LAST:
             default:
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("Unsupported hostdev type %s"),
-                               virDomainHostdevSubsysTypeToString(dev->source.subsys.type));
+                               _("Unsupported hostdev type %1$s"),
+                               virDomainHostdevSubsysTypeToString(dev->source.caps.type));
                 return -1;
             }
             break;
 
 
         default:
+        case VIR_DOMAIN_HOSTDEV_MODE_LAST:
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Unsupported hostdev mode %s"),
+                           _("Unsupported hostdev mode %1$s"),
                            virDomainHostdevModeTypeToString(dev->mode));
             return -1;
         }
@@ -115,19 +122,19 @@ int virLXCPrepareHostDevices(virLXCDriverPtr driver,
 
 
 static void
-virLXCDomainReAttachHostUSBDevices(virLXCDriverPtr driver,
+virLXCDomainReAttachHostUSBDevices(virLXCDriver *driver,
                                    const char *name,
-                                   virDomainHostdevDefPtr *hostdevs,
+                                   virDomainHostdevDef **hostdevs,
                                    int nhostdevs)
 {
-    virHostdevManagerPtr hostdev_mgr = driver->hostdevMgr;
+    virHostdevManager *hostdev_mgr = driver->hostdevMgr;
 
     virHostdevReAttachUSBDevices(hostdev_mgr, LXC_DRIVER_NAME,
                                  name, hostdevs, nhostdevs);
 }
 
-void virLXCDomainReAttachHostDevices(virLXCDriverPtr driver,
-                                     virDomainDefPtr def)
+void virLXCDomainReAttachHostDevices(virLXCDriver *driver,
+                                     virDomainDef *def)
 {
     if (!def->nhostdevs)
         return;

@@ -28,11 +28,9 @@
 
 #include "internal.h"
 #include "viralloc.h"
-#include "virfile.h"
 #include "virlog.h"
-#include "viruuid.h"
 #include "storage_conf.h"
-#include "virstoragefile.h"
+#include "storage_source_conf.h"
 #include "esx_storage_backend_vmfs.h"
 #include "esx_private.h"
 #include "esx_vi.h"
@@ -444,14 +442,12 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
     esxVI_DatastoreHostMount *hostMount = NULL;
     esxVI_DynamicProperty *dynamicProperty = NULL;
     esxVI_Boolean accessible = esxVI_Boolean_Undefined;
-    virStoragePoolDef def;
+    virStoragePoolDef def = { 0 };
     esxVI_DatastoreInfo *info = NULL;
     esxVI_NasDatastoreInfo *nasInfo = NULL;
     char *xml = NULL;
 
     virCheckFlags(0, NULL);
-
-    memset(&def, 0, sizeof(def));
 
     if (esxVI_String_AppendValueListToList(&propertyNameList,
                                            "summary.accessible\0"
@@ -512,8 +508,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
     if (esxVI_LocalDatastoreInfo_DynamicCast(info)) {
         def.type = VIR_STORAGE_POOL_DIR;
     } else if ((nasInfo = esxVI_NasDatastoreInfo_DynamicCast(info))) {
-        if (VIR_ALLOC_N(def.source.hosts, 1) < 0)
-            goto cleanup;
+        def.source.hosts = g_new0(virStoragePoolSourceHost, 1);
         def.type = VIR_STORAGE_POOL_NETFS;
         def.source.nhost = 1;
         def.source.hosts[0].name = nasInfo->nas->remoteHost;
@@ -525,7 +520,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
             def.source.format = VIR_STORAGE_POOL_NETFS_CIFS;
         } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Datastore has unexpected type '%s'"),
+                           _("Datastore has unexpected type '%1$s'"),
                            nasInfo->nas->type);
             goto cleanup;
         }
@@ -545,7 +540,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
     xml = virStoragePoolDefFormat(&def);
 
  cleanup:
-    VIR_FREE(def.source.hosts);
+    g_free(def.source.hosts);
     esxVI_String_Free(&propertyNameList);
     esxVI_ObjectContent_Free(&datastore);
     esxVI_DatastoreHostMount_Free(&hostMount);
@@ -599,7 +594,6 @@ esxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names,
     esxVI_HostDatastoreBrowserSearchResults *searchResultsList = NULL;
     esxVI_HostDatastoreBrowserSearchResults *searchResults = NULL;
     esxVI_FileInfo *fileInfo = NULL;
-    char *directoryAndFileName = NULL;
     size_t length;
     int count = 0;
     size_t i;
@@ -620,7 +614,7 @@ esxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names,
     /* Interpret search result */
     for (searchResults = searchResultsList; searchResults;
          searchResults = searchResults->_next) {
-        VIR_FREE(directoryAndFileName);
+        g_autofree char *directoryAndFileName = NULL;
 
         if (esxUtil_ParseDatastorePath(searchResults->folderPath, NULL, NULL,
                                        &directoryAndFileName) < 0) {
@@ -660,8 +654,6 @@ esxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names,
     }
 
     esxVI_HostDatastoreBrowserSearchResults_Free(&searchResultsList);
-    VIR_FREE(directoryAndFileName);
-
     return count;
 }
 
@@ -671,26 +663,19 @@ static virStorageVolPtr
 esxStorageVolLookupByName(virStoragePoolPtr pool,
                           const char *name)
 {
-    virStorageVolPtr volume = NULL;
     esxPrivate *priv = pool->conn->privateData;
-    char *datastorePath = NULL;
-    char *key = NULL;
+    g_autofree char *datastorePath = NULL;
+    g_autofree char *key = NULL;
 
     datastorePath = g_strdup_printf("[%s] %s", pool->name, name);
 
     if (esxVI_LookupStorageVolumeKeyByDatastorePath(priv->primary,
                                                     datastorePath, &key) < 0) {
-        goto cleanup;
+        return NULL;
     }
 
-    volume = virGetStorageVol(pool->conn, pool->name, name, key,
-                              &esxStorageBackendVMFS, NULL);
-
- cleanup:
-    VIR_FREE(datastorePath);
-    VIR_FREE(key);
-
-    return volume;
+    return virGetStorageVol(pool->conn, pool->name, name, key,
+                            &esxStorageBackendVMFS, NULL);
 }
 
 
@@ -698,31 +683,23 @@ esxStorageVolLookupByName(virStoragePoolPtr pool,
 static virStorageVolPtr
 esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
 {
-    virStorageVolPtr volume = NULL;
     esxPrivate *priv = conn->privateData;
-    char *datastoreName = NULL;
-    char *directoryAndFileName = NULL;
-    char *key = NULL;
+    g_autofree char *datastoreName = NULL;
+    g_autofree char *directoryAndFileName = NULL;
+    g_autofree char *key = NULL;
 
     if (esxUtil_ParseDatastorePath(path, &datastoreName, NULL,
                                    &directoryAndFileName) < 0) {
-        goto cleanup;
+        return NULL;
     }
 
     if (esxVI_LookupStorageVolumeKeyByDatastorePath(priv->primary, path,
                                                     &key) < 0) {
-        goto cleanup;
+        return NULL;
     }
 
-    volume = virGetStorageVol(conn, datastoreName, directoryAndFileName, key,
-                              &esxStorageBackendVMFS, NULL);
-
- cleanup:
-    VIR_FREE(datastoreName);
-    VIR_FREE(directoryAndFileName);
-    VIR_FREE(key);
-
-    return volume;
+    return virGetStorageVol(conn, datastoreName, directoryAndFileName, key,
+                            &esxStorageBackendVMFS, NULL);
 }
 
 
@@ -738,12 +715,8 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
     char *datastoreName = NULL;
     esxVI_HostDatastoreBrowserSearchResults *searchResultsList = NULL;
     esxVI_HostDatastoreBrowserSearchResults *searchResults = NULL;
-    char *directoryAndFileName = NULL;
     size_t length;
-    char *datastorePath = NULL;
-    char *volumeName = NULL;
     esxVI_FileInfo *fileInfo = NULL;
-    char *uuid_string = NULL;
     char key_candidate[VIR_UUID_STRING_BUFLEN] = "";
 
     if (STRPREFIX(key, "[")) {
@@ -753,8 +726,7 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
     if (!priv->primary->hasQueryVirtualDiskUuid) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("QueryVirtualDiskUuid not available, "
-                         "cannot lookup storage volume by UUID"));
+                       _("QueryVirtualDiskUuid not available, cannot lookup storage volume by UUID"));
         return NULL;
     }
 
@@ -785,7 +757,7 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
         /* Interpret search result */
         for (searchResults = searchResultsList; searchResults;
              searchResults = searchResults->_next) {
-            VIR_FREE(directoryAndFileName);
+            g_autofree char *directoryAndFileName = NULL;
 
             if (esxUtil_ParseDatastorePath(searchResults->folderPath, NULL,
                                            NULL, &directoryAndFileName) < 0) {
@@ -803,7 +775,9 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
             /* Build datastore path and query the UUID */
             for (fileInfo = searchResults->file; fileInfo;
                  fileInfo = fileInfo->_next) {
-                VIR_FREE(datastorePath);
+                g_autofree char *volumeName = NULL;
+                g_autofree char *datastorePath = NULL;
+                g_autofree char *uuid_string = NULL;
 
                 if (length < 1) {
                     volumeName = g_strdup(fileInfo->path);
@@ -818,8 +792,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
                     /* Only a VirtualDisk has a UUID */
                     continue;
                 }
-
-                VIR_FREE(uuid_string);
 
                 if (esxVI_QueryVirtualDiskUuid
                       (priv->primary, datastorePath,
@@ -846,11 +818,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
     esxVI_String_Free(&propertyNameList);
     esxVI_ObjectContent_Free(&datastoreList);
     esxVI_HostDatastoreBrowserSearchResults_Free(&searchResultsList);
-    VIR_FREE(directoryAndFileName);
-    VIR_FREE(datastorePath);
-    VIR_FREE(volumeName);
-    VIR_FREE(uuid_string);
-
     return volume;
 }
 
@@ -863,27 +830,25 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
 {
     virStorageVolPtr volume = NULL;
     esxPrivate *priv = pool->conn->privateData;
-    virStoragePoolDef poolDef;
+    virStoragePoolDef poolDef = { 0 };
     char *tmp;
-    char *unescapedDatastorePath = NULL;
-    char *unescapedDirectoryName = NULL;
-    char *unescapedDirectoryAndFileName = NULL;
-    char *directoryName = NULL;
-    char *fileName = NULL;
-    char *datastorePathWithoutFileName = NULL;
-    char *datastorePath = NULL;
+    g_autofree char *unescapedDatastorePath = NULL;
+    g_autofree char *unescapedDirectoryName = NULL;
+    g_autofree char *unescapedDirectoryAndFileName = NULL;
+    g_autofree char *directoryName = NULL;
+    g_autofree char *fileName = NULL;
+    g_autofree char *datastorePathWithoutFileName = NULL;
+    g_autofree char *datastorePath = NULL;
     esxVI_FileInfo *fileInfo = NULL;
     esxVI_FileBackedVirtualDiskSpec *virtualDiskSpec = NULL;
     esxVI_ManagedObjectReference *task = NULL;
     esxVI_TaskInfoState taskInfoState;
-    char *taskInfoErrorMessage = NULL;
-    char *uuid_string = NULL;
-    char *key = NULL;
+    g_autofree char *taskInfoErrorMessage = NULL;
+    g_autofree char *uuid_string = NULL;
+    g_autofree char *key = NULL;
     g_autoptr(virStorageVolDef) def = NULL;
 
     virCheckFlags(0, NULL);
-
-    memset(&poolDef, 0, sizeof(poolDef));
 
     if (esxLookupVMFSStoragePoolType(priv->primary, pool->name,
                                      &poolDef.type) < 0) {
@@ -891,13 +856,13 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
     }
 
     /* Parse config */
-    def = virStorageVolDefParseString(&poolDef, xmldesc, 0);
+    def = virStorageVolDefParse(&poolDef, xmldesc, NULL, 0);
 
     if (!def)
         goto cleanup;
 
     if (def->type != VIR_STORAGE_VOL_FILE) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+        virReportError(VIR_ERR_NO_SUPPORT, "%s",
                        _("Creating non-file volumes is not supported"));
         goto cleanup;
     }
@@ -907,15 +872,15 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
 
     if (!tmp || *def->name == '/' || tmp[1] == '\0') {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Volume name '%s' doesn't have expected format "
-                         "'<directory>/<file>'"), def->name);
+                       _("Volume name '%1$s' doesn't have expected format '<directory>/<file>'"),
+                       def->name);
         goto cleanup;
     }
 
     if (!virStringHasCaseSuffix(def->name, ".vmdk")) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Volume name '%s' has unsupported suffix, "
-                         "expecting '.vmdk'"), def->name);
+        virReportError(VIR_ERR_NO_SUPPORT,
+                       _("Volume name '%1$s' has unsupported suffix, expecting '.vmdk'"),
+                       def->name);
         goto cleanup;
     }
 
@@ -1010,14 +975,13 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
 
         if (taskInfoState != esxVI_TaskInfoState_Success) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not create volume: %s"),
+                           _("Could not create volume: %1$s"),
                            taskInfoErrorMessage);
             goto cleanup;
         }
 
         if (priv->primary->hasQueryVirtualDiskUuid) {
-            if (VIR_ALLOC_N(key, VIR_UUID_STRING_BUFLEN) < 0)
-                goto cleanup;
+            key = g_new0(char, VIR_UUID_STRING_BUFLEN);
 
             if (esxVI_QueryVirtualDiskUuid(priv->primary, datastorePath,
                                            priv->primary->datacenter->_reference,
@@ -1032,8 +996,8 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
             key = g_strdup(datastorePath);
         }
     } else {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Creation of %s volumes is not supported"),
+        virReportError(VIR_ERR_NO_SUPPORT,
+                       _("Creation of %1$s volumes is not supported"),
                        virStorageFileFormatTypeToString(def->target.format));
         goto cleanup;
     }
@@ -1047,20 +1011,9 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
         virtualDiskSpec->adapterType = NULL;
     }
 
-    VIR_FREE(unescapedDatastorePath);
-    VIR_FREE(unescapedDirectoryName);
-    VIR_FREE(unescapedDirectoryAndFileName);
-    VIR_FREE(directoryName);
-    VIR_FREE(fileName);
-    VIR_FREE(datastorePathWithoutFileName);
-    VIR_FREE(datastorePath);
     esxVI_FileInfo_Free(&fileInfo);
     esxVI_FileBackedVirtualDiskSpec_Free(&virtualDiskSpec);
     esxVI_ManagedObjectReference_Free(&task);
-    VIR_FREE(taskInfoErrorMessage);
-    VIR_FREE(uuid_string);
-    VIR_FREE(key);
-
     return volume;
 }
 
@@ -1074,27 +1027,25 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool,
 {
     virStorageVolPtr volume = NULL;
     esxPrivate *priv = pool->conn->privateData;
-    virStoragePoolDef poolDef;
-    char *sourceDatastorePath = NULL;
+    virStoragePoolDef poolDef = { 0 };
+    g_autofree char *sourceDatastorePath = NULL;
     char *tmp;
-    char *unescapedDatastorePath = NULL;
-    char *unescapedDirectoryName = NULL;
-    char *unescapedDirectoryAndFileName = NULL;
-    char *directoryName = NULL;
-    char *fileName = NULL;
-    char *datastorePathWithoutFileName = NULL;
-    char *datastorePath = NULL;
+    g_autofree char *unescapedDatastorePath = NULL;
+    g_autofree char *unescapedDirectoryName = NULL;
+    g_autofree char *unescapedDirectoryAndFileName = NULL;
+    g_autofree char *directoryName = NULL;
+    g_autofree char *fileName = NULL;
+    g_autofree char *datastorePathWithoutFileName = NULL;
+    g_autofree char *datastorePath = NULL;
     esxVI_FileInfo *fileInfo = NULL;
     esxVI_ManagedObjectReference *task = NULL;
     esxVI_TaskInfoState taskInfoState;
-    char *taskInfoErrorMessage = NULL;
-    char *uuid_string = NULL;
-    char *key = NULL;
+    g_autofree char *taskInfoErrorMessage = NULL;
+    g_autofree char *uuid_string = NULL;
+    g_autofree char *key = NULL;
     g_autoptr(virStorageVolDef) def = NULL;
 
     virCheckFlags(0, NULL);
-
-    memset(&poolDef, 0, sizeof(poolDef));
 
     if (esxLookupVMFSStoragePoolType(priv->primary, pool->name,
                                      &poolDef.type) < 0) {
@@ -1105,13 +1056,13 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool,
                                           sourceVolume->name);
 
     /* Parse config */
-    def = virStorageVolDefParseString(&poolDef, xmldesc, 0);
+    def = virStorageVolDefParse(&poolDef, xmldesc, NULL, 0);
 
     if (!def)
         goto cleanup;
 
     if (def->type != VIR_STORAGE_VOL_FILE) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+        virReportError(VIR_ERR_NO_SUPPORT, "%s",
                        _("Creating non-file volumes is not supported"));
         goto cleanup;
     }
@@ -1121,15 +1072,15 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool,
 
     if (!tmp || *def->name == '/' || tmp[1] == '\0') {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Volume name '%s' doesn't have expected format "
-                         "'<directory>/<file>'"), def->name);
+                       _("Volume name '%1$s' doesn't have expected format '<directory>/<file>'"),
+                       def->name);
         goto cleanup;
     }
 
     if (!virStringHasCaseSuffix(def->name, ".vmdk")) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Volume name '%s' has unsupported suffix, "
-                         "expecting '.vmdk'"), def->name);
+        virReportError(VIR_ERR_NO_SUPPORT,
+                       _("Volume name '%1$s' has unsupported suffix, expecting '.vmdk'"),
+                       def->name);
         goto cleanup;
     }
 
@@ -1190,14 +1141,13 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool,
         }
 
         if (taskInfoState != esxVI_TaskInfoState_Success) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not copy volume: %s"),
+            virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not copy volume: %1$s"),
                            taskInfoErrorMessage);
             goto cleanup;
         }
 
         if (priv->primary->hasQueryVirtualDiskUuid) {
-            if (VIR_ALLOC_N(key, VIR_UUID_STRING_BUFLEN) < 0)
-                goto cleanup;
+            key = g_new0(char, VIR_UUID_STRING_BUFLEN);
 
             if (esxVI_QueryVirtualDiskUuid(priv->primary, datastorePath,
                                            priv->primary->datacenter->_reference,
@@ -1212,8 +1162,8 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool,
             key = g_strdup(datastorePath);
         }
     } else {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Creation of %s volumes is not supported"),
+        virReportError(VIR_ERR_NO_SUPPORT,
+                       _("Creation of %1$s volumes is not supported"),
                        virStorageFileFormatTypeToString(def->target.format));
         goto cleanup;
     }
@@ -1222,20 +1172,8 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool,
                               &esxStorageBackendVMFS, NULL);
 
  cleanup:
-    VIR_FREE(sourceDatastorePath);
-    VIR_FREE(unescapedDatastorePath);
-    VIR_FREE(unescapedDirectoryName);
-    VIR_FREE(unescapedDirectoryAndFileName);
-    VIR_FREE(directoryName);
-    VIR_FREE(fileName);
-    VIR_FREE(datastorePathWithoutFileName);
-    VIR_FREE(datastorePath);
     esxVI_FileInfo_Free(&fileInfo);
     esxVI_ManagedObjectReference_Free(&task);
-    VIR_FREE(taskInfoErrorMessage);
-    VIR_FREE(uuid_string);
-    VIR_FREE(key);
-
     return volume;
 }
 
@@ -1246,10 +1184,10 @@ esxStorageVolDelete(virStorageVolPtr volume, unsigned int flags)
 {
     int result = -1;
     esxPrivate *priv = volume->conn->privateData;
-    char *datastorePath = NULL;
+    g_autofree char *datastorePath = NULL;
     esxVI_ManagedObjectReference *task = NULL;
     esxVI_TaskInfoState taskInfoState;
-    char *taskInfoErrorMessage = NULL;
+    g_autofree char *taskInfoErrorMessage = NULL;
 
     virCheckFlags(0, -1);
 
@@ -1266,7 +1204,7 @@ esxStorageVolDelete(virStorageVolPtr volume, unsigned int flags)
     }
 
     if (taskInfoState != esxVI_TaskInfoState_Success) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not delete volume: %s"),
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not delete volume: %1$s"),
                        taskInfoErrorMessage);
         goto cleanup;
     }
@@ -1274,10 +1212,7 @@ esxStorageVolDelete(virStorageVolPtr volume, unsigned int flags)
     result = 0;
 
  cleanup:
-    VIR_FREE(datastorePath);
     esxVI_ManagedObjectReference_Free(&task);
-    VIR_FREE(taskInfoErrorMessage);
-
     return result;
 }
 
@@ -1288,10 +1223,10 @@ esxStorageVolWipe(virStorageVolPtr volume, unsigned int flags)
 {
     int result = -1;
     esxPrivate *priv = volume->conn->privateData;
-    char *datastorePath = NULL;
+    g_autofree char *datastorePath = NULL;
     esxVI_ManagedObjectReference *task = NULL;
     esxVI_TaskInfoState taskInfoState;
-    char *taskInfoErrorMessage = NULL;
+    g_autofree char *taskInfoErrorMessage = NULL;
 
     virCheckFlags(0, -1);
 
@@ -1308,7 +1243,7 @@ esxStorageVolWipe(virStorageVolPtr volume, unsigned int flags)
     }
 
     if (taskInfoState != esxVI_TaskInfoState_Success) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not wipe volume: %s"),
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not wipe volume: %1$s"),
                        taskInfoErrorMessage);
         goto cleanup;
     }
@@ -1316,10 +1251,7 @@ esxStorageVolWipe(virStorageVolPtr volume, unsigned int flags)
     result = 0;
 
  cleanup:
-    VIR_FREE(datastorePath);
     esxVI_ManagedObjectReference_Free(&task);
-    VIR_FREE(taskInfoErrorMessage);
-
     return result;
 }
 
@@ -1331,7 +1263,7 @@ esxStorageVolGetInfo(virStorageVolPtr volume,
 {
     int result = -1;
     esxPrivate *priv = volume->conn->privateData;
-    char *datastorePath = NULL;
+    g_autofree char *datastorePath = NULL;
     esxVI_FileInfo *fileInfo = NULL;
     esxVI_VmDiskFileInfo *vmDiskFileInfo = NULL;
 
@@ -1361,7 +1293,6 @@ esxStorageVolGetInfo(virStorageVolPtr volume,
     result = 0;
 
  cleanup:
-    VIR_FREE(datastorePath);
     esxVI_FileInfo_Free(&fileInfo);
 
     return result;
@@ -1374,19 +1305,16 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
                         unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStoragePoolDef pool;
-    char *datastorePath = NULL;
+    virStoragePoolDef pool = { 0 };
+    g_autofree char *datastorePath = NULL;
     esxVI_FileInfo *fileInfo = NULL;
     esxVI_VmDiskFileInfo *vmDiskFileInfo = NULL;
     esxVI_IsoImageFileInfo *isoImageFileInfo = NULL;
     esxVI_FloppyImageFileInfo *floppyImageFileInfo = NULL;
-    virStorageVolDef def;
+    virStorageVolDef def = { 0 };
     char *xml = NULL;
 
     virCheckFlags(0, NULL);
-
-    memset(&pool, 0, sizeof(pool));
-    memset(&def, 0, sizeof(def));
 
     if (esxLookupVMFSStoragePoolType(priv->primary, volume->pool,
                                      &pool.type) < 0) {
@@ -1434,16 +1362,15 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
         def.target.format = VIR_STORAGE_FILE_RAW;
     } else {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("File '%s' has unknown type"), datastorePath);
+                       _("File '%1$s' has unknown type"), datastorePath);
         goto cleanup;
     }
 
     xml = virStorageVolDefFormat(&pool, &def);
 
  cleanup:
-    VIR_FREE(datastorePath);
     esxVI_FileInfo_Free(&fileInfo);
-    VIR_FREE(def.key);
+    g_free(def.key);
 
     return xml;
 }
@@ -1453,10 +1380,7 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
 static char *
 esxStorageVolGetPath(virStorageVolPtr volume)
 {
-    char *path;
-
-    path = g_strdup_printf("[%s] %s", volume->pool, volume->name);
-    return path;
+    return g_strdup_printf("[%s] %s", volume->pool, volume->name);
 }
 
 

@@ -48,18 +48,22 @@ int virPidFileReadIfAlive(const char *dir,
                           const char *name,
                           pid_t *pid,
                           const char *binpath) G_GNUC_WARN_UNUSED_RESULT;
+int virPidFileReadPathIfLocked(const char *path,
+                               pid_t *pid)  G_GNUC_WARN_UNUSED_RESULT;
 
 int virPidFileDeletePath(const char *path);
 int virPidFileDelete(const char *dir,
                      const char *name);
 
 
+int virPidFileAcquirePathFull(const char *path,
+                              bool waitForLock,
+                              bool quiet,
+                              pid_t pid) G_GNUC_WARN_UNUSED_RESULT;
 int virPidFileAcquirePath(const char *path,
-                          bool waitForLock,
                           pid_t pid) G_GNUC_WARN_UNUSED_RESULT;
 int virPidFileAcquire(const char *dir,
                       const char *name,
-                      bool waitForLock,
                       pid_t pid) G_GNUC_WARN_UNUSED_RESULT;
 
 int virPidFileReleasePath(const char *path,
@@ -73,4 +77,6 @@ int virPidFileConstructPath(bool privileged,
                             const char *progname,
                             char **pidfile);
 
+int virPidFileForceCleanupPathFull(const char *path,
+                                   bool group) ATTRIBUTE_NONNULL(1);
 int virPidFileForceCleanupPath(const char *path) ATTRIBUTE_NONNULL(1);

@@ -31,20 +31,47 @@
 #include "datatypes.h"
 #include "viralloc.h"
 #include "domain_conf.h"
-#include "libvirt_internal.h"
 #include "virxml.h"
-#include "virstring.h"
 #include "virdomaincheckpointobjlist.h"
-#include "virdomainsnapshotobjlist.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
 VIR_LOG_INIT("qemu.qemu_checkpoint");
 
+/**
+ * qemuCheckpointSetCurrent: Set currently active checkpoint
+ *
+ * @vm: domain object
+ * @newcurrent: checkpoint object to set as current/active
+ *
+ * Sets @newcurrent as the 'current' checkpoint of @vm. This helper ensures that
+ * the checkpoint which was 'current' previously is updated.
+ */
+static void
+qemuCheckpointSetCurrent(virDomainObj *vm,
+                       virDomainMomentObj *newcurrent)
+{
+    qemuDomainObjPrivate *priv = vm->privateData;
+    virQEMUDriver *driver = priv->driver;
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    virDomainMomentObj *oldcurrent = virDomainCheckpointGetCurrent(vm->checkpoints);
+
+    virDomainCheckpointSetCurrent(vm->checkpoints, newcurrent);
+
+    /* we need to write out metadata for the old checkpoint to update the
+     * 'active' property */
+    if (oldcurrent &&
+        oldcurrent != newcurrent) {
+        if (qemuCheckpointWriteMetadata(vm, oldcurrent, driver->xmlopt, cfg->checkpointDir) < 0)
+            VIR_WARN("failed to update old current checkpoint");
+    }
+}
+
+
 /* Looks up the domain object from checkpoint and unlocks the
  * driver. The returned domain object is locked and ref'd and the
  * caller must call virDomainObjEndAPI() on it. */
-virDomainObjPtr
+virDomainObj *
 qemuDomObjFromCheckpoint(virDomainCheckpointPtr checkpoint)
 {
     return qemuDomainObjFromDomain(checkpoint->domain);
@@ -52,15 +79,15 @@ qemuDomObjFromCheckpoint(virDomainCheckpointPtr checkpoint)
 
 
 /* Looks up checkpoint object from VM and name */
-virDomainMomentObjPtr
-qemuCheckpointObjFromName(virDomainObjPtr vm,
+virDomainMomentObj *
+qemuCheckpointObjFromName(virDomainObj *vm,
                           const char *name)
 {
-    virDomainMomentObjPtr chk = NULL;
+    virDomainMomentObj *chk = NULL;
     chk = virDomainCheckpointFindByName(vm->checkpoints, name);
     if (!chk)
         virReportError(VIR_ERR_NO_DOMAIN_CHECKPOINT,
-                       _("no domain checkpoint with matching name '%s'"),
+                       _("no domain checkpoint with matching name '%1$s'"),
                        name);
 
     return chk;
@@ -68,22 +95,22 @@ qemuCheckpointObjFromName(virDomainObjPtr vm,
 
 
 /* Looks up checkpoint object from VM and checkpointPtr */
-virDomainMomentObjPtr
-qemuCheckpointObjFromCheckpoint(virDomainObjPtr vm,
+virDomainMomentObj *
+qemuCheckpointObjFromCheckpoint(virDomainObj *vm,
                                 virDomainCheckpointPtr checkpoint)
 {
     return qemuCheckpointObjFromName(vm, checkpoint->name);
 }
 
 
-static int
-qemuCheckpointWriteMetadata(virDomainObjPtr vm,
-                            virDomainMomentObjPtr checkpoint,
-                            virDomainXMLOptionPtr xmlopt,
+int
+qemuCheckpointWriteMetadata(virDomainObj *vm,
+                            virDomainMomentObj *checkpoint,
+                            virDomainXMLOption *xmlopt,
                             const char *checkpointDir)
 {
     unsigned int flags = VIR_DOMAIN_CHECKPOINT_FORMAT_SECURE;
-    virDomainCheckpointDefPtr def = virDomainCheckpointObjGetDef(checkpoint);
+    virDomainCheckpointDef *def = virDomainCheckpointObjGetDef(checkpoint);
     g_autofree char *newxml = NULL;
     g_autofree char *chkDir = NULL;
     g_autofree char *chkFile = NULL;
@@ -93,8 +120,8 @@ qemuCheckpointWriteMetadata(virDomainObjPtr vm,
         return -1;
 
     chkDir = g_strdup_printf("%s/%s", checkpointDir, vm->def->name);
-    if (virFileMakePath(chkDir) < 0) {
-        virReportSystemError(errno, _("cannot create checkpoint directory '%s'"),
+    if (g_mkdir_with_parents(chkDir, 0777) < 0) {
+        virReportSystemError(errno, _("cannot create checkpoint directory '%1$s'"),
                              chkDir);
         return -1;
     }
@@ -106,19 +133,19 @@ qemuCheckpointWriteMetadata(virDomainObjPtr vm,
 
 
 int
-qemuCheckpointDiscardDiskBitmaps(virStorageSourcePtr src,
-                                 virHashTablePtr blockNamedNodeData,
+qemuCheckpointDiscardDiskBitmaps(virStorageSource *src,
+                                 GHashTable *blockNamedNodeData,
                                  const char *delbitmap,
-                                 virJSONValuePtr actions,
+                                 virJSONValue *actions,
                                  const char *diskdst,
                                  GSList **reopenimages)
 {
-    virStorageSourcePtr n;
+    virStorageSource *n;
     bool found = false;
 
     /* find the backing chain entry with bitmap named '@delbitmap' */
     for (n = src; virStorageSourceIsBacking(n); n = n->backingStore) {
-        qemuBlockNamedNodeDataBitmapPtr bitmapdata;
+        qemuBlockNamedNodeDataBitmap *bitmapdata;
 
         if (!(bitmapdata = qemuBlockNamedNodeDataGetBitmapByName(blockNamedNodeData,
                                                                  n, delbitmap)))
@@ -127,7 +154,7 @@ qemuCheckpointDiscardDiskBitmaps(virStorageSourcePtr src,
         found = true;
 
         if (qemuMonitorTransactionBitmapRemove(actions,
-                                               n->nodeformat,
+                                               qemuBlockStorageSourceGetEffectiveNodename(n),
                                                bitmapdata->name) < 0)
             return -1;
 
@@ -137,7 +164,7 @@ qemuCheckpointDiscardDiskBitmaps(virStorageSourcePtr src,
 
     if (!found) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("bitmap '%s' not found in backing chain of '%s'"),
+                       _("bitmap '%1$s' not found in backing chain of '%2$s'"),
                        delbitmap, diskdst);
         return -1;
     }
@@ -147,12 +174,12 @@ qemuCheckpointDiscardDiskBitmaps(virStorageSourcePtr src,
 
 
 static int
-qemuCheckpointDiscardBitmaps(virDomainObjPtr vm,
-                             virDomainCheckpointDefPtr chkdef)
+qemuCheckpointDiscardBitmaps(virDomainObj *vm,
+                             virDomainCheckpointDef *chkdef)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    virQEMUDriverPtr driver = priv->driver;
-    g_autoptr(virHashTable) blockNamedNodeData = NULL;
+    qemuDomainObjPrivate *priv = vm->privateData;
+    virQEMUDriver *driver = priv->driver;
+    g_autoptr(GHashTable) blockNamedNodeData = NULL;
     int rc = -1;
     g_autoptr(virJSONValue) actions = NULL;
     size_t i;
@@ -162,12 +189,12 @@ qemuCheckpointDiscardBitmaps(virDomainObjPtr vm,
 
     actions = virJSONValueNewArray();
 
-    if (!(blockNamedNodeData = qemuBlockGetNamedNodeData(vm, QEMU_ASYNC_JOB_NONE)))
+    if (!(blockNamedNodeData = qemuBlockGetNamedNodeData(vm, VIR_ASYNC_JOB_NONE)))
         return -1;
 
     for (i = 0; i < chkdef->ndisks; i++) {
         virDomainCheckpointDiskDef *chkdisk = &chkdef->disks[i];
-        virDomainDiskDefPtr domdisk = virDomainDiskByTarget(vm->def, chkdisk->name);
+        virDomainDiskDef *domdisk = virDomainDiskByTarget(vm->def, chkdisk->name);
 
         /* domdisk can be missing e.g. when it was unplugged */
         if (!domdisk)
@@ -175,6 +202,13 @@ qemuCheckpointDiscardBitmaps(virDomainObjPtr vm,
 
         if (chkdisk->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
             continue;
+
+        if (!chkdisk->bitmap) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("missing bitmap name for disk '%1$s' of checkpoint '%2$s'"),
+                           chkdisk->name, chkdef->parent.name);
+            return -1;
+        }
 
         if (qemuCheckpointDiscardDiskBitmaps(domdisk->src, blockNamedNodeData,
                                              chkdisk->bitmap,
@@ -185,30 +219,29 @@ qemuCheckpointDiscardBitmaps(virDomainObjPtr vm,
 
     /* label any non-top images for read-write access */
     for (next = reopenimages; next; next = next->next) {
-        virStorageSourcePtr src = next->data;
+        virStorageSource *src = next->data;
 
         if (qemuDomainStorageSourceAccessAllow(driver, vm, src,
                                                false, false, false) < 0)
             goto relabel;
 
         if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV_REOPEN) &&
-            qemuBlockReopenReadWrite(vm, src, QEMU_ASYNC_JOB_NONE) < 0)
+            qemuBlockReopenReadWrite(vm, src, VIR_ASYNC_JOB_NONE) < 0)
             goto relabel;
 
         relabelimages = g_slist_prepend(relabelimages, src);
     }
 
-    qemuDomainObjEnterMonitor(driver, vm);
+    qemuDomainObjEnterMonitor(vm);
     rc = qemuMonitorTransaction(priv->mon, &actions);
-    if (qemuDomainObjExitMonitor(driver, vm) < 0)
-        return -1;
+    qemuDomainObjExitMonitor(vm);
 
  relabel:
     for (next = relabelimages; next; next = next->next) {
-        virStorageSourcePtr src = next->data;
+        virStorageSource *src = next->data;
 
         if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV_REOPEN))
-            ignore_value(qemuBlockReopenReadOnly(vm, src, QEMU_ASYNC_JOB_NONE));
+            ignore_value(qemuBlockReopenReadOnly(vm, src, VIR_ASYNC_JOB_NONE));
 
         ignore_value(qemuDomainStorageSourceAccessAllow(driver, vm, src,
                                                         true, false, false));
@@ -219,9 +252,9 @@ qemuCheckpointDiscardBitmaps(virDomainObjPtr vm,
 
 
 static int
-qemuCheckpointDiscard(virQEMUDriverPtr driver,
-                      virDomainObjPtr vm,
-                      virDomainMomentObjPtr chk,
+qemuCheckpointDiscard(virQEMUDriver *driver,
+                      virDomainObj *vm,
+                      virDomainMomentObj *chk,
                       bool update_parent,
                       bool metadata_only)
 {
@@ -239,13 +272,13 @@ qemuCheckpointDiscard(virQEMUDriverPtr driver,
                               chk->def->name);
 
     if (!metadata_only) {
-        virDomainCheckpointDefPtr chkdef = virDomainCheckpointObjGetDef(chk);
+        virDomainCheckpointDef *chkdef = virDomainCheckpointObjGetDef(chk);
         if (qemuCheckpointDiscardBitmaps(vm, chkdef) < 0)
             return -1;
     }
 
     if (chkcurrent) {
-        virDomainMomentObjPtr parent = NULL;
+        virDomainMomentObj *parent = NULL;
 
         virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
         parent = virDomainCheckpointFindByName(vm->checkpoints,
@@ -274,8 +307,8 @@ qemuCheckpointDiscard(virQEMUDriverPtr driver,
 
 
 int
-qemuCheckpointDiscardAllMetadata(virQEMUDriverPtr driver,
-                                       virDomainObjPtr vm)
+qemuCheckpointDiscardAllMetadata(virQEMUDriver *driver,
+                                       virDomainObj *vm)
 {
     virQEMUMomentRemove rem = {
         .driver = driver,
@@ -294,13 +327,13 @@ qemuCheckpointDiscardAllMetadata(virQEMUDriverPtr driver,
 
 /* Called inside job lock */
 static int
-qemuCheckpointPrepare(virQEMUDriverPtr driver,
-                      virDomainObjPtr vm,
-                      virDomainCheckpointDefPtr def)
+qemuCheckpointPrepare(virQEMUDriver *driver,
+                      virDomainObj *vm,
+                      virDomainCheckpointDef *def)
 {
     size_t i;
     g_autofree char *xml = NULL;
-    qemuDomainObjPrivatePtr priv = vm->privateData;
+    qemuDomainObjPrivate *priv = vm->privateData;
 
     /* Easiest way to clone inactive portion of vm->def is via
      * conversion in and back out of xml.  */
@@ -317,29 +350,28 @@ qemuCheckpointPrepare(virQEMUDriverPtr driver,
         return -1;
 
     for (i = 0; i < def->ndisks; i++) {
-        virDomainCheckpointDiskDefPtr disk = &def->disks[i];
+        virDomainCheckpointDiskDef *disk = &def->disks[i];
 
         if (disk->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
             continue;
 
         if (STRNEQ(disk->bitmap, def->parent.name)) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("bitmap for disk '%s' must match checkpoint name '%s'"),
+                           _("bitmap for disk '%1$s' must match checkpoint name '%2$s'"),
                            disk->name, def->parent.name);
             return -1;
         }
 
         if (vm->def->disks[i]->src->format != VIR_STORAGE_FILE_QCOW2) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("checkpoint for disk %s unsupported "
-                             "for storage type %s"),
+                           _("checkpoint for disk %1$s unsupported for storage type %2$s"),
                            disk->name,
                            virStorageFileFormatTypeToString(
                                vm->def->disks[i]->src->format));
             return -1;
         }
 
-        if (!qemuDomainDiskBlockJobIsSupported(vm, vm->def->disks[i]))
+        if (!qemuDomainDiskBlockJobIsSupported(vm->def->disks[i]))
             return -1;
     }
 
@@ -347,15 +379,15 @@ qemuCheckpointPrepare(virQEMUDriverPtr driver,
 }
 
 static int
-qemuCheckpointAddActions(virDomainObjPtr vm,
-                         virJSONValuePtr actions,
-                         virDomainCheckpointDefPtr def)
+qemuCheckpointAddActions(virDomainObj *vm,
+                         virJSONValue *actions,
+                         virDomainCheckpointDef *def)
 {
     size_t i;
 
     for (i = 0; i < def->ndisks; i++) {
         virDomainCheckpointDiskDef *chkdisk = &def->disks[i];
-        virDomainDiskDefPtr domdisk = virDomainDiskByTarget(vm->def, chkdisk->name);
+        virDomainDiskDef *domdisk = virDomainDiskByTarget(vm->def, chkdisk->name);
 
         /* checkpoint definition validator mandates that the corresponding
          * domdisk should exist */
@@ -363,7 +395,8 @@ qemuCheckpointAddActions(virDomainObjPtr vm,
             chkdisk->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
             continue;
 
-        if (qemuMonitorTransactionBitmapAdd(actions, domdisk->src->nodeformat,
+        if (qemuMonitorTransactionBitmapAdd(actions,
+                                            qemuBlockStorageSourceGetEffectiveNodename(domdisk->src),
                                             chkdisk->bitmap, true, false, 0) < 0)
             return -1;
     }
@@ -371,40 +404,69 @@ qemuCheckpointAddActions(virDomainObjPtr vm,
 }
 
 
-static virDomainMomentObjPtr
-qemuCheckpointRedefine(virQEMUDriverPtr driver,
-                       virDomainObjPtr vm,
-                       virDomainCheckpointDefPtr *def,
-                       bool *update_current)
+static int
+qemuCheckpointRedefineValidateBitmaps(virDomainObj *vm,
+                                      virDomainCheckpointDef *chkdef)
 {
-    virDomainMomentObjPtr chk = NULL;
+    g_autoptr(GHashTable) blockNamedNodeData = NULL;
+    size_t i;
 
-    if (virDomainCheckpointRedefinePrep(vm, def, &chk, driver->xmlopt,
-                                        update_current) < 0)
+    if (virDomainObjCheckActive(vm) < 0)
+        return -1;
+
+    if (!(blockNamedNodeData = qemuBlockGetNamedNodeData(vm, VIR_ASYNC_JOB_NONE)))
+        return -1;
+
+    for (i = 0; i < chkdef->ndisks; i++) {
+        virDomainCheckpointDiskDef *chkdisk = chkdef->disks + i;
+        virDomainDiskDef *domdisk;
+
+        if (chkdisk->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
+            continue;
+
+        /* we tolerate missing disks due to possible detach */
+        if (!(domdisk = virDomainDiskByTarget(vm->def, chkdisk->name)))
+            continue;
+
+        if (!qemuBlockBitmapChainIsValid(domdisk->src, chkdef->parent.name,
+                                         blockNamedNodeData)) {
+            virReportError(VIR_ERR_CHECKPOINT_INCONSISTENT,
+                           _("missing or broken bitmap '%1$s' for disk '%2$s'"),
+                           chkdef->parent.name, domdisk->dst);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+static virDomainMomentObj *
+qemuCheckpointRedefine(virDomainObj *vm,
+                       virDomainCheckpointDef **def,
+                       bool *update_current,
+                       bool validate_bitmaps)
+{
+    if (virDomainCheckpointRedefinePrep(vm, *def, update_current) < 0)
         return NULL;
 
-    /* XXX Should we validate that the redefined checkpoint even
-     * makes sense, such as checking that qemu-img recognizes the
-     * checkpoint bitmap name in at least one of the domain's disks?  */
+    if (validate_bitmaps &&
+        qemuCheckpointRedefineValidateBitmaps(vm, *def) < 0)
+        return NULL;
 
-    if (chk)
-        return chk;
-
-    chk = virDomainCheckpointAssignDef(vm->checkpoints, *def);
-    *def = NULL;
-    return chk;
+    return virDomainCheckpointRedefineCommit(vm, def);
 }
 
 
 int
-qemuCheckpointCreateCommon(virQEMUDriverPtr driver,
-                           virDomainObjPtr vm,
-                           virDomainCheckpointDefPtr *def,
-                           virJSONValuePtr *actions,
-                           virDomainMomentObjPtr *chk)
+qemuCheckpointCreateCommon(virQEMUDriver *driver,
+                           virDomainObj *vm,
+                           virDomainCheckpointDef **def,
+                           virJSONValue **actions,
+                           virDomainMomentObj **chk)
 {
     g_autoptr(virJSONValue) tmpactions = NULL;
-    virDomainMomentObjPtr parent;
+    virDomainMomentObj *parent;
 
     if (qemuCheckpointPrepare(driver, vm, *def) < 0)
         return -1;
@@ -435,8 +497,8 @@ qemuCheckpointCreateCommon(virQEMUDriverPtr driver,
  * If @chk is not null remove the @chk object from the list of checkpoints of @vm.
  */
 void
-qemuCheckpointRollbackMetadata(virDomainObjPtr vm,
-                               virDomainMomentObjPtr chk)
+qemuCheckpointRollbackMetadata(virDomainObj *vm,
+                               virDomainMomentObj *chk)
 {
     if (!chk)
         return;
@@ -445,21 +507,22 @@ qemuCheckpointRollbackMetadata(virDomainObjPtr vm,
 }
 
 
-static virDomainMomentObjPtr
-qemuCheckpointCreate(virQEMUDriverPtr driver,
-                     virDomainObjPtr vm,
-                     virDomainCheckpointDefPtr *def)
+static virDomainMomentObj *
+qemuCheckpointCreate(virQEMUDriver *driver,
+                     virDomainObj *vm,
+                     virDomainCheckpointDef **def)
 {
     g_autoptr(virJSONValue) actions = NULL;
-    virDomainMomentObjPtr chk = NULL;
+    virDomainMomentObj *chk = NULL;
     int rc;
 
     if (qemuCheckpointCreateCommon(driver, vm, def, &actions, &chk) < 0)
         return NULL;
 
-    qemuDomainObjEnterMonitor(driver, vm);
+    qemuDomainObjEnterMonitor(vm);
     rc = qemuMonitorTransaction(qemuDomainGetMonitor(vm), &actions);
-    if (qemuDomainObjExitMonitor(driver, vm) < 0 || rc < 0) {
+    qemuDomainObjExitMonitor(vm);
+    if (rc < 0) {
         qemuCheckpointRollbackMetadata(vm, chk);
         return NULL;
     }
@@ -469,14 +532,14 @@ qemuCheckpointCreate(virQEMUDriverPtr driver,
 
 
 int
-qemuCheckpointCreateFinalize(virQEMUDriverPtr driver,
-                             virDomainObjPtr vm,
-                             virQEMUDriverConfigPtr cfg,
-                             virDomainMomentObjPtr chk,
+qemuCheckpointCreateFinalize(virQEMUDriver *driver,
+                             virDomainObj *vm,
+                             virQEMUDriverConfig *cfg,
+                             virDomainMomentObj *chk,
                              bool update_current)
 {
     if (update_current)
-        virDomainCheckpointSetCurrent(vm->checkpoints, chk);
+        qemuCheckpointSetCurrent(vm, chk);
 
     if (qemuCheckpointWriteMetadata(vm, chk,
                                     driver->xmlopt,
@@ -484,7 +547,7 @@ qemuCheckpointCreateFinalize(virQEMUDriverPtr driver,
         /* if writing of metadata fails, error out rather than trying
          * to silently carry on without completing the checkpoint */
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unable to save metadata for checkpoint %s"),
+                       _("unable to save metadata for checkpoint %1$s"),
                        chk->def->name);
         qemuCheckpointRollbackMetadata(vm, chk);
         return -1;
@@ -498,21 +561,23 @@ qemuCheckpointCreateFinalize(virQEMUDriverPtr driver,
 
 virDomainCheckpointPtr
 qemuCheckpointCreateXML(virDomainPtr domain,
-                        virDomainObjPtr vm,
+                        virDomainObj *vm,
                         const char *xmlDesc,
                         unsigned int flags)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    virQEMUDriverPtr driver = priv->driver;
-    virDomainMomentObjPtr chk = NULL;
+    qemuDomainObjPrivate *priv = vm->privateData;
+    virQEMUDriver *driver = priv->driver;
+    virDomainMomentObj *chk = NULL;
     virDomainCheckpointPtr checkpoint = NULL;
     bool update_current = true;
     bool redefine = flags & VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE;
+    bool validate_bitmaps = flags & VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE_VALIDATE;
     unsigned int parse_flags = 0;
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autoptr(virDomainCheckpointDef) def = NULL;
 
-    virCheckFlags(VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE, NULL);
+    virCheckFlags(VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE |
+                  VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE_VALIDATE, NULL);
 
     if (redefine) {
         parse_flags |= VIR_DOMAIN_CHECKPOINT_PARSE_REDEFINE;
@@ -539,11 +604,11 @@ qemuCheckpointCreateXML(virDomainPtr domain,
     /* Unlike snapshots, the RNG schema already ensured a sane filename. */
 
     /* We are going to modify the domain below. */
-    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MODIFY) < 0)
+    if (virDomainObjBeginJob(vm, VIR_JOB_MODIFY) < 0)
         return NULL;
 
     if (redefine) {
-        chk = qemuCheckpointRedefine(driver, vm, &def, &update_current);
+        chk = qemuCheckpointRedefine(vm, &def, &update_current, validate_bitmaps);
     } else {
         chk = qemuCheckpointCreate(driver, vm, &def);
     }
@@ -561,30 +626,172 @@ qemuCheckpointCreateXML(virDomainPtr domain,
     checkpoint = virGetDomainCheckpoint(domain, chk->def->name);
 
  endjob:
-    qemuDomainObjEndJob(driver, vm);
+    virDomainObjEndJob(vm);
 
     return checkpoint;
 }
 
 
+struct qemuCheckpointDiskMap {
+    virDomainCheckpointDiskDef *chkdisk;
+    virDomainDiskDef *domdisk;
+};
+
+
+static int
+qemuCheckpointGetXMLDescUpdateSize(virDomainObj *vm,
+                                   virDomainCheckpointDef *chkdef)
+{
+    qemuDomainObjPrivate *priv = vm->privateData;
+    g_autoptr(GHashTable) nodedataMerge = NULL;
+    g_autoptr(GHashTable) nodedataStats = NULL;
+    g_autofree struct qemuCheckpointDiskMap *diskmap = NULL;
+    g_autoptr(virJSONValue) recoveractions = NULL;
+    g_autoptr(virJSONValue) mergeactions = virJSONValueNewArray();
+    g_autoptr(virJSONValue) cleanupactions = virJSONValueNewArray();
+    int rc = 0;
+    size_t ndisks = 0;
+    size_t i;
+    int ret = -1;
+
+    if (virDomainObjBeginJob(vm, VIR_JOB_MODIFY) < 0)
+        return -1;
+
+    if (virDomainObjCheckActive(vm) < 0)
+        goto endjob;
+
+    if (!(nodedataMerge = qemuBlockGetNamedNodeData(vm, VIR_ASYNC_JOB_NONE)))
+        goto endjob;
+
+    /* enumerate disks relevant for the checkpoint which are also present in the
+     * domain */
+    diskmap = g_new0(struct qemuCheckpointDiskMap, chkdef->ndisks);
+
+    for (i = 0; i < chkdef->ndisks; i++) {
+        virDomainCheckpointDiskDef *chkdisk = chkdef->disks + i;
+        virDomainDiskDef *domdisk;
+
+        chkdisk->size = 0;
+        chkdisk->sizeValid = false;
+
+        if (chkdisk->type != VIR_DOMAIN_CHECKPOINT_TYPE_BITMAP)
+            continue;
+
+        if (!(domdisk = virDomainDiskByTarget(vm->def, chkdisk->name)))
+            continue;
+
+        if (!qemuBlockBitmapChainIsValid(domdisk->src, chkdef->parent.name, nodedataMerge))
+            continue;
+
+        diskmap[ndisks].chkdisk = chkdisk;
+        diskmap[ndisks].domdisk = domdisk;
+        ndisks++;
+    }
+
+    if (ndisks == 0) {
+        ret = 0;
+        goto endjob;
+    }
+
+    /* we need to calculate the merged bitmap to obtain accurate data */
+    for (i = 0; i < ndisks; i++) {
+        virDomainDiskDef *domdisk = diskmap[i].domdisk;
+        g_autoptr(virJSONValue) actions = NULL;
+
+        /* possibly delete leftovers from previous cases */
+        if (qemuBlockNamedNodeDataGetBitmapByName(nodedataMerge, domdisk->src,
+                                                  "libvirt-tmp-size-xml")) {
+            if (!recoveractions)
+                recoveractions = virJSONValueNewArray();
+
+            if (qemuMonitorTransactionBitmapRemove(recoveractions,
+                                                   qemuBlockStorageSourceGetEffectiveNodename(domdisk->src),
+                                                   "libvirt-tmp-size-xml") < 0)
+                goto endjob;
+        }
+
+        if (qemuBlockGetBitmapMergeActions(domdisk->src, NULL, domdisk->src,
+                                           chkdef->parent.name, "libvirt-tmp-size-xml",
+                                           NULL, &actions, nodedataMerge) < 0)
+            goto endjob;
+
+        if (virJSONValueArrayConcat(mergeactions, actions) < 0)
+            goto endjob;
+
+        if (qemuMonitorTransactionBitmapRemove(cleanupactions,
+                                               qemuBlockStorageSourceGetEffectiveNodename(domdisk->src),
+                                               "libvirt-tmp-size-xml") < 0)
+            goto endjob;
+    }
+
+    qemuDomainObjEnterMonitor(vm);
+
+    if (rc == 0 && recoveractions)
+        rc = qemuMonitorTransaction(priv->mon, &recoveractions);
+
+    if (rc == 0)
+        rc = qemuMonitorTransaction(priv->mon, &mergeactions);
+
+    qemuDomainObjExitMonitor(vm);
+    if (rc < 0)
+        goto endjob;
+
+    /* now do a final refresh */
+    if (!(nodedataStats = qemuBlockGetNamedNodeData(vm, VIR_ASYNC_JOB_NONE)))
+        goto endjob;
+
+    qemuDomainObjEnterMonitor(vm);
+
+    rc = qemuMonitorTransaction(priv->mon, &cleanupactions);
+
+    qemuDomainObjExitMonitor(vm);
+    if (rc < 0)
+        goto endjob;
+
+    /* update disks */
+    for (i = 0; i < ndisks; i++) {
+        virDomainCheckpointDiskDef *chkdisk = diskmap[i].chkdisk;
+        virDomainDiskDef *domdisk = diskmap[i].domdisk;
+        qemuBlockNamedNodeDataBitmap *bitmap;
+
+        if ((bitmap = qemuBlockNamedNodeDataGetBitmapByName(nodedataStats, domdisk->src,
+                                                            "libvirt-tmp-size-xml"))) {
+            chkdisk->size = bitmap->dirtybytes;
+            chkdisk->sizeValid = true;
+        }
+    }
+
+    ret = 0;
+
+ endjob:
+    virDomainObjEndJob(vm);
+    return ret;
+}
+
+
 char *
-qemuCheckpointGetXMLDesc(virDomainObjPtr vm,
+qemuCheckpointGetXMLDesc(virDomainObj *vm,
                          virDomainCheckpointPtr checkpoint,
                          unsigned int flags)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    virQEMUDriverPtr driver = priv->driver;
-    virDomainMomentObjPtr chk = NULL;
-    virDomainCheckpointDefPtr chkdef;
+    qemuDomainObjPrivate *priv = vm->privateData;
+    virQEMUDriver *driver = priv->driver;
+    virDomainMomentObj *chk = NULL;
+    virDomainCheckpointDef *chkdef;
     unsigned int format_flags;
 
     virCheckFlags(VIR_DOMAIN_CHECKPOINT_XML_SECURE |
-                  VIR_DOMAIN_CHECKPOINT_XML_NO_DOMAIN, NULL);
+                  VIR_DOMAIN_CHECKPOINT_XML_NO_DOMAIN |
+                  VIR_DOMAIN_CHECKPOINT_XML_SIZE, NULL);
 
     if (!(chk = qemuCheckpointObjFromCheckpoint(vm, checkpoint)))
         return NULL;
 
     chkdef = virDomainCheckpointObjGetDef(chk);
+
+    if (flags & VIR_DOMAIN_CHECKPOINT_XML_SIZE &&
+        qemuCheckpointGetXMLDescUpdateSize(vm, chkdef) < 0)
+        return NULL;
 
     format_flags = virDomainCheckpointFormatConvertXMLFlags(flags);
     return virDomainCheckpointDefFormat(chkdef, driver->xmlopt,
@@ -594,19 +801,19 @@ qemuCheckpointGetXMLDesc(virDomainObjPtr vm,
 
 struct virQEMUCheckpointReparent {
     const char *dir;
-    virDomainMomentObjPtr parent;
-    virDomainObjPtr vm;
-    virDomainXMLOptionPtr xmlopt;
+    virDomainMomentObj *parent;
+    virDomainObj *vm;
+    virDomainXMLOption *xmlopt;
     int err;
 };
 
 
 static int
 qemuCheckpointReparentChildren(void *payload,
-                               const void *name G_GNUC_UNUSED,
+                               const char *name G_GNUC_UNUSED,
                                void *data)
 {
-    virDomainMomentObjPtr moment = payload;
+    virDomainMomentObj *moment = payload;
     struct virQEMUCheckpointReparent *rep = data;
 
     if (rep->err < 0)
@@ -624,15 +831,15 @@ qemuCheckpointReparentChildren(void *payload,
 
 
 int
-qemuCheckpointDelete(virDomainObjPtr vm,
+qemuCheckpointDelete(virDomainObj *vm,
                      virDomainCheckpointPtr checkpoint,
                      unsigned int flags)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    virQEMUDriverPtr driver = priv->driver;
+    qemuDomainObjPrivate *priv = vm->privateData;
+    virQEMUDriver *driver = priv->driver;
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     int ret = -1;
-    virDomainMomentObjPtr chk = NULL;
+    virDomainMomentObj *chk = NULL;
     virQEMUMomentRemove rem;
     struct virQEMUCheckpointReparent rep;
     bool metadata_only = !!(flags & VIR_DOMAIN_CHECKPOINT_DELETE_METADATA_ONLY);
@@ -641,7 +848,7 @@ qemuCheckpointDelete(virDomainObjPtr vm,
                   VIR_DOMAIN_CHECKPOINT_DELETE_METADATA_ONLY |
                   VIR_DOMAIN_CHECKPOINT_DELETE_CHILDREN_ONLY, -1);
 
-    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MODIFY) < 0)
+    if (virDomainObjBeginJob(vm, VIR_JOB_MODIFY) < 0)
         return -1;
 
     if (!metadata_only) {
@@ -675,13 +882,14 @@ qemuCheckpointDelete(virDomainObjPtr vm,
         if (rem.err < 0)
             goto endjob;
         if (rem.found) {
-            virDomainCheckpointSetCurrent(vm->checkpoints, chk);
+            qemuCheckpointSetCurrent(vm, chk);
+
             if (flags & VIR_DOMAIN_CHECKPOINT_DELETE_CHILDREN_ONLY) {
                 if (qemuCheckpointWriteMetadata(vm, chk,
                                                 driver->xmlopt,
                                                 cfg->checkpointDir) < 0) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("failed to set checkpoint '%s' as current"),
+                                   _("failed to set checkpoint '%1$s' as current"),
                                    chk->def->name);
                     virDomainCheckpointSetCurrent(vm->checkpoints, NULL);
                     goto endjob;
@@ -709,6 +917,6 @@ qemuCheckpointDelete(virDomainObjPtr vm,
     }
 
  endjob:
-    qemuDomainObjEndJob(driver, vm);
+    virDomainObjEndJob(vm);
     return ret;
 }

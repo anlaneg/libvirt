@@ -19,8 +19,6 @@
 #include <config.h>
 
 #include "testutils.h"
-#include "virerror.h"
-#include "viralloc.h"
 #include "virlog.h"
 
 #include "domain_conf.h"
@@ -29,8 +27,8 @@
 
 VIR_LOG_INIT("tests.domainconftest");
 
-static virCapsPtr caps;
-static virDomainXMLOptionPtr xmlopt;
+static virCaps *caps;
+static virDomainXMLOption *xmlopt;
 
 struct testGetFilesystemData {
     const char *filename;
@@ -40,17 +38,16 @@ struct testGetFilesystemData {
 
 static int testGetFilesystem(const void *opaque)
 {
-    int ret = -1;
-    virDomainDefPtr def = NULL;
-    char *filename = NULL;
+    g_autoptr(virDomainDef) def = NULL;
+    g_autofree char *filename = NULL;
     const struct testGetFilesystemData *data = opaque;
-    virDomainFSDefPtr fsdef;
+    virDomainFSDef *fsdef;
 
     filename = g_strdup_printf("%s/domainconfdata/%s.xml", abs_srcdir,
                                data->filename);
 
     if (!(def = virDomainDefParseFile(filename, xmlopt, NULL, 0)))
-        goto cleanup;
+        return -1;
 
     fsdef = virDomainGetFilesystemForTarget(def,
                                             data->path);
@@ -58,22 +55,17 @@ static int testGetFilesystem(const void *opaque)
         if (data->expectEntry) {
             fprintf(stderr, "Expected FS for path '%s' in '%s'\n",
                     data->path, filename);
-            goto cleanup;
+            return -1;
         }
     } else {
         if (!data->expectEntry) {
             fprintf(stderr, "Unexpected FS for path '%s' in '%s'\n",
                     data->path, filename);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
-
- cleanup:
-    virDomainDefFree(def);
-    VIR_FREE(filename);
-    return ret;
+    return 0;
 }
 
 static int
@@ -82,10 +74,10 @@ mymain(void)
     int ret = 0;
 
     if ((caps = virTestGenericCapsInit()) == NULL)
-        goto cleanup;
+        return EXIT_FAILURE;
 
     if (!(xmlopt = virTestGenericDomainXMLConfInit()))
-        goto cleanup;
+        return EXIT_FAILURE;
 
 #define DO_TEST_GET_FS(fspath, expect) \
     do { \
@@ -106,7 +98,6 @@ mymain(void)
     virObjectUnref(caps);
     virObjectUnref(xmlopt);
 
- cleanup:
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

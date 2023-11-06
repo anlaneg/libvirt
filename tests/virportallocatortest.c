@@ -20,17 +20,14 @@
 #include "virfile.h"
 #include "testutils.h"
 
-#if HAVE_DLFCN_H
+#if WITH_DLFCN_H
 # include <dlfcn.h>
 #endif
 
 #if defined(__linux__) && defined(RTLD_NEXT)
 
-# include "virerror.h"
-# include "viralloc.h"
 # include "virlog.h"
 # include "virportallocator.h"
-# include "virstring.h"
 
 # define VIR_FROM_THIS VIR_FROM_RPC
 
@@ -38,7 +35,7 @@ VIR_LOG_INIT("tests.portallocatortest");
 
 static int testAllocAll(const void *args G_GNUC_UNUSED)
 {
-    virPortAllocatorRangePtr ports = virPortAllocatorRangeNew("test", 5900, 5909);
+    virPortAllocatorRange *ports = virPortAllocatorRangeNew("test", 5900, 5909);
     int ret = -1;
     unsigned short p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0;
 
@@ -110,7 +107,7 @@ static int testAllocAll(const void *args G_GNUC_UNUSED)
 
 static int testAllocReuse(const void *args G_GNUC_UNUSED)
 {
-    virPortAllocatorRangePtr ports = virPortAllocatorRangeNew("test", 5900, 5910);
+    virPortAllocatorRange *ports = virPortAllocatorRangeNew("test", 5900, 5910);
     int ret = -1;
     unsigned short p1 = 0, p2 = 0, p3 = 0, p4 = 0;
 

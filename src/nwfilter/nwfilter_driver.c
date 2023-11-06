@@ -24,22 +24,17 @@
 
 #include <config.h>
 
-#include "virdbus.h"
+#include "virgdbus.h"
 #include "virlog.h"
 
 #include "internal.h"
 
 #include "virerror.h"
 #include "datatypes.h"
-#include "viralloc.h"
-#include "domain_conf.h"
-#include "domain_nwfilter.h"
 #include "nwfilter_driver.h"
 #include "nwfilter_gentech_driver.h"
 #include "configmake.h"
-#include "virfile.h"
 #include "virpidfile.h"
-#include "virstring.h"
 #include "viraccessapicheck.h"
 
 #include "nwfilter_ipaddrmap.h"
@@ -50,65 +45,61 @@
 
 VIR_LOG_INIT("nwfilter.nwfilter_driver");
 
-#define DBUS_RULE_FWD_NAMEOWNERCHANGED \
-    "type='signal'" \
-    ",interface='"DBUS_INTERFACE_DBUS"'" \
-    ",member='NameOwnerChanged'" \
-    ",arg0='org.fedoraproject.FirewallD1'"
 
-#define DBUS_RULE_FWD_RELOADED \
-    "type='signal'" \
-    ",interface='org.fedoraproject.FirewallD1'" \
-    ",member='Reloaded'"
-
-
-static virNWFilterDriverStatePtr driver;
-
-static int nwfilterStateCleanup(void);
+static virNWFilterDriverState *driver;
 
 static int nwfilterStateReload(void);
 
-static void nwfilterDriverLock(void)
-{
-    virMutexLock(&driver->lock);
-}
-static void nwfilterDriverUnlock(void)
-{
-    virMutexUnlock(&driver->lock);
-}
+static virMutex driverMutex = VIR_MUTEX_INITIALIZER;
 
 #ifdef WITH_FIREWALLD
 
-static DBusHandlerResult
-nwfilterFirewalldDBusFilter(DBusConnection *connection G_GNUC_UNUSED,
-                            DBusMessage *message,
-                            void *user_data G_GNUC_UNUSED)
+static void nwfilterStateReloadThread(void *opaque G_GNUC_UNUSED)
 {
-    if (dbus_message_is_signal(message, DBUS_INTERFACE_DBUS,
-                               "NameOwnerChanged") ||
-        dbus_message_is_signal(message, "org.fedoraproject.FirewallD1",
-                               "Reloaded")) {
-        VIR_DEBUG("Reload in nwfilter_driver because of firewalld.");
-        nwfilterStateReload();
-    }
+    VIR_INFO("Reloading configuration on firewalld reload/restart");
 
-    return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+    nwfilterStateReload();
 }
+
+static void
+nwfilterFirewalldDBusSignalCallback(GDBusConnection *connection G_GNUC_UNUSED,
+                                    const char *senderName G_GNUC_UNUSED,
+                                    const char *objectPath G_GNUC_UNUSED,
+                                    const char *interfaceName G_GNUC_UNUSED,
+                                    const char *signalName G_GNUC_UNUSED,
+                                    GVariant *parameters G_GNUC_UNUSED,
+                                    gpointer user_data G_GNUC_UNUSED)
+{
+    virThread thr;
+
+    if (virThreadCreateFull(&thr, false, nwfilterStateReloadThread,
+                            "firewall-reload", false, NULL) < 0) {
+        /*
+         * Not much we can do on error here except log it.
+         */
+        VIR_ERROR(_("Failed to create thread to handle firewall reload/restart"));
+    }
+}
+
+static unsigned int restartID;
+static unsigned int reloadID;
 
 static void
 nwfilterDriverRemoveDBusMatches(void)
 {
-    DBusConnection *sysbus;
+    GDBusConnection *sysbus = virGDBusGetSystemBus();
 
-    sysbus = virDBusGetSystemBus();
-    if (sysbus) {
-        dbus_bus_remove_match(sysbus,
-                              DBUS_RULE_FWD_NAMEOWNERCHANGED,
-                              NULL);
-        dbus_bus_remove_match(sysbus,
-                              DBUS_RULE_FWD_RELOADED,
-                              NULL);
-        dbus_connection_remove_filter(sysbus, nwfilterFirewalldDBusFilter, NULL);
+    if (!sysbus)
+        return;
+
+    if (restartID != 0) {
+        g_dbus_connection_signal_unsubscribe(sysbus, restartID);
+        restartID = 0;
+    }
+
+    if (reloadID != 0) {
+        g_dbus_connection_signal_unsubscribe(sysbus, reloadID);
+        reloadID = 0;
     }
 }
 
@@ -117,33 +108,29 @@ nwfilterDriverRemoveDBusMatches(void)
  *
  * Startup DBus matches for monitoring the state of firewalld
  */
-static int
-nwfilterDriverInstallDBusMatches(DBusConnection *sysbus)
+static void
+nwfilterDriverInstallDBusMatches(GDBusConnection *sysbus)
 {
-    int ret = 0;
-
-    if (!sysbus) {
-        ret = -1;
-    } else {
-        /* add matches for
-         * NameOwnerChanged on org.freedesktop.DBus for firewalld start/stop
-         * Reloaded on org.fedoraproject.FirewallD1 for firewalld reload
-         */
-        dbus_bus_add_match(sysbus,
-                           DBUS_RULE_FWD_NAMEOWNERCHANGED,
-                           NULL);
-        dbus_bus_add_match(sysbus,
-                           DBUS_RULE_FWD_RELOADED,
-                           NULL);
-        if (!dbus_connection_add_filter(sysbus, nwfilterFirewalldDBusFilter,
-                                        NULL, NULL)) {
-            VIR_WARN(("Adding a filter to the DBus connection failed"));
-            nwfilterDriverRemoveDBusMatches();
-            ret =  -1;
-        }
-    }
-
-    return ret;
+    restartID = g_dbus_connection_signal_subscribe(sysbus,
+                                                   NULL,
+                                                   "org.freedesktop.DBus",
+                                                   "NameOwnerChanged",
+                                                   NULL,
+                                                   "org.fedoraproject.FirewallD1",
+                                                   G_DBUS_SIGNAL_FLAGS_NONE,
+                                                   nwfilterFirewalldDBusSignalCallback,
+                                                   NULL,
+                                                   NULL);
+    reloadID = g_dbus_connection_signal_subscribe(sysbus,
+                                                  NULL,
+                                                  "org.fedoraproject.FirewallD1",
+                                                  "Reloaded",
+                                                  NULL,
+                                                  NULL,
+                                                  G_DBUS_SIGNAL_FLAGS_NONE,
+                                                  nwfilterFirewalldDBusSignalCallback,
+                                                  NULL,
+                                                  NULL);
 }
 
 #else /* WITH_FIREWALLD */
@@ -153,10 +140,9 @@ nwfilterDriverRemoveDBusMatches(void)
 {
 }
 
-static int
-nwfilterDriverInstallDBusMatches(DBusConnection *sysbus G_GNUC_UNUSED)
+static void
+nwfilterDriverInstallDBusMatches(GDBusConnection *sysbus G_GNUC_UNUSED)
 {
-    return 0;
 }
 
 #endif /* WITH_FIREWALLD */
@@ -164,9 +150,56 @@ nwfilterDriverInstallDBusMatches(DBusConnection *sysbus G_GNUC_UNUSED)
 static int
 virNWFilterTriggerRebuildImpl(void *opaque)
 {
-    virNWFilterDriverStatePtr nwdriver = opaque;
+    virNWFilterDriverState *nwdriver = opaque;
 
     return virNWFilterBuildAll(nwdriver, true);
+}
+
+
+static int
+nwfilterStateCleanupLocked(void)
+{
+    if (!driver)
+        return -1;
+
+    if (driver->privileged) {
+        virNWFilterConfLayerShutdown();
+        virNWFilterDHCPSnoopShutdown();
+        virNWFilterLearnShutdown();
+        virNWFilterIPAddrMapShutdown();
+        virNWFilterTechDriversShutdown();
+        nwfilterDriverRemoveDBusMatches();
+
+        if (driver->lockFD != -1)
+            virPidFileRelease(driver->stateDir, "driver", driver->lockFD);
+
+        g_free(driver->stateDir);
+        g_free(driver->configDir);
+        g_free(driver->bindingDir);
+    }
+
+    virObjectUnref(driver->bindings);
+
+    /* free inactive nwfilters */
+    virNWFilterObjListFree(driver->nwfilters);
+
+    if (driver->updateLockInitialized)
+        virMutexDestroy(&driver->updateLock);
+    g_clear_pointer(&driver, g_free);
+
+    return 0;
+}
+
+/**
+ * nwfilterStateCleanup:
+ *
+ * Shutdown the nwfilter driver, it will stop all active nwfilters
+ */
+static int
+nwfilterStateCleanup(void)
+{
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driverMutex);
+    return nwfilterStateCleanupLocked();
 }
 
 
@@ -178,29 +211,31 @@ virNWFilterTriggerRebuildImpl(void *opaque)
 static int
 nwfilterStateInitialize(bool privileged,
                         const char *root,
+                        bool monolithic G_GNUC_UNUSED,
                         virStateInhibitCallback callback G_GNUC_UNUSED,
                         void *opaque G_GNUC_UNUSED)
 {
-    DBusConnection *sysbus = NULL;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driverMutex);
+    GDBusConnection *sysbus = NULL;
 
     if (root != NULL) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
                        _("Driver does not support embedded mode"));
-        return -1;
+        return VIR_DRV_STATE_INIT_ERROR;
     }
 
-    if (virDBusHasSystemBus() &&
-        !(sysbus = virDBusGetSystemBus()))
+    if (virGDBusHasSystemBus() && !(sysbus = virGDBusGetSystemBus()))
         return VIR_DRV_STATE_INIT_ERROR;
 
-    if (VIR_ALLOC(driver) < 0)
-        return VIR_DRV_STATE_INIT_ERROR;
+    driver = g_new0(virNWFilterDriverState, 1);
 
     driver->lockFD = -1;
-    if (virMutexInit(&driver->lock) < 0)
-        goto err_free_driverstate;
+    if (virMutexInitRecursive(&driver->updateLock) < 0)
+        goto error;
 
+    driver->updateLockInitialized = true;
     driver->privileged = privileged;
+
     if (!(driver->nwfilters = virNWFilterObjListNew()))
         goto error;
 
@@ -210,66 +245,52 @@ nwfilterStateInitialize(bool privileged,
     if (!privileged)
         return VIR_DRV_STATE_INIT_SKIPPED;
 
-    nwfilterDriverLock();
-
     driver->stateDir = g_strdup(RUNSTATEDIR "/libvirt/nwfilter");
 
-    if (virFileMakePathWithMode(driver->stateDir, S_IRWXU) < 0) {
-        virReportSystemError(errno, _("cannot create state directory '%s'"),
+    if (g_mkdir_with_parents(driver->stateDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create state directory '%1$s'"),
                              driver->stateDir);
         goto error;
     }
 
     if ((driver->lockFD =
-         virPidFileAcquire(driver->stateDir, "driver", false, getpid())) < 0)
+         virPidFileAcquire(driver->stateDir, "driver", getpid())) < 0)
         goto error;
 
     if (virNWFilterIPAddrMapInit() < 0)
-        goto err_free_driverstate;
+        goto error;
+
     if (virNWFilterLearnInit() < 0)
-        goto err_exit_ipaddrmapshutdown;
+        goto error;
+
     if (virNWFilterDHCPSnoopInit() < 0)
-        goto err_exit_learnshutdown;
+        goto error;
 
     if (virNWFilterTechDriversInit(privileged) < 0)
-        goto err_dhcpsnoop_shutdown;
+        goto error;
 
-    if (virNWFilterConfLayerInit(virNWFilterTriggerRebuildImpl,
-                                 driver) < 0)
-        goto err_techdrivers_shutdown;
+    if (virNWFilterConfLayerInit(virNWFilterTriggerRebuildImpl, driver) < 0)
+        goto error;
 
     /*
      * startup the DBus late so we don't get a reload signal while
      * initializing
      */
-    if (sysbus &&
-        nwfilterDriverInstallDBusMatches(sysbus) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("DBus matches could not be installed. "
-                       "Disabling nwfilter driver"));
-        /*
-         * unfortunately this is fatal since virNWFilterTechDriversInit
-         * may have caused the ebiptables driver to use the firewall tool
-         * but now that the watches don't work, we just disable the nwfilter
-         * driver
-         *
-         * This may only happen if the system bus is available.
-         */
-        goto error;
-    }
+    if (sysbus)
+        nwfilterDriverInstallDBusMatches(sysbus);
 
     driver->configDir = g_strdup(SYSCONFDIR "/libvirt/nwfilter");
 
-    if (virFileMakePathWithMode(driver->configDir, S_IRWXU) < 0) {
-        virReportSystemError(errno, _("cannot create config directory '%s'"),
+    if (g_mkdir_with_parents(driver->configDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create config directory '%1$s'"),
                              driver->configDir);
         goto error;
     }
 
     driver->bindingDir = g_strdup(RUNSTATEDIR "/libvirt/nwfilter-binding");
 
-    if (virFileMakePathWithMode(driver->bindingDir, S_IRWXU) < 0) {
-        virReportSystemError(errno, _("cannot create config directory '%s'"),
+    if (g_mkdir_with_parents(driver->bindingDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create config directory '%1$s'"),
                              driver->bindingDir);
         goto error;
     }
@@ -283,29 +304,10 @@ nwfilterStateInitialize(bool privileged,
     if (virNWFilterBuildAll(driver, false) < 0)
         goto error;
 
-    nwfilterDriverUnlock();
-
     return VIR_DRV_STATE_INIT_COMPLETE;
 
  error:
-    nwfilterDriverUnlock();
-    nwfilterStateCleanup();
-
-    return VIR_DRV_STATE_INIT_ERROR;
-
- err_techdrivers_shutdown:
-    virNWFilterTechDriversShutdown();
- err_dhcpsnoop_shutdown:
-    virNWFilterDHCPSnoopShutdown();
- err_exit_learnshutdown:
-    virNWFilterLearnShutdown();
- err_exit_ipaddrmapshutdown:
-    virNWFilterIPAddrMapShutdown();
-
- err_free_driverstate:
-    virNWFilterObjListFree(driver->nwfilters);
-    VIR_FREE(driver);
-
+    nwfilterStateCleanupLocked();
     return VIR_DRV_STATE_INIT_ERROR;
 }
 
@@ -328,59 +330,14 @@ nwfilterStateReload(void)
     /* shut down all threads -- they will be restarted if necessary */
     virNWFilterLearnThreadsTerminate(true);
 
-    nwfilterDriverLock();
-    virNWFilterWriteLockFilterUpdates();
-
-    virNWFilterObjListLoadAllConfigs(driver->nwfilters, driver->configDir);
-
-    virNWFilterUnlockFilterUpdates();
-
-    virNWFilterBuildAll(driver, false);
-
-    nwfilterDriverUnlock();
-
-    return 0;
-}
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        VIR_WITH_MUTEX_LOCK_GUARD(&driver->updateLock) {
+            virNWFilterObjListLoadAllConfigs(driver->nwfilters, driver->configDir);
+        }
 
 
-/**
- * nwfilterStateCleanup:
- *
- * Shutdown the nwfilter driver, it will stop all active nwfilters
- */
-static int
-nwfilterStateCleanup(void)
-{
-    if (!driver)
-        return -1;
-
-    if (driver->privileged) {
-        virNWFilterConfLayerShutdown();
-        virNWFilterDHCPSnoopShutdown();
-        virNWFilterLearnShutdown();
-        virNWFilterIPAddrMapShutdown();
-        virNWFilterTechDriversShutdown();
-
-        nwfilterDriverLock();
-
-        nwfilterDriverRemoveDBusMatches();
-
-        if (driver->lockFD != -1)
-            virPidFileRelease(driver->stateDir, "driver", driver->lockFD);
-
-        VIR_FREE(driver->stateDir);
-        VIR_FREE(driver->configDir);
-        VIR_FREE(driver->bindingDir);
-        nwfilterDriverUnlock();
+        virNWFilterBuildAll(driver, false);
     }
-
-    virObjectUnref(driver->bindings);
-
-    /* free inactive nwfilters */
-    virNWFilterObjListFree(driver->nwfilters);
-
-    virMutexDestroy(&driver->lock);
-    VIR_FREE(driver);
 
     return 0;
 }
@@ -389,7 +346,7 @@ nwfilterStateCleanup(void)
 static virDrvOpenStatus
 nwfilterConnectOpen(virConnectPtr conn,
                     virConnectAuthPtr auth G_GNUC_UNUSED,
-                    virConfPtr conf G_GNUC_UNUSED,
+                    virConf *conf G_GNUC_UNUSED,
                     unsigned int flags)
 {
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
@@ -402,7 +359,7 @@ nwfilterConnectOpen(virConnectPtr conn,
 
     if (STRNEQ(conn->uri->path, "/system")) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected nwfilter URI path '%s', try nwfilter:///system"),
+                       _("unexpected nwfilter URI path '%1$s', try nwfilter:///system"),
                        conn->uri->path);
         return VIR_DRV_OPEN_ERROR;
     }
@@ -439,16 +396,16 @@ static int nwfilterConnectIsAlive(virConnectPtr conn G_GNUC_UNUSED)
 }
 
 
-static virNWFilterObjPtr
+static virNWFilterObj *
 nwfilterObjFromNWFilter(const unsigned char *uuid)
 {
-    virNWFilterObjPtr obj;
+    virNWFilterObj *obj;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     if (!(obj = virNWFilterObjListFindByUUID(driver->nwfilters, uuid))) {
         virUUIDFormat(uuid, uuidstr);
         virReportError(VIR_ERR_NO_NWFILTER,
-                       _("no nwfilter with matching uuid '%s'"), uuidstr);
+                       _("no nwfilter with matching uuid '%1$s'"), uuidstr);
     }
     return obj;
 }
@@ -458,13 +415,13 @@ static virNWFilterPtr
 nwfilterLookupByUUID(virConnectPtr conn,
                      const unsigned char *uuid)
 {
-    virNWFilterObjPtr obj;
-    virNWFilterDefPtr def;
+    virNWFilterObj *obj = NULL;
+    virNWFilterDef *def;
     virNWFilterPtr nwfilter = NULL;
 
-    nwfilterDriverLock();
-    obj = nwfilterObjFromNWFilter(uuid);
-    nwfilterDriverUnlock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        obj = nwfilterObjFromNWFilter(uuid);
+    }
 
     if (!obj)
         return NULL;
@@ -485,17 +442,17 @@ static virNWFilterPtr
 nwfilterLookupByName(virConnectPtr conn,
                      const char *name)
 {
-    virNWFilterObjPtr obj;
-    virNWFilterDefPtr def;
+    virNWFilterObj *obj = NULL;
+    virNWFilterDef *def;
     virNWFilterPtr nwfilter = NULL;
 
-    nwfilterDriverLock();
-    obj = virNWFilterObjListFindByName(driver->nwfilters, name);
-    nwfilterDriverUnlock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        obj = virNWFilterObjListFindByName(driver->nwfilters, name);
+    }
 
     if (!obj) {
         virReportError(VIR_ERR_NO_NWFILTER,
-                       _("no nwfilter with matching name '%s'"), name);
+                       _("no nwfilter with matching name '%1$s'"), name);
         return NULL;
     }
     def = virNWFilterObjGetDef(obj);
@@ -514,11 +471,16 @@ nwfilterLookupByName(virConnectPtr conn,
 static int
 nwfilterConnectNumOfNWFilters(virConnectPtr conn)
 {
+    int ret = -1;
     if (virConnectNumOfNWFiltersEnsureACL(conn) < 0)
         return -1;
 
-    return virNWFilterObjListNumOfNWFilters(driver->nwfilters, conn,
-                                        virConnectNumOfNWFiltersCheckACL);
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        ret = virNWFilterObjListNumOfNWFilters(driver->nwfilters, conn,
+                                               virConnectNumOfNWFiltersCheckACL);
+    }
+
+    return ret;
 }
 
 
@@ -527,16 +489,17 @@ nwfilterConnectListNWFilters(virConnectPtr conn,
                              char **const names,
                              int maxnames)
 {
-    int nnames;
+    int nnames = -1;
 
     if (virConnectListNWFiltersEnsureACL(conn) < 0)
         return -1;
 
-    nwfilterDriverLock();
-    nnames = virNWFilterObjListGetNames(driver->nwfilters, conn,
-                                    virConnectListNWFiltersCheckACL,
-                                    names, maxnames);
-    nwfilterDriverUnlock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        nnames = virNWFilterObjListGetNames(driver->nwfilters, conn,
+                                            virConnectListNWFiltersCheckACL,
+                                            names, maxnames);
+    }
+
     return nnames;
 }
 
@@ -546,29 +509,35 @@ nwfilterConnectListAllNWFilters(virConnectPtr conn,
                                 virNWFilterPtr **nwfilters,
                                 unsigned int flags)
 {
-    int ret;
+    int ret = -1;
 
     virCheckFlags(0, -1);
 
     if (virConnectListAllNWFiltersEnsureACL(conn) < 0)
         return -1;
 
-    nwfilterDriverLock();
-    ret = virNWFilterObjListExport(conn, driver->nwfilters, nwfilters,
-                                   virConnectListAllNWFiltersCheckACL);
-    nwfilterDriverUnlock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        ret = virNWFilterObjListExport(conn, driver->nwfilters, nwfilters,
+                                       virConnectListAllNWFiltersCheckACL);
+    }
 
     return ret;
 }
 
+
 static virNWFilterPtr
-nwfilterDefineXML(virConnectPtr conn,
-                  const char *xml)
+nwfilterDefineXMLFlags(virConnectPtr conn,
+                       const char *xml,
+                       unsigned int flags)
 {
-    virNWFilterDefPtr def;
-    virNWFilterObjPtr obj = NULL;
-    virNWFilterDefPtr objdef;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driverMutex);
+    virNWFilterDef *def;
+    virNWFilterObj *obj = NULL;
+    virNWFilterDef *objdef;
     virNWFilterPtr nwfilter = NULL;
+
+    virCheckFlags(VIR_NWFILTER_DEFINE_VALIDATE, NULL);
+
 
     if (!driver->privileged) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
@@ -576,17 +545,16 @@ nwfilterDefineXML(virConnectPtr conn,
         return NULL;
     }
 
-    nwfilterDriverLock();
-    virNWFilterWriteLockFilterUpdates();
-
-    if (!(def = virNWFilterDefParseString(xml)))
+    if (!(def = virNWFilterDefParse(xml, NULL, flags)))
         goto cleanup;
 
-    if (virNWFilterDefineXMLEnsureACL(conn, def) < 0)
+    if (virNWFilterDefineXMLFlagsEnsureACL(conn, def) < 0)
         goto cleanup;
 
-    if (!(obj = virNWFilterObjListAssignDef(driver->nwfilters, def)))
-        goto cleanup;
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->updateLock) {
+        if (!(obj = virNWFilterObjListAssignDef(driver->nwfilters, def)))
+            goto cleanup;
+    }
     def = NULL;
     objdef = virNWFilterObjGetDef(obj);
 
@@ -601,50 +569,53 @@ nwfilterDefineXML(virConnectPtr conn,
     virNWFilterDefFree(def);
     if (obj)
         virNWFilterObjUnlock(obj);
-
-    virNWFilterUnlockFilterUpdates();
-    nwfilterDriverUnlock();
     return nwfilter;
+}
+
+
+static virNWFilterPtr
+nwfilterDefineXML(virConnectPtr conn,
+                  const char *xml)
+{
+    return nwfilterDefineXMLFlags(conn, xml, 0);
 }
 
 
 static int
 nwfilterUndefine(virNWFilterPtr nwfilter)
 {
-    virNWFilterObjPtr obj;
-    virNWFilterDefPtr def;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driverMutex);
+    virNWFilterObj *obj;
+    virNWFilterDef *def;
     int ret = -1;
 
-    nwfilterDriverLock();
-    virNWFilterWriteLockFilterUpdates();
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->updateLock) {
+        if (!(obj = nwfilterObjFromNWFilter(nwfilter->uuid)))
+            goto cleanup;
+        def = virNWFilterObjGetDef(obj);
 
-    if (!(obj = nwfilterObjFromNWFilter(nwfilter->uuid)))
-        goto cleanup;
-    def = virNWFilterObjGetDef(obj);
+        if (virNWFilterUndefineEnsureACL(nwfilter->conn, def) < 0)
+            goto cleanup;
 
-    if (virNWFilterUndefineEnsureACL(nwfilter->conn, def) < 0)
-        goto cleanup;
+        if (virNWFilterObjTestUnassignDef(obj) < 0) {
+            virReportError(VIR_ERR_OPERATION_INVALID,
+                           "%s",
+                           _("nwfilter is in use"));
+            goto cleanup;
+        }
 
-    if (virNWFilterObjTestUnassignDef(obj) < 0) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       "%s",
-                       _("nwfilter is in use"));
-        goto cleanup;
+        if (virNWFilterDeleteDef(driver->configDir, def) < 0)
+            goto cleanup;
+
+        virNWFilterObjListRemove(driver->nwfilters, obj);
+        obj = NULL;
     }
-
-    if (virNWFilterDeleteDef(driver->configDir, def) < 0)
-        goto cleanup;
-
-    virNWFilterObjListRemove(driver->nwfilters, obj);
-    obj = NULL;
     ret = 0;
 
  cleanup:
     if (obj)
         virNWFilterObjUnlock(obj);
 
-    virNWFilterUnlockFilterUpdates();
-    nwfilterDriverUnlock();
     return ret;
 }
 
@@ -653,15 +624,15 @@ static char *
 nwfilterGetXMLDesc(virNWFilterPtr nwfilter,
                    unsigned int flags)
 {
-    virNWFilterObjPtr obj;
-    virNWFilterDefPtr def;
+    virNWFilterObj *obj = NULL;
+    virNWFilterDef *def;
     char *ret = NULL;
 
     virCheckFlags(0, NULL);
 
-    nwfilterDriverLock();
-    obj = nwfilterObjFromNWFilter(nwfilter->uuid);
-    nwfilterDriverUnlock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&driverMutex) {
+        obj = nwfilterObjFromNWFilter(nwfilter->uuid);
+    }
 
     if (!obj)
         return NULL;
@@ -683,14 +654,14 @@ nwfilterBindingLookupByPortDev(virConnectPtr conn,
                                const char *portdev)
 {
     virNWFilterBindingPtr ret = NULL;
-    virNWFilterBindingObjPtr obj;
-    virNWFilterBindingDefPtr def;
+    virNWFilterBindingObj *obj;
+    virNWFilterBindingDef *def;
 
     obj = virNWFilterBindingObjListFindByPortDev(driver->bindings,
                                                  portdev);
     if (!obj) {
         virReportError(VIR_ERR_NO_NWFILTER_BINDING,
-                       _("no nwfilter binding for port dev '%s'"), portdev);
+                       _("no nwfilter binding for port dev '%1$s'"), portdev);
         goto cleanup;
     }
 
@@ -725,8 +696,8 @@ static char *
 nwfilterBindingGetXMLDesc(virNWFilterBindingPtr binding,
                           unsigned int flags)
 {
-    virNWFilterBindingObjPtr obj;
-    virNWFilterBindingDefPtr def;
+    virNWFilterBindingObj *obj;
+    virNWFilterBindingDef *def;
     char *ret = NULL;
 
     virCheckFlags(0, NULL);
@@ -735,7 +706,7 @@ nwfilterBindingGetXMLDesc(virNWFilterBindingPtr binding,
                                                  binding->portdev);
     if (!obj) {
         virReportError(VIR_ERR_NO_NWFILTER_BINDING,
-                       _("no nwfilter binding for port dev '%s'"), binding->portdev);
+                       _("no nwfilter binding for port dev '%1$s'"), binding->portdev);
         goto cleanup;
     }
 
@@ -756,11 +727,11 @@ nwfilterBindingCreateXML(virConnectPtr conn,
                          const char *xml,
                          unsigned int flags)
 {
-    virNWFilterBindingDefPtr def;
-    virNWFilterBindingObjPtr obj = NULL;
+    virNWFilterBindingDef *def;
+    virNWFilterBindingObj *obj = NULL;
     virNWFilterBindingPtr ret = NULL;
 
-    virCheckFlags(0, NULL);
+    virCheckFlags(VIR_NWFILTER_BINDING_CREATE_VALIDATE, NULL);
 
     if (!driver->privileged) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
@@ -768,7 +739,7 @@ nwfilterBindingCreateXML(virConnectPtr conn,
         return NULL;
     }
 
-    def = virNWFilterBindingDefParseString(xml);
+    def = virNWFilterBindingDefParse(xml, NULL, flags);
     if (!def)
         return NULL;
 
@@ -783,12 +754,14 @@ nwfilterBindingCreateXML(virConnectPtr conn,
     if (!(ret = virGetNWFilterBinding(conn, def->portdevname, def->filter)))
         goto cleanup;
 
-    if (virNWFilterInstantiateFilter(driver, def) < 0) {
-        virNWFilterBindingObjListRemove(driver->bindings, obj);
-        virObjectUnref(ret);
-        ret = NULL;
-        goto cleanup;
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->updateLock) {
+        if (virNWFilterInstantiateFilter(driver, def) < 0) {
+            virNWFilterBindingObjListRemove(driver->bindings, obj);
+            g_clear_pointer(&ret, virObjectUnref);
+            goto cleanup;
+        }
     }
+
     virNWFilterBindingObjSave(obj, driver->bindingDir);
 
  cleanup:
@@ -810,14 +783,14 @@ nwfilterBindingCreateXML(virConnectPtr conn,
 static int
 nwfilterBindingDelete(virNWFilterBindingPtr binding)
 {
-    virNWFilterBindingObjPtr obj;
-    virNWFilterBindingDefPtr def;
+    virNWFilterBindingObj *obj;
+    virNWFilterBindingDef *def;
     int ret = -1;
 
     obj = virNWFilterBindingObjListFindByPortDev(driver->bindings, binding->portdev);
     if (!obj) {
         virReportError(VIR_ERR_NO_NWFILTER_BINDING,
-                       _("no nwfilter binding for port dev '%s'"), binding->portdev);
+                       _("no nwfilter binding for port dev '%1$s'"), binding->portdev);
         return -1;
     }
 
@@ -825,7 +798,9 @@ nwfilterBindingDelete(virNWFilterBindingPtr binding)
     if (virNWFilterBindingDeleteEnsureACL(binding->conn, def) < 0)
         goto cleanup;
 
-    virNWFilterTeardownFilter(def);
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->updateLock) {
+        virNWFilterTeardownFilter(def);
+    }
     virNWFilterBindingObjDelete(obj, driver->bindingDir);
     virNWFilterBindingObjListRemove(driver->bindings, obj);
 
@@ -845,6 +820,7 @@ static virNWFilterDriver nwfilterDriver = {
     .nwfilterLookupByName = nwfilterLookupByName, /* 0.8.0 */
     .nwfilterLookupByUUID = nwfilterLookupByUUID, /* 0.8.0 */
     .nwfilterDefineXML = nwfilterDefineXML, /* 0.8.0 */
+    .nwfilterDefineXMLFlags = nwfilterDefineXMLFlags, /* 7.7.0 */
     .nwfilterUndefine = nwfilterUndefine, /* 0.8.0 */
     .nwfilterGetXMLDesc = nwfilterGetXMLDesc, /* 0.8.0 */
     .nwfilterBindingLookupByPortDev = nwfilterBindingLookupByPortDev, /* 4.5.0 */

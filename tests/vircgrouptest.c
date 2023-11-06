@@ -25,7 +25,6 @@
 
 # define LIBVIRT_VIRCGROUPPRIV_H_ALLOW
 # include "vircgrouppriv.h"
-# include "virstring.h"
 # include "virerror.h"
 # include "virlog.h"
 # include "virfile.h"
@@ -37,8 +36,7 @@
 
 VIR_LOG_INIT("tests.cgrouptest");
 
-static int validateCgroup(virCgroupPtr cgroup,
-                          const char *expectPath,
+static int validateCgroup(virCgroup *cgroup,
                           const char **expectMountPoint,
                           const char **expectLinkPoint,
                           const char **expectPlacement,
@@ -47,12 +45,6 @@ static int validateCgroup(virCgroupPtr cgroup,
                           unsigned int expectUnifiedControllers)
 {
     size_t i;
-
-    if (STRNEQ(cgroup->path, expectPath)) {
-        fprintf(stderr, "Wrong path '%s', expected '%s'\n",
-                cgroup->path, expectPath);
-        return -1;
-    }
 
     for (i = 0; i < VIR_CGROUP_CONTROLLER_LAST; i++) {
         if (STRNEQ_NULLABLE(expectMountPoint[i],
@@ -181,10 +173,10 @@ testCgroupDetectMounts(const void *args)
 {
     int result = -1;
     const struct _detectMountsData *data = args;
-    char *parsed = NULL;
+    g_autofree char *parsed = NULL;
     const char *actual;
-    virCgroupPtr group = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_autoptr(virCgroup) group = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     size_t i;
 
     g_setenv("VIR_CGROUP_MOCK_FILENAME", data->file, TRUE);
@@ -216,17 +208,13 @@ testCgroupDetectMounts(const void *args)
 
  cleanup:
     g_unsetenv("VIR_CGROUP_MOCK_FILENAME");
-    VIR_FREE(parsed);
-    virCgroupFree(&group);
-    virBufferFreeAndReset(&buf);
     return result;
 }
 
 
 static int testCgroupNewForSelf(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     const char *placement[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/system",
         [VIR_CGROUP_CONTROLLER_CPUACCT] = "/system",
@@ -240,14 +228,10 @@ static int testCgroupNewForSelf(const void *args G_GNUC_UNUSED)
 
     if (virCgroupNewSelf(&cgroup) < 0) {
         fprintf(stderr, "Cannot create cgroup for self\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(cgroup, "", mountsFull, links, placement, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return validateCgroup(cgroup, mountsFull, links, placement, NULL, NULL, 0);
 }
 
 
@@ -257,7 +241,7 @@ static int testCgroupNewForSelf(const void *args G_GNUC_UNUSED)
         virErrorPtr err = virGetLastError(); \
         fprintf(stderr, "Did not get " #en " error code: %d:%d\n", \
                 err ? err->code : 0, err ? err->int1 : 0); \
-        goto cleanup; \
+        return -1; \
     } } while (0)
 
     /* Asking for impossible combination since CPU is co-mounted */
@@ -265,8 +249,7 @@ static int testCgroupNewForSelf(const void *args G_GNUC_UNUSED)
 
 static int testCgroupNewForPartition(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     int rv;
     const char *placementSmall[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/virtualmachines.partition",
@@ -291,7 +274,7 @@ static int testCgroupNewForPartition(const void *args G_GNUC_UNUSED)
 
     if ((rv = virCgroupNewPartition("/virtualmachines", false, -1, &cgroup)) != -1) {
         fprintf(stderr, "Unexpected found /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(ENOENT);
 
@@ -300,7 +283,7 @@ static int testCgroupNewForPartition(const void *args G_GNUC_UNUSED)
                                     (1 << VIR_CGROUP_CONTROLLER_CPU),
                                     &cgroup)) != -1) {
         fprintf(stderr, "Should not have created /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(EINVAL);
 
@@ -309,7 +292,7 @@ static int testCgroupNewForPartition(const void *args G_GNUC_UNUSED)
                                     (1 << VIR_CGROUP_CONTROLLER_DEVICES),
                                     &cgroup)) != -1) {
         fprintf(stderr, "Should not have created /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(ENXIO);
 
@@ -320,27 +303,22 @@ static int testCgroupNewForPartition(const void *args G_GNUC_UNUSED)
                                     (1 << VIR_CGROUP_CONTROLLER_MEMORY),
                                     &cgroup)) != 0) {
         fprintf(stderr, "Cannot create /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
-    ret = validateCgroup(cgroup, "/virtualmachines.partition", mountsSmall, links, placementSmall, NULL, NULL, 0);
-    virCgroupFree(&cgroup);
+    rv = validateCgroup(cgroup, mountsSmall, links, placementSmall, NULL, NULL, 0);
+    virCgroupFree(cgroup);
 
     if ((rv = virCgroupNewPartition("/virtualmachines", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Cannot create /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
-    ret = validateCgroup(cgroup, "/virtualmachines.partition", mountsFull, links, placementFull, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return validateCgroup(cgroup, mountsFull, links, placementFull, NULL, NULL, 0);
 }
 
 
 static int testCgroupNewForPartitionNested(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     int rv;
     const char *placementFull[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/deployment.partition/production.partition",
@@ -355,42 +333,36 @@ static int testCgroupNewForPartitionNested(const void *args G_GNUC_UNUSED)
 
     if ((rv = virCgroupNewPartition("/deployment/production", false, -1, &cgroup)) != -1) {
         fprintf(stderr, "Unexpected found /deployment/production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(ENOENT);
 
     /* Should not work, since we require /deployment to be pre-created */
     if ((rv = virCgroupNewPartition("/deployment/production", true, -1, &cgroup)) != -1) {
         fprintf(stderr, "Unexpected created /deployment/production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(ENOENT);
 
     if ((rv = virCgroupNewPartition("/deployment", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /deployment cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     /* Should now work */
-    virCgroupFree(&cgroup);
+    virCgroupFree(cgroup);
     if ((rv = virCgroupNewPartition("/deployment/production", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /deployment/production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(cgroup, "/deployment.partition/production.partition",
-                         mountsFull, links, placementFull, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return validateCgroup(cgroup, mountsFull, links, placementFull, NULL, NULL, 0);
 }
 
 
 static int testCgroupNewForPartitionNestedDeep(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     int rv;
     const char *placementFull[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/user/berrange.user/production.partition",
@@ -405,50 +377,44 @@ static int testCgroupNewForPartitionNestedDeep(const void *args G_GNUC_UNUSED)
 
     if ((rv = virCgroupNewPartition("/user/berrange.user/production", false, -1, &cgroup)) != -1) {
         fprintf(stderr, "Unexpected found /user/berrange.user/production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(ENOENT);
 
     /* Should not work, since we require /user/berrange.user to be pre-created */
     if ((rv = virCgroupNewPartition("/user/berrange.user/production", true, -1, &cgroup)) != -1) {
         fprintf(stderr, "Unexpected created /user/berrange.user/production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
     ENSURE_ERRNO(ENOENT);
 
     if ((rv = virCgroupNewPartition("/user", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /user/berrange.user cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
-    virCgroupFree(&cgroup);
+    virCgroupFree(cgroup);
     if ((rv = virCgroupNewPartition("/user/berrange.user", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /user/berrange.user cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     /* Should now work */
-    virCgroupFree(&cgroup);
+    virCgroupFree(cgroup);
     if ((rv = virCgroupNewPartition("/user/berrange.user/production", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /user/berrange.user/production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(cgroup, "/user/berrange.user/production.partition",
-                         mountsFull, links, placementFull, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return validateCgroup(cgroup, mountsFull, links, placementFull, NULL, NULL, 0);
 }
 
 
 
 static int testCgroupNewForPartitionDomain(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr partitioncgroup = NULL;
-    virCgroupPtr domaincgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) partitioncgroup = NULL;
+    g_autoptr(virCgroup) domaincgroup = NULL;
     int rv;
     const char *placement[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/production.partition/foo.libvirt-lxc",
@@ -463,29 +429,23 @@ static int testCgroupNewForPartitionDomain(const void *args G_GNUC_UNUSED)
 
     if ((rv = virCgroupNewPartition("/production", true, -1, &partitioncgroup)) != 0) {
         fprintf(stderr, "Failed to create /production cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
-    if ((rv = virCgroupNewDomainPartition(partitioncgroup, "lxc", "foo", true, &domaincgroup)) != 0) {
+    if ((rv = virCgroupNewDomainPartition(partitioncgroup, "lxc", "foo", &domaincgroup)) != 0) {
         fprintf(stderr, "Cannot create LXC cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(domaincgroup, "/production.partition/foo.libvirt-lxc", mountsFull, links, placement, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&partitioncgroup);
-    virCgroupFree(&domaincgroup);
-    return ret;
+    return validateCgroup(domaincgroup, mountsFull, links, placement, NULL, NULL, 0);
 }
 
 static int testCgroupNewForPartitionDomainEscaped(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr partitioncgroup1 = NULL;
-    virCgroupPtr partitioncgroup2 = NULL;
-    virCgroupPtr partitioncgroup3 = NULL;
-    virCgroupPtr domaincgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) partitioncgroup1 = NULL;
+    g_autoptr(virCgroup) partitioncgroup2 = NULL;
+    g_autoptr(virCgroup) partitioncgroup3 = NULL;
+    g_autoptr(virCgroup) domaincgroup = NULL;
     int rv;
     const char *placement[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/_cgroup.evil/net_cls.evil/__evil.evil/_cpu.foo.libvirt-lxc",
@@ -500,42 +460,34 @@ static int testCgroupNewForPartitionDomainEscaped(const void *args G_GNUC_UNUSED
 
     if ((rv = virCgroupNewPartition("/cgroup.evil", true, -1, &partitioncgroup1)) != 0) {
         fprintf(stderr, "Failed to create /cgroup.evil cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if ((rv = virCgroupNewPartition("/cgroup.evil/net_cls.evil", true, -1, &partitioncgroup2)) != 0) {
         fprintf(stderr, "Failed to create /cgroup.evil/cpu.evil cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if ((rv = virCgroupNewPartition("/cgroup.evil/net_cls.evil/_evil.evil", true, -1, &partitioncgroup3)) != 0) {
         fprintf(stderr, "Failed to create /cgroup.evil cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
-    if ((rv = virCgroupNewDomainPartition(partitioncgroup3, "lxc", "cpu.foo", true, &domaincgroup)) != 0) {
+    if ((rv = virCgroupNewDomainPartition(partitioncgroup3, "lxc", "cpu.foo", &domaincgroup)) != 0) {
         fprintf(stderr, "Cannot create LXC cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     /* NB we're not expecting 'net_cls.evil' to be escaped,
      * since our fake /proc/cgroups pretends this controller
      * isn't compiled into the kernel
      */
-    ret = validateCgroup(domaincgroup, "/_cgroup.evil/net_cls.evil/__evil.evil/_cpu.foo.libvirt-lxc", mountsFull, links, placement, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&partitioncgroup3);
-    virCgroupFree(&partitioncgroup2);
-    virCgroupFree(&partitioncgroup1);
-    virCgroupFree(&domaincgroup);
-    return ret;
+    return validateCgroup(domaincgroup, mountsFull, links, placement, NULL, NULL, 0);
 }
 
 static int testCgroupNewForSelfAllInOne(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     const char *placement[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPU] = "/",
         [VIR_CGROUP_CONTROLLER_CPUACCT] = "/",
@@ -548,24 +500,19 @@ static int testCgroupNewForSelfAllInOne(const void *args G_GNUC_UNUSED)
 
     if (virCgroupNewSelf(&cgroup) < 0) {
         fprintf(stderr, "Cannot create cgroup for self\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(cgroup, "", mountsAllInOne, linksAllInOne, placement, NULL, NULL, 0);
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return validateCgroup(cgroup, mountsAllInOne, linksAllInOne, placement, NULL, NULL, 0);
 }
 
 
 static int testCgroupNewForSelfLogind(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
 
     if (virCgroupNewSelf(&cgroup) >= 0) {
         fprintf(stderr, "Expected to fail, only systemd cgroup available.\n");
-        virCgroupFree(&cgroup);
         return -1;
     }
 
@@ -575,8 +522,7 @@ static int testCgroupNewForSelfLogind(const void *args G_GNUC_UNUSED)
 
 static int testCgroupNewForSelfUnified(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     const char *empty[VIR_CGROUP_CONTROLLER_LAST] = { 0 };
     unsigned int controllers =
         (1 << VIR_CGROUP_CONTROLLER_CPU) |
@@ -587,21 +533,17 @@ static int testCgroupNewForSelfUnified(const void *args G_GNUC_UNUSED)
 
     if (virCgroupNewSelf(&cgroup) < 0) {
         fprintf(stderr, "Cannot create cgroup for self\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(cgroup, "", empty, empty, empty,
-                         "/not/really/sys/fs/cgroup", "/", controllers);
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return validateCgroup(cgroup, empty, empty, empty,
+                          "/not/really/sys/fs/cgroup", "/", controllers);
 }
 
 
 static int testCgroupNewForSelfHybrid(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
     const char *empty[VIR_CGROUP_CONTROLLER_LAST] = { 0 };
     const char *mounts[VIR_CGROUP_CONTROLLER_LAST] = {
         [VIR_CGROUP_CONTROLLER_CPUSET] = "/not/really/sys/fs/cgroup/cpuset",
@@ -624,15 +566,69 @@ static int testCgroupNewForSelfHybrid(const void *args G_GNUC_UNUSED)
 
     if (virCgroupNewSelf(&cgroup) < 0) {
         fprintf(stderr, "Cannot create cgroup for self\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = validateCgroup(cgroup, "", mounts, empty, placement,
-                         "/not/really/sys/fs/cgroup/unified", "/", controllers);
+    return validateCgroup(cgroup, mounts, empty, placement,
+                          "/not/really/sys/fs/cgroup/unified", "/", controllers);
+}
 
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+
+static int testCgroupNewForSelfSystemdLegacy(const void *args G_GNUC_UNUSED)
+{
+    g_autoptr(virCgroup) cgroup = NULL;
+    const char *empty[VIR_CGROUP_CONTROLLER_LAST] = { 0 };
+    const char *mounts[VIR_CGROUP_CONTROLLER_LAST] = {
+        [VIR_CGROUP_CONTROLLER_BLKIO] = "/not/really/sys/fs/cgroup/blkio",
+        [VIR_CGROUP_CONTROLLER_CPU] = "/not/really/sys/fs/cgroup/cpu",
+        [VIR_CGROUP_CONTROLLER_CPUACCT] = "/not/really/sys/fs/cgroup/cpuacct",
+        [VIR_CGROUP_CONTROLLER_CPUSET] = "/not/really/sys/fs/cgroup/cpuset",
+        [VIR_CGROUP_CONTROLLER_DEVICES] = "/not/really/sys/fs/cgroup/devices",
+        [VIR_CGROUP_CONTROLLER_FREEZER] = "/not/really/sys/fs/cgroup/freezer",
+        [VIR_CGROUP_CONTROLLER_MEMORY] = "/not/really/sys/fs/cgroup/memory",
+        [VIR_CGROUP_CONTROLLER_NET_CLS] = "/not/really/sys/fs/cgroup/net_cls",
+        [VIR_CGROUP_CONTROLLER_PERF_EVENT] = "/not/really/sys/fs/cgroup/perf_event",
+    };
+    const char *placement[VIR_CGROUP_CONTROLLER_LAST] = {
+        [VIR_CGROUP_CONTROLLER_BLKIO] = "",
+        [VIR_CGROUP_CONTROLLER_CPU] = "",
+        [VIR_CGROUP_CONTROLLER_CPUACCT] = "",
+        [VIR_CGROUP_CONTROLLER_CPUSET] = "",
+        [VIR_CGROUP_CONTROLLER_DEVICES] = "",
+        [VIR_CGROUP_CONTROLLER_FREEZER] = "",
+        [VIR_CGROUP_CONTROLLER_MEMORY] = "",
+        [VIR_CGROUP_CONTROLLER_NET_CLS] = "",
+        [VIR_CGROUP_CONTROLLER_PERF_EVENT] = "",
+    };
+
+    if (virCgroupNewSelf(&cgroup) < 0) {
+        fprintf(stderr, "Cannot create cgroup for self\n");
+        return -1;
+    }
+
+    return validateCgroup(cgroup, mounts, empty, placement, NULL, NULL, 0);
+}
+
+
+static int testCgroupNewForSelfSystemdUnified(const void *args G_GNUC_UNUSED)
+{
+    g_autoptr(virCgroup) cgroup = NULL;
+    const char *empty[VIR_CGROUP_CONTROLLER_LAST] = { 0 };
+    unsigned int controllers =
+        (1 << VIR_CGROUP_CONTROLLER_CPU) |
+        (1 << VIR_CGROUP_CONTROLLER_CPUACCT) |
+        (1 << VIR_CGROUP_CONTROLLER_MEMORY) |
+        (1 << VIR_CGROUP_CONTROLLER_DEVICES) |
+        (1 << VIR_CGROUP_CONTROLLER_BLKIO);
+
+    if (virCgroupNewSelf(&cgroup) < 0) {
+        fprintf(stderr, "Cannot create cgroup for self\n");
+        return -1;
+    }
+
+    return validateCgroup(cgroup, empty, empty, empty,
+                          "/not/really/sys/fs/cgroup", "",
+                          controllers);
 }
 
 
@@ -680,7 +676,7 @@ static int testCgroupControllerAvailable(const void *args G_GNUC_UNUSED)
 
 static int testCgroupGetPercpuStats(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
     size_t i;
     int rv, ret = -1;
     virTypedParameterPtr params = NULL;
@@ -709,8 +705,7 @@ static int testCgroupGetPercpuStats(const void *args G_GNUC_UNUSED)
         635751356ULL, 0, 0, 0, 0, 0, 0, 0,
     };
 
-    if (VIR_ALLOC_N(params, EXPECTED_NCPUS) < 0)
-        goto cleanup;
+    params = g_new0(virTypedParameter, EXPECTED_NCPUS);
 
     if ((rv = virCgroupNewPartition("/virtualmachines", true,
                                     (1 << VIR_CGROUP_CONTROLLER_CPU) |
@@ -758,50 +753,44 @@ static int testCgroupGetPercpuStats(const void *args G_GNUC_UNUSED)
     ret = 0;
 
  cleanup:
-    virCgroupFree(&cgroup);
     VIR_FREE(params);
     return ret;
 }
 
 static int testCgroupGetMemoryUsage(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
-    int rv, ret = -1;
+    g_autoptr(virCgroup) cgroup = NULL;
+    int rv;
     unsigned long kb;
 
     if ((rv = virCgroupNewPartition("/virtualmachines", true,
                                     (1 << VIR_CGROUP_CONTROLLER_MEMORY),
                                     &cgroup)) < 0) {
         fprintf(stderr, "Could not create /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if ((rv = virCgroupGetMemoryUsage(cgroup, &kb)) < 0) {
         fprintf(stderr, "Could not retrieve GetMemoryUsage for /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if (kb != 1421212UL) {
         fprintf(stderr,
                 "Wrong value from virCgroupGetMemoryUsage (expected %ld)\n",
                 1421212UL);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return 0;
 }
 
 
 static int
 testCgroupGetMemoryStat(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
     int rv;
-    int ret = -1;
     size_t i;
 
     const unsigned long long expected_values[] = {
@@ -826,7 +815,7 @@ testCgroupGetMemoryStat(const void *args G_GNUC_UNUSED)
                                     (1 << VIR_CGROUP_CONTROLLER_MEMORY),
                                     &cgroup)) < 0) {
         fprintf(stderr, "Could not create /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if ((rv = virCgroupGetMemoryStat(cgroup, &values[0],
@@ -834,7 +823,7 @@ testCgroupGetMemoryStat(const void *args G_GNUC_UNUSED)
                                      &values[3], &values[4],
                                      &values[5])) < 0) {
         fprintf(stderr, "Could not retrieve GetMemoryStat for /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < G_N_ELEMENTS(expected_values); i++) {
@@ -844,23 +833,19 @@ testCgroupGetMemoryStat(const void *args G_GNUC_UNUSED)
                     "Wrong value (%llu) for %s from virCgroupGetMemoryStat "
                     "(expected %llu)\n",
                     values[i], names[i], (expected_values[i] >> 10));
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return 0;
 }
 
 
 static int testCgroupGetBlkioIoServiced(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
     size_t i;
-    int rv, ret = -1;
+    int rv;
 
     const long long expected_values[] = {
         119084214273ULL,
@@ -880,14 +865,14 @@ static int testCgroupGetBlkioIoServiced(const void *args G_GNUC_UNUSED)
                                     (1 << VIR_CGROUP_CONTROLLER_BLKIO),
                                     &cgroup)) < 0) {
         fprintf(stderr, "Could not create /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if ((rv = virCgroupGetBlkioIoServiced(cgroup,
                                           values, &values[1],
                                           &values[2], &values[3])) < 0) {
         fprintf(stderr, "Could not retrieve BlkioIoServiced for /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < G_N_ELEMENTS(expected_values); i++) {
@@ -895,22 +880,18 @@ static int testCgroupGetBlkioIoServiced(const void *args G_GNUC_UNUSED)
             fprintf(stderr,
                     "Wrong value for %s from virCgroupBlkioIoServiced (expected %lld)\n",
                     names[i], expected_values[i]);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return 0;
 }
 
 static int testCgroupGetBlkioIoDeviceServiced(const void *args G_GNUC_UNUSED)
 {
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
     size_t i;
-    int rv, ret = -1;
+    int rv;
     const long long expected_values0[] = {
         59542107136ULL,
         411440480256ULL,
@@ -935,7 +916,7 @@ static int testCgroupGetBlkioIoDeviceServiced(const void *args G_GNUC_UNUSED)
                                     (1 << VIR_CGROUP_CONTROLLER_BLKIO),
                                     &cgroup)) < 0) {
         fprintf(stderr, "Could not create /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     if ((rv = virCgroupGetBlkioIoDeviceServiced(cgroup,
@@ -943,7 +924,7 @@ static int testCgroupGetBlkioIoDeviceServiced(const void *args G_GNUC_UNUSED)
                                                 values, &values[1],
                                                 &values[2], &values[3])) < 0) {
         fprintf(stderr, "Could not retrieve BlkioIoDeviceServiced for /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < G_N_ELEMENTS(expected_values0); i++) {
@@ -951,7 +932,7 @@ static int testCgroupGetBlkioIoDeviceServiced(const void *args G_GNUC_UNUSED)
             fprintf(stderr,
                     "Wrong value for %s from virCgroupGetBlkioIoDeviceServiced (expected %lld)\n",
                     names[i], expected_values0[i]);
-            goto cleanup;
+            return -1;
         }
     }
 
@@ -960,7 +941,7 @@ static int testCgroupGetBlkioIoDeviceServiced(const void *args G_GNUC_UNUSED)
                                                 values, &values[1],
                                                 &values[2], &values[3])) < 0) {
         fprintf(stderr, "Could not retrieve BlkioIoDeviceServiced for /virtualmachines cgroup: %d\n", -rv);
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < G_N_ELEMENTS(expected_values1); i++) {
@@ -968,18 +949,12 @@ static int testCgroupGetBlkioIoDeviceServiced(const void *args G_GNUC_UNUSED)
             fprintf(stderr,
                     "Wrong value for %s from virCgroupGetBlkioIoDeviceServiced (expected %lld)\n",
                     names[i], expected_values1[i]);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
-
- cleanup:
-    virCgroupFree(&cgroup);
-    return ret;
+    return 0;
 }
-
-# define FAKEROOTDIRTEMPLATE abs_builddir "/fakerootdir-XXXXXX"
 
 static char *
 initFakeFS(const char *mode,
@@ -987,14 +962,8 @@ initFakeFS(const char *mode,
 {
     char *fakerootdir;
 
-    fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
-
-    if (!g_mkdtemp(fakerootdir)) {
-        fprintf(stderr, "Cannot create fakerootdir");
+    if (!(fakerootdir = virTestFakeRootDirInit()))
         abort();
-    }
-
-    g_setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, TRUE);
 
     if (mode)
         g_setenv("VIR_CGROUP_MOCK_MODE", mode, TRUE);
@@ -1008,13 +977,11 @@ initFakeFS(const char *mode,
 static void
 cleanupFakeFS(char *fakerootdir)
 {
-    if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
-        virFileDeleteTree(fakerootdir);
-
-    VIR_FREE(fakerootdir);
-    g_unsetenv("LIBVIRT_FAKE_ROOT_DIR");
     g_unsetenv("VIR_CGROUP_MOCK_MODE");
     g_unsetenv("VIR_CGROUP_MOCK_FILENAME");
+
+    virTestFakeRootDirCleanup(fakerootdir);
+    VIR_FREE(fakerootdir);
 }
 
 static int
@@ -1042,7 +1009,9 @@ mymain(void)
     DETECT_MOUNTS("cgroups1");
     DETECT_MOUNTS("cgroups2");
     DETECT_MOUNTS("cgroups3");
+    fakerootdir = initFakeFS(NULL, "all-in-one");
     DETECT_MOUNTS("all-in-one");
+    cleanupFakeFS(fakerootdir);
     DETECT_MOUNTS_FAIL("no-cgroups");
     DETECT_MOUNTS("kubevirt");
     fakerootdir = initFakeFS("unified", NULL);
@@ -1123,6 +1092,20 @@ mymain(void)
         ret = -1;
     if (virTestRun("Cgroup available (hybrid)", testCgroupAvailable, (void*)0x1) < 0)
         ret = -1;
+    cleanupFakeFS(fakerootdir);
+
+    fakerootdir = initFakeFS("legacy", "systemd-legacy");
+    if (virTestRun("New cgroup for self (systemd-legacy)",
+                   testCgroupNewForSelfSystemdLegacy, NULL) < 0) {
+        ret = -1;
+    }
+    cleanupFakeFS(fakerootdir);
+
+    fakerootdir = initFakeFS("unified", "systemd-unified");
+    if (virTestRun("New cgroup for self (systemd-unified)",
+                   testCgroupNewForSelfSystemdUnified, NULL) < 0) {
+        ret = -1;
+    }
     cleanupFakeFS(fakerootdir);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

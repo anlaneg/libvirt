@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "conf/nwfilter_params.h"
 #include "nwfilter_tech_driver.h"
 #include "virnwfilterbindingdef.h"
 #include <net/if.h>
@@ -33,10 +32,10 @@ enum howDetect {
   DETECT_STATIC = 2,
 };
 
-int virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver,
-                              virNWFilterBindingDefPtr binding,
+int virNWFilterLearnIPAddress(virNWFilterTechDriver *techdriver,
+                              virNWFilterBindingDef *binding,
                               int ifindex,
-                              virNWFilterDriverStatePtr driver,
+                              virNWFilterDriverState *driver,
                               int howDetect);
 
 bool virNWFilterHasLearnReq(int ifindex);

@@ -33,7 +33,6 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "virfile.h"
-#include "virstring.h"
 #include "virutil.h"
 #include "storage_util.h"
 
@@ -42,15 +41,14 @@
 VIR_LOG_INIT("storage.storage_backend_mpath");
 
 static int
-virStorageBackendMpathNewVol(virStoragePoolObjPtr pool,
+virStorageBackendMpathNewVol(virStoragePoolObj *pool,
                              const int devnum,
                              const char *dev)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     g_autoptr(virStorageVolDef) vol = NULL;
 
-    if (VIR_ALLOC(vol) < 0)
-        return -1;
+    vol = g_new0(virStorageVolDef, 1);
 
     vol->type = VIR_STORAGE_VOL_BLOCK;
 
@@ -148,16 +146,15 @@ virStorageBackendGetMinorNumber(const char *dev_name, uint32_t *minor)
 
 
 static int
-virStorageBackendCreateVols(virStoragePoolObjPtr pool,
+virStorageBackendCreateVols(virStoragePoolObj *pool,
                             struct dm_names *names)
 {
-    int is_mpath = 0;
     uint32_t minor = -1;
     uint32_t next;
     g_autofree char *map_device = NULL;
 
     do {
-        is_mpath = virStorageBackendIsMultipath(names->name);
+        int is_mpath = virStorageBackendIsMultipath(names->name);
 
         if (is_mpath < 0)
             return -1;
@@ -168,7 +165,7 @@ virStorageBackendCreateVols(virStoragePoolObjPtr pool,
 
             if (virStorageBackendGetMinorNumber(names->name, &minor) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Failed to get %s minor number"),
+                               _("Failed to get %1$s minor number"),
                                names->name);
                 return -1;
             }
@@ -193,7 +190,7 @@ virStorageBackendCreateVols(virStoragePoolObjPtr pool,
 
 
 static int
-virStorageBackendGetMaps(virStoragePoolObjPtr pool)
+virStorageBackendGetMaps(virStoragePoolObj *pool)
 {
     int retval = 0;
     struct dm_task *dmt = NULL;
@@ -230,7 +227,7 @@ virStorageBackendGetMaps(virStoragePoolObjPtr pool)
 }
 
 static int
-virStorageBackendMpathCheckPool(virStoragePoolObjPtr pool G_GNUC_UNUSED,
+virStorageBackendMpathCheckPool(virStoragePoolObj *pool G_GNUC_UNUSED,
                                 bool *isActive)
 {
     *isActive = virFileExists("/dev/mapper") ||
@@ -241,9 +238,9 @@ virStorageBackendMpathCheckPool(virStoragePoolObjPtr pool G_GNUC_UNUSED,
 
 
 static int
-virStorageBackendMpathRefreshPool(virStoragePoolObjPtr pool)
+virStorageBackendMpathRefreshPool(virStoragePoolObj *pool)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
 
     VIR_DEBUG("pool=%p", pool);
 

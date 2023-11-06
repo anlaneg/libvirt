@@ -1,6 +1,6 @@
 #
 # Private symbols used in RPC operations. Add symbols here, and see
-# Makefile.am for more details.
+# src/remote/meson.build for more details.
 #
 # Keep this file sorted by header name, then by symbols with each header.
 #
@@ -13,6 +13,11 @@ xdr_*;
 # since there's no libvirtd built.
 xdr_virNetMessageError;
 
+
+# remote/remote_sockets.h
+remoteProbeSessionDriverFromBinary;
+remoteProbeSessionDriverFromSocket;
+remoteProbeSystemDriverFromSocket;
 
 # rpc/virnetclient.h
 virNetClientAddProgram;
@@ -42,6 +47,7 @@ virNetClientSendStream;
 virNetClientSendWithReply;
 virNetClientSetCloseCallback;
 virNetClientSetTLSSession;
+virNetClientSSHHelperCommand;
 
 
 # rpc/virnetclientprogram.h
@@ -60,6 +66,7 @@ virNetClientStreamEOF;
 virNetClientStreamEventAddCallback;
 virNetClientStreamEventRemoveCallback;
 virNetClientStreamEventUpdateCallback;
+virNetClientStreamInData;
 virNetClientStreamMatches;
 virNetClientStreamNew;
 virNetClientStreamQueuePacket;
@@ -75,7 +82,6 @@ virNetDaemonAddServer;
 virNetDaemonAddShutdownInhibition;
 virNetDaemonAddSignalHandler;
 virNetDaemonAutoShutdown;
-virNetDaemonClose;
 virNetDaemonGetServer;
 virNetDaemonGetServers;
 virNetDaemonHasClients;
@@ -85,14 +91,18 @@ virNetDaemonNew;
 virNetDaemonNewPostExecRestart;
 virNetDaemonPreExecRestart;
 virNetDaemonQuit;
+virNetDaemonQuitExecRestart;
 virNetDaemonRemoveShutdownInhibition;
 virNetDaemonRun;
+virNetDaemonSetShutdownCallbacks;
+virNetDaemonSetStateStopWorkerThread;
 virNetDaemonUpdateServices;
 
 
 # rpc/virnetmessage.h
 virNetMessageAddFD;
 virNetMessageClear;
+virNetMessageClearFDs;
 virNetMessageClearPayload;
 virNetMessageDecodeHeader;
 virNetMessageDecodeLength;
@@ -213,65 +223,10 @@ virNetServerServiceNewTCP;
 virNetServerServiceNewUNIX;
 virNetServerServicePreExecRestart;
 virNetServerServiceSetDispatcher;
+virNetServerServiceTimerActive;
 virNetServerServiceToggle;
 
 
-# rpc/virnetsocket.h
-virNetSocketAccept;
-virNetSocketAddIOCallback;
-virNetSocketCheckProtocols;
-virNetSocketClose;
-virNetSocketDupFD;
-virNetSocketGetFD;
-virNetSocketGetPath;
-virNetSocketGetPort;
-virNetSocketGetSELinuxContext;
-virNetSocketGetUNIXIdentity;
-virNetSocketHasCachedData;
-virNetSocketHasPassFD;
-virNetSocketHasPendingData;
-virNetSocketIsLocal;
-virNetSocketListen;
-virNetSocketLocalAddrStringSASL;
-virNetSocketNewConnectCommand;
-virNetSocketNewConnectExternal;
-virNetSocketNewConnectLibSSH2;
-virNetSocketNewConnectSockFD;
-virNetSocketNewConnectSSH;
-virNetSocketNewConnectTCP;
-virNetSocketNewConnectUNIX;
-virNetSocketNewListenFD;
-virNetSocketNewListenTCP;
-virNetSocketNewListenUNIX;
-virNetSocketNewPostExecRestart;
-virNetSocketPreExecRestart;
-virNetSocketRead;
-virNetSocketRecvFD;
-virNetSocketRemoteAddrStringSASL;
-virNetSocketRemoteAddrStringURI;
-virNetSocketRemoveIOCallback;
-virNetSocketSendFD;
-virNetSocketSetBlocking;
-virNetSocketSetTLSSession;
-virNetSocketUpdateIOCallback;
-virNetSocketWrite;
-
-
-# rpc/virnettlscontext.h
-virNetTLSContextCheckCertificate;
-virNetTLSContextNewClient;
-virNetTLSContextNewClientPath;
-virNetTLSContextNewServer;
-virNetTLSContextNewServerPath;
-virNetTLSInit;
-virNetTLSSessionGetHandshakeStatus;
-virNetTLSSessionGetKeySize;
-virNetTLSSessionGetX509DName;
-virNetTLSSessionHandshake;
-virNetTLSSessionNew;
-virNetTLSSessionRead;
-virNetTLSSessionSetIOCallbacks;
-virNetTLSSessionWrite;
 
 
 # Let emacs know we want case-insensitive sorting

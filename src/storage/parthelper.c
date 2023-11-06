@@ -37,9 +37,9 @@
 #include <unistd.h>
 
 #include "virfile.h"
-#include "virstring.h"
 #include "virgettext.h"
 #include "virdevmapper.h"
+#include "virerror.h"
 
 /* we don't need to include the full internal.h just for this */
 #define STREQ(a, b) (strcmp(a, b) == 0)
@@ -62,11 +62,12 @@ int main(int argc, char **argv)
     PedPartition *part;
     int cmd = DISK_LAYOUT;
     const char *path;
-    char *canonical_path;
+    g_autofree char *canonical_path = NULL;
     const char *partsep;
     bool devmap_partsep = false;
 
-    if (virGettextInitialize() < 0)
+    if (virGettextInitialize() < 0 ||
+        virErrorInitialize() < 0)
         exit(EXIT_FAILURE);
 
     if (argc == 3 && STREQ(argv[2], "-g")) {
@@ -74,7 +75,7 @@ int main(int argc, char **argv)
     } else if (argc == 3 && STREQ(argv[2], "-p")) {
         devmap_partsep = true;
     } else if (argc != 2) {
-        fprintf(stderr, _("syntax: %s DEVICE [-g]|[-p]\n"), argv[0]);
+        fprintf(stderr, _("syntax: %1$s DEVICE [-g]|[-p]\n"), argv[0]);
         return 1;
     }
 
@@ -100,7 +101,7 @@ int main(int argc, char **argv)
     }
 
     if ((dev = ped_device_get(path)) == NULL) {
-        fprintf(stderr, _("unable to access device %s\n"), path);
+        fprintf(stderr, _("unable to access device %1$s\n"), path);
         return 2;
     }
 
@@ -114,7 +115,7 @@ int main(int argc, char **argv)
     }
 
     if ((disk = ped_disk_new(dev)) == NULL) {
-        fprintf(stderr, _("unable to access disk %s\n"), argv[1]);
+        fprintf(stderr, _("unable to access disk %1$s\n"), argv[1]);
         return 2;
     }
 
@@ -129,7 +130,6 @@ int main(int argc, char **argv)
                 content = "free";
             else if (part->type & PED_PARTITION_METADATA)
                 content = "metadata";
-            /* coverity[dead_error_condition] - not true if defined */
             else if (part->type & PED_PARTITION_PROTECTED)
                 content = "protected";
             else
@@ -143,7 +143,6 @@ int main(int argc, char **argv)
                 content = "free";
             else if (part->type & PED_PARTITION_METADATA)
                 content = "metadata";
-            /* coverity[dead_error_condition] - not true if defined */
             else if (part->type & PED_PARTITION_PROTECTED)
                 content = "protected";
             else

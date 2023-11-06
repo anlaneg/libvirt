@@ -18,9 +18,7 @@
 
 #include <config.h>
 
-#include "viralloc.h"
 #include "virerror.h"
-#include "virfile.h"
 #include "virusb.h"
 
 #include "testutils.h"
@@ -45,11 +43,11 @@ struct findTestInfo {
     bool expectFailure;
 };
 
-static int testDeviceFileActor(virUSBDevicePtr dev,
+static int testDeviceFileActor(virUSBDevice *dev,
                                const char *path,
                                void *opaque G_GNUC_UNUSED)
 {
-    char *str = NULL;
+    g_autofree char *str = NULL;
     int ret = 0;
 
     str = g_strdup_printf(USB_DEVFS "%03d/%03d", virUSBDeviceGetBus(dev),
@@ -61,7 +59,6 @@ static int testDeviceFileActor(virUSBDevicePtr dev,
                        path, str);
         ret = -1;
     }
-    VIR_FREE(str);
     return ret;
 }
 
@@ -69,8 +66,8 @@ static int testDeviceFind(const void *opaque)
 {
     const struct findTestInfo *info = opaque;
     int ret = -1;
-    virUSBDevicePtr dev = NULL;
-    virUSBDeviceListPtr devs = NULL;
+    virUSBDevice *dev = NULL;
+    g_autoptr(virUSBDeviceList) devs = NULL;
     int rv = 0;
     size_t i, ndevs = 0;
 
@@ -113,7 +110,7 @@ static int testDeviceFind(const void *opaque)
         ndevs = virUSBDeviceListCount(devs);
 
         for (i = 0; i < ndevs; i++) {
-            virUSBDevicePtr device = virUSBDeviceListGet(devs, i);
+            virUSBDevice *device = virUSBDeviceListGet(devs, i);
             if (virUSBDeviceFileIterate(device, testDeviceFileActor, NULL) < 0)
                 goto cleanup;
         }
@@ -123,7 +120,6 @@ static int testDeviceFind(const void *opaque)
     ret = 0;
 
  cleanup:
-    virObjectUnref(devs);
     virUSBDeviceFree(dev);
     return ret;
 }
@@ -147,9 +143,9 @@ testCheckNdevs(const char* occasion,
 static int
 testUSBList(const void *opaque G_GNUC_UNUSED)
 {
-    virUSBDeviceListPtr list = NULL;
-    virUSBDeviceListPtr devlist = NULL;
-    virUSBDevicePtr dev = NULL;
+    virUSBDeviceList *list = NULL;
+    virUSBDeviceList *devlist = NULL;
+    virUSBDevice *dev = NULL;
     int ret = -1;
     size_t i, ndevs;
 
@@ -173,8 +169,7 @@ testUSBList(const void *opaque G_GNUC_UNUSED)
         dev = NULL;
     }
 
-    virObjectUnref(devlist);
-    devlist = NULL;
+    g_clear_pointer(&devlist, virObjectUnref);
 
     ndevs = virUSBDeviceListCount(list);
     if (testCheckNdevs("After first loop", ndevs, EXPECTED_NDEVS_ONE) < 0)
@@ -212,8 +207,7 @@ testUSBList(const void *opaque G_GNUC_UNUSED)
     }
 
     virUSBDeviceListDel(list, dev);
-    virUSBDeviceFree(dev);
-    dev = NULL;
+    g_clear_pointer(&dev, virUSBDeviceFree);
 
     if (testCheckNdevs("After deleting one",
                        virUSBDeviceListCount(list),

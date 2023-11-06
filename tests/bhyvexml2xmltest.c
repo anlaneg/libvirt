@@ -26,8 +26,8 @@ static int
 testCompareXMLToXMLHelper(const void *data)
 {
     const struct testInfo *info = data;
-    char *xml_in = NULL;
-    char *xml_out = NULL;
+    g_autofree char *xml_in = NULL;
+    g_autofree char *xml_out = NULL;
     bool is_different = info->flags & FLAG_IS_DIFFERENT;
     int ret = -1;
 
@@ -48,8 +48,6 @@ testCompareXMLToXMLHelper(const void *data)
         virResetLastError();
     }
 
-    VIR_FREE(xml_in);
-    VIR_FREE(xml_out);
     return ret;
 }
 
@@ -90,6 +88,7 @@ mymain(void)
     DO_TEST_DIFFERENT("bhyveload-bootorder4");
     DO_TEST_DIFFERENT("bhyveload-explicitargs");
     DO_TEST_DIFFERENT("console");
+    DO_TEST_DIFFERENT("console-master-slave-not-specified");
     DO_TEST_DIFFERENT("custom-loader");
     DO_TEST_DIFFERENT("disk-cdrom");
     DO_TEST_DIFFERENT("disk-cdrom-grub");
@@ -108,8 +107,13 @@ mymain(void)
     DO_TEST_DIFFERENT("vnc-vgaconf-off");
     DO_TEST_DIFFERENT("vnc-vgaconf-io");
     DO_TEST_DIFFERENT("vnc-autoport");
+    DO_TEST_DIFFERENT("vnc-resolution");
+    DO_TEST_DIFFERENT("vnc-password");
     DO_TEST_DIFFERENT("commandline");
     DO_TEST_DIFFERENT("msrs");
+    DO_TEST_DIFFERENT("sound");
+    DO_TEST_DIFFERENT("isa-controller");
+    DO_TEST_DIFFERENT("fs-9p");
 
     /* Address allocation tests */
     DO_TEST_DIFFERENT("addr-single-sata-disk");
@@ -117,6 +121,8 @@ mymain(void)
     DO_TEST_DIFFERENT("addr-more-than-32-sata-disks");
     DO_TEST_DIFFERENT("addr-single-virtio-disk");
     DO_TEST_DIFFERENT("addr-multiple-virtio-disks");
+    DO_TEST_DIFFERENT("addr-isa-controller-on-slot-1");
+    DO_TEST_DIFFERENT("addr-isa-controller-on-slot-31");
 
     /* The same without 32 devs per controller support */
     driver.bhyvecaps ^= BHYVE_CAP_AHCI32SLOT;

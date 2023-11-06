@@ -24,10 +24,9 @@
 #include "viruri.h"
 
 typedef struct _virNetSSHSession virNetSSHSession;
-typedef virNetSSHSession *virNetSSHSessionPtr;
 
-virNetSSHSessionPtr virNetSSHSessionNew(void);
-void virNetSSHSessionFree(virNetSSHSessionPtr sess);
+virNetSSHSession *virNetSSHSessionNew(const char *username);
+void virNetSSHSessionFree(virNetSSHSession *sess);
 
 typedef enum {
     VIR_NET_SSH_HOSTKEY_VERIFY_NORMAL,
@@ -40,46 +39,41 @@ typedef enum {
     VIR_NET_SSH_HOSTKEY_FILE_CREATE   = 1 << 1,
 } virNetSSHHostKeyFileFlags;
 
-void virNetSSHSessionSetChannelCommand(virNetSSHSessionPtr sess,
+void virNetSSHSessionSetChannelCommand(virNetSSHSession *sess,
                                        const char *command);
 
-void virNetSSHSessionAuthReset(virNetSSHSessionPtr sess);
+void virNetSSHSessionAuthReset(virNetSSHSession *sess);
 
-int virNetSSHSessionAuthSetCallback(virNetSSHSessionPtr sess,
+int virNetSSHSessionAuthSetCallback(virNetSSHSession *sess,
                                     virConnectAuthPtr auth);
 
-int virNetSSHSessionAuthAddPasswordAuth(virNetSSHSessionPtr sess,
-                                        virURIPtr uri,
-                                        const char *username);
+int virNetSSHSessionAuthAddPasswordAuth(virNetSSHSession *sess,
+                                        virURI *uri);
 
-int virNetSSHSessionAuthAddAgentAuth(virNetSSHSessionPtr sess,
-                                     const char *username);
+int virNetSSHSessionAuthAddAgentAuth(virNetSSHSession *sess);
 
-int virNetSSHSessionAuthAddPrivKeyAuth(virNetSSHSessionPtr sess,
-                                       const char *username,
-                                       const char *keyfile,
-                                       const char *password);
+int virNetSSHSessionAuthAddPrivKeyAuth(virNetSSHSession *sess,
+                                       const char *keyfile);
 
-int virNetSSHSessionAuthAddKeyboardAuth(virNetSSHSessionPtr sess,
-                                        const char *username,
+int virNetSSHSessionAuthAddKeyboardAuth(virNetSSHSession *sess,
                                         int tries);
 
-int virNetSSHSessionSetHostKeyVerification(virNetSSHSessionPtr sess,
+int virNetSSHSessionSetHostKeyVerification(virNetSSHSession *sess,
                                            const char *hostname,
                                            int port,
                                            const char *hostsfile,
                                            virNetSSHHostkeyVerify opt,
                                            unsigned int flags);
 
-int virNetSSHSessionConnect(virNetSSHSessionPtr sess,
+int virNetSSHSessionConnect(virNetSSHSession *sess,
                             int sock);
 
-ssize_t virNetSSHChannelRead(virNetSSHSessionPtr sess,
+ssize_t virNetSSHChannelRead(virNetSSHSession *sess,
                              char *buf,
                              size_t len);
 
-ssize_t virNetSSHChannelWrite(virNetSSHSessionPtr sess,
+ssize_t virNetSSHChannelWrite(virNetSSHSession *sess,
                               const char *buf,
                               size_t len);
 
-bool virNetSSHSessionHasCachedData(virNetSSHSessionPtr sess);
+bool virNetSSHSessionHasCachedData(virNetSSHSession *sess);

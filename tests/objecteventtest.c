@@ -23,9 +23,6 @@
 
 #include "testutils.h"
 
-#include "virerror.h"
-#include "virxml.h"
-
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 
@@ -82,17 +79,6 @@ typedef struct {
     int deletedEvents;
 } lifecycleEventCounter;
 
-static void
-lifecycleEventCounter_reset(lifecycleEventCounter *counter)
-{
-    counter->startEvents = 0;
-    counter->stopEvents = 0;
-    counter->defineEvents = 0;
-    counter->undefineEvents = 0;
-    counter->unexpectedEvents = 0;
-    counter->createdEvents = 0;
-    counter->deletedEvents = 0;
-}
 
 typedef struct {
     virConnectPtr conn;
@@ -202,12 +188,10 @@ static int
 testDomainCreateXMLOld(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virDomainPtr dom = NULL;
     int ret = -1;
     bool registered = false;
-
-    lifecycleEventCounter_reset(&counter);
 
     if (virConnectDomainEventRegister(test->conn,
                                       domainLifecycleCb,
@@ -242,13 +226,11 @@ static int
 testDomainCreateXMLNew(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     int eventId = VIR_DOMAIN_EVENT_ID_LIFECYCLE;
     virDomainPtr dom = NULL;
     int id;
     int ret = -1;
-
-    lifecycleEventCounter_reset(&counter);
 
     id = virConnectDomainEventRegisterAny(test->conn, NULL, eventId,
                            VIR_DOMAIN_EVENT_CALLBACK(&domainLifecycleCb),
@@ -283,14 +265,12 @@ static int
 testDomainCreateXMLMixed(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virDomainPtr dom;
     int ret = -1;
     int id1 = -1;
     int id2 = -1;
     bool registered = false;
-
-    lifecycleEventCounter_reset(&counter);
 
     /* Fun with mixing old and new API, also with global and
      * per-domain.  Handler should be fired three times, once for each
@@ -360,13 +340,11 @@ static int
 testDomainDefine(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     int eventId = VIR_DOMAIN_EVENT_ID_LIFECYCLE;
     virDomainPtr dom = NULL;
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectDomainEventRegisterAny(test->conn, NULL, eventId,
                            VIR_DOMAIN_EVENT_CALLBACK(&domainLifecycleCb),
@@ -376,12 +354,10 @@ testDomainDefine(const void *data)
     dom = virDomainDefineXML(test->conn, domainDef);
 
     if (dom == NULL || virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.defineEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
@@ -389,16 +365,14 @@ testDomainDefine(const void *data)
     virDomainUndefine(dom);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.undefineEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
-
+    ret = 0;
  cleanup:
     virConnectDomainEventDeregisterAny(test->conn, id);
     if (dom != NULL)
@@ -411,15 +385,13 @@ static int
 testDomainStartStopEvent(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     int eventId = VIR_DOMAIN_EVENT_ID_LIFECYCLE;
     int id;
     int ret = -1;
     virDomainPtr dom;
     virConnectPtr conn2 = NULL;
     virDomainPtr dom2 = NULL;
-
-    lifecycleEventCounter_reset(&counter);
 
     dom = virDomainLookupByName(test->conn, "test");
     if (dom == NULL)
@@ -476,12 +448,10 @@ static int
 testNetworkCreateXML(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virNetworkPtr net;
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectNetworkEventRegisterAny(test->conn, NULL,
                            VIR_NETWORK_EVENT_ID_LIFECYCLE,
@@ -490,15 +460,14 @@ testNetworkCreateXML(const void *data)
     net = virNetworkCreateXML(test->conn, networkDef);
 
     if (!net || virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.startEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
+    ret = 0;
  cleanup:
     virConnectNetworkEventDeregisterAny(test->conn, id);
     if (net) {
@@ -512,12 +481,10 @@ static int
 testNetworkDefine(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virNetworkPtr net;
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectNetworkEventRegisterAny(test->conn, NULL,
                            VIR_NETWORK_EVENT_ID_LIFECYCLE,
@@ -528,12 +495,10 @@ testNetworkDefine(const void *data)
     net = virNetworkDefineXML(test->conn, networkDef);
 
     if (!net || virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.defineEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
@@ -541,16 +506,15 @@ testNetworkDefine(const void *data)
     virNetworkUndefine(net);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.undefineEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
 
+    ret = 0;
  cleanup:
     virConnectNetworkEventDeregisterAny(test->conn, id);
     if (net)
@@ -563,14 +527,12 @@ static int
 testNetworkStartStopEvent(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     int id;
-    int ret = 0;
+    int ret = -1;
 
     if (!test->net)
         return -1;
-
-    lifecycleEventCounter_reset(&counter);
 
     id = virConnectNetworkEventRegisterAny(test->conn, test->net,
                            VIR_NETWORK_EVENT_ID_LIFECYCLE,
@@ -580,15 +542,15 @@ testNetworkStartStopEvent(const void *data)
     virNetworkDestroy(test->net);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.startEvents != 1 || counter.stopEvents != 1 ||
         counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
+
+    ret = 0;
  cleanup:
     virConnectNetworkEventDeregisterAny(test->conn, id);
 
@@ -599,12 +561,10 @@ static int
 testStoragePoolCreateXML(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virStoragePoolPtr pool;
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectStoragePoolEventRegisterAny(test->conn, NULL,
                       VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE,
@@ -613,15 +573,14 @@ testStoragePoolCreateXML(const void *data)
     pool = virStoragePoolCreateXML(test->conn, storagePoolDef, 0);
 
     if (!pool || virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.startEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
+    ret = 0;
  cleanup:
     virConnectStoragePoolEventDeregisterAny(test->conn, id);
     if (pool) {
@@ -635,12 +594,10 @@ static int
 testStoragePoolDefine(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virStoragePoolPtr pool;
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectStoragePoolEventRegisterAny(test->conn, NULL,
                       VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE,
@@ -651,12 +608,10 @@ testStoragePoolDefine(const void *data)
     pool = virStoragePoolDefineXML(test->conn, storagePoolDef, 0);
 
     if (!pool || virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.defineEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
@@ -664,16 +619,14 @@ testStoragePoolDefine(const void *data)
     virStoragePoolUndefine(pool);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.undefineEvents != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
-
+    ret = 0;
  cleanup:
     virConnectStoragePoolEventDeregisterAny(test->conn, id);
     if (pool)
@@ -686,16 +639,13 @@ static int
 testStoragePoolStartStopEvent(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
-    int refreshCounter;
+    lifecycleEventCounter counter = { 0 };
+    int refreshCounter = 0;
     int id1, id2;
-    int ret = 0;
+    int ret = -1;
 
     if (!test->pool)
         return -1;
-
-    lifecycleEventCounter_reset(&counter);
-    refreshCounter = 0;
 
     id1 = virConnectStoragePoolEventRegisterAny(test->conn, test->pool,
                       VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE,
@@ -710,16 +660,15 @@ testStoragePoolStartStopEvent(const void *data)
     virStoragePoolDestroy(test->pool);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.startEvents != 1 || counter.stopEvents != 1 ||
         refreshCounter != 1 || counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
+    ret = 0;
  cleanup:
     virConnectStoragePoolEventDeregisterAny(test->conn, id1);
     virConnectStoragePoolEventDeregisterAny(test->conn, id2);
@@ -730,11 +679,9 @@ static int
 testStoragePoolBuild(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectStoragePoolEventRegisterAny(test->conn, NULL,
                       VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE,
@@ -744,15 +691,14 @@ testStoragePoolBuild(const void *data)
     virStoragePoolBuild(test->pool, 0);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.createdEvents != 1) {
-        ret = -1;
         goto cleanup;
     }
 
+    ret = 0;
  cleanup:
     virConnectStoragePoolEventDeregisterAny(test->conn, id);
     return ret;
@@ -762,11 +708,9 @@ static int
 testStoragePoolDelete(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectStoragePoolEventRegisterAny(test->conn, NULL,
                       VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE,
@@ -776,15 +720,14 @@ testStoragePoolDelete(const void *data)
     virStoragePoolDelete(test->pool, 0);
 
     if (virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.deletedEvents != 1) {
-        ret = -1;
         goto cleanup;
     }
 
+    ret = 0;
  cleanup:
     virConnectStoragePoolEventDeregisterAny(test->conn, id);
     return ret;
@@ -793,12 +736,10 @@ static int
 testNodeDeviceCreateXML(const void *data)
 {
     const objecteventTest *test = data;
-    lifecycleEventCounter counter;
+    lifecycleEventCounter counter = { 0 };
     virNodeDevicePtr dev;
     int id;
-    int ret = 0;
-
-    lifecycleEventCounter_reset(&counter);
+    int ret = -1;
 
     id = virConnectNodeDeviceEventRegisterAny(test->conn, NULL,
                         VIR_NODE_DEVICE_EVENT_ID_LIFECYCLE,
@@ -808,16 +749,15 @@ testNodeDeviceCreateXML(const void *data)
     virNodeDeviceDestroy(dev);
 
     if (!dev || virEventRunDefaultImpl() < 0) {
-        ret = -1;
         goto cleanup;
     }
 
     if (counter.createdEvents != 1 || counter.deletedEvents != 1 ||
         counter.unexpectedEvents > 0) {
-        ret = -1;
         goto cleanup;
     }
 
+    ret = 0;
  cleanup:
     virConnectNodeDeviceEventDeregisterAny(test->conn, id);
     if (dev)

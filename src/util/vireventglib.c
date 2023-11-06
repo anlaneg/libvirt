@@ -27,7 +27,6 @@
 
 #include "vireventglib.h"
 #include "vireventglibwatch.h"
-#include "virerror.h"
 #include "virlog.h"
 #include "virprobe.h"
 
@@ -45,7 +44,7 @@ struct virEventGLibHandle
     int fd;
     int events;
     int removed;
-    guint source;
+    GSource *source;
     virEventHandleCallback cb;
     void *opaque;
     virFreeCallback ff;
@@ -56,7 +55,7 @@ struct virEventGLibTimeout
     int timer;
     int interval;
     int removed;
-    guint source;
+    GSource *source;
     virEventTimeoutCallback cb;
     void *opaque;
     virFreeCallback ff;
@@ -187,6 +186,7 @@ virEventGLibHandleFind(int watch)
     return NULL;
 }
 
+
 static void
 virEventGLibHandleUpdate(int watch,
                          int events)
@@ -212,23 +212,25 @@ virEventGLibHandleUpdate(int watch,
         if (events == data->events)
             goto cleanup;
 
-        if (data->source != 0) {
-            VIR_DEBUG("Removed old handle watch=%d", data->source);
-            g_source_remove(data->source);
+        if (data->source != NULL) {
+            VIR_DEBUG("Removed old handle source=%p", data->source);
+            g_source_destroy(data->source);
+            vir_g_source_unref(data->source, NULL);
         }
 
         data->source = virEventGLibAddSocketWatch(
             data->fd, cond, NULL, virEventGLibHandleDispatch, data, NULL);
 
         data->events = events;
-        VIR_DEBUG("Added new handle watch=%d", data->source);
+        VIR_DEBUG("Added new handle source=%p", data->source);
     } else {
-        if (data->source == 0)
+        if (data->source == NULL)
             goto cleanup;
 
-        VIR_DEBUG("Removed old handle watch=%d", data->source);
-        g_source_remove(data->source);
-        data->source = 0;
+        VIR_DEBUG("Removed old handle source=%p", data->source);
+        g_source_destroy(data->source);
+        vir_g_source_unref(data->source, NULL);
+        data->source = NULL;
         data->events = 0;
     }
 
@@ -274,9 +276,10 @@ virEventGLibHandleRemove(int watch)
     VIR_DEBUG("Remove handle data=%p watch=%d fd=%d",
               data, watch, data->fd);
 
-    if (data->source != 0) {
-        g_source_remove(data->source);
-        data->source = 0;
+    if (data->source != NULL) {
+        g_source_destroy(data->source);
+        vir_g_source_unref(data->source, NULL);
+        data->source = NULL;
         data->events = 0;
     }
 
@@ -285,7 +288,7 @@ virEventGLibHandleRemove(int watch)
      * 'removed' to prevent reuse
      */
     data->removed = TRUE;
-    g_idle_add(virEventGLibHandleRemoveIdle, data);
+    g_idle_add_full(G_PRIORITY_HIGH, virEventGLibHandleRemoveIdle, data, NULL);
 
     ret = 0;
 
@@ -311,6 +314,22 @@ virEventGLibTimeoutDispatch(void *opaque)
     return TRUE;
 }
 
+
+static GSource *
+virEventGLibTimeoutCreate(int interval,
+                          struct virEventGLibTimeout *data)
+{
+    GSource *source = g_timeout_source_new(interval);
+
+    g_source_set_callback(source,
+                          virEventGLibTimeoutDispatch,
+                          data, NULL);
+    g_source_attach(source, NULL);
+
+    return source;
+}
+
+
 static int
 virEventGLibTimeoutAdd(int interval,
                        virEventTimeoutCallback cb,
@@ -329,9 +348,7 @@ virEventGLibTimeoutAdd(int interval,
     data->opaque = opaque;
     data->ff = ff;
     if (interval >= 0)
-        data->source = g_timeout_add(interval,
-                                     virEventGLibTimeoutDispatch,
-                                     data);
+        data->source = virEventGLibTimeoutCreate(interval, data);
 
     g_ptr_array_add(timeouts, data);
 
@@ -392,19 +409,20 @@ virEventGLibTimeoutUpdate(int timer,
     VIR_DEBUG("Update timeout data=%p timer=%d interval=%d ms", data, timer, interval);
 
     if (interval >= 0) {
-        if (data->source != 0)
-            g_source_remove(data->source);
+        if (data->source != NULL) {
+            g_source_destroy(data->source);
+            vir_g_source_unref(data->source, NULL);
+        }
 
         data->interval = interval;
-        data->source = g_timeout_add(data->interval,
-                                     virEventGLibTimeoutDispatch,
-                                     data);
+        data->source = virEventGLibTimeoutCreate(interval, data);
     } else {
-        if (data->source == 0)
+        if (data->source == NULL)
             goto cleanup;
 
-        g_source_remove(data->source);
-        data->source = 0;
+        g_source_destroy(data->source);
+        vir_g_source_unref(data->source, NULL);
+        data->source = NULL;
     }
 
  cleanup:
@@ -450,9 +468,10 @@ virEventGLibTimeoutRemove(int timer)
     VIR_DEBUG("Remove timeout data=%p timer=%d",
               data, timer);
 
-    if (data->source != 0) {
-        g_source_remove(data->source);
-        data->source = 0;
+    if (data->source != NULL) {
+        g_source_destroy(data->source);
+        vir_g_source_unref(data->source, NULL);
+        data->source = NULL;
     }
 
     /* since the actual timeout deletion is done asynchronously, a timeoutUpdate call may

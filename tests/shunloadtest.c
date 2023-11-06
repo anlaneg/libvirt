@@ -81,7 +81,7 @@ static void *threadMain(void *arg)
 
 static void sigHandler(int sig)
 {
-    ignore_value(write(STDERR_FILENO, "FAIL\n", 5));
+    ignore_value(write(STDERR_FILENO, "FAIL\n", 5)); /* sc_avoid_write */
     signal(sig, SIG_DFL);
     raise(sig);
 }
@@ -105,8 +105,8 @@ int main(int argc G_GNUC_UNUSED, char **argv)
     fprintf(stderr, "      .%*s 1   ", 39, "");
     signal(SIGSEGV, sigHandler);
 
-    if (!(lib = dlopen("./.libs/libshunload.so", RTLD_LAZY))) {
-        fprintf(stderr, "Cannot load ./.libs/libshunload.so %s\n", dlerror());
+    if (!(lib = dlopen(abs_builddir "/libshunload.so", RTLD_LAZY))) {
+        fprintf(stderr, "Cannot load ./libshunload.so %s\n", dlerror());
         return 1;
     }
     if (!(startup = dlsym(lib, "shunloadStart"))) {

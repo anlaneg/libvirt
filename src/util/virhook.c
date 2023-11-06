@@ -27,13 +27,12 @@
 
 #include "virerror.h"
 #include "virhook.h"
-#include "virutil.h"
 #include "virlog.h"
-#include "viralloc.h"
 #include "virfile.h"
 #include "configmake.h"
 #include "vircommand.h"
 #include "virstring.h"
+#include "virglibutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_HOOK
 
@@ -144,24 +143,19 @@ static int
 virHookCheck(int no, const char *driver)
 {
     int ret;
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
     struct dirent *entry;
     g_autofree char *path = NULL;
     g_autofree char *dir_path = NULL;
 
     if (driver == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Invalid hook name for #%d"), no);
+                       _("Invalid hook name for #%1$d"), no);
         return -1;
     }
 
     //构造driver对应的目录 /etc/libvirt/hooks/network
-    if (virBuildPath(&path, LIBVIRT_HOOK_DIR, driver) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to build path for %s hook"),
-                       driver);
-        return -1;
-    }
+    path = g_build_filename(LIBVIRT_HOOK_DIR, driver, NULL);
 
     //如果文件不存在，则报错
     if (!virFileExists(path)) {
@@ -175,6 +169,12 @@ virHookCheck(int no, const char *driver)
 
     //文件必须可执行
     dir_path = g_strdup_printf("%s.d", path);
+
+    if (!virFileIsExecutable(dir_path) && errno != EISDIR) {
+        VIR_DEBUG("Hook dir %s is not accessible", dir_path);
+        return 0;
+    }
+
     if ((ret = virDirOpenIfExists(&dir, dir_path)) < 0)
         return -1;
 
@@ -196,8 +196,6 @@ virHookCheck(int no, const char *driver)
         ret = 1;
         break;
     }
-
-    VIR_DIR_CLOSE(dir);
 
     return ret;
 }
@@ -348,15 +346,15 @@ virHookCall(int driver/*要调用的hook点名称*/,
             char **output)
 {
     int ret, script_ret;
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
     struct dirent *entry;
     g_autofree char *path = NULL;
     g_autofree char *dir_path = NULL;
-    VIR_AUTOSTRINGLIST entries = NULL;
+    g_autoptr(virGSListString) entries = NULL;
     const char *drvstr;
     const char *opstr;
     const char *subopstr;
-    size_t i, nentries;
+    GSList *next;
 
     if (output)
         *output = NULL;
@@ -404,7 +402,7 @@ virHookCall(int driver/*要调用的hook点名称*/,
     }
     if (opstr == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Hook for %s, failed to find operation #%d"),
+                       _("Hook for %1$s, failed to find operation #%2$d"),
                        drvstr, op);
         return 1;
     }
@@ -417,12 +415,7 @@ virHookCall(int driver/*要调用的hook点名称*/,
         extra = "-";
 
     //构造hook对应的path
-    if (virBuildPath(&path, LIBVIRT_HOOK_DIR, drvstr) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to build path for %s hook"),
-                       drvstr);
-        return -1;
-    }
+    path = g_build_filename(LIBVIRT_HOOK_DIR, drvstr, NULL);
 
     script_ret = 1;
 
@@ -432,6 +425,7 @@ virHookCall(int driver/*要调用的hook点名称*/,
     }
 
     dir_path = g_strdup_printf("%s.d", path);
+
     if ((ret = virDirOpenIfExists(&dir, dir_path)) < 0)
         return -1;
 
@@ -445,10 +439,8 @@ virHookCall(int driver/*要调用的hook点名称*/,
         if (!virFileIsExecutable(entry_path))
             continue;
 
-        virStringListAdd(&entries, entry_path);
+        entries = g_slist_prepend(entries, g_steal_pointer(&entry_path));
     }
-
-    VIR_DIR_CLOSE(dir);
 
     if (ret < 0)
         return -1;
@@ -456,18 +448,18 @@ virHookCall(int driver/*要调用的hook点名称*/,
     if (!entries)
         return script_ret;
 
-    nentries = virStringListLength((const char **)entries);
-    qsort(entries, nentries, sizeof(*entries), virStringSortCompare);
+    entries = g_slist_sort(entries, (GCompareFunc) strcmp);
 
-    for (i = 0; i < nentries; i++) {
+    for (next = entries; next; next = next->next) {
         int entry_ret;
         const char *entry_input;
         g_autofree char *entry_output = NULL;
+        const char *filename = next->data;
 
         /* Get input from previous output */
         entry_input = (!script_ret && output &&
                        !virStringIsEmpty(*output)) ? *output : input;
-        entry_ret = virRunScript(entries[i], id, opstr,
+        entry_ret = virRunScript(filename, id, opstr,
                                  subopstr, extra, entry_input,
                                  (output) ? &entry_output : NULL);
         if (entry_ret < script_ret)

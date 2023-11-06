@@ -32,7 +32,6 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 typedef struct _testQemuData testQemuData;
-typedef testQemuData *testQemuDataPtr;
 struct _testQemuData {
     virQEMUDriver driver;
     const char *inputDir;
@@ -40,13 +39,22 @@ struct _testQemuData {
     const char *prefix;
     const char *version;
     const char *archName;
+    const char *variant;
     const char *suffix;
     int ret;
 };
 
+bool isHVF = false;
+
+bool
+virQEMUCapsProbeHVF(virQEMUCaps *qemuCaps G_GNUC_UNUSED)
+{
+    return isHVF;
+}
+
 
 static int
-testQemuDataInit(testQemuDataPtr data)
+testQemuDataInit(testQemuData *data)
 {
     if (qemuTestDriverInit(&data->driver) < 0)
         return -1;
@@ -60,7 +68,7 @@ testQemuDataInit(testQemuDataPtr data)
 
 
 static void
-testQemuDataReset(testQemuDataPtr data)
+testQemuDataReset(testQemuData *data)
 {
     qemuTestDriverFree(&data->driver);
 }
@@ -69,48 +77,50 @@ testQemuDataReset(testQemuDataPtr data)
 static int
 testQemuCaps(const void *opaque)
 {
-    int ret = -1;
     testQemuData *data = (void *) opaque;
-    char *repliesFile = NULL;
-    char *capsFile = NULL;
-    qemuMonitorTestPtr mon = NULL;
-    virQEMUCapsPtr capsActual = NULL;
-    char *binary = NULL;
-    char *actual = NULL;
+    g_autofree char *repliesFile = NULL;
+    g_autofree char *capsFile = NULL;
+    g_autoptr(qemuMonitorTest) mon = NULL;
+    g_autoptr(virQEMUCaps) capsActual = NULL;
+    g_autofree char *binary = NULL;
+    g_autofree char *actual = NULL;
     unsigned int fakeMicrocodeVersion = 0;
     const char *p;
 
-    repliesFile = g_strdup_printf("%s/%s_%s.%s.%s",
+    repliesFile = g_strdup_printf("%s/%s_%s_%s%s.%s",
                                   data->inputDir, data->prefix, data->version,
-                                  data->archName, data->suffix);
-    capsFile = g_strdup_printf("%s/%s_%s.%s.xml",
+                                  data->archName, data->variant, data->suffix);
+    capsFile = g_strdup_printf("%s/%s_%s_%s%s.xml",
                                data->outputDir, data->prefix, data->version,
-                               data->archName);
+                               data->archName, data->variant);
 
     if (!(mon = qemuMonitorTestNewFromFileFull(repliesFile, &data->driver, NULL,
                                                NULL)))
-        goto cleanup;
+        return -1;
+
+    isHVF = STREQ(data->variant, "+hvf");
 
     if (qemuProcessQMPInitMonitor(qemuMonitorTestGetMonitor(mon)) < 0)
-        goto cleanup;
+        return -1;
 
     binary = g_strdup_printf("/usr/bin/qemu-system-%s",
                              data->archName);
 
-    if (!(capsActual = virQEMUCapsNewBinary(binary)) ||
-        virQEMUCapsInitQMPMonitor(capsActual,
-                                  qemuMonitorTestGetMonitor(mon)) < 0)
-        goto cleanup;
+    capsActual = virQEMUCapsNewBinary(binary);
 
-    if (virQEMUCapsGet(capsActual, QEMU_CAPS_KVM)) {
+    if (virQEMUCapsInitQMPMonitor(capsActual, qemuMonitorTestGetMonitor(mon)) < 0)
+        return -1;
+
+    if (virQEMUCapsHaveAccel(capsActual) &&
+        virQEMUCapsGet(capsActual, QEMU_CAPS_TCG)) {
         qemuMonitorResetCommandID(qemuMonitorTestGetMonitor(mon));
 
         if (qemuProcessQMPInitMonitor(qemuMonitorTestGetMonitor(mon)) < 0)
-            goto cleanup;
+            return -1;
 
         if (virQEMUCapsInitQMPMonitorTCG(capsActual,
                                          qemuMonitorTestGetMonitor(mon)) < 0)
-            goto cleanup;
+            return -1;
 
         /* calculate fake microcode version based on filename for a reproducible
          * number for testing which does not change with the contents */
@@ -126,58 +136,41 @@ testQemuCaps(const void *opaque)
     }
 
     if (!(actual = virQEMUCapsFormatCache(capsActual)))
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(actual, capsFile) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    VIR_FREE(repliesFile);
-    VIR_FREE(capsFile);
-    VIR_FREE(actual);
-    VIR_FREE(binary);
-    qemuMonitorTestFree(mon);
-    virObjectUnref(capsActual);
-    return ret;
+    return 0;
 }
 
 
 static int
 testQemuCapsCopy(const void *opaque)
 {
-    int ret = -1;
     const testQemuData *data = opaque;
-    char *capsFile = NULL;
-    virQEMUCapsPtr orig = NULL;
-    virQEMUCapsPtr copy = NULL;
-    char *actual = NULL;
+    g_autofree char *capsFile = NULL;
+    g_autoptr(virQEMUCaps) orig = NULL;
+    g_autoptr(virQEMUCaps) copy = NULL;
+    g_autofree char *actual = NULL;
 
-    capsFile = g_strdup_printf("%s/%s_%s.%s.xml",
+    capsFile = g_strdup_printf("%s/%s_%s_%s%s.xml",
                                data->outputDir, data->prefix, data->version,
-                               data->archName);
+                               data->archName, data->variant);
 
     if (!(orig = qemuTestParseCapabilitiesArch(
               virArchFromString(data->archName), capsFile)))
-        goto cleanup;
+        return -1;
 
-    if (!(copy = virQEMUCapsNewCopy(orig)))
-        goto cleanup;
+    copy = virQEMUCapsNewCopy(orig);
 
     if (!(actual = virQEMUCapsFormatCache(copy)))
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(actual, capsFile) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(capsFile);
-    virObjectUnref(orig);
-    virObjectUnref(copy);
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 
@@ -186,10 +179,11 @@ doCapsTest(const char *inputDir,
            const char *prefix,
            const char *version,
            const char *archName,
+           const char *variant,
            const char *suffix,
            void *opaque)
 {
-    testQemuDataPtr data = (testQemuDataPtr) opaque;
+    testQemuData *data = (testQemuData *) opaque;
     g_autofree char *title = NULL;
     g_autofree char *copyTitle = NULL;
 
@@ -200,6 +194,7 @@ doCapsTest(const char *inputDir,
     data->prefix = prefix;
     data->version = version;
     data->archName = archName;
+    data->variant = variant,
     data->suffix = suffix;
 
     if (virTestRun(title, testQemuCaps, data) < 0)
@@ -225,25 +220,12 @@ mymain(void)
     if (testQemuCapsIterate(".replies", doCapsTest, &data) < 0)
         return EXIT_FAILURE;
 
-    /*
-     * Run "tests/qemucapsprobe /path/to/qemu/binary >foo.replies"
-     * to generate updated or new *.replies data files.
-     *
-     * If you manually edit replies files you can run
-     * "tests/qemucapsfixreplies foo.replies" to fix the replies ids.
-     *
-     * Once a replies file has been generated and tweaked if necessary,
-     * you can drop it into tests/qemucapabilitiesdata/ (with a sensible
-     * name - look at what's already there for inspiration) and test
-     * programs will automatically pick it up.
-     *
-     * To generate the corresponding output files after a new replies
-     * file has been added, run "VIR_TEST_REGENERATE_OUTPUT=1 make check".
-     */
+    /* See documentation in qemucapabilitiesdata/README.rst */
 
     testQemuDataReset(&data);
 
     return (data.ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN(mymain)
+VIR_TEST_MAIN_PRELOAD(mymain,
+                      VIR_TEST_MOCK("domaincaps"))

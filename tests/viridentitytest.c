@@ -25,16 +25,21 @@
 
 #include "testutils.h"
 
-#include "viridentity.h"
-#include "virerror.h"
-#include "viralloc.h"
-#include "virlog.h"
+#define LIBVIRT_VIRIDENTITYPRIV_H_ALLOW
 
-#include "virlockspace.h"
+#include "viridentitypriv.h"
+#include "virlog.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("tests.identitytest");
+
+char *
+virIdentityEnsureSystemToken(void)
+{
+    return g_strdup("3de80bcbf22d4833897f1638e01be9b2");
+}
+
 
 static int testIdentityAttrs(const void *data G_GNUC_UNUSED)
 {
@@ -88,8 +93,7 @@ static int testIdentityGetSystem(const void *data)
 #if !WITH_SELINUX
     if (context) {
         VIR_DEBUG("libvirt not compiled with SELinux, skipping this test");
-        ret = EXIT_AM_SKIP;
-        return -1;
+        return EXIT_AM_SKIP;
     }
 #endif
 
@@ -120,7 +124,7 @@ static int testIdentityGetSystem(const void *data)
 static int testSetFakeSELinuxContext(const void *data G_GNUC_UNUSED)
 {
 #if WITH_SELINUX
-    return setcon_raw((security_context_t)data);
+    return setcon_raw(data);
 #else
     VIR_DEBUG("libvirt not compiled with SELinux, skipping this test");
     return EXIT_AM_SKIP;
@@ -158,7 +162,7 @@ mymain(void)
 }
 
 #if WITH_SELINUX
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/libsecurityselinuxhelper.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/libsecurityselinuxhelper.so")
 #else
 VIR_TEST_MAIN(mymain)
 #endif

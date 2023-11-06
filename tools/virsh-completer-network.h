@@ -22,14 +22,37 @@
 
 #include "vsh.h"
 
-char ** virshNetworkNameCompleter(vshControl *ctl,
-                                  const vshCmd *cmd,
-                                  unsigned int flags);
+char **
+virshNetworkNameCompleter(vshControl *ctl,
+                          const vshCmd *cmd,
+                          unsigned int flags);
 
-char ** virshNetworkEventNameCompleter(vshControl *ctl,
-                                       const vshCmd *cmd,
-                                       unsigned int flags);
+char **
+virshNetworkEventNameCompleter(vshControl *ctl,
+                               const vshCmd *cmd,
+                               unsigned int flags);
 
-char ** virshNetworkPortUUIDCompleter(vshControl *ctl,
-                                      const vshCmd *cmd,
-                                      unsigned int flags);
+char **
+virshNetworkPortUUIDCompleter(vshControl *ctl,
+                              const vshCmd *cmd,
+                              unsigned int flags);
+
+char **
+virshNetworkUUIDCompleter(vshControl *ctl,
+                          const vshCmd *cmd,
+                          unsigned int flags);
+
+char **
+virshNetworkDhcpMacCompleter(vshControl *ctl,
+                             const vshCmd *cmd,
+                             unsigned int flags);
+
+char **
+virshNetworkUpdateCommandCompleter(vshControl *ctl,
+                                   const vshCmd *cmd,
+                                   unsigned int flags);
+
+char **
+virshNetworkUpdateSectionCompleter(vshControl *ctl,
+                                   const vshCmd *cmd,
+                                   unsigned int flags);

@@ -39,13 +39,12 @@ typedef enum {
 
 /* Stores disk-checkpoint information */
 typedef struct _virDomainCheckpointDiskDef virDomainCheckpointDiskDef;
-typedef virDomainCheckpointDiskDef *virDomainCheckpointDiskDefPtr;
 struct _virDomainCheckpointDiskDef {
     char *name;     /* name matching the <target dev='...' of the domain */
-    int idx;        /* index within checkpoint->dom->disks that matches name */
     int type;       /* virDomainCheckpointType */
     char *bitmap;   /* bitmap name, if type is bitmap */
     unsigned long long size; /* current checkpoint size in bytes */
+    bool sizeValid;
 };
 
 /* Stores the complete checkpoint metadata */
@@ -72,27 +71,30 @@ typedef enum {
 unsigned int
 virDomainCheckpointFormatConvertXMLFlags(unsigned int flags);
 
-virDomainCheckpointDefPtr
+virDomainCheckpointDef *
 virDomainCheckpointDefParseString(const char *xmlStr,
-                                  virDomainXMLOptionPtr xmlopt,
+                                  virDomainXMLOption *xmlopt,
                                   void *parseOpaque,
                                   unsigned int flags);
 
-virDomainCheckpointDefPtr
+virDomainCheckpointDef *
 virDomainCheckpointDefNew(void);
 
 char *
-virDomainCheckpointDefFormat(virDomainCheckpointDefPtr def,
-                             virDomainXMLOptionPtr xmlopt,
+virDomainCheckpointDefFormat(virDomainCheckpointDef *def,
+                             virDomainXMLOption *xmlopt,
                              unsigned int flags);
 
 int
-virDomainCheckpointAlignDisks(virDomainCheckpointDefPtr checkpoint);
+virDomainCheckpointAlignDisks(virDomainCheckpointDef *checkpoint);
 
-int virDomainCheckpointRedefinePrep(virDomainObjPtr vm,
-                                    virDomainCheckpointDefPtr *def,
-                                    virDomainMomentObjPtr *checkpoint,
-                                    virDomainXMLOptionPtr xmlopt,
-                                    bool *update_current);
+int
+virDomainCheckpointRedefinePrep(virDomainObj *vm,
+                                virDomainCheckpointDef *def,
+                                bool *update_current);
+
+virDomainMomentObj *
+virDomainCheckpointRedefineCommit(virDomainObj *vm,
+                                  virDomainCheckpointDef **defptr);
 
 VIR_ENUM_DECL(virDomainCheckpoint);

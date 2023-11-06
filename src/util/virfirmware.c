@@ -20,7 +20,6 @@
 
 #include <config.h>
 
-#include "viralloc.h"
 #include "virerror.h"
 #include "virfirmware.h"
 #include "virlog.h"
@@ -32,37 +31,36 @@ VIR_LOG_INIT("util.firmware");
 
 
 void
-virFirmwareFree(virFirmwarePtr firmware)
+virFirmwareFree(virFirmware *firmware)
 {
     if (!firmware)
         return;
 
-    VIR_FREE(firmware->name);
-    VIR_FREE(firmware->nvram);
-    VIR_FREE(firmware);
+    g_free(firmware->name);
+    g_free(firmware->nvram);
+    g_free(firmware);
 }
 
 
 void
-virFirmwareFreeList(virFirmwarePtr *firmwares, size_t nfirmwares)
+virFirmwareFreeList(virFirmware **firmwares, size_t nfirmwares)
 {
     size_t i;
 
     for (i = 0; i < nfirmwares; i++)
         virFirmwareFree(firmwares[i]);
 
-    VIR_FREE(firmwares);
+    g_free(firmwares);
 }
 
 
 int
-virFirmwareParse(const char *str, virFirmwarePtr firmware)
+virFirmwareParse(const char *str, virFirmware *firmware)
 {
-    int ret = -1;
-    char **token;
+    g_auto(GStrv) token = NULL;
 
-    if (!(token = virStringSplit(str, ":", 0)))
-        goto cleanup;
+    if (!(token = g_strsplit(str, ":", 0)))
+        return -1;
 
     if (token[0]) {
         virSkipSpaces((const char **) &token[0]);
@@ -74,60 +72,51 @@ virFirmwareParse(const char *str, virFirmwarePtr firmware)
     if (!token[0] || !token[1] || token[2] ||
         STREQ(token[0], "") || STREQ(token[1], "")) {
         virReportError(VIR_ERR_CONF_SYNTAX,
-                       _("Invalid nvram format: '%s'"),
+                       _("Invalid nvram format: '%1$s'"),
                        str);
-        goto cleanup;
+        return -1;
     }
 
     firmware->name = g_strdup(token[0]);
     firmware->nvram = g_strdup(token[1]);
 
-    ret = 0;
- cleanup:
-    virStringListFree(token);
-    return ret;
+    return 0;
 }
 
 
 int
 virFirmwareParseList(const char *list,
-                     virFirmwarePtr **firmwares,
+                     virFirmware ***firmwares,
                      size_t *nfirmwares)
 {
-    int ret = -1;
-    char **token;
+    g_auto(GStrv) token = NULL;
     size_t i, j;
 
-    if (!(token = virStringSplit(list, ":", 0)))
-        goto cleanup;
+    if (!(token = g_strsplit(list, ":", 0)))
+        return -1;
 
     for (i = 0; token[i]; i += 2) {
         if (!token[i] || !token[i + 1] ||
             STREQ(token[i], "") || STREQ(token[i + 1], "")) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Invalid --with-loader-nvram list: %s"),
+                           _("Invalid --with-loader-nvram list: %1$s"),
                            list);
-            goto cleanup;
+            return -1;
         }
     }
 
     if (i) {
-        if (VIR_ALLOC_N(*firmwares, i / 2) < 0)
-            goto cleanup;
+        *firmwares = g_new0(virFirmware *, i / 2);
         *nfirmwares = i / 2;
 
         for (j = 0; j < i / 2; j++) {
-            virFirmwarePtr *fws = *firmwares;
+            virFirmware **fws = *firmwares;
 
-            if (VIR_ALLOC(fws[j]) < 0)
-                goto cleanup;
+            fws[j] = g_new0(virFirmware, 1);
             fws[j]->name = g_strdup(token[2 * j]);
             fws[j]->nvram = g_strdup(token[2 * j + 1]);
         }
     }
 
-    ret = 0;
- cleanup:
-    virStringListFree(token);
-    return ret;
+    return 0;
 }

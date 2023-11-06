@@ -28,7 +28,6 @@
 #include "internal.h"
 #include "datatypes.h"
 #include "libxl/xen_xl.h"
-#include "viralloc.h"
 #include "virstring.h"
 #include "testutils.h"
 #include "testutilsxen.h"
@@ -36,7 +35,7 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-static libxlDriverPrivatePtr driver;
+static libxlDriverPrivate *driver;
 
 /*
  * This function provides a mechanism to replace variables in test
@@ -45,7 +44,7 @@ static libxlDriverPrivatePtr driver;
 static char *
 testReplaceVarsXML(const char *xml)
 {
-    char *xmlcfgData;
+    g_autofree char *xmlcfgData = NULL;
     char *replacedXML;
 
     if (virTestLoadFile(xml, &xmlcfgData) < 0)
@@ -54,7 +53,6 @@ testReplaceVarsXML(const char *xml)
     replacedXML = virStringReplace(xmlcfgData, "/LIBXL_FIRMWARE_DIR",
                                    LIBXL_FIRMWARE_DIR);
 
-    VIR_FREE(xmlcfgData);
     return replacedXML;
 }
 
@@ -65,56 +63,47 @@ testReplaceVarsXML(const char *xml)
 static int
 testCompareParseXML(const char *xlcfg, const char *xml, bool replaceVars)
 {
-    char *gotxlcfgData = NULL;
+    g_autofree char *gotxlcfgData = NULL;
     g_autoptr(virConf) conf = NULL;
-    virConnectPtr conn = NULL;
+    g_autoptr(virConnect) conn = NULL;
     int wrote = 4096;
-    int ret = -1;
-    virDomainDefPtr def = NULL;
-    char *replacedXML = NULL;
+    g_autoptr(virDomainDef) def = NULL;
+    g_autofree char *replacedXML = NULL;
 
-    if (VIR_ALLOC_N(gotxlcfgData, wrote) < 0)
-        goto fail;
+    gotxlcfgData = g_new0(char, wrote);
 
     conn = virGetConnect();
-    if (!conn) goto fail;
+    if (!conn)
+        return -1;
 
     if (replaceVars) {
         if (!(replacedXML = testReplaceVarsXML(xml)))
-            goto fail;
+            return -1;
         if (!(def = virDomainDefParseString(replacedXML, driver->xmlopt,
                                             NULL, VIR_DOMAIN_XML_INACTIVE)))
-            goto fail;
+            return -1;
     } else {
         if (!(def = virDomainDefParseFile(xml, driver->xmlopt,
                                           NULL, VIR_DOMAIN_XML_INACTIVE)))
-            goto fail;
+            return -1;
     }
 
     if (!virDomainDefCheckABIStability(def, def, driver->xmlopt)) {
         fprintf(stderr, "ABI stability check failed on %s", xml);
-        goto fail;
+        return -1;
     }
 
     if (!(conf = xenFormatXL(def, conn)))
-        goto fail;
+        return -1;
 
     if (virConfWriteMem(gotxlcfgData, &wrote, conf) < 0)
-        goto fail;
+        return -1;
     gotxlcfgData[wrote] = '\0';
 
     if (virTestCompareToFile(gotxlcfgData, xlcfg) < 0)
-        goto fail;
+        return -1;
 
-    ret = 0;
-
- fail:
-    VIR_FREE(replacedXML);
-    VIR_FREE(gotxlcfgData);
-    virDomainDefFree(def);
-    virObjectUnref(conn);
-
-    return ret;
+    return 0;
 }
 
 /*
@@ -124,52 +113,43 @@ testCompareParseXML(const char *xlcfg, const char *xml, bool replaceVars)
 static int
 testCompareFormatXML(const char *xlcfg, const char *xml, bool replaceVars)
 {
-    char *xlcfgData = NULL;
-    char *gotxml = NULL;
+    g_autofree char *xlcfgData = NULL;
+    g_autofree char *gotxml = NULL;
     g_autoptr(virConf) conf = NULL;
-    int ret = -1;
-    virConnectPtr conn;
-    virDomainDefPtr def = NULL;
-    char *replacedXML = NULL;
+    g_autoptr(virConnect) conn = NULL;
+    g_autoptr(virDomainDef) def = NULL;
+    g_autofree char *replacedXML = NULL;
     g_autoptr(libxlDriverConfig) cfg = libxlDriverConfigGet(driver);
 
     conn = virGetConnect();
-    if (!conn) goto fail;
+    if (!conn)
+        return -1;
 
     if (virTestLoadFile(xlcfg, &xlcfgData) < 0)
-        goto fail;
+        return -1;
 
     if (!(conf = virConfReadString(xlcfgData, 0)))
-        goto fail;
+        return -1;
 
     if (!(def = xenParseXL(conf, cfg->caps, driver->xmlopt)))
-        goto fail;
+        return -1;
 
     if (!(gotxml = virDomainDefFormat(def, driver->xmlopt,
                                       VIR_DOMAIN_XML_INACTIVE |
                                       VIR_DOMAIN_XML_SECURE)))
-        goto fail;
+        return -1;
 
     if (replaceVars) {
         if (!(replacedXML = testReplaceVarsXML(xml)))
-            goto fail;
+            return -1;
         if (virTestCompareToString(gotxml, replacedXML) < 0)
-            goto fail;
+            return -1;
     } else {
         if (virTestCompareToFile(gotxml, xml) < 0)
-            goto fail;
+            return -1;
     }
 
-    ret = 0;
-
- fail:
-    VIR_FREE(replacedXML);
-    VIR_FREE(xlcfgData);
-    VIR_FREE(gotxml);
-    virDomainDefFree(def);
-    virObjectUnref(conn);
-
-    return ret;
+    return 0;
 }
 
 
@@ -184,8 +164,8 @@ testCompareHelper(const void *data)
 {
     int result = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *cfg = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *cfg = NULL;
 
     xml = g_strdup_printf("%s/xlconfigdata/test-%s.xml", abs_srcdir, info->name);
     cfg = g_strdup_printf("%s/xlconfigdata/test-%s.cfg", abs_srcdir, info->name);
@@ -194,9 +174,6 @@ testCompareHelper(const void *data)
         result = testCompareParseXML(cfg, xml, info->replaceVars);
     else
         result = testCompareFormatXML(cfg, xml, info->replaceVars);
-
-    VIR_FREE(xml);
-    VIR_FREE(cfg);
 
     return result;
 }
@@ -245,9 +222,7 @@ mymain(void)
     DO_TEST("new-disk");
     DO_TEST_FORMAT("disk-positional-parms-full", false);
     DO_TEST_FORMAT("disk-positional-parms-partial", false);
-#ifdef LIBXL_HAVE_QED
     DO_TEST_FORMAT("disk-qed", false);
-#endif
     DO_TEST("net-fakemodel");
     DO_TEST("spice");
     DO_TEST("spice-features");
@@ -260,12 +235,11 @@ mymain(void)
     DO_TEST("fullvirt-nestedhvm-disabled");
     DO_TEST("fullvirt-cpuid");
     DO_TEST("fullvirt-acpi-slic");
-#ifdef LIBXL_HAVE_VNUMA
+    DO_TEST("fullvirt-pci");
     DO_TEST("fullvirt-vnuma");
     DO_TEST_PARSE("fullvirt-vnuma-autocomplete", false);
     DO_TEST_PARSE("fullvirt-vnuma-nodistances", false);
     DO_TEST_PARSE("fullvirt-vnuma-partialdist", false);
-#endif
 
     DO_TEST("paravirt-cmdline");
     DO_TEST_FORMAT("paravirt-cmdline-extra-root", false);
@@ -275,21 +249,13 @@ mymain(void)
     DO_TEST_FORMAT("fullvirt-type", false);
     DO_TEST("pvh-type");
 
-#ifdef LIBXL_HAVE_DEVICE_CHANNEL
     DO_TEST("channel-pty");
     DO_TEST("channel-unix");
-#endif
-#ifdef LIBXL_HAVE_BUILDINFO_SERIAL_LIST
     DO_TEST("fullvirt-multiserial");
-#endif
-#ifdef LIBXL_HAVE_BUILDINFO_USBDEVICE_LIST
     DO_TEST("fullvirt-multiusb");
-#endif
-#ifdef LIBXL_HAVE_BUILDINFO_KERNEL
     DO_TEST("fullvirt-direct-kernel-boot");
     DO_TEST_FORMAT("fullvirt-direct-kernel-boot-extra", false);
     DO_TEST_FORMAT("fullvirt-direct-kernel-boot-bogus-extra", false);
-#endif
 #ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
     DO_TEST("max-gntframes");
 #endif
@@ -304,6 +270,7 @@ mymain(void)
 #ifdef LIBXL_HAVE_CREATEINFO_PASSTHROUGH
     DO_TEST("fullvirt-hypervisor-features");
 #endif
+    DO_TEST("qemu-passthrough");
 
     testXLFreeDriver(driver);
 

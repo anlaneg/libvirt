@@ -22,12 +22,10 @@
 
 #include "qemu_interop_config.h"
 #include "configmake.h"
-#include "viralloc.h"
-#include "virenum.h"
+#include "virerror.h"
 #include "virfile.h"
 #include "virhash.h"
 #include "virlog.h"
-#include "virstring.h"
 #include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
@@ -35,12 +33,11 @@
 VIR_LOG_INIT("qemu.qemu_configs");
 
 static int
-qemuBuildFileList(virHashTablePtr files, const char *dir)
+qemuBuildFileList(GHashTable *files, const char *dir)
 {
-    DIR *dirp;
+    g_autoptr(DIR) dirp = NULL;
     struct dirent *ent = NULL;
     int rc;
-    int ret = -1;
 
     if ((rc = virDirOpenIfExists(&dirp, dir)) < 0)
         return -1;
@@ -61,50 +58,41 @@ qemuBuildFileList(virHashTablePtr files, const char *dir)
         path = g_strdup_printf("%s/%s", dir, filename);
 
         if (stat(path, &sb) < 0) {
-            virReportSystemError(errno, _("Unable to access %s"), path);
-            goto cleanup;
+            virReportSystemError(errno, _("Unable to access %1$s"), path);
+            return -1;
         }
 
         if (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode))
             continue;
 
         if (virHashUpdateEntry(files, filename, path) < 0)
-            goto cleanup;
+            return -1;
 
         path = NULL;
     }
 
     if (rc < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    virDirClose(&dirp);
-    return ret;
+    return 0;
 }
 
-static int
-qemuConfigFilesSorter(const virHashKeyValuePair *a,
-                      const virHashKeyValuePair *b)
-{
-    return strcmp(a->key, b->key);
-}
-
-#define QEMU_SYSTEM_LOCATION PREFIX "/share/qemu"
-#define QEMU_ETC_LOCATION SYSCONFDIR "/qemu"
+#define QEMU_CONFDIR SYSCONFDIR "/qemu"
 
 int
 qemuInteropFetchConfigs(const char *name,
                         char ***configs,
                         bool privileged)
 {
-    g_autoptr(virHashTable) files = NULL;
+    g_autoptr(GHashTable) files = virHashNew(g_free);
     g_autofree char *homeConfig = NULL;
     g_autofree char *xdgConfig = NULL;
-    g_autofree char *sysLocation = virFileBuildPath(QEMU_SYSTEM_LOCATION, name, NULL);
-    g_autofree char *etcLocation = virFileBuildPath(QEMU_ETC_LOCATION, name, NULL);
-    g_autofree virHashKeyValuePairPtr pairs = NULL;
-    virHashKeyValuePairPtr tmp = NULL;
+    g_autofree char *dataLocation = virFileBuildPath(QEMU_DATADIR, name, NULL);
+    g_autofree char *confLocation = virFileBuildPath(QEMU_CONFDIR, name, NULL);
+    g_autofree virHashKeyValuePair *pairs = NULL;
+    size_t npairs;
+    virHashKeyValuePair *tmp = NULL;
+    size_t nconfigs = 0;
 
     *configs = NULL;
 
@@ -125,13 +113,10 @@ qemuInteropFetchConfigs(const char *name,
         homeConfig = g_strdup_printf("%s/qemu/%s", xdgConfig, name);
     }
 
-    if (!(files = virHashCreate(10, virHashValueFree)))
+    if (qemuBuildFileList(files, dataLocation) < 0)
         return -1;
 
-    if (qemuBuildFileList(files, sysLocation) < 0)
-        return -1;
-
-    if (qemuBuildFileList(files, etcLocation) < 0)
+    if (qemuBuildFileList(files, confLocation) < 0)
         return -1;
 
     if (homeConfig &&
@@ -142,11 +127,13 @@ qemuInteropFetchConfigs(const char *name,
      * where each filename (as key) has the highest priority full pathname
      * associated with it. */
 
-    if (virHashSize(files) == 0)
+    if (!(pairs = virHashGetItems(files, &npairs, true)))
+        return -1;
+
+    if (npairs == 0)
         return 0;
 
-    if (!(pairs = virHashGetItems(files, qemuConfigFilesSorter)))
-        return -1;
+    *configs = g_new0(char *, npairs + 1);
 
     for (tmp = pairs; tmp->key; tmp++) {
         const char *path = tmp->value;
@@ -154,7 +141,7 @@ qemuInteropFetchConfigs(const char *name,
 
         if ((len = virFileLength(path, -1)) < 0) {
             virReportSystemError(errno,
-                                 _("unable to get size of '%s'"),
+                                 _("unable to get size of '%1$s'"),
                                  path);
             return -1;
         }
@@ -168,8 +155,7 @@ qemuInteropFetchConfigs(const char *name,
             continue;
         }
 
-        if (virStringListAdd(configs, path) < 0)
-            return -1;
+        (*configs)[nconfigs++] = g_strdup(path);
     }
 
     return 0;

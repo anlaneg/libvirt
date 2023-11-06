@@ -45,18 +45,28 @@ typedef enum {
     VIR_DOMAIN_BACKUP_DISK_STATE_LAST
 } virDomainBackupDiskState;
 
+
+typedef enum {
+    VIR_DOMAIN_BACKUP_DISK_BACKUP_MODE_DEFAULT = 0,
+    VIR_DOMAIN_BACKUP_DISK_BACKUP_MODE_FULL,
+    VIR_DOMAIN_BACKUP_DISK_BACKUP_MODE_INCREMENTAL,
+
+    VIR_DOMAIN_BACKUP_DISK_BACKUP_MODE_LAST
+} virDomainBackupDiskBackupMode;
+
+
 /* Stores disk-backup information */
 typedef struct _virDomainBackupDiskDef virDomainBackupDiskDef;
-typedef virDomainBackupDiskDef *virDomainBackupDiskDefPtr;
 struct _virDomainBackupDiskDef {
     char *name;     /* name matching the <target dev='...' of the domain */
     virTristateBool backup; /* whether backup is requested */
+    virDomainBackupDiskBackupMode backupmode;
     char *incremental; /* name of the starting point checkpoint of an incremental backup */
     char *exportname; /* name of the NBD export for pull mode backup */
     char *exportbitmap; /* name of the bitmap exposed in NBD for pull mode backup */
 
     /* details of target for push-mode, or of the scratch file for pull-mode */
-    virStorageSourcePtr store;
+    virStorageSource *store;
 
     /* internal data */
     virDomainBackupDiskState state;
@@ -64,17 +74,22 @@ struct _virDomainBackupDiskDef {
 
 /* Stores the complete backup metadata */
 typedef struct _virDomainBackupDef virDomainBackupDef;
-typedef virDomainBackupDef *virDomainBackupDefPtr;
 struct _virDomainBackupDef {
     /* Public XML.  */
     int type; /* virDomainBackupType */
     char *incremental;
-    virStorageNetHostDefPtr server; /* only when type == PULL */
+    virStorageNetHostDef *server; /* only when type == PULL */
+    virTristateBool tls; /* use TLS for NBD */
 
     size_t ndisks; /* should not exceed dom->ndisks */
     virDomainBackupDiskDef *disks;
 
     /* internal data */
+
+    /* NBD TLS internals */
+    char *tlsAlias;
+    char *tlsSecretAlias;
+
     /* statistic totals for completed disks */
     unsigned long long push_transferred;
     unsigned long long push_total;
@@ -82,32 +97,35 @@ struct _virDomainBackupDef {
     unsigned long long pull_tmp_total;
 
     char *errmsg; /* error message of failed sub-blockjob */
+
+    unsigned int apiFlags; /* original flags used when starting the job */
 };
 
 typedef enum {
     VIR_DOMAIN_BACKUP_PARSE_INTERNAL = 1 << 0,
 } virDomainBackupParseFlags;
 
-virDomainBackupDefPtr
+virDomainBackupDef *
+virDomainBackupDefParseXML(xmlXPathContextPtr ctxt,
+                           virDomainXMLOption *xmlopt,
+                           unsigned int flags);
+
+virDomainBackupDef *
 virDomainBackupDefParseString(const char *xmlStr,
-                              virDomainXMLOptionPtr xmlopt,
+                              virDomainXMLOption *xmlopt,
                               unsigned int flags);
 
-virDomainBackupDefPtr
-virDomainBackupDefParseNode(xmlDocPtr xml,
-                            xmlNodePtr root,
-                            virDomainXMLOptionPtr xmlopt,
-                            unsigned int flags);
 void
-virDomainBackupDefFree(virDomainBackupDefPtr def);
+virDomainBackupDefFree(virDomainBackupDef *def);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainBackupDef, virDomainBackupDefFree);
 
 int
-virDomainBackupDefFormat(virBufferPtr buf,
-                         virDomainBackupDefPtr def,
-                         bool internal);
+virDomainBackupDefFormat(virBuffer *buf,
+                         virDomainBackupDef *def,
+                         bool internal,
+                         virDomainXMLOption *xmlopt);
 int
-virDomainBackupAlignDisks(virDomainBackupDefPtr backup,
-                          virDomainDefPtr dom,
+virDomainBackupAlignDisks(virDomainBackupDef *backup,
+                          virDomainDef *dom,
                           const char *suffix);

@@ -31,17 +31,12 @@
 #if defined(WITH_LIBXL) && defined(WITH_YAJL)
 
 # include "internal.h"
-# include "viralloc.h"
 # include "libxl/libxl_conf.h"
-# include "datatypes.h"
-# include "virstring.h"
-# include "virmock.h"
-# include "virjson.h"
 # include "testutilsxen.h"
 
 # define VIR_FROM_THIS VIR_FROM_LIBXL
 
-static libxlDriverPrivatePtr driver;
+static libxlDriverPrivate *driver;
 
 static int
 testCompareXMLToDomConfig(const char *xmlfile,
@@ -51,11 +46,11 @@ testCompareXMLToDomConfig(const char *xmlfile,
     libxl_domain_config actualconfig;
     libxl_domain_config expectconfig;
     xentoollog_logger *log = NULL;
-    virPortAllocatorRangePtr gports = NULL;
-    virDomainDefPtr vmdef = NULL;
-    char *actualjson = NULL;
-    char *tempjson = NULL;
-    char *expectjson = NULL;
+    virPortAllocatorRange *gports = NULL;
+    g_autoptr(virDomainDef) vmdef = NULL;
+    g_autofree char *actualjson = NULL;
+    g_autofree char *tempjson = NULL;
+    g_autofree char *expectjson = NULL;
     g_autoptr(libxlDriverConfig) cfg = libxlDriverConfigGet(driver);
 
     libxl_domain_config_init(&actualconfig);
@@ -97,6 +92,20 @@ testCompareXMLToDomConfig(const char *xmlfile,
                        "Failed to create libxl_domain_config from JSON doc");
         goto cleanup;
     }
+
+    /*
+     * In order to have common test files between Xen 4.9 and newer Xen versions,
+     * tweak the expected libxl_domain_config object before getting a json
+     * representation.
+     */
+# ifndef LIBXL_HAVE_BUILDINFO_APIC
+    if (expectconfig.c_info.type == LIBXL_DOMAIN_TYPE_HVM) {
+        libxl_defbool_unset(&expectconfig.b_info.acpi);
+        libxl_defbool_set(&expectconfig.b_info.u.hvm.apic, true);
+        libxl_defbool_set(&expectconfig.b_info.u.hvm.acpi, true);
+    }
+# endif
+
     if (!(expectjson = libxl_domain_config_to_json(cfg->ctx, &expectconfig))) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        "Failed to retrieve JSON doc for libxl_domain_config");
@@ -114,10 +123,6 @@ testCompareXMLToDomConfig(const char *xmlfile,
         vmdef->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC)
         virPortAllocatorRelease(vmdef->graphics[0]->data.vnc.port);
 
-    VIR_FREE(expectjson);
-    VIR_FREE(actualjson);
-    VIR_FREE(tempjson);
-    virDomainDefFree(vmdef);
     virPortAllocatorRangeFree(gports);
     libxl_domain_config_dispose(&actualconfig);
     libxl_domain_config_dispose(&expectconfig);
@@ -136,16 +141,14 @@ testCompareXMLToDomConfigHelper(const void *data)
 {
     int ret = -1;
     const struct testInfo *info = data;
-    char *xmlfile = NULL;
-    char *jsonfile = NULL;
+    g_autofree char *xmlfile = NULL;
+    g_autofree char *jsonfile = NULL;
 
     xmlfile = g_strdup_printf("%s/libxlxml2domconfigdata/%s.xml", abs_srcdir, info->name);
     jsonfile = g_strdup_printf("%s/libxlxml2domconfigdata/%s.json", abs_srcdir, info->name);
 
     ret = testCompareXMLToDomConfig(xmlfile, jsonfile);
 
-    VIR_FREE(xmlfile);
-    VIR_FREE(jsonfile);
     return ret;
 }
 
@@ -180,7 +183,8 @@ mymain(void)
 
     DO_TEST("basic-pv");
     DO_TEST("basic-hvm");
-# ifdef HAVE_XEN_PVH
+    DO_TEST("efi-hvm");
+# ifdef WITH_XEN_PVH
     DO_TEST("basic-pvh");
 # endif
     DO_TEST("cpu-shares-hvm");

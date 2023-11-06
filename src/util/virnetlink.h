@@ -22,12 +22,16 @@
 #include "internal.h"
 #include "virmacaddr.h"
 
-#if defined(__linux__) && defined(HAVE_LIBNL)
+#if defined(WITH_LIBNL)
 
 # include <netlink/msg.h>
 
 typedef struct nl_msg virNetlinkMsg;
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetlinkMsg, nlmsg_free);
+
+struct nl_msg *
+virNetlinkMsgNew(int nlmsgtype,
+                 int nlmsgflags);
 
 #else
 
@@ -36,30 +40,7 @@ struct sockaddr_nl;
 struct nlattr;
 struct nlmsghdr;
 
-#endif /* __linux__ */
-
-#define NETLINK_MSG_NEST_START(msg, container, attrtype) \
-do { \
-    container = nla_nest_start(msg, attrtype); \
-    if (!container) \
-        goto buffer_too_small; \
-} while(0)
-
-#define NETLINK_MSG_NEST_END(msg, container) \
-do { nla_nest_end(msg, container); } while(0)
-
-/*
- * we need to use an intermediary pointer to @data as compilers may sometimes
- * complain about @data not being a pointer type:
- * error: the address of 'foo' will always evaluate as 'true' [-Werror=address]
- */
-#define NETLINK_MSG_PUT(msg, attrtype, datalen, data) \
-do { \
-    const void *dataptr = data; \
-    if (dataptr && nla_put(msg, attrtype, datalen, dataptr) < 0) \
-        goto buffer_too_small; \
-} while(0)
-
+#endif /* WITH_LIBNL */
 
 int virNetlinkStartup(void);
 void virNetlinkShutdown(void);
@@ -79,21 +60,21 @@ int virNetlinkDumpCommand(struct nl_msg *nl_msg,
                           void *opaque);
 
 typedef struct _virNetlinkNewLinkData virNetlinkNewLinkData;
-typedef virNetlinkNewLinkData *virNetlinkNewLinkDataPtr;
 struct _virNetlinkNewLinkData {
     const int *ifindex;             /* The index for the 'link' device */
     const virMacAddr *mac;          /* The MAC address of the device */
     const uint32_t *macvlan_mode;   /* The mode of macvlan */
+    const char *veth_peer;          /* The peer name for veth */
 };
 
 int virNetlinkNewLink(const char *ifname,
                       const char *type,
-                      virNetlinkNewLinkDataPtr data,
+                      virNetlinkNewLinkData *data,
                       int *error);
 
-typedef int (*virNetlinkDelLinkFallback)(const char *ifname);
+typedef int (*virNetlinkTalkFallback)(const char *ifname);
 
-int virNetlinkDelLink(const char *ifname, virNetlinkDelLinkFallback fallback);
+int virNetlinkDelLink(const char *ifname, virNetlinkTalkFallback fallback);
 
 int virNetlinkGetErrorCode(struct nlmsghdr *resp, unsigned int recvbuflen);
 

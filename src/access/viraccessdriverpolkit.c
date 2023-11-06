@@ -21,13 +21,9 @@
 #include <config.h>
 
 #include "viraccessdriverpolkit.h"
-#include "viralloc.h"
-#include "vircommand.h"
 #include "virlog.h"
-#include "virprocess.h"
 #include "virerror.h"
 #include "virpolkit.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_ACCESS
 
@@ -40,14 +36,12 @@ VIR_LOG_INIT("access.accessdriverpolkit");
 #define VIR_ACCESS_DRIVER_POLKIT_ACTION_PREFIX "org.libvirt.api"
 
 typedef struct _virAccessDriverPolkitPrivate virAccessDriverPolkitPrivate;
-typedef virAccessDriverPolkitPrivate *virAccessDriverPolkitPrivatePtr;
-
 struct _virAccessDriverPolkitPrivate {
     bool ignore;
 };
 
 
-static void virAccessDriverPolkitCleanup(virAccessManagerPtr manager G_GNUC_UNUSED)
+static void virAccessDriverPolkitCleanup(virAccessManager *manager G_GNUC_UNUSED)
 {
 }
 
@@ -81,7 +75,7 @@ virAccessDriverPolkitGetCaller(const char *actionid,
 
     if (!identity) {
         virAccessError(VIR_ERR_ACCESS_DENIED,
-                       _("Policy kit denied action %s from <anonymous>"),
+                       _("Policy kit denied action %1$s from <anonymous>"),
                        actionid);
         return -1;
     }
@@ -118,7 +112,7 @@ virAccessDriverPolkitGetCaller(const char *actionid,
 
 
 static int
-virAccessDriverPolkitCheck(virAccessManagerPtr manager G_GNUC_UNUSED,
+virAccessDriverPolkitCheck(virAccessManager *manager G_GNUC_UNUSED,
                            const char *typename,
                            const char *permname,
                            const char **attrs)
@@ -161,7 +155,7 @@ virAccessDriverPolkitCheck(virAccessManagerPtr manager G_GNUC_UNUSED,
 
 
 static int
-virAccessDriverPolkitCheckConnect(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckConnect(virAccessManager *manager,
                                   const char *driverName,
                                   virAccessPermConnect perm)
 {
@@ -177,9 +171,9 @@ virAccessDriverPolkitCheckConnect(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckDomain(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckDomain(virAccessManager *manager,
                                  const char *driverName,
-                                 virDomainDefPtr domain,
+                                 virDomainDef *domain,
                                  virAccessPermDomain perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -198,9 +192,9 @@ virAccessDriverPolkitCheckDomain(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckInterface(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckInterface(virAccessManager *manager,
                                     const char *driverName,
-                                    virInterfaceDefPtr iface,
+                                    virInterfaceDef *iface,
                                     virAccessPermInterface perm)
 {
     const char *attrs[] = {
@@ -217,9 +211,9 @@ virAccessDriverPolkitCheckInterface(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNetwork(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNetwork(virAccessManager *manager,
                                   const char *driverName,
-                                  virNetworkDefPtr network,
+                                  virNetworkDef *network,
                                   virAccessPermNetwork perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -238,10 +232,10 @@ virAccessDriverPolkitCheckNetwork(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNetworkPort(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNetworkPort(virAccessManager *manager,
                                       const char *driverName,
-                                      virNetworkDefPtr network,
-                                      virNetworkPortDefPtr port,
+                                      virNetworkDef *network,
+                                      virNetworkPortDef *port,
                                       virAccessPermNetworkPort perm)
 {
     char uuidstr1[VIR_UUID_STRING_BUFLEN];
@@ -263,9 +257,9 @@ virAccessDriverPolkitCheckNetworkPort(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNodeDevice(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNodeDevice(virAccessManager *manager,
                                      const char *driverName,
-                                     virNodeDeviceDefPtr nodedev,
+                                     virNodeDeviceDef *nodedev,
                                      virAccessPermNodeDevice perm)
 {
     const char *attrs[] = {
@@ -281,9 +275,9 @@ virAccessDriverPolkitCheckNodeDevice(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNWFilter(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNWFilter(virAccessManager *manager,
                                    const char *driverName,
-                                   virNWFilterDefPtr nwfilter,
+                                   virNWFilterDef *nwfilter,
                                    virAccessPermNWFilter perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -302,9 +296,9 @@ virAccessDriverPolkitCheckNWFilter(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNWFilterBinding(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNWFilterBinding(virAccessManager *manager,
                                           const char *driverName,
-                                          virNWFilterBindingDefPtr binding,
+                                          virNWFilterBindingDef *binding,
                                           virAccessPermNWFilterBinding perm)
 {
     const char *attrs[] = {
@@ -322,9 +316,9 @@ virAccessDriverPolkitCheckNWFilterBinding(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckSecret(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckSecret(virAccessManager *manager,
                                  const char *driverName,
-                                 virSecretDefPtr secret,
+                                 virSecretDef *secret,
                                  virAccessPermSecret perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -400,9 +394,9 @@ virAccessDriverPolkitCheckSecret(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckStoragePool(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckStoragePool(virAccessManager *manager,
                                       const char *driverName,
-                                      virStoragePoolDefPtr pool,
+                                      virStoragePoolDef *pool,
                                       virAccessPermStoragePool perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -421,10 +415,10 @@ virAccessDriverPolkitCheckStoragePool(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckStorageVol(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckStorageVol(virAccessManager *manager,
                                      const char *driverName,
-                                     virStoragePoolDefPtr pool,
-                                     virStorageVolDefPtr vol,
+                                     virStoragePoolDef *pool,
+                                     virStorageVolDef *vol,
                                      virAccessPermStorageVol perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];

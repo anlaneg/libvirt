@@ -24,10 +24,7 @@
 
 #include "virfdstream.h"
 #include "datatypes.h"
-#include "virerror.h"
-#include "viralloc.h"
 #include "virlog.h"
-#include "virstring.h"
 #include "virfile.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -38,11 +35,11 @@ VIR_LOG_INIT("tests.fdstreamtest");
 
 static int testFDStreamReadCommon(const char *scratchdir, bool blocking)
 {
-    int fd = -1;
-    char *file = NULL;
+    VIR_AUTOCLOSE fd = -1;
+    g_autofree char *file = NULL;
     int ret = -1;
-    char *pattern = NULL;
-    char *buf = NULL;
+    g_autofree char *pattern = NULL;
+    g_autofree char *buf = NULL;
     virStreamPtr st = NULL;
     size_t i;
     virConnectPtr conn = NULL;
@@ -54,9 +51,8 @@ static int testFDStreamReadCommon(const char *scratchdir, bool blocking)
     if (!(conn = virConnectOpen("test:///default")))
         goto cleanup;
 
-    if (VIR_ALLOC_N(pattern, PATTERN_LEN) < 0 ||
-        VIR_ALLOC_N(buf, PATTERN_LEN) < 0)
-        goto cleanup;
+    pattern = g_new0(char, PATTERN_LEN);
+    buf = g_new0(char, PATTERN_LEN);
 
     for (i = 0; i < PATTERN_LEN; i++)
         pattern[i] = i;
@@ -145,14 +141,10 @@ static int testFDStreamReadCommon(const char *scratchdir, bool blocking)
  cleanup:
     if (st)
         virStreamFree(st);
-    VIR_FORCE_CLOSE(fd);
     if (file != NULL)
         unlink(file);
     if (conn)
         virConnectClose(conn);
-    VIR_FREE(file);
-    VIR_FREE(pattern);
-    VIR_FREE(buf);
     return ret;
 }
 
@@ -169,11 +161,11 @@ static int testFDStreamReadNonblock(const void *data)
 
 static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
 {
-    int fd = -1;
-    char *file = NULL;
+    VIR_AUTOCLOSE fd = -1;
+    g_autofree char *file = NULL;
     int ret = -1;
-    char *pattern = NULL;
-    char *buf = NULL;
+    g_autofree char *pattern = NULL;
+    g_autofree char *buf = NULL;
     virStreamPtr st = NULL;
     size_t i;
     virConnectPtr conn = NULL;
@@ -185,9 +177,8 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
     if (!(conn = virConnectOpen("test:///default")))
         goto cleanup;
 
-    if (VIR_ALLOC_N(pattern, PATTERN_LEN) < 0 ||
-        VIR_ALLOC_N(buf, PATTERN_LEN) < 0)
-        goto cleanup;
+    pattern = g_new0(char, PATTERN_LEN);
+    buf = g_new0(char, PATTERN_LEN);
 
     for (i = 0; i < PATTERN_LEN; i++)
         pattern[i] = i;
@@ -289,14 +280,10 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
  cleanup:
     if (st)
         virStreamFree(st);
-    VIR_FORCE_CLOSE(fd);
     if (file != NULL)
         unlink(file);
     if (conn)
         virConnectClose(conn);
-    VIR_FREE(file);
-    VIR_FREE(pattern);
-    VIR_FREE(buf);
     return ret;
 }
 

@@ -14,10 +14,8 @@
 
 # include "internal.h"
 # include "qemu/qemu_conf.h"
-# include "qemu/qemu_domain.h"
 # include "checkpoint_conf.h"
 # include "testutilsqemu.h"
-# include "virstring.h"
 
 # define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -66,10 +64,9 @@ testCompareXMLToXMLFiles(const char *inxml,
         def->parent.parent_name = g_strdup("1525111885");
     }
     if (flags & TEST_VDA_BITMAP) {
-        virDomainCheckpointDiskDefPtr disk;
+        virDomainCheckpointDiskDef *disk;
 
-        if (VIR_EXPAND_N(def->disks, def->ndisks, 1) < 0)
-            return -1;
+        VIR_EXPAND_N(def->disks, def->ndisks, 1);
         disk = &def->disks[0];
         if (disk->bitmap)
             return -1;
@@ -83,13 +80,9 @@ testCompareXMLToXMLFiles(const char *inxml,
     }
     if (flags & TEST_SIZE) {
         def->disks[0].size = 1048576;
+        def->disks[0].sizeValid = true;
         formatflags |= VIR_DOMAIN_CHECKPOINT_FORMAT_SIZE;
     }
-
-    /* Parsing XML does not populate the domain definition; work
-     * around that by not requesting domain on output */
-    if (!def->parent.dom)
-        formatflags |= VIR_DOMAIN_CHECKPOINT_FORMAT_NO_DOMAIN;
 
     if (!(actual = virDomainCheckpointDefFormat(def,
                                                 driver.xmlopt,
@@ -113,7 +106,7 @@ struct testInfo {
 static long long mocktime;
 
 static int
-testCheckpointPostParse(virDomainMomentDefPtr def)
+testCheckpointPostParse(virDomainMomentDef *def)
 {
     if (!mocktime)
         return 0;
@@ -138,9 +131,15 @@ testCompareXMLToXMLHelper(const void *data)
 static int
 mymain(void)
 {
+    g_autoptr(GHashTable) capslatest = testQemuGetLatestCaps();
+    g_autoptr(GHashTable) capscache = virHashNew(virObjectUnref);
     int ret = 0;
 
     if (qemuTestDriverInit(&driver) < 0)
+        return EXIT_FAILURE;
+
+    if (testQemuInsertRealCaps(driver.qemuCapsCache, "x86_64", "latest", "",
+                               capslatest, capscache, NULL, NULL) < 0)
         return EXIT_FAILURE;
 
     virDomainXMLOptionSetMomentPostParse(driver.xmlopt,

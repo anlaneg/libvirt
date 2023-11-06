@@ -11,7 +11,7 @@ specification.
 
 See also:
 
-* http://www.google-melange.com/gsoc/project/google/gsoc2013/kawamuray/7001
+* https://www.google-melange.com/gsoc/project/google/gsoc2013/kawamuray/7001
 * https://wiki.qemu.org/Features/LibvirtWiresharkDissector
 
 
@@ -24,8 +24,7 @@ Then dissector will compiled with libvirt itself.
 Add/Remove protocol from dissector's support
 --------------------------------------------
 
-Modify variable ``WS_DISSECTOR_PROTO_FILES``
-in ``tools/wireshark/src/Makefile.am``.
+Modify argument ``input`` in ``tools/wireshark/src/libvirt/meson.build``.
 
 Changing installation directory
 -------------------------------

@@ -24,7 +24,7 @@
 #include <config.h>
 
 #include <sys/types.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -58,38 +58,28 @@ VIR_LOG_INIT("openvz.openvz_driver");
 static int openvzGetProcessInfo(unsigned long long *cpuTime, int vpsid);
 static int openvzConnectGetMaxVcpus(virConnectPtr conn, const char *type);
 static int openvzDomainGetMaxVcpus(virDomainPtr dom);
-static int openvzDomainSetVcpusInternal(virDomainObjPtr vm,
+static int openvzDomainSetVcpusInternal(virDomainObj *vm,
                                         unsigned int nvcpus,
-                                        virDomainXMLOptionPtr xmlopt);
-static int openvzDomainSetMemoryInternal(virDomainObjPtr vm,
+                                        virDomainXMLOption *xmlopt);
+static int openvzDomainSetMemoryInternal(virDomainObj *vm,
                                          unsigned long long memory);
-static int openvzGetVEStatus(virDomainObjPtr vm, int *status, int *reason);
-
-static void openvzDriverLock(struct openvz_driver *driver)
-{
-    virMutexLock(&driver->lock);
-}
-
-static void openvzDriverUnlock(struct openvz_driver *driver)
-{
-    virMutexUnlock(&driver->lock);
-}
+static int openvzGetVEStatus(virDomainObj *vm, int *status, int *reason);
 
 struct openvz_driver ovz_driver;
 
 
-static virDomainObjPtr
+static virDomainObj *
 openvzDomObjFromDomainLocked(struct openvz_driver *driver,
                              const unsigned char *uuid)
 {
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     if (!(vm = virDomainObjListFindByUUID(driver->domains, uuid))) {
         virUUIDFormat(uuid, uuidstr);
 
         virReportError(VIR_ERR_NO_DOMAIN,
-                       _("no domain with matching uuid '%s'"), uuidstr);
+                       _("no domain with matching uuid '%1$s'"), uuidstr);
         return NULL;
     }
 
@@ -97,16 +87,13 @@ openvzDomObjFromDomainLocked(struct openvz_driver *driver,
 }
 
 
-static virDomainObjPtr
+static virDomainObj *
 openvzDomObjFromDomain(struct openvz_driver *driver,
                        const unsigned char *uuid)
 {
-    virDomainObjPtr vm;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
-    openvzDriverLock(driver);
-    vm = openvzDomObjFromDomainLocked(driver, uuid);
-    openvzDriverUnlock(driver);
-    return vm;
+    return openvzDomObjFromDomainLocked(driver, uuid);
 }
 
 
@@ -115,18 +102,17 @@ openvzDomObjFromDomain(struct openvz_driver *driver,
            0 - OK
    Caller has to free the cmd
 */
-static virCommandPtr
-openvzDomainDefineCmd(virDomainDefPtr vmdef)
+static virCommand *
+openvzDomainDefineCmd(virDomainDef *vmdef)
 {
-    virCommandPtr cmd = virCommandNewArgList(VZCTL,
-                                             "--quiet",
-                                             "create",
-                                             NULL);
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL,
+                                                     "--quiet",
+                                                     "create",
+                                                     NULL);
 
     if (vmdef == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Container is not defined"));
-        virCommandFree(cmd);
         return NULL;
     }
 
@@ -137,20 +123,18 @@ openvzDomainDefineCmd(virDomainDefPtr vmdef)
         virCommandAddArgList(cmd, "--ostemplate", vmdef->fss[0]->src, NULL);
     }
 
-    return cmd;
+    return g_steal_pointer(&cmd);
 }
 
 
-static int openvzSetInitialConfig(virDomainDefPtr vmdef)
+static int openvzSetInitialConfig(virDomainDef *vmdef)
 {
-    int ret = -1;
     int vpsid;
-    virCommandPtr cmd = NULL;
 
     if (vmdef->nfss > 1) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("only one filesystem supported"));
-        goto cleanup;
+        return -1;
     }
 
     if (vmdef->nfss == 1 &&
@@ -159,7 +143,7 @@ static int openvzSetInitialConfig(virDomainDefPtr vmdef)
     {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("filesystem is not of type 'template' or 'mount'"));
-        goto cleanup;
+        return -1;
     }
 
 
@@ -170,47 +154,41 @@ static int openvzSetInitialConfig(virDomainDefPtr vmdef)
         if (virStrToLong_i(vmdef->name, NULL, 10, &vpsid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Could not convert domain name to VEID"));
-            goto cleanup;
+            return -1;
         }
 
         if (openvzCopyDefaultConfig(vpsid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Could not copy default config"));
-            goto cleanup;
+            return -1;
         }
 
         if (openvzWriteVPSConfigParam(vpsid, "VE_PRIVATE", vmdef->fss[0]->src->path) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Could not set the source dir for the filesystem"));
-            goto cleanup;
+            return -1;
         }
     } else {
-        cmd = openvzDomainDefineCmd(vmdef);
+        g_autoptr(virCommand) cmd = openvzDomainDefineCmd(vmdef);
         if (virCommandRun(cmd, NULL) < 0)
-            goto cleanup;
+            return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virCommandFree(cmd);
-
-    return ret;
+    return 0;
 }
 
 
 static int
-openvzSetDiskQuota(virDomainDefPtr vmdef,
-                   virDomainFSDefPtr fss,
+openvzSetDiskQuota(virDomainDef *vmdef,
+                   virDomainFSDef *fss,
                    bool persist)
 {
-    int ret = -1;
     unsigned long long sl, hl;
-    virCommandPtr cmd = virCommandNewArgList(VZCTL,
-                                             "--quiet",
-                                             "set",
-                                             vmdef->name,
-                                             NULL);
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL,
+                                                     "--quiet",
+                                                     "set",
+                                                     vmdef->name,
+                                                     NULL);
     if (persist)
         virCommandAddArg(cmd, "--save");
 
@@ -228,18 +206,14 @@ openvzSetDiskQuota(virDomainDefPtr vmdef,
         } else if (fss->space_soft_limit) {
             virReportError(VIR_ERR_INVALID_ARG, "%s",
                            _("Can't set soft limit without hard limit"));
-            goto cleanup;
+            return -1;
         }
 
         if (virCommandRun(cmd, NULL) < 0)
-            goto cleanup;
+            return -1;
     }
 
-    ret = 0;
- cleanup:
-    virCommandFree(cmd);
-
-    return ret;
+    return 0;
 }
 
 
@@ -248,7 +222,7 @@ openvzDomainGetHostname(virDomainPtr dom, unsigned int flags)
 {
     char *hostname = NULL;
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
 
     virCheckFlags(0, NULL);
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -261,7 +235,7 @@ openvzDomainGetHostname(virDomainPtr dom, unsigned int flags)
     /* vzlist prints an unset hostname as '-' */
     if (STREQ(hostname, "-")) {
         virReportError(VIR_ERR_OPERATION_FAILED,
-                       _("Hostname of '%s' is unset"), vm->def->name);
+                       _("Hostname of '%1$s' is unset"), vm->def->name);
         VIR_FREE(hostname);
     }
 
@@ -275,16 +249,16 @@ static virDomainPtr openvzDomainLookupByID(virConnectPtr conn,
                                            int id)
 {
     struct openvz_driver *driver = conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm = NULL;
     virDomainPtr dom = NULL;
 
-    openvzDriverLock(driver);
-    vm = virDomainObjListFindByID(driver->domains, id);
-    openvzDriverUnlock(driver);
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->lock) {
+        vm = virDomainObjListFindByID(driver->domains, id);
+    }
 
     if (!vm) {
         virReportError(VIR_ERR_NO_DOMAIN,
-                       _("no domain with matching id '%d'"), id);
+                       _("no domain with matching id '%1$d'"), id);
         goto cleanup;
     }
 
@@ -298,9 +272,9 @@ static virDomainPtr openvzDomainLookupByID(virConnectPtr conn,
 static int openvzConnectGetVersion(virConnectPtr conn, unsigned long *version)
 {
     struct  openvz_driver *driver = conn->privateData;
-    openvzDriverLock(driver);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
+
     *version = driver->version;
-    openvzDriverUnlock(driver);
     return 0;
 }
 
@@ -314,7 +288,7 @@ static char *openvzConnectGetHostname(virConnectPtr conn G_GNUC_UNUSED)
 static char *openvzDomainGetOSType(virDomainPtr dom)
 {
     struct  openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     char *ret = NULL;
 
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -331,7 +305,7 @@ static virDomainPtr openvzDomainLookupByUUID(virConnectPtr conn,
                                              const unsigned char *uuid)
 {
     struct  openvz_driver *driver = conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     virDomainPtr dom = NULL;
 
     if (!(vm = openvzDomObjFromDomain(driver, uuid)))
@@ -347,16 +321,16 @@ static virDomainPtr openvzDomainLookupByName(virConnectPtr conn,
                                              const char *name)
 {
     struct openvz_driver *driver = conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm = NULL;
     virDomainPtr dom = NULL;
 
-    openvzDriverLock(driver);
-    vm = virDomainObjListFindByName(driver->domains, name);
-    openvzDriverUnlock(driver);
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->lock) {
+        vm = virDomainObjListFindByName(driver->domains, name);
+    }
 
     if (!vm) {
         virReportError(VIR_ERR_NO_DOMAIN,
-                       _("no domain with matching name '%s'"), name);
+                       _("no domain with matching name '%1$s'"), name);
         goto cleanup;
     }
 
@@ -371,7 +345,7 @@ static int openvzDomainGetInfo(virDomainPtr dom,
                                virDomainInfoPtr info)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int state;
     int ret = -1;
 
@@ -387,7 +361,7 @@ static int openvzDomainGetInfo(virDomainPtr dom,
     } else {
         if (openvzGetProcessInfo(&(info->cpuTime), dom->id) < 0) {
             virReportError(VIR_ERR_OPERATION_FAILED,
-                           _("cannot read cputime for domain %d"), dom->id);
+                           _("cannot read cputime for domain %1$d"), dom->id);
             goto cleanup;
         }
     }
@@ -410,7 +384,7 @@ openvzDomainGetState(virDomainPtr dom,
                      unsigned int flags)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int ret = -1;
 
     virCheckFlags(0, -1);
@@ -428,7 +402,7 @@ openvzDomainGetState(virDomainPtr dom,
 static int openvzDomainIsActive(virDomainPtr dom)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr obj;
+    virDomainObj *obj;
     int ret = -1;
 
     if (!(obj = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -444,7 +418,7 @@ static int openvzDomainIsActive(virDomainPtr dom)
 static int openvzDomainIsPersistent(virDomainPtr dom)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr obj;
+    virDomainObj *obj;
     int ret = -1;
 
     if (!(obj = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -463,7 +437,7 @@ static int openvzDomainIsUpdated(virDomainPtr dom G_GNUC_UNUSED)
 
 static char *openvzDomainGetXMLDesc(virDomainPtr dom, unsigned int flags) {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     char *ret = NULL;
 
     virCheckFlags(VIR_DOMAIN_XML_COMMON_FLAGS, NULL);
@@ -483,7 +457,7 @@ static int openvzDomainSuspend(virDomainPtr dom)
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "chkpnt", NULL);
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int ret = -1;
 
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -510,7 +484,7 @@ static int openvzDomainResume(virDomainPtr dom)
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "chkpnt", NULL);
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int ret = -1;
 
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -539,7 +513,7 @@ openvzDomainShutdownFlags(virDomainPtr dom,
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "stop", NULL);
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int ret = -1;
     int status;
 
@@ -595,7 +569,7 @@ static int openvzDomainReboot(virDomainPtr dom,
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "restart", NULL);
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int ret = -1;
     int status;
 
@@ -671,16 +645,15 @@ openvzGenerateContainerVethName(int veid)
 
 static int
 openvzDomainSetNetwork(virConnectPtr conn, const char *vpsid,
-                       virDomainNetDefPtr net,
-                       virBufferPtr configBuf)
+                       virDomainNetDef *net,
+                       virBuffer *configBuf)
 {
-    int rc = -1;
     char macaddr[VIR_MAC_STRING_BUFLEN];
     virMacAddr host_mac;
     char host_macaddr[VIR_MAC_STRING_BUFLEN];
     struct openvz_driver *driver =  conn->privateData;
-    virCommandPtr cmd = NULL;
-    char *guest_ifname = NULL;
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *guest_ifname = NULL;
 
     if (net == NULL)
         return 0;
@@ -704,7 +677,7 @@ openvzDomainSetNetwork(virConnectPtr conn, const char *vpsid,
     if (net->type == VIR_DOMAIN_NET_TYPE_BRIDGE ||
         (net->type == VIR_DOMAIN_NET_TYPE_ETHERNET &&
          net->guestIP.nips == 0)) {
-        virBuffer buf = VIR_BUFFER_INITIALIZER;
+        g_auto(virBuffer)buf = VIR_BUFFER_INITIALIZER;
         int veid = openvzGetVEID(vpsid);
 
         /* if net is ethernet and the user has specified guest interface name,
@@ -716,7 +689,7 @@ openvzDomainSetNetwork(virConnectPtr conn, const char *vpsid,
             if (guest_ifname == NULL) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                                _("Could not generate eth name for container"));
-                goto cleanup;
+                return -1;
             }
         }
 
@@ -727,7 +700,7 @@ openvzDomainSetNetwork(virConnectPtr conn, const char *vpsid,
             if (net->ifname == NULL) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                                _("Could not generate veth name"));
-                goto cleanup;
+                return -1;
             }
         }
 
@@ -757,32 +730,26 @@ openvzDomainSetNetwork(virConnectPtr conn, const char *vpsid,
 
         /* --ipadd ip */
         for (i = 0; i < net->guestIP.nips; i++) {
-            char *ipStr = virSocketAddrFormat(&net->guestIP.ips[i]->address);
+            g_autofree char *ipStr = virSocketAddrFormat(&net->guestIP.ips[i]->address);
             if (!ipStr)
-                goto cleanup;
+                return -1;
             virCommandAddArgList(cmd, "--ipadd", ipStr, NULL);
-            VIR_FREE(ipStr);
         }
     }
 
     /* TODO: processing NAT and physical device */
 
     virCommandAddArg(cmd, "--save");
-    rc = virCommandRun(cmd, NULL);
-
- cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(guest_ifname);
-    return rc;
+    return virCommandRun(cmd, NULL);
 }
 
 
 static int
 openvzDomainSetNetworkConfig(virConnectPtr conn,
-                             virDomainDefPtr def)
+                             virDomainDef *def)
 {
     size_t i;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     char *param;
     int first = 1;
     struct openvz_driver *driver =  conn->privateData;
@@ -799,7 +766,7 @@ openvzDomainSetNetworkConfig(virConnectPtr conn,
         if (openvzDomainSetNetwork(conn, def->name, def->nets[i], &buf) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Could not configure network"));
-            goto exit;
+            return -1;
         }
     }
 
@@ -817,10 +784,6 @@ openvzDomainSetNetworkConfig(virConnectPtr conn,
     }
 
     return 0;
-
- exit:
-    virBufferFreeAndReset(&buf);
-    return -1;
 }
 
 
@@ -828,17 +791,17 @@ static virDomainPtr
 openvzDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
 {
     struct openvz_driver *driver =  conn->privateData;
-    virDomainDefPtr vmdef = NULL;
-    virDomainObjPtr vm = NULL;
+    g_autoptr(virDomainDef) vmdef = NULL;
+    virDomainObj *vm = NULL;
     virDomainPtr dom = NULL;
     unsigned int parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
     virCheckFlags(VIR_DOMAIN_DEFINE_VALIDATE, NULL);
 
     if (flags & VIR_DOMAIN_DEFINE_VALIDATE)
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
-    openvzDriverLock(driver);
     if ((vmdef = virDomainDefParseString(xml, driver->xmlopt,
                                          NULL, parse_flags)) == NULL)
         goto cleanup;
@@ -846,11 +809,10 @@ openvzDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fla
     if (virXMLCheckIllegalChars("name", vmdef->name, "\n") < 0)
         goto cleanup;
 
-    if (!(vm = virDomainObjListAdd(driver->domains, vmdef,
+    if (!(vm = virDomainObjListAdd(driver->domains, &vmdef,
                                    driver->xmlopt,
                                    0, NULL)))
         goto cleanup;
-    vmdef = NULL;
     vm->persistent = 1;
 
     if (openvzSetInitialConfig(vm->def) < 0) {
@@ -900,9 +862,7 @@ openvzDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fla
     dom = virGetDomain(conn, vm->def->name, vm->def->uuid, -1);
 
  cleanup:
-    virDomainDefFree(vmdef);
     virDomainObjEndAPI(&vm);
-    openvzDriverUnlock(driver);
     return dom;
 }
 
@@ -918,29 +878,29 @@ openvzDomainCreateXML(virConnectPtr conn, const char *xml,
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "start", NULL);
     struct openvz_driver *driver =  conn->privateData;
-    virDomainDefPtr vmdef = NULL;
-    virDomainObjPtr vm = NULL;
+    g_autoptr(virDomainDef) vmdef = NULL;
+    virDomainObj *vm = NULL;
     virDomainPtr dom = NULL;
     unsigned int parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
     virCheckFlags(VIR_DOMAIN_START_VALIDATE, NULL);
 
     if (flags & VIR_DOMAIN_START_VALIDATE)
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
-    openvzDriverLock(driver);
     if ((vmdef = virDomainDefParseString(xml, driver->xmlopt,
                                          NULL, parse_flags)) == NULL)
         goto cleanup;
 
     if (!(vm = virDomainObjListAdd(driver->domains,
-                                   vmdef,
+                                   &vmdef,
                                    driver->xmlopt,
                                    VIR_DOMAIN_OBJ_LIST_ADD_LIVE |
                                    VIR_DOMAIN_OBJ_LIST_ADD_CHECK_LIVE,
                                    NULL)))
         goto cleanup;
-    vmdef = NULL;
+
     /* All OpenVZ domains seem to be persistent - this is a bit of a violation
      * of this libvirt API which is intended for transient domain creation */
     vm->persistent = 1;
@@ -988,9 +948,7 @@ openvzDomainCreateXML(virConnectPtr conn, const char *xml,
     dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
-    virDomainDefFree(vmdef);
     virDomainObjEndAPI(&vm);
-    openvzDriverUnlock(driver);
     return dom;
 }
 
@@ -999,19 +957,19 @@ openvzDomainCreateWithFlags(virDomainPtr dom, unsigned int flags)
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "start", NULL);
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm = NULL;
     int ret = -1;
     int status;
 
     virCheckFlags(0, -1);
 
-    openvzDriverLock(driver);
-    vm = virDomainObjListFindByName(driver->domains, dom->name);
-    openvzDriverUnlock(driver);
+    VIR_WITH_MUTEX_LOCK_GUARD(&driver->lock) {
+        vm = virDomainObjListFindByName(driver->domains, dom->name);
+    }
 
     if (!vm) {
         virReportError(VIR_ERR_NO_DOMAIN,
-                       _("no domain with matching name '%s'"), dom->name);
+                       _("no domain with matching name '%1$s'"), dom->name);
         goto cleanup;
     }
 
@@ -1052,13 +1010,13 @@ openvzDomainUndefineFlags(virDomainPtr dom,
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "start", "destroy", NULL);
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     int ret = -1;
     int status;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
     virCheckFlags(0, -1);
 
-    openvzDriverLock(driver);
     if (!(vm = openvzDomObjFromDomainLocked(driver, dom->uuid)))
         goto cleanup;
 
@@ -1079,7 +1037,6 @@ openvzDomainUndefineFlags(virDomainPtr dom,
 
  cleanup:
     virDomainObjEndAPI(&vm);
-    openvzDriverUnlock(driver);
     return ret;
 }
 
@@ -1092,7 +1049,7 @@ static int
 openvzDomainSetAutostart(virDomainPtr dom, int autostart)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", NULL);
     int ret = -1;
 
@@ -1117,7 +1074,7 @@ static int
 openvzDomainGetAutostart(virDomainPtr dom, int *autostart)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     char *value = NULL;
     int ret = -1;
 
@@ -1149,7 +1106,7 @@ static int openvzConnectGetMaxVcpus(virConnectPtr conn G_GNUC_UNUSED,
         return 1028; /* OpenVZ has no limitation */
 
     virReportError(VIR_ERR_INVALID_ARG,
-                   _("unknown type '%s'"), type);
+                   _("unknown type '%1$s'"), type);
     return -1;
 }
 
@@ -1159,7 +1116,7 @@ openvzDomainGetVcpusFlags(virDomainPtr dom G_GNUC_UNUSED,
 {
     if (flags != (VIR_DOMAIN_AFFECT_LIVE | VIR_DOMAIN_VCPU_MAXIMUM)) {
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("unsupported flags (0x%x)"), flags);
+                       _("unsupported flags (0x%1$x)"), flags);
         return -1;
     }
 
@@ -1172,9 +1129,9 @@ static int openvzDomainGetMaxVcpus(virDomainPtr dom)
                                            VIR_DOMAIN_VCPU_MAXIMUM));
 }
 
-static int openvzDomainSetVcpusInternal(virDomainObjPtr vm,
+static int openvzDomainSetVcpusInternal(virDomainObj *vm,
                                         unsigned int nvcpus,
-                                        virDomainXMLOptionPtr xmlopt)
+                                        virDomainXMLOption *xmlopt)
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", NULL);
     char        str_vcpus[32];
@@ -1203,20 +1160,20 @@ static int openvzDomainSetVcpusInternal(virDomainObjPtr vm,
 static int openvzDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
                                      unsigned int flags)
 {
-    virDomainObjPtr         vm;
+    virDomainObj *        vm;
     struct openvz_driver   *driver = dom->conn->privateData;
     int                     ret = -1;
 
     if (flags != VIR_DOMAIN_AFFECT_LIVE) {
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("unsupported flags (0x%x)"), flags);
+                       _("unsupported flags (0x%1$x)"), flags);
         return -1;
     }
 
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
         return -1;
 
-    if (nvcpus <= 0) {
+    if (nvcpus == 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Number of vCPUs should be >= 1"));
         goto cleanup;
@@ -1258,7 +1215,7 @@ openvzConnectURIProbe(char **uri)
 
 static virDrvOpenStatus openvzConnectOpen(virConnectPtr conn,
                                           virConnectAuthPtr auth G_GNUC_UNUSED,
-                                          virConfPtr conf G_GNUC_UNUSED,
+                                          virConf *conf G_GNUC_UNUSED,
                                           unsigned int flags)
 {
     struct openvz_driver *driver;
@@ -1268,7 +1225,7 @@ static virDrvOpenStatus openvzConnectOpen(virConnectPtr conn,
     /* If path isn't /system, then they typoed, so tell them correct path */
     if (STRNEQ(conn->uri->path, "/system")) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected OpenVZ URI path '%s', try openvz:///system"),
+                       _("unexpected OpenVZ URI path '%1$s', try openvz:///system"),
                        conn->uri->path);
         return VIR_DRV_OPEN_ERROR;
     }
@@ -1288,8 +1245,7 @@ static virDrvOpenStatus openvzConnectOpen(virConnectPtr conn,
     /* We now know the URI is definitely for this driver, so beyond
      * here, don't return DECLINED, always use ERROR */
 
-    if (VIR_ALLOC(driver) < 0)
-        return VIR_DRV_OPEN_ERROR;
+    driver = g_new0(struct openvz_driver, 1);
 
     if (!(driver->domains = virDomainObjListNew()))
         goto cleanup;
@@ -1349,118 +1305,101 @@ openvzConnectIsAlive(virConnectPtr conn G_GNUC_UNUSED)
 
 static char *openvzConnectGetCapabilities(virConnectPtr conn) {
     struct openvz_driver *driver = conn->privateData;
-    char *ret;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
-    openvzDriverLock(driver);
-    ret = virCapabilitiesFormatXML(driver->caps);
-    openvzDriverUnlock(driver);
-
-    return ret;
+    return virCapabilitiesFormatXML(driver->caps);
 }
 
 static int openvzConnectListDomains(virConnectPtr conn G_GNUC_UNUSED,
                                     int *ids, int nids)
 {
     int got = 0;
-    int veid;
-    int outfd = -1;
-    int rc = -1;
-    int ret;
-    char buf[32];
-    char *endptr;
-    virCommandPtr cmd = virCommandNewArgList(VZLIST, "-ovpsid", "-H", NULL);
+    VIR_AUTOCLOSE outfd = -1;
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VZLIST, "-ovpsid", "-H", NULL);
 
     virCommandSetOutputFD(cmd, &outfd);
     if (virCommandRunAsync(cmd, NULL) < 0)
-        goto cleanup;
+        return -1;
 
     while (got < nids) {
-        ret = openvz_readline(outfd, buf, 32);
-        if (!ret)
+        char *endptr;
+        char buf[32];
+        int veid;
+
+        if (openvz_readline(outfd, buf, 32) == 0)
             break;
         if (virStrToLong_i(buf, &endptr, 10, &veid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not parse VPS ID %s"), buf);
+                           _("Could not parse VPS ID %1$s"), buf);
             continue;
         }
-        ids[got] = veid;
-        got ++;
+        ids[got++] = veid;
     }
 
     if (virCommandWait(cmd, NULL) < 0)
-        goto cleanup;
+        return -1;
 
     if (VIR_CLOSE(outfd) < 0) {
         virReportSystemError(errno, "%s", _("failed to close file"));
-        goto cleanup;
+        return -1;
     }
 
-    rc = got;
- cleanup:
-    VIR_FORCE_CLOSE(outfd);
-    virCommandFree(cmd);
-    return rc;
+    return got;
 }
 
 static int openvzConnectNumOfDomains(virConnectPtr conn)
 {
     struct openvz_driver *driver = conn->privateData;
-    int n;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
-    openvzDriverLock(driver);
-    n = virDomainObjListNumOfDomains(driver->domains, true, NULL, NULL);
-    openvzDriverUnlock(driver);
-
-    return n;
+    return virDomainObjListNumOfDomains(driver->domains, true, NULL, NULL);
 }
 
 static int openvzConnectListDefinedDomains(virConnectPtr conn G_GNUC_UNUSED,
                                            char **const names, int nnames) {
     int got = 0;
-    int veid, outfd = -1, ret;
-    int rc = -1;
-    char vpsname[32];
-    char buf[32];
-    char *endptr;
-    virCommandPtr cmd = virCommandNewArgList(VZLIST,
-                                             "-ovpsid", "-H", "-S", NULL);
+    VIR_AUTOCLOSE outfd = -1;
+    int ret = -1;
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VZLIST,
+                                                     "-ovpsid", "-H", "-S", NULL);
 
     /* the -S options lists only stopped domains */
     virCommandSetOutputFD(cmd, &outfd);
     if (virCommandRunAsync(cmd, NULL) < 0)
-        goto out;
+        goto cleanup;
 
     while (got < nnames) {
-        ret = openvz_readline(outfd, buf, 32);
-        if (!ret)
+        char vpsname[32];
+        char buf[32];
+        char *endptr;
+        int veid;
+
+        if (openvz_readline(outfd, buf, 32) == 0)
             break;
         if (virStrToLong_i(buf, &endptr, 10, &veid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not parse VPS ID %s"), buf);
+                           _("Could not parse VPS ID %1$s"), buf);
             continue;
         }
         g_snprintf(vpsname, sizeof(vpsname), "%d", veid);
-        names[got] = g_strdup(vpsname);
-        got ++;
+        names[got++] = g_strdup(vpsname);
     }
 
     if (virCommandWait(cmd, NULL) < 0)
-        goto out;
+        goto cleanup;
 
     if (VIR_CLOSE(outfd) < 0) {
         virReportSystemError(errno, "%s", _("failed to close file"));
-        goto out;
+        goto cleanup;
     }
 
-    rc = got;
- out:
-    VIR_FORCE_CLOSE(outfd);
-    virCommandFree(cmd);
-    if (rc < 0) {
+    ret = got;
+ cleanup:
+    if (ret < 0) {
         for (; got >= 0; got--)
             VIR_FREE(names[got]);
     }
-    return rc;
+    return ret;
 }
 
 static int openvzGetProcessInfo(unsigned long long *cpuTime, int vpsid)
@@ -1517,17 +1456,13 @@ Version: 2.2
 static int openvzConnectNumOfDefinedDomains(virConnectPtr conn)
 {
     struct openvz_driver *driver =  conn->privateData;
-    int n;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
-    openvzDriverLock(driver);
-    n = virDomainObjListNumOfDomains(driver->domains, false, NULL, NULL);
-    openvzDriverUnlock(driver);
-
-    return n;
+    return virDomainObjListNumOfDomains(driver->domains, false, NULL, NULL);
 }
 
 static int
-openvzDomainSetMemoryInternal(virDomainObjPtr vm,
+openvzDomainSetMemoryInternal(virDomainObj *vm,
                               unsigned long long mem)
 {
     g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", NULL);
@@ -1552,37 +1487,33 @@ openvzDomainGetBarrierLimit(virDomainPtr domain,
                             unsigned long long *barrier,
                             unsigned long long *limit)
 {
-    int ret = -1;
-    char *endp, *output = NULL;
+    char *endp;
+    g_autofree char *output = NULL;
     const char *tmp;
-    virCommandPtr cmd = virCommandNewArgList(VZLIST, "--no-header", NULL);
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VZLIST, "--no-header", NULL);
 
     virCommandSetOutputBuffer(cmd, &output);
     virCommandAddArgFormat(cmd, "-o%s.b,%s.l", param, param);
     virCommandAddArg(cmd, domain->name);
     if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
+        return -1;
 
     tmp = output;
     virSkipSpaces(&tmp);
     if (virStrToLong_ull(tmp, &endp, 10, barrier) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Can't parse limit from vzlist output '%s'"), output);
-        goto cleanup;
+                       _("Can't parse limit from vzlist output '%1$s'"), output);
+        return -1;
     }
     tmp = endp;
     virSkipSpaces(&tmp);
     if (virStrToLong_ull(tmp, &endp, 10, limit) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Can't parse barrier from vzlist output '%s'"), output);
-        goto cleanup;
+                       _("Can't parse barrier from vzlist output '%1$s'"), output);
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(output);
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 
 
@@ -1592,28 +1523,22 @@ openvzDomainSetBarrierLimit(virDomainPtr domain,
                             unsigned long long barrier,
                             unsigned long long limit)
 {
-    int ret = -1;
-    virCommandPtr cmd = virCommandNewArgList(VZCTL, "--quiet", "set", NULL);
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VZCTL, "--quiet", "set", NULL);
 
     /* LONG_MAX indicates unlimited so reject larger values */
     if (barrier > LONG_MAX || limit > LONG_MAX) {
         virReportError(VIR_ERR_OPERATION_FAILED,
-                       _("Failed to set %s for %s: value too large"), param,
+                       _("Failed to set %1$s for %2$s: value too large"), param,
                        domain->name);
-        goto cleanup;
+        return -1;
     }
 
     virCommandAddArg(cmd, domain->name);
     virCommandAddArgFormat(cmd, "--%s", param);
     virCommandAddArgFormat(cmd, "%llu:%llu", barrier, limit);
     virCommandAddArg(cmd, "--save");
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
 
-    ret = 0;
- cleanup:
-    virCommandFree(cmd);
-    return ret;
+    return virCommandRun(cmd, NULL);
 }
 
 
@@ -1742,23 +1667,22 @@ openvzDomainSetMemoryParameters(virDomainPtr domain,
 
 
 static int
-openvzGetVEStatus(virDomainObjPtr vm, int *status, int *reason)
+openvzGetVEStatus(virDomainObj *vm, int *status, int *reason)
 {
-    virCommandPtr cmd;
-    char *outbuf;
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *outbuf = NULL;
     char *line;
     int state;
-    int ret = -1;
 
     cmd = virCommandNewArgList(VZLIST, vm->def->name, "-ostatus", "-H", NULL);
     virCommandSetOutputBuffer(cmd, &outbuf);
     if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
+        return -1;
 
     if ((line = strchr(outbuf, '\n')) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Failed to parse vzlist output"));
-        goto cleanup;
+        return -1;
     }
     *line++ = '\0';
 
@@ -1775,12 +1699,7 @@ openvzGetVEStatus(virDomainObjPtr vm, int *status, int *reason)
         *status = VIR_DOMAIN_SHUTOFF;
     }
 
-    ret = 0;
-
- cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(outbuf);
-    return ret;
+    return 0;
 }
 
 static int
@@ -1789,8 +1708,8 @@ openvzDomainInterfaceStats(virDomainPtr dom,
                            virDomainInterfaceStatsPtr stats)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr vm;
-    virDomainNetDefPtr net = NULL;
+    virDomainObj *vm;
+    virDomainNetDef *net = NULL;
     int ret = -1;
 
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
@@ -1815,11 +1734,12 @@ openvzDomainInterfaceStats(virDomainPtr dom,
 
 
 static int
-openvzUpdateDevice(virDomainDefPtr vmdef,
-                   virDomainDeviceDefPtr dev,
+openvzUpdateDevice(virDomainDef *vmdef,
+                   virDomainDeviceDef *dev,
                    bool persist)
 {
-    virDomainFSDefPtr fs, cur;
+    virDomainFSDef *fs;
+    virDomainFSDef *cur;
     int pos;
 
     if (dev->type == VIR_DOMAIN_DEVICE_FS) {
@@ -1828,7 +1748,7 @@ openvzUpdateDevice(virDomainDefPtr vmdef,
 
         if (pos < 0) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("target %s doesn't exist."), fs->dst);
+                           _("target %1$s doesn't exist."), fs->dst);
             return -1;
         }
         cur = vmdef->fss[pos];
@@ -1850,7 +1770,7 @@ openvzUpdateDevice(virDomainDefPtr vmdef,
         cur->space_soft_limit = fs->space_soft_limit;
     } else {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Can't modify device type '%s'"),
+                       _("Can't modify device type '%1$s'"),
                        virDomainDeviceTypeToString(dev->type));
         return -1;
     }
@@ -1866,15 +1786,15 @@ openvzDomainUpdateDeviceFlags(virDomainPtr dom, const char *xml,
     int ret = -1;
     int veid;
     struct  openvz_driver *driver = dom->conn->privateData;
-    virDomainDeviceDefPtr dev = NULL;
-    virDomainObjPtr vm = NULL;
-    virDomainDefPtr def = NULL;
+    virDomainDeviceDef *dev = NULL;
+    virDomainObj *vm = NULL;
+    virDomainDef *def = NULL;
     bool persist = false;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
     virCheckFlags(VIR_DOMAIN_DEVICE_MODIFY_LIVE |
                   VIR_DOMAIN_DEVICE_MODIFY_CONFIG, -1);
 
-    openvzDriverLock(driver);
     if (!(vm = openvzDomObjFromDomainLocked(driver, dom->uuid)))
         goto cleanup;
 
@@ -1901,7 +1821,6 @@ openvzDomainUpdateDeviceFlags(virDomainPtr dom, const char *xml,
     ret = 0;
 
  cleanup:
-    openvzDriverUnlock(driver);
     virDomainDeviceDefFree(dev);
     virDomainObjEndAPI(&vm);
     return ret;
@@ -1913,16 +1832,10 @@ openvzConnectListAllDomains(virConnectPtr conn,
                             unsigned int flags)
 {
     struct openvz_driver *driver = conn->privateData;
-    int ret = -1;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&driver->lock);
 
     virCheckFlags(VIR_CONNECT_LIST_DOMAINS_FILTERS_ALL, -1);
-
-    openvzDriverLock(driver);
-    ret = virDomainObjListExport(driver->domains, conn, domains,
-                                 NULL, flags);
-    openvzDriverUnlock(driver);
-
-    return ret;
+    return virDomainObjListExport(driver->domains, conn, domains, NULL, flags);
 }
 
 
@@ -1990,22 +1903,32 @@ openvzNodeGetCPUMap(virConnectPtr conn G_GNUC_UNUSED,
 static int
 openvzConnectSupportsFeature(virConnectPtr conn G_GNUC_UNUSED, int feature)
 {
+    int supported;
+
+    if (virDriverFeatureIsGlobal(feature, &supported))
+        return supported;
+
     switch ((virDrvFeature) feature) {
+    case VIR_DRV_FEATURE_REMOTE:
+    case VIR_DRV_FEATURE_PROGRAM_KEEPALIVE:
+    case VIR_DRV_FEATURE_REMOTE_CLOSE_CALLBACK:
+    case VIR_DRV_FEATURE_REMOTE_EVENT_CALLBACK:
+    case VIR_DRV_FEATURE_TYPED_PARAM_STRING:
+    case VIR_DRV_FEATURE_NETWORK_UPDATE_HAS_CORRECT_ORDER:
+    case VIR_DRV_FEATURE_FD_PASSING:
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("Global feature %1$d should have already been handled"),
+                       feature);
+        return -1;
     case VIR_DRV_FEATURE_MIGRATION_PARAMS:
     case VIR_DRV_FEATURE_MIGRATION_V3:
         return 1;
-    case VIR_DRV_FEATURE_FD_PASSING:
     case VIR_DRV_FEATURE_MIGRATE_CHANGE_PROTECTION:
     case VIR_DRV_FEATURE_MIGRATION_DIRECT:
     case VIR_DRV_FEATURE_MIGRATION_OFFLINE:
     case VIR_DRV_FEATURE_MIGRATION_P2P:
     case VIR_DRV_FEATURE_MIGRATION_V1:
     case VIR_DRV_FEATURE_MIGRATION_V2:
-    case VIR_DRV_FEATURE_PROGRAM_KEEPALIVE:
-    case VIR_DRV_FEATURE_REMOTE:
-    case VIR_DRV_FEATURE_REMOTE_CLOSE_CALLBACK:
-    case VIR_DRV_FEATURE_REMOTE_EVENT_CALLBACK:
-    case VIR_DRV_FEATURE_TYPED_PARAM_STRING:
     case VIR_DRV_FEATURE_XML_MIGRATABLE:
     default:
         return 0;
@@ -2021,7 +1944,7 @@ openvzDomainMigrateBegin3Params(virDomainPtr domain,
                                 int *cookieoutlen G_GNUC_UNUSED,
                                 unsigned int flags)
 {
-    virDomainObjPtr vm = NULL;
+    virDomainObj *vm = NULL;
     struct openvz_driver *driver = domain->conn->privateData;
     char *xml = NULL;
     int status;
@@ -2067,11 +1990,11 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
     struct openvz_driver *driver = dconn->privateData;
     const char *dom_xml = NULL;
     const char *uri_in = NULL;
-    virDomainDefPtr def = NULL;
-    virDomainObjPtr vm = NULL;
-    char *my_hostname = NULL;
+    g_autoptr(virDomainDef) def = NULL;
+    virDomainObj *vm = NULL;
+    g_autofree char *my_hostname = NULL;
     const char *hostname = NULL;
-    virURIPtr uri = NULL;
+    g_autoptr(virURI) uri = NULL;
     int ret = -1;
 
     if (virTypedParamsValidate(params, nparams, OPENVZ_MIGRATION_PARAMETERS) < 0)
@@ -2097,13 +2020,12 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
         goto error;
 
-    if (!(vm = virDomainObjListAdd(driver->domains, def,
+    if (!(vm = virDomainObjListAdd(driver->domains, &def,
                                    driver->xmlopt,
                                    VIR_DOMAIN_OBJ_LIST_ADD_LIVE |
                                    VIR_DOMAIN_OBJ_LIST_ADD_CHECK_LIVE,
                                    NULL)))
         goto error;
-    def = NULL;
 
     if (!uri_in) {
         if ((my_hostname = virGetHostname()) == NULL)
@@ -2111,28 +2033,29 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
 
         if (STRPREFIX(my_hostname, "localhost")) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("hostname on destination resolved to localhost,"
-                             " but migration requires an FQDN"));
+                           _("hostname on destination resolved to localhost, but migration requires an FQDN"));
             goto error;
         }
+
+        hostname = my_hostname;
     } else {
         uri = virURIParse(uri_in);
 
         if (uri == NULL) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("unable to parse URI: %s"),
+                           _("unable to parse URI: %1$s"),
                            uri_in);
             goto error;
         }
 
         if (uri->server == NULL) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("missing host in migration URI: %s"),
+                           _("missing host in migration URI: %1$s"),
                            uri_in);
             goto error;
-        } else {
-            hostname = uri->server;
         }
+
+        hostname = uri->server;
     }
 
     *uri_out = g_strdup_printf("ssh://%s", hostname);
@@ -2141,13 +2064,10 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
     goto done;
 
  error:
-    virDomainDefFree(def);
     if (vm)
         virDomainObjListRemove(driver->domains, vm);
 
  done:
-    VIR_FREE(my_hostname);
-    virURIFree(uri);
     virDomainObjEndAPI(&vm);
     return ret;
 }
@@ -2164,10 +2084,10 @@ openvzDomainMigratePerform3Params(virDomainPtr domain,
                                   unsigned int flags)
 {
     struct openvz_driver *driver = domain->conn->privateData;
-    virDomainObjPtr vm = NULL;
+    virDomainObj *vm = NULL;
     const char *uri_str = NULL;
-    virURIPtr uri = NULL;
-    virCommandPtr cmd = NULL;
+    g_autoptr(virURI) uri = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     int ret = -1;
 
     virCheckFlags(OPENVZ_MIGRATION_FLAGS, -1);
@@ -2199,8 +2119,6 @@ openvzDomainMigratePerform3Params(virDomainPtr domain,
     ret = 0;
 
  cleanup:
-    virCommandFree(cmd);
-    virURIFree(uri);
     virDomainObjEndAPI(&vm);
     return ret;
 }
@@ -2217,7 +2135,7 @@ openvzDomainMigrateFinish3Params(virConnectPtr dconn,
                                  int cancelled)
 {
     struct openvz_driver *driver = dconn->privateData;
-    virDomainObjPtr vm = NULL;
+    virDomainObj *vm = NULL;
     const char *dname = NULL;
     virDomainPtr dom = NULL;
     int status;
@@ -2238,8 +2156,7 @@ openvzDomainMigrateFinish3Params(virConnectPtr dconn,
         !(vm = virDomainObjListFindByName(driver->domains, dname))) {
         /* Migration obviously failed if the domain doesn't exist */
         virReportError(VIR_ERR_OPERATION_FAILED,
-                       _("Migration failed. No domain on destination host "
-                         "with matching name '%s'"),
+                       _("Migration failed. No domain on destination host with matching name '%1$s'"),
                        NULLSTR(dname));
         goto cleanup;
     }
@@ -2273,7 +2190,7 @@ openvzDomainMigrateConfirm3Params(virDomainPtr domain,
                                   int cancelled)
 {
     struct openvz_driver *driver = domain->conn->privateData;
-    virDomainObjPtr vm = NULL;
+    virDomainObj *vm = NULL;
     int status;
     int ret = -1;
 
@@ -2315,7 +2232,7 @@ static int
 openvzDomainHasManagedSaveImage(virDomainPtr dom, unsigned int flags)
 {
     struct openvz_driver *driver = dom->conn->privateData;
-    virDomainObjPtr obj;
+    virDomainObj *obj;
     int ret = -1;
 
     virCheckFlags(0, -1);

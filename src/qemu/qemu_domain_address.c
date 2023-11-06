@@ -51,22 +51,24 @@ VIR_LOG_INIT("qemu.qemu_domain_address");
 int
 qemuDomainGetSCSIControllerModel(const virDomainDef *def,
                                  const virDomainControllerDef *cont,
-                                 virQEMUCapsPtr qemuCaps)
+                                 virQEMUCaps *qemuCaps)
 {
     if (cont->model > 0)
         return cont->model;
 
     if (qemuDomainIsPSeries(def))
         return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI;
-    else if (ARCH_IS_S390(def->os.arch))
+    if (ARCH_IS_S390(def->os.arch))
         return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI;
-    else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_SCSI_LSI))
+    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_SCSI_LSI))
         return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC;
-    else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_SCSI))
+    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_SCSI))
         return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI;
+    if (qemuDomainHasBuiltinESP(def))
+        return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90;
 
     virReportError(VIR_ERR_INTERNAL_ERROR,
-                   _("Unable to determine model for SCSI controller idx=%d"),
+                   _("Unable to determine model for SCSI controller idx=%1$d"),
                    cont->idx);
     return -1;
 }
@@ -84,8 +86,8 @@ qemuDomainGetSCSIControllerModel(const virDomainDef *def,
  */
 int
 qemuDomainSetSCSIControllerModel(const virDomainDef *def,
-                                 virDomainControllerDefPtr cont,
-                                 virQEMUCapsPtr qemuCaps)
+                                 virDomainControllerDef *cont,
+                                 virQEMUCaps *qemuCaps)
 {
     int model = qemuDomainGetSCSIControllerModel(def, cont, qemuCaps);
 
@@ -108,13 +110,13 @@ qemuDomainSetSCSIControllerModel(const virDomainDef *def,
  */
 int
 qemuDomainFindSCSIControllerModel(const virDomainDef *def,
-                                  virDomainDeviceInfoPtr info)
+                                  virDomainDeviceInfo *info)
 {
-    virDomainControllerDefPtr cont;
+    virDomainControllerDef *cont;
 
     if (!(cont = virDomainDeviceFindSCSIController(def, &info->addr.drive))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unable to find a SCSI controller for idx=%d"),
+                       _("unable to find a SCSI controller for idx=%1$d"),
                        info->addr.drive.controller);
         return -1;
     }
@@ -124,11 +126,11 @@ qemuDomainFindSCSIControllerModel(const virDomainDef *def,
 
 
 static int
-qemuDomainAssignVirtioSerialAddresses(virDomainDefPtr def)
+qemuDomainAssignVirtioSerialAddresses(virDomainDef *def)
 {
     int ret = -1;
     size_t i;
-    virDomainVirtioSerialAddrSetPtr addrs = NULL;
+    virDomainVirtioSerialAddrSet *addrs = NULL;
 
     if (!(addrs = virDomainVirtioSerialAddrSetCreateFromDomain(def)))
         goto cleanup;
@@ -136,7 +138,7 @@ qemuDomainAssignVirtioSerialAddresses(virDomainDefPtr def)
     VIR_DEBUG("Finished reserving existing ports");
 
     for (i = 0; i < def->nconsoles; i++) {
-        virDomainChrDefPtr chr = def->consoles[i];
+        virDomainChrDef *chr = def->consoles[i];
         if (chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE &&
             chr->targetType == VIR_DOMAIN_CHR_CONSOLE_TARGET_TYPE_VIRTIO &&
             !virDomainVirtioSerialAddrIsComplete(&chr->info) &&
@@ -146,7 +148,7 @@ qemuDomainAssignVirtioSerialAddresses(virDomainDefPtr def)
     }
 
     for (i = 0; i < def->nchannels; i++) {
-        virDomainChrDefPtr chr = def->channels[i];
+        virDomainChrDef *chr = def->channels[i];
         if (chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CHANNEL &&
             chr->targetType == VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_VIRTIO &&
             !virDomainVirtioSerialAddrIsComplete(&chr->info) &&
@@ -164,11 +166,11 @@ qemuDomainAssignVirtioSerialAddresses(virDomainDefPtr def)
 
 
 static int
-qemuDomainSpaprVIOFindByReg(virDomainDefPtr def G_GNUC_UNUSED,
-                            virDomainDeviceDefPtr device G_GNUC_UNUSED,
-                            virDomainDeviceInfoPtr info, void *opaque)
+qemuDomainSpaprVIOFindByReg(virDomainDef *def G_GNUC_UNUSED,
+                            virDomainDeviceDef *device G_GNUC_UNUSED,
+                            virDomainDeviceInfo *info, void *opaque)
 {
-    virDomainDeviceInfoPtr target = opaque;
+    virDomainDeviceInfo *target = opaque;
 
     if (info->type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO)
         return 0;
@@ -184,8 +186,8 @@ qemuDomainSpaprVIOFindByReg(virDomainDefPtr def G_GNUC_UNUSED,
 
 
 static int
-qemuDomainAssignSpaprVIOAddress(virDomainDefPtr def,
-                                virDomainDeviceInfoPtr info,
+qemuDomainAssignSpaprVIOAddress(virDomainDef *def,
+                                virDomainDeviceInfo *info,
                                 unsigned long long default_reg)
 {
     bool user_reg;
@@ -205,7 +207,7 @@ qemuDomainAssignSpaprVIOAddress(virDomainDefPtr def,
     while (ret != 0) {
         if (user_reg) {
             virReportError(VIR_ERR_XML_ERROR,
-                           _("spapr-vio address %#llx already in use"),
+                           _("spapr-vio address %1$#llx already in use"),
                            info->addr.spaprvio.reg);
             return -EEXIST;
         }
@@ -221,14 +223,14 @@ qemuDomainAssignSpaprVIOAddress(virDomainDefPtr def,
 
 
 static int
-qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
+qemuDomainAssignSpaprVIOAddresses(virDomainDef *def)
 {
     size_t i;
 
     /* Default values match QEMU. See spapr_(llan|vscsi|vty).c */
 
     for (i = 0; i < def->nnets; i++) {
-        virDomainNetDefPtr net = def->nets[i];
+        virDomainNetDef *net = def->nets[i];
 
         if (net->model == VIR_DOMAIN_NET_MODEL_SPAPR_VLAN)
             net->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
@@ -238,7 +240,7 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
     }
 
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
 
         if (cont->model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI &&
             cont->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI) {
@@ -269,7 +271,7 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
     }
 
     for (i = 0; i < def->ntpms; i++) {
-        virDomainTPMDefPtr tpm = def->tpms[i];
+        virDomainTPMDef *tpm = def->tpms[i];
 
         if (tpm->model != VIR_DOMAIN_TPM_MODEL_SPAPR_PROXY &&
             qemuDomainIsPSeries(def))
@@ -286,13 +288,13 @@ qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def)
 
 
 static void
-qemuDomainPrimeVfioDeviceAddresses(virDomainDefPtr def,
+qemuDomainPrimeVfioDeviceAddresses(virDomainDef *def,
                                    virDomainDeviceAddressType type)
 {
     size_t i;
 
     for (i = 0; i < def->nhostdevs; i++) {
-        virDomainHostdevSubsysPtr subsys = &def->hostdevs[i]->source.subsys;
+        virDomainHostdevSubsys *subsys = &def->hostdevs[i]->source.subsys;
 
         if (virHostdevIsMdevDevice(def->hostdevs[i]) &&
             subsys->u.mdev.model == VIR_MDEV_MODEL_TYPE_VFIO_CCW &&
@@ -307,15 +309,15 @@ qemuDomainPrimeVfioDeviceAddresses(virDomainDefPtr def,
 
 
 static void
-qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
+qemuDomainPrimeVirtioDeviceAddresses(virDomainDef *def,
                                      virDomainDeviceAddressType type)
 {
     /*
-       declare address-less virtio devices to be of address type 'type'
-       disks, networks, videos, consoles, controllers, memballoon and rng
-       in this order
-       if type is ccw filesystem and vsock devices are declared to be of
-       address type ccw
+       Declare address-less virtio devices to be of address type 'type'
+       disks, networks, videos, consoles, controllers, hostdevs, memballoon,
+       rngs and memories in this order.
+       If type is ccw filesystem and vsock devices are declared to be of
+       address type ccw.
     */
     size_t i;
 
@@ -326,7 +328,7 @@ qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
     }
 
     for (i = 0; i < def->nnets; i++) {
-        virDomainNetDefPtr net = def->nets[i];
+        virDomainNetDef *net = def->nets[i];
 
         if (virDomainNetIsVirtioModel(net) &&
             net->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
@@ -335,7 +337,7 @@ qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
     }
 
     for (i = 0; i < def->nvideos; i++) {
-        virDomainVideoDefPtr video = def->videos[i];
+        virDomainVideoDef *video = def->videos[i];
 
         if (video->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE &&
             video->type == VIR_DOMAIN_VIDEO_TYPE_VIRTIO)
@@ -349,7 +351,7 @@ qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
     }
 
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
 
         if ((cont->type == VIR_DOMAIN_CONTROLLER_TYPE_VIRTIO_SERIAL ||
              cont->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI) &&
@@ -377,6 +379,22 @@ qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
             def->rngs[i]->info.type = type;
     }
 
+    for (i = 0; i < def->nmems; i++) {
+        switch (def->mems[i]->model) {
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+            if (def->mems[i]->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE)
+                def->mems[i]->info.type = type;
+            break;
+        case VIR_DOMAIN_MEMORY_MODEL_NONE:
+        case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+        case VIR_DOMAIN_MEMORY_MODEL_LAST:
+            break;
+        }
+    }
+
     if (type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW) {
         for (i = 0; i < def->nfss; i++) {
             if (def->fss[i]->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE)
@@ -386,6 +404,12 @@ qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
             def->vsock->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
             def->vsock->info.type = type;
         }
+    }
+
+    for (i = 0; i < def->ncryptos; i++) {
+        /* All <crypto> devices accepted by the qemu driver are virtio */
+        if (def->cryptos[i]->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE)
+            def->cryptos[i]->info.type = type;
     }
 }
 
@@ -397,27 +421,21 @@ qemuDomainPrimeVirtioDeviceAddresses(virDomainDefPtr def,
  * 3. Assign defaults to the rest
  */
 static int
-qemuDomainAssignS390Addresses(virDomainDefPtr def,
-                              virQEMUCapsPtr qemuCaps)
+qemuDomainAssignS390Addresses(virDomainDef *def,
+                              virQEMUCaps *qemuCaps)
 {
     int ret = -1;
-    virDomainCCWAddressSetPtr addrs = NULL;
+    virDomainCCWAddressSet *addrs = NULL;
 
-    if (qemuDomainIsS390CCW(def) &&
-        virQEMUCapsGet(qemuCaps, QEMU_CAPS_CCW)) {
+    if (qemuDomainIsS390CCW(def)) {
         if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VFIO_CCW))
-            qemuDomainPrimeVfioDeviceAddresses(
-                def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
-        qemuDomainPrimeVirtioDeviceAddresses(
-            def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
+            qemuDomainPrimeVfioDeviceAddresses(def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
+
+        qemuDomainPrimeVirtioDeviceAddresses(def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
 
         if (!(addrs = virDomainCCWAddressSetCreateFromDomain(def)))
             goto cleanup;
 
-    } else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_S390)) {
-        /* deal with legacy virtio-s390 */
-        qemuDomainPrimeVirtioDeviceAddresses(
-            def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390);
     }
 
     ret = 0;
@@ -430,9 +448,9 @@ qemuDomainAssignS390Addresses(virDomainDefPtr def,
 
 
 static int
-qemuDomainHasVirtioMMIODevicesCallback(virDomainDefPtr def G_GNUC_UNUSED,
-                                       virDomainDeviceDefPtr dev G_GNUC_UNUSED,
-                                       virDomainDeviceInfoPtr info,
+qemuDomainHasVirtioMMIODevicesCallback(virDomainDef *def G_GNUC_UNUSED,
+                                       virDomainDeviceDef *dev G_GNUC_UNUSED,
+                                       virDomainDeviceInfo *info,
                                        void *opaque)
 {
     if (info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_MMIO) {
@@ -455,7 +473,7 @@ qemuDomainHasVirtioMMIODevicesCallback(virDomainDefPtr def G_GNUC_UNUSED,
  * Returns: true if there are any, false otherwise
  */
 static bool
-qemuDomainHasVirtioMMIODevices(virDomainDefPtr def)
+qemuDomainHasVirtioMMIODevices(virDomainDef *def)
 {
     bool result = false;
 
@@ -468,8 +486,8 @@ qemuDomainHasVirtioMMIODevices(virDomainDefPtr def)
 
 
 static void
-qemuDomainAssignVirtioMMIOAddresses(virDomainDefPtr def,
-                                    virQEMUCapsPtr qemuCaps)
+qemuDomainAssignVirtioMMIOAddresses(virDomainDef *def,
+                                    virQEMUCaps *qemuCaps)
 {
     if (def->os.arch != VIR_ARCH_ARMV6L &&
         def->os.arch != VIR_ARCH_ARMV7L &&
@@ -502,9 +520,9 @@ qemuDomainAssignVirtioMMIOAddresses(virDomainDefPtr def,
 
 
 static bool
-qemuDomainDeviceSupportZPCI(virDomainDeviceDefPtr device)
+qemuDomainDeviceSupportZPCI(virDomainDeviceDef *device)
 {
-    switch ((virDomainDeviceType)device->type) {
+    switch (device->type) {
     case VIR_DOMAIN_DEVICE_CHR:
         return false;
 
@@ -531,6 +549,8 @@ qemuDomainDeviceSupportZPCI(virDomainDeviceDefPtr device)
     case VIR_DOMAIN_DEVICE_MEMORY:
     case VIR_DOMAIN_DEVICE_IOMMU:
     case VIR_DOMAIN_DEVICE_VSOCK:
+    case VIR_DOMAIN_DEVICE_AUDIO:
+    case VIR_DOMAIN_DEVICE_CRYPTO:
         break;
 
     case VIR_DOMAIN_DEVICE_NONE:
@@ -545,8 +565,8 @@ qemuDomainDeviceSupportZPCI(virDomainDeviceDefPtr device)
 
 
 static virPCIDeviceAddressExtensionFlags
-qemuDomainDeviceCalculatePCIAddressExtensionFlags(virQEMUCapsPtr qemuCaps,
-                                                  virDomainDeviceDefPtr dev)
+qemuDomainDeviceCalculatePCIAddressExtensionFlags(virQEMUCaps *qemuCaps,
+                                                  virDomainDeviceDef *dev)
 {
     virPCIDeviceAddressExtensionFlags extFlags = 0;
 
@@ -577,19 +597,18 @@ qemuDomainDeviceCalculatePCIAddressExtensionFlags(virQEMUCapsPtr qemuCaps,
  * is no failure.
  */
 static virDomainPCIConnectFlags
-qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
-                                         virQEMUDriverPtr driver,
+qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDef *dev,
                                          virDomainPCIConnectFlags pcieFlags,
                                          virDomainPCIConnectFlags virtioFlags)
 {
     virDomainPCIConnectFlags pciFlags = (VIR_PCI_CONNECT_TYPE_PCI_DEVICE |
                                          VIR_PCI_CONNECT_AUTOASSIGN);
 
-    switch ((virDomainDeviceType)dev->type) {
+    switch (dev->type) {
     case VIR_DOMAIN_DEVICE_CONTROLLER: {
-        virDomainControllerDefPtr cont = dev->data.controller;
+        virDomainControllerDef *cont = dev->data.controller;
 
-        switch ((virDomainControllerType)cont->type) {
+        switch (cont->type) {
         case VIR_DOMAIN_CONTROLLER_TYPE_PCI:
             return virDomainPCIControllerModelToConnectType(cont->model);
 
@@ -636,6 +655,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
             switch ((virDomainControllerModelSCSI) cont->model) {
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_DEFAULT:
+            case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90:
                 return 0;
 
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI:
@@ -651,6 +671,8 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VMPVSCSI:
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI:
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1078:
+            case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_DC390:
+            case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_AM53C974:
                 return pciFlags;
 
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST:
@@ -677,6 +699,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_CONTROLLER_TYPE_FDC:
         case VIR_DOMAIN_CONTROLLER_TYPE_CCID:
         case VIR_DOMAIN_CONTROLLER_TYPE_XENBUS:
+        case VIR_DOMAIN_CONTROLLER_TYPE_ISA:
         case VIR_DOMAIN_CONTROLLER_TYPE_LAST:
             return 0;
         }
@@ -684,12 +707,12 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         break;
 
     case VIR_DOMAIN_DEVICE_FS:
-        switch ((virDomainFSDriverType) dev->data.fs->fsdriver) {
+        switch (dev->data.fs->fsdriver) {
         case VIR_DOMAIN_FS_DRIVER_TYPE_DEFAULT:
         case VIR_DOMAIN_FS_DRIVER_TYPE_PATH:
         case VIR_DOMAIN_FS_DRIVER_TYPE_HANDLE:
             /* these drivers are handled by virtio-9p-pci */
-            switch ((virDomainFSModel) dev->data.fs->model) {
+            switch (dev->data.fs->model) {
             case VIR_DOMAIN_FS_MODEL_VIRTIO_TRANSITIONAL:
                 /* Transitional devices only work in conventional PCI slots */
                 return pciFlags;
@@ -716,7 +739,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         return 0;
 
     case VIR_DOMAIN_DEVICE_NET: {
-        virDomainNetDefPtr net = dev->data.net;
+        virDomainNetDef *net = dev->data.net;
 
         /* NB: a type='hostdev' will use PCI, but its
          * address is assigned when we're assigning the
@@ -734,7 +757,8 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         if (net->model == VIR_DOMAIN_NET_MODEL_VIRTIO_TRANSITIONAL)
             return pciFlags;
 
-        if (net->model == VIR_DOMAIN_NET_MODEL_E1000E)
+        if (net->model == VIR_DOMAIN_NET_MODEL_E1000E ||
+            net->model == VIR_DOMAIN_NET_MODEL_IGB)
             return pcieFlags;
 
         /* the only time model can be "unknown" is for type='hostdev'
@@ -749,7 +773,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
     }
 
     case VIR_DOMAIN_DEVICE_SOUND:
-        switch ((virDomainSoundModel) dev->data.sound->model) {
+        switch (dev->data.sound->model) {
         case VIR_DOMAIN_SOUND_MODEL_ES1370:
         case VIR_DOMAIN_SOUND_MODEL_AC97:
         case VIR_DOMAIN_SOUND_MODEL_ICH6:
@@ -759,16 +783,17 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_SOUND_MODEL_SB16:
         case VIR_DOMAIN_SOUND_MODEL_PCSPK:
         case VIR_DOMAIN_SOUND_MODEL_USB:
+        case VIR_DOMAIN_SOUND_MODEL_ICH7:
         case VIR_DOMAIN_SOUND_MODEL_LAST:
             return 0;
         }
         break;
 
     case VIR_DOMAIN_DEVICE_DISK:
-        switch ((virDomainDiskBus) dev->data.disk->bus) {
+        switch (dev->data.disk->bus) {
         case VIR_DOMAIN_DISK_BUS_VIRTIO:
             /* only virtio disks use PCI */
-            switch ((virDomainDiskModel) dev->data.disk->model) {
+            switch (dev->data.disk->model) {
             case VIR_DOMAIN_DISK_MODEL_VIRTIO_TRANSITIONAL:
                 /* Transitional devices only work in conventional PCI slots */
                 return pciFlags;
@@ -789,16 +814,16 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_DISK_BUS_UML:
         case VIR_DOMAIN_DISK_BUS_SATA:
         case VIR_DOMAIN_DISK_BUS_SD:
+        case VIR_DOMAIN_DISK_BUS_NONE:
         case VIR_DOMAIN_DISK_BUS_LAST:
             return 0;
         }
         break;
 
     case VIR_DOMAIN_DEVICE_HOSTDEV: {
-        virDomainHostdevDefPtr hostdev = dev->data.hostdev;
-        bool isExpress = false;
-        virPCIDevicePtr pciDev;
-        virPCIDeviceAddressPtr hostAddr = &hostdev->source.subsys.u.pci.addr;
+        virDomainHostdevDef *hostdev = dev->data.hostdev;
+        g_autoptr(virPCIDevice) pciDev = NULL;
+        virPCIDeviceAddress *hostAddr = &hostdev->source.subsys.u.pci.addr;
 
         if (!virHostdevIsMdevDevice(hostdev) &&
             (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS ||
@@ -839,7 +864,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
          * are the same as virtio-scsi, so they should follow virtio logic
          */
         if (hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST) {
-            switch ((virDomainHostdevSubsysSCSIVHostModelType) hostdev->source.subsys.u.scsi_host.model) {
+            switch (hostdev->source.subsys.u.scsi_host.model) {
             case VIR_DOMAIN_HOSTDEV_SUBSYS_SCSI_VHOST_MODEL_TYPE_VIRTIO_TRANSITIONAL:
                 /* Transitional devices only work in conventional PCI slots */
                 return pciFlags;
@@ -853,10 +878,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
             return 0;
         }
 
-        if (!(pciDev = virPCIDeviceNew(hostAddr->domain,
-                                       hostAddr->bus,
-                                       hostAddr->slot,
-                                       hostAddr->function))) {
+        if (!(pciDev = virPCIDeviceNew(hostAddr))) {
             /* libvirt should be able to perform all the
              * operations in virPCIDeviceNew() even if it's
              * running unprivileged, so if this fails, the device
@@ -867,47 +889,14 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
             return pcieFlags;
         }
 
-        if (!driver->privileged) {
-            /* unprivileged libvirtd is unable to read *all* of a
-             * device's PCI config (it can only read the first 64
-             * bytes, which isn't enough for the check that's done
-             * in virPCIDeviceIsPCIExpress()), so instead of
-             * trying and failing, we make an educated guess based
-             * on the length of the device's config file - if it
-             * is 256 bytes, then it is definitely a legacy PCI
-             * device. If it's larger than that, then it is
-             * *probably PCIe (although it could be PCI-x, but
-             * those are extremely rare). If the config file can't
-             * be found (in which case the "length" will be -1),
-             * then we blindly assume the most likely outcome -
-             * PCIe.
-             */
-            off_t configLen
-               = virFileLength(virPCIDeviceGetConfigPath(pciDev), -1);
-
-            virPCIDeviceFree(pciDev);
-
-            if (configLen == 256)
-                return pciFlags;
-
-            return pcieFlags;
-        }
-
-        /* If we are running with privileges, we can examine the
-         * PCI config contents with virPCIDeviceIsPCIExpress() for
-         * a definitive answer.
-         */
-        isExpress = virPCIDeviceIsPCIExpress(pciDev);
-        virPCIDeviceFree(pciDev);
-
-        if (isExpress)
+        if (virPCIDeviceIsPCIExpress(pciDev))
             return pcieFlags;
 
         return pciFlags;
     }
 
     case VIR_DOMAIN_DEVICE_MEMBALLOON:
-        switch ((virDomainMemballoonModel) dev->data.memballoon->model) {
+        switch (dev->data.memballoon->model) {
         case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO_TRANSITIONAL:
             /* Transitional devices only work in conventional PCI slots */
             return pciFlags;
@@ -923,7 +912,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         break;
 
     case VIR_DOMAIN_DEVICE_RNG:
-        switch ((virDomainRNGModel) dev->data.rng->model) {
+        switch (dev->data.rng->model) {
         case VIR_DOMAIN_RNG_MODEL_VIRTIO_TRANSITIONAL:
             /* Transitional devices only work in conventional PCI slots */
             return pciFlags;
@@ -938,12 +927,13 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
 
     case VIR_DOMAIN_DEVICE_WATCHDOG:
         /* only one model connects using PCI */
-        switch ((virDomainWatchdogModel) dev->data.watchdog->model) {
+        switch (dev->data.watchdog->model) {
         case VIR_DOMAIN_WATCHDOG_MODEL_I6300ESB:
             return pciFlags;
 
         case VIR_DOMAIN_WATCHDOG_MODEL_IB700:
         case VIR_DOMAIN_WATCHDOG_MODEL_DIAG288:
+        case VIR_DOMAIN_WATCHDOG_MODEL_ITCO:
         case VIR_DOMAIN_WATCHDOG_MODEL_LAST:
             return 0;
         }
@@ -994,10 +984,12 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
             }
             return 0;
 
+        case VIR_DOMAIN_INPUT_BUS_DEFAULT:
         case VIR_DOMAIN_INPUT_BUS_PS2:
         case VIR_DOMAIN_INPUT_BUS_USB:
         case VIR_DOMAIN_INPUT_BUS_XEN:
         case VIR_DOMAIN_INPUT_BUS_PARALLELS:
+        case VIR_DOMAIN_INPUT_BUS_NONE:
         case VIR_DOMAIN_INPUT_BUS_LAST:
             return 0;
         }
@@ -1013,9 +1005,23 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_SPAPR_VIO:
         case VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_SYSTEM:
         case VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_SCLP:
+        case VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_ISA_DEBUG:
         case VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_NONE:
         case VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_LAST:
             return 0;
+        }
+        break;
+
+    case VIR_DOMAIN_DEVICE_IOMMU:
+        switch (dev->data.iommu->model) {
+            case VIR_DOMAIN_IOMMU_MODEL_VIRTIO:
+                return virtioFlags | VIR_PCI_CONNECT_INTEGRATED;
+
+            case VIR_DOMAIN_IOMMU_MODEL_INTEL:
+            case VIR_DOMAIN_IOMMU_MODEL_SMMUV3:
+            case VIR_DOMAIN_IOMMU_MODEL_LAST:
+                /* These are not PCI devices */
+                return 0;
         }
         break;
 
@@ -1034,18 +1040,55 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         }
         break;
 
+    case VIR_DOMAIN_DEVICE_MEMORY:
+        switch (dev->data.memory->model) {
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+            return virtioFlags;
+
+        case VIR_DOMAIN_MEMORY_MODEL_NONE:
+        case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+        case VIR_DOMAIN_MEMORY_MODEL_LAST:
+            return 0;
+        }
+        break;
+
+    case VIR_DOMAIN_DEVICE_CRYPTO:
+        switch (dev->data.crypto->model) {
+        case VIR_DOMAIN_CRYPTO_MODEL_VIRTIO:
+            return pciFlags;
+        case VIR_DOMAIN_CRYPTO_MODEL_LAST:
+            return 0;
+        }
+        break;
+
+    case VIR_DOMAIN_DEVICE_PANIC:
+        switch ((virDomainPanicModel) dev->data.panic->model) {
+        case VIR_DOMAIN_PANIC_MODEL_PVPANIC:
+            return pciFlags | VIR_PCI_CONNECT_INTEGRATED;
+
+        case VIR_DOMAIN_PANIC_MODEL_DEFAULT:
+        case VIR_DOMAIN_PANIC_MODEL_ISA:
+        case VIR_DOMAIN_PANIC_MODEL_PSERIES:
+        case VIR_DOMAIN_PANIC_MODEL_HYPERV:
+        case VIR_DOMAIN_PANIC_MODEL_S390:
+        case VIR_DOMAIN_PANIC_MODEL_LAST:
+            return 0;
+        }
+        break;
+
         /* These devices don't ever connect with PCI */
     case VIR_DOMAIN_DEVICE_NVRAM:
     case VIR_DOMAIN_DEVICE_TPM:
-    case VIR_DOMAIN_DEVICE_PANIC:
-    case VIR_DOMAIN_DEVICE_MEMORY:
     case VIR_DOMAIN_DEVICE_HUB:
     case VIR_DOMAIN_DEVICE_REDIRDEV:
     case VIR_DOMAIN_DEVICE_SMARTCARD:
         /* These devices don't even have a DeviceInfo */
     case VIR_DOMAIN_DEVICE_LEASE:
     case VIR_DOMAIN_DEVICE_GRAPHICS:
-    case VIR_DOMAIN_DEVICE_IOMMU:
+    case VIR_DOMAIN_DEVICE_AUDIO:
     case VIR_DOMAIN_DEVICE_LAST:
     case VIR_DOMAIN_DEVICE_NONE:
         return 0;
@@ -1063,7 +1106,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
 typedef struct {
     virDomainPCIConnectFlags virtioFlags;
     virDomainPCIConnectFlags pcieFlags;
-    virQEMUDriverPtr driver;
+    virQEMUDriver *driver;
 } qemuDomainFillDevicePCIConnectFlagsIterData;
 
 
@@ -1074,9 +1117,9 @@ typedef struct {
  * qemuDomainCalculateDevicePCIConnectFlags().
  */
 static void
-qemuDomainFillDevicePCIConnectFlagsIterInit(virDomainDefPtr def,
-                                            virQEMUCapsPtr qemuCaps,
-                                            virQEMUDriverPtr driver,
+qemuDomainFillDevicePCIConnectFlagsIterInit(virDomainDef *def,
+                                            virQEMUCaps *qemuCaps,
+                                            virQEMUDriver *driver,
                                             qemuDomainFillDevicePCIConnectFlagsIterData *data)
 {
     data->driver = driver;
@@ -1089,7 +1132,7 @@ qemuDomainFillDevicePCIConnectFlagsIterInit(virDomainDefPtr def,
                            VIR_PCI_CONNECT_AUTOASSIGN);
     }
 
-    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_PCI_DISABLE_LEGACY)) {
+    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_PCI_TRANSITIONAL)) {
         data->virtioFlags = data->pcieFlags;
     } else {
         data->virtioFlags = (VIR_PCI_CONNECT_TYPE_PCI_DEVICE |
@@ -1112,15 +1155,15 @@ qemuDomainFillDevicePCIConnectFlagsIterInit(virDomainDefPtr def,
  * Always returns 0 - there is no failure.
  */
 static int
-qemuDomainFillDevicePCIConnectFlagsIter(virDomainDefPtr def G_GNUC_UNUSED,
-                                        virDomainDeviceDefPtr dev,
-                                        virDomainDeviceInfoPtr info,
+qemuDomainFillDevicePCIConnectFlagsIter(virDomainDef *def G_GNUC_UNUSED,
+                                        virDomainDeviceDef *dev,
+                                        virDomainDeviceInfo *info,
                                         void *opaque)
 {
     qemuDomainFillDevicePCIConnectFlagsIterData *data = opaque;
 
     info->pciConnectFlags
-        = qemuDomainDeviceCalculatePCIConnectFlags(dev, data->driver,
+        = qemuDomainDeviceCalculatePCIConnectFlags(dev,
                                                    data->pcieFlags,
                                                    data->virtioFlags);
     return 0;
@@ -1140,9 +1183,9 @@ qemuDomainFillDevicePCIConnectFlagsIter(virDomainDefPtr def G_GNUC_UNUSED,
  * virDomainDeviceInfoIterate())
  */
 static int
-qemuDomainFillAllPCIConnectFlags(virDomainDefPtr def,
-                                 virQEMUCapsPtr qemuCaps,
-                                 virQEMUDriverPtr driver)
+qemuDomainFillAllPCIConnectFlags(virDomainDef *def,
+                                 virQEMUCaps *qemuCaps,
+                                 virQEMUDriver *driver)
 {
     qemuDomainFillDevicePCIConnectFlagsIterData data;
 
@@ -1168,12 +1211,12 @@ qemuDomainFillAllPCIConnectFlags(virDomainDefPtr def,
  * Always returns 0 - there is no failure.
  */
 static int
-qemuDomainFillDevicePCIExtensionFlagsIter(virDomainDefPtr def G_GNUC_UNUSED,
-                                          virDomainDeviceDefPtr dev,
-                                          virDomainDeviceInfoPtr info,
+qemuDomainFillDevicePCIExtensionFlagsIter(virDomainDef *def G_GNUC_UNUSED,
+                                          virDomainDeviceDef *dev,
+                                          virDomainDeviceInfo *info,
                                           void *opaque)
 {
-    virQEMUCapsPtr qemuCaps = opaque;
+    virQEMUCaps *qemuCaps = opaque;
 
     info->pciAddrExtFlags =
         qemuDomainDeviceCalculatePCIAddressExtensionFlags(qemuCaps, dev);
@@ -1195,8 +1238,8 @@ qemuDomainFillDevicePCIExtensionFlagsIter(virDomainDefPtr def G_GNUC_UNUSED,
  * virDomainDeviceInfoIterate())
  */
 static int
-qemuDomainFillAllPCIExtensionFlags(virDomainDefPtr def,
-                                   virQEMUCapsPtr qemuCaps)
+qemuDomainFillAllPCIExtensionFlags(virDomainDef *def,
+                                   virQEMUCaps *qemuCaps)
 {
     return virDomainDeviceInfoIterate(def,
                                       qemuDomainFillDevicePCIExtensionFlagsIter,
@@ -1217,9 +1260,9 @@ qemuDomainFillAllPCIExtensionFlags(virDomainDefPtr def,
  * Return: 0 if the isolation group is not used by the device, <1 otherwise.
  */
 static int
-qemuDomainFindUnusedIsolationGroupIter(virDomainDefPtr def G_GNUC_UNUSED,
-                                       virDomainDeviceDefPtr dev G_GNUC_UNUSED,
-                                       virDomainDeviceInfoPtr info,
+qemuDomainFindUnusedIsolationGroupIter(virDomainDef *def G_GNUC_UNUSED,
+                                       virDomainDeviceDef *dev G_GNUC_UNUSED,
+                                       virDomainDeviceInfo *info,
                                        void *opaque)
 {
     unsigned int *isolationGroup = opaque;
@@ -1248,7 +1291,7 @@ qemuDomainFindUnusedIsolationGroupIter(virDomainDefPtr def G_GNUC_UNUSED,
  * Return: unused isolation group
  */
 static unsigned int
-qemuDomainFindUnusedIsolationGroup(virDomainDefPtr def)
+qemuDomainFindUnusedIsolationGroup(virDomainDef *def)
 {
     unsigned int isolationGroup = UINT_MAX;
 
@@ -1275,8 +1318,8 @@ qemuDomainFindUnusedIsolationGroup(virDomainDefPtr def)
  * Fill isolation group information for a single device.
  */
 void
-qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
-                                   virDomainDeviceDefPtr dev)
+qemuDomainFillDeviceIsolationGroup(virDomainDef *def,
+                                   virDomainDeviceDef *dev)
 {
     /* Only host devices need their isolation group to be different from
      * the default. Interfaces of type hostdev are just host devices in
@@ -1284,9 +1327,9 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
      * each such interface a corresponding hostdev is also added to the
      * guest configuration */
     if (dev->type == VIR_DOMAIN_DEVICE_HOSTDEV) {
-        virDomainHostdevDefPtr hostdev = dev->data.hostdev;
-        virDomainDeviceInfoPtr info = hostdev->info;
-        virPCIDeviceAddressPtr hostAddr;
+        virDomainHostdevDef *hostdev = dev->data.hostdev;
+        virDomainDeviceInfo *info = hostdev->info;
+        virPCIDeviceAddress *hostAddr;
         int tmp;
 
         /* Only PCI host devices are subject to isolation */
@@ -1326,8 +1369,8 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
                   info->isolationGroup);
 
     } else if (dev->type == VIR_DOMAIN_DEVICE_NET) {
-        virDomainNetDefPtr iface = dev->data.net;
-        virDomainDeviceInfoPtr info = &iface->info;
+        virDomainNetDef *iface = dev->data.net;
+        virDomainDeviceInfo *info = &iface->info;
         unsigned int tmp;
 
         /* Network interfaces can ultimately result in the guest being
@@ -1379,9 +1422,9 @@ qemuDomainFillDeviceIsolationGroup(virDomainDefPtr def,
  * Return: 0 on success, <0 on failure
  */
 static int
-qemuDomainFillDeviceIsolationGroupIter(virDomainDefPtr def,
-                                       virDomainDeviceDefPtr dev,
-                                       virDomainDeviceInfoPtr info G_GNUC_UNUSED,
+qemuDomainFillDeviceIsolationGroupIter(virDomainDef *def,
+                                       virDomainDeviceDef *dev,
+                                       virDomainDeviceInfo *info G_GNUC_UNUSED,
                                        void *opaque G_GNUC_UNUSED)
 {
     qemuDomainFillDeviceIsolationGroup(def, dev);
@@ -1403,7 +1446,7 @@ qemuDomainFillDeviceIsolationGroupIter(virDomainDefPtr def,
  * Return: 0 on success, <0 on failure
  */
 static int
-qemuDomainSetupIsolationGroups(virDomainDefPtr def)
+qemuDomainSetupIsolationGroups(virDomainDef *def)
 {
     int idx;
 
@@ -1442,12 +1485,12 @@ qemuDomainSetupIsolationGroups(virDomainDefPtr def)
  * No return value.
  */
 static void
-qemuDomainFillDevicePCIConnectFlags(virDomainDefPtr def,
-                                    virDomainDeviceDefPtr dev,
-                                    virQEMUCapsPtr qemuCaps,
-                                    virQEMUDriverPtr driver)
+qemuDomainFillDevicePCIConnectFlags(virDomainDef *def,
+                                    virDomainDeviceDef *dev,
+                                    virQEMUCaps *qemuCaps,
+                                    virQEMUDriver *driver)
 {
-    virDomainDeviceInfoPtr info = virDomainDeviceGetInfo(dev);
+    virDomainDeviceInfo *info = virDomainDeviceGetInfo(dev);
 
     if (info) {
         /* qemuDomainDeviceCalculatePCIConnectFlags() is called with
@@ -1464,7 +1507,7 @@ qemuDomainFillDevicePCIConnectFlags(virDomainDefPtr def,
         qemuDomainFillDevicePCIConnectFlagsIterInit(def, qemuCaps, driver, &data);
 
         info->pciConnectFlags
-            = qemuDomainDeviceCalculatePCIConnectFlags(dev, data.driver,
+            = qemuDomainDeviceCalculatePCIConnectFlags(dev,
                                                        data.pcieFlags,
                                                        data.virtioFlags);
     }
@@ -1483,9 +1526,9 @@ qemuDomainFillDevicePCIConnectFlags(virDomainDefPtr def,
  * No return value.
  */
 static void
-qemuDomainFillDevicePCIExtensionFlags(virDomainDeviceDefPtr dev,
-                                      virDomainDeviceInfoPtr info,
-                                      virQEMUCapsPtr qemuCaps)
+qemuDomainFillDevicePCIExtensionFlags(virDomainDeviceDef *dev,
+                                      virDomainDeviceInfo *info,
+                                      virQEMUCaps *qemuCaps)
 {
     info->pciAddrExtFlags =
         qemuDomainDeviceCalculatePCIAddressExtensionFlags(qemuCaps, dev);
@@ -1493,8 +1536,8 @@ qemuDomainFillDevicePCIExtensionFlags(virDomainDeviceDefPtr dev,
 
 
 static int
-qemuDomainPCIAddressReserveNextAddr(virDomainPCIAddressSetPtr addrs,
-                                    virDomainDeviceInfoPtr dev)
+qemuDomainPCIAddressReserveNextAddr(virDomainPCIAddressSet *addrs,
+                                    virDomainDeviceInfo *dev)
 {
     return virDomainPCIAddressReserveNextAddr(addrs, dev,
                                               dev->pciConnectFlags, -1);
@@ -1502,13 +1545,13 @@ qemuDomainPCIAddressReserveNextAddr(virDomainPCIAddressSetPtr addrs,
 
 
 static int
-qemuDomainAssignPCIAddressExtension(virDomainDefPtr def G_GNUC_UNUSED,
-                                    virDomainDeviceDefPtr device G_GNUC_UNUSED,
-                                    virDomainDeviceInfoPtr info,
+qemuDomainAssignPCIAddressExtension(virDomainDef *def G_GNUC_UNUSED,
+                                    virDomainDeviceDef *device G_GNUC_UNUSED,
+                                    virDomainDeviceInfo *info,
                                     void *opaque)
 {
-    virDomainPCIAddressSetPtr addrs = opaque;
-    virPCIDeviceAddressPtr addr = &info->addr.pci;
+    virDomainPCIAddressSet *addrs = opaque;
+    virPCIDeviceAddress *addr = &info->addr.pci;
 
     if (info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI)
         addr->extFlags = info->pciAddrExtFlags;
@@ -1520,13 +1563,13 @@ qemuDomainAssignPCIAddressExtension(virDomainDefPtr def G_GNUC_UNUSED,
 }
 
 static int
-qemuDomainCollectPCIAddress(virDomainDefPtr def G_GNUC_UNUSED,
-                            virDomainDeviceDefPtr device,
-                            virDomainDeviceInfoPtr info,
+qemuDomainCollectPCIAddress(virDomainDef *def G_GNUC_UNUSED,
+                            virDomainDeviceDef *device,
+                            virDomainDeviceInfo *info,
                             void *opaque)
 {
-    virDomainPCIAddressSetPtr addrs = opaque;
-    virPCIDeviceAddressPtr addr = &info->addr.pci;
+    virDomainPCIAddressSet *addrs = opaque;
+    virPCIDeviceAddress *addr = &info->addr.pci;
 
     if (!virDeviceInfoPCIAddressIsPresent(info) ||
         ((device->type == VIR_DOMAIN_DEVICE_HOSTDEV) &&
@@ -1573,7 +1616,7 @@ qemuDomainCollectPCIAddress(virDomainDefPtr def G_GNUC_UNUSED,
      */
     if (device->type == VIR_DOMAIN_DEVICE_CONTROLLER && addr->domain == 0 &&
         addr->bus == 0 && addr->slot == 1) {
-        virDomainControllerDefPtr cont = device->data.controller;
+        virDomainControllerDef *cont = device->data.controller;
 
         if ((cont->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE && cont->idx == 0 &&
              addr->function == 1) ||
@@ -1590,12 +1633,10 @@ qemuDomainCollectPCIAddress(virDomainDefPtr def G_GNUC_UNUSED,
             if (addrs->nbuses > 0 &&
                 !(addrs->buses[0].flags & VIR_PCI_CONNECT_TYPE_PCI_DEVICE)) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Bus 0 must be PCI for integrated PIIX3 "
-                                 "USB or IDE controllers"));
+                               _("Bus 0 must be PCI for integrated PIIX3 USB or IDE controllers"));
                 return -1;
-            } else {
-                return 0;
             }
+            return 0;
         }
     }
 
@@ -1609,13 +1650,13 @@ qemuDomainCollectPCIAddress(virDomainDefPtr def G_GNUC_UNUSED,
 }
 
 static int
-qemuDomainCollectPCIAddressExtension(virDomainDefPtr def G_GNUC_UNUSED,
-                                     virDomainDeviceDefPtr device,
-                                     virDomainDeviceInfoPtr info,
+qemuDomainCollectPCIAddressExtension(virDomainDef *def G_GNUC_UNUSED,
+                                     virDomainDeviceDef *device,
+                                     virDomainDeviceInfo *info,
                                      void *opaque)
 {
-    virDomainPCIAddressSetPtr addrs = opaque;
-    virPCIDeviceAddressPtr addr = &info->addr.pci;
+    virDomainPCIAddressSet *addrs = opaque;
+    virPCIDeviceAddress *addr = &info->addr.pci;
 
     if (info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI)
         addr->extFlags = info->pciAddrExtFlags;
@@ -1633,13 +1674,13 @@ qemuDomainCollectPCIAddressExtension(virDomainDefPtr def G_GNUC_UNUSED,
     return virDomainPCIAddressExtensionReserveAddr(addrs, addr);
 }
 
-static virDomainPCIAddressSetPtr
-qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
-                              virQEMUCapsPtr qemuCaps,
+static virDomainPCIAddressSet *
+qemuDomainPCIAddressSetCreate(virDomainDef *def,
+                              virQEMUCaps *qemuCaps,
                               unsigned int nbuses,
                               bool dryRun)
 {
-    virDomainPCIAddressSetPtr addrs;
+    virDomainPCIAddressSet *addrs;
     size_t i;
     bool hasPCIeRoot = false;
     virDomainControllerModelPCI defaultModel;
@@ -1661,7 +1702,7 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
         addrs->isPCIeToPCIBridgeSupported = true;
 
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
         size_t idx = cont->idx;
         bool allowHotplug = false;
 
@@ -1670,8 +1711,8 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
 
         if (idx >= addrs->nbuses) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Inappropriate new pci controller index %zu "
-                             "exceeds addrs array length"), idx);
+                           _("Inappropriate new pci controller index %1$zu exceeds addrs array length"),
+                           idx);
             goto error;
         }
 
@@ -1743,20 +1784,18 @@ qemuDomainPCIAddressSetCreate(virDomainDefPtr def,
 
 
 static int
-qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
-                                      virQEMUCapsPtr qemuCaps,
-                                      virDomainPCIAddressSetPtr addrs)
+qemuDomainValidateDevicePCISlotsPIIX3(virDomainDef *def,
+                                      virDomainPCIAddressSet *addrs)
 {
     size_t i;
-    virPCIDeviceAddress tmp_addr;
-    bool qemuDeviceVideoUsable = virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIDEO_PRIMARY);
+    virPCIDeviceAddress tmp_addr = { 0 };
     g_autofree char *addrStr = NULL;
     virDomainPCIConnectFlags flags = (VIR_PCI_CONNECT_AUTOASSIGN
                                       | VIR_PCI_CONNECT_TYPE_PCI_DEVICE);
 
     /* Verify that first IDE and USB controllers (if any) is on the PIIX3, fn 1 */
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
         virPCIDeviceAddress primaryIDEAddr = {.domain = 0, .bus = 0,
                                               .slot = 1, .function = 1};
         virPCIDeviceAddress piix3USBAddr = {.domain = 0, .bus = 0,
@@ -1769,8 +1808,7 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
                 if (!virPCIDeviceAddressEqual(&cont->info.addr.pci,
                                               &primaryIDEAddr)) {
                     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                   _("Primary IDE controller must have PCI "
-                                     "address 0:0:1.1"));
+                                   _("Primary IDE controller must have PCI address 0:0:1.1"));
                     return -1;
                 }
             } else {
@@ -1785,8 +1823,7 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
                 if (!virPCIDeviceAddressEqual(&cont->info.addr.pci,
                                               &piix3USBAddr)) {
                     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                   _("PIIX3 USB controller at index 0 must "
-                                     "have PCI address 0:0:1.2"));
+                                   _("PIIX3 USB controller at index 0 must have PCI address 0:0:1.2"));
                     return -1;
                 }
             } else {
@@ -1825,9 +1862,7 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
          * device added after integrated devices), it *always* ends up
          * at slot 2.
          */
-        virDomainVideoDefPtr primaryVideo = def->videos[0];
-        virPCIDeviceAddress primaryCardAddr = {.domain = 0, .bus = 0,
-                                               .slot = 2, .function = 0};
+        virDomainVideoDef *primaryVideo = def->videos[0];
 
         if (virDeviceInfoPCIAddressIsWanted(&primaryVideo->info)) {
             memset(&tmp_addr, 0, sizeof(tmp_addr));
@@ -1840,15 +1875,8 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
                 return -1;
 
             if (virDomainPCIAddressSlotInUse(addrs, &tmp_addr)) {
-                if (qemuDeviceVideoUsable) {
-                    if (qemuDomainPCIAddressReserveNextAddr(addrs,
-                                                            &primaryVideo->info) < 0) {
-                        return -1;
-                    }
-                } else {
-                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                   _("PCI address 0:0:2.0 is in use, "
-                                     "QEMU needs it for primary video"));
+                if (qemuDomainPCIAddressReserveNextAddr(addrs,
+                                                        &primaryVideo->info) < 0) {
                     return -1;
                 }
             } else {
@@ -1857,26 +1885,6 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
                 primaryVideo->info.addr.pci = tmp_addr;
                 primaryVideo->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI;
             }
-        } else if (!qemuDeviceVideoUsable) {
-            if (!virPCIDeviceAddressEqual(&primaryVideo->info.addr.pci,
-                                          &primaryCardAddr)) {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Primary video card must have PCI address 0:0:2.0"));
-                return -1;
-            }
-            /* If TYPE == PCI, then qemuDomainCollectPCIAddress() function
-             * has already reserved the address, so we must skip */
-        }
-    } else if (addrs->nbuses && !qemuDeviceVideoUsable) {
-        memset(&tmp_addr, 0, sizeof(tmp_addr));
-        tmp_addr.slot = 2;
-
-        if (virDomainPCIAddressSlotInUse(addrs, &tmp_addr)) {
-            VIR_DEBUG("PCI address 0:0:2.0 in use, future addition of a video"
-                      " device will not be possible without manual"
-                      " intervention");
-        } else if (virDomainPCIAddressReserveAddr(addrs, &tmp_addr, flags, 0) < 0) {
-            return -1;
         }
     }
     return 0;
@@ -1884,18 +1892,16 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
 
 
 static int
-qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
-                                    virQEMUCapsPtr qemuCaps,
-                                    virDomainPCIAddressSetPtr addrs)
+qemuDomainValidateDevicePCISlotsQ35(virDomainDef *def,
+                                    virDomainPCIAddressSet *addrs)
 {
     size_t i;
-    virPCIDeviceAddress tmp_addr;
-    bool qemuDeviceVideoUsable = virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIDEO_PRIMARY);
+    virPCIDeviceAddress tmp_addr = { 0 };
     g_autofree char *addrStr = NULL;
     virDomainPCIConnectFlags flags = VIR_PCI_CONNECT_TYPE_PCIE_DEVICE;
 
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
         virPCIDeviceAddress primarySATAAddr = {.domain = 0, .bus = 0,
                                                .slot = 0x1F, .function = 2};
 
@@ -1910,8 +1916,7 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
                     if (!virPCIDeviceAddressEqual(&cont->info.addr.pci,
                                                   &primarySATAAddr)) {
                         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                       _("Primary SATA controller must have "
-                                         "PCI address 0:0:1f.2"));
+                                       _("Primary SATA controller must have PCI address 0:0:1f.2"));
                         return -1;
                     }
                 } else {
@@ -1979,6 +1984,16 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
                 }
             }
             break;
+
+        case VIR_DOMAIN_CONTROLLER_TYPE_IDE:
+        case VIR_DOMAIN_CONTROLLER_TYPE_FDC:
+        case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
+        case VIR_DOMAIN_CONTROLLER_TYPE_VIRTIO_SERIAL:
+        case VIR_DOMAIN_CONTROLLER_TYPE_CCID:
+        case VIR_DOMAIN_CONTROLLER_TYPE_XENBUS:
+        case VIR_DOMAIN_CONTROLLER_TYPE_ISA:
+        case VIR_DOMAIN_CONTROLLER_TYPE_LAST:
+            break;
         }
     }
 
@@ -2011,7 +2026,7 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
          * slot 1 (which was used up by the integrated PIIX3 devices
          * on pc machinetypes).
          */
-        virDomainVideoDefPtr primaryVideo = def->videos[0];
+        virDomainVideoDef *primaryVideo = def->videos[0];
         if (virDeviceInfoPCIAddressIsWanted(&primaryVideo->info)) {
             memset(&tmp_addr, 0, sizeof(tmp_addr));
             tmp_addr.slot = 1;
@@ -2023,45 +2038,15 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
                 return -1;
 
             if (virDomainPCIAddressSlotInUse(addrs, &tmp_addr)) {
-                if (qemuDeviceVideoUsable) {
-                    if (qemuDomainPCIAddressReserveNextAddr(addrs,
-                                                            &primaryVideo->info) < 0)
-                        return -1;
-                } else {
-                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                   _("PCI address 0:0:1.0 is in use, "
-                                     "QEMU needs it for primary video"));
+                if (qemuDomainPCIAddressReserveNextAddr(addrs,
+                                                        &primaryVideo->info) < 0)
                     return -1;
-                }
             } else {
                 if (virDomainPCIAddressReserveAddr(addrs, &tmp_addr, flags, 0) < 0)
                     return -1;
                 primaryVideo->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI;
                 primaryVideo->info.addr.pci = tmp_addr;
             }
-        } else if (!qemuDeviceVideoUsable) {
-            if (primaryVideo->info.addr.pci.domain != 0 ||
-                primaryVideo->info.addr.pci.bus != 0 ||
-                primaryVideo->info.addr.pci.slot != 1 ||
-                primaryVideo->info.addr.pci.function != 0) {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Primary video card must have PCI address 0:0:1.0"));
-                return -1;
-            }
-            /* If TYPE == PCI, then qemuDomainCollectPCIAddress() function
-             * has already reserved the address, so we must skip */
-        }
-    } else if (addrs->nbuses && !qemuDeviceVideoUsable) {
-        memset(&tmp_addr, 0, sizeof(tmp_addr));
-        tmp_addr.slot = 1;
-
-        if (virDomainPCIAddressSlotInUse(addrs, &tmp_addr)) {
-            VIR_DEBUG("PCI address 0:0:1.0 in use, future addition of a video"
-                      " device will not be possible without manual"
-                      " intervention");
-            virResetLastError();
-        } else if (virDomainPCIAddressReserveAddr(addrs, &tmp_addr, flags, 0) < 0) {
-            return -1;
         }
     }
 
@@ -2075,7 +2060,7 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
          * normal device addressing assign something later.
          */
         for (i = 0; i < def->nsounds; i++) {
-            virDomainSoundDefPtr sound = def->sounds[i];
+            virDomainSoundDef *sound = def->sounds[i];
 
             if (sound->model != VIR_DOMAIN_SOUND_MODEL_ICH9 ||
                 !virDeviceInfoPCIAddressIsWanted(&sound->info)) {
@@ -2095,17 +2080,16 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
 
 
 static int
-qemuDomainValidateDevicePCISlotsChipsets(virDomainDefPtr def,
-                                         virQEMUCapsPtr qemuCaps,
-                                         virDomainPCIAddressSetPtr addrs)
+qemuDomainValidateDevicePCISlotsChipsets(virDomainDef *def,
+                                         virDomainPCIAddressSet *addrs)
 {
     if (qemuDomainIsI440FX(def) &&
-        qemuDomainValidateDevicePCISlotsPIIX3(def, qemuCaps, addrs) < 0) {
+        qemuDomainValidateDevicePCISlotsPIIX3(def, addrs) < 0) {
         return -1;
     }
 
     if (qemuDomainIsQ35(def) &&
-        qemuDomainValidateDevicePCISlotsQ35(def, qemuCaps, addrs) < 0) {
+        qemuDomainValidateDevicePCISlotsQ35(def, addrs) < 0) {
         return -1;
     }
 
@@ -2150,15 +2134,15 @@ qemuDomainValidateDevicePCISlotsChipsets(virDomainDefPtr def,
  * skip over info.type == PCI
  */
 static int
-qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
-                               virQEMUCapsPtr qemuCaps,
-                               virDomainPCIAddressSetPtr addrs)
+qemuDomainAssignDevicePCISlots(virDomainDef *def,
+                               virQEMUCaps *qemuCaps,
+                               virDomainPCIAddressSet *addrs)
 {
     size_t i, j;
 
     /* PCI controllers */
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
 
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) {
             virDomainControllerModelPCI model = cont->model;
@@ -2185,7 +2169,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
     /* Network interfaces */
     for (i = 0; i < def->nnets; i++) {
-        virDomainNetDefPtr net = def->nets[i];
+        virDomainNetDef *net = def->nets[i];
 
         /* type='hostdev' network devices might be USB, and are also
          * in hostdevs list anyway, so handle them with other hostdevs
@@ -2202,7 +2186,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
     /* Sound cards */
     for (i = 0; i < def->nsounds; i++) {
-        virDomainSoundDefPtr sound = def->sounds[i];
+        virDomainSoundDef *sound = def->sounds[i];
 
         if (!virDeviceInfoPCIAddressIsWanted(&sound->info))
             continue;
@@ -2220,7 +2204,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
     /* Device controllers (SCSI, USB, but not IDE, FDC or CCID) */
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
 
         /* PCI controllers have been dealt with earlier */
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI)
@@ -2240,6 +2224,11 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
            dealt with earlier on */
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE &&
             cont->idx == 0)
+            continue;
+
+        /* NCR53C90 SCSI controller is always a built-in device */
+        if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI &&
+            cont->model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90)
             continue;
 
         if (!virDeviceInfoPCIAddressIsWanted(&cont->info))
@@ -2314,10 +2303,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
         /* don't touch s390 devices */
         if (virDeviceInfoPCIAddressIsPresent(&def->disks[i]->info) ||
-            def->disks[i]->info.type ==
-            VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390 ||
-            def->disks[i]->info.type ==
-            VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW)
+            def->disks[i]->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW)
             continue;
 
         /* Also ignore virtio-mmio disks if our machine allows them */
@@ -2328,7 +2314,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
         if (!virDeviceInfoPCIAddressIsWanted(&def->disks[i]->info)) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("virtio disk cannot have an address of type '%s'"),
+                           _("virtio disk cannot have an address of type '%1$s'"),
                            virDomainDeviceAddressTypeToString(def->disks[i]->info.type));
             return -1;
         }
@@ -2339,7 +2325,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
 
     /* Host PCI devices */
     for (i = 0; i < def->nhostdevs; i++) {
-        virDomainHostdevSubsysPtr subsys = &def->hostdevs[i]->source.subsys;
+        virDomainHostdevSubsys *subsys = &def->hostdevs[i]->source.subsys;
         if (!virDeviceInfoPCIAddressIsWanted(def->hostdevs[i]->info))
             continue;
         if (def->hostdevs[i]->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS)
@@ -2379,10 +2365,10 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
     }
 
     /* A watchdog - check if it is a PCI device */
-    if (def->watchdog &&
-        def->watchdog->model == VIR_DOMAIN_WATCHDOG_MODEL_I6300ESB &&
-        virDeviceInfoPCIAddressIsWanted(&def->watchdog->info)) {
-        if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->watchdog->info) < 0)
+    for (i = 0; i < def->nwatchdogs; i++) {
+        if (def->watchdogs[i]->model == VIR_DOMAIN_WATCHDOG_MODEL_I6300ESB &&
+            virDeviceInfoPCIAddressIsWanted(&def->watchdogs[i]->info) &&
+            qemuDomainPCIAddressReserveNextAddr(addrs, &def->watchdogs[i]->info) < 0)
             return -1;
     }
 
@@ -2419,7 +2405,7 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         /* Nada - none are PCI based (yet) */
     }
     for (i = 0; i < def->nserials; i++) {
-        virDomainChrDefPtr chr = def->serials[i];
+        virDomainChrDef *chr = def->serials[i];
 
         if (chr->targetType != VIR_DOMAIN_CHR_SERIAL_TARGET_TYPE_PCI ||
             !virDeviceInfoPCIAddressIsWanted(&chr->info))
@@ -2435,6 +2421,25 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
         /* Nada - none are PCI based (yet) */
     }
 
+    if (def->iommu) {
+        virDomainIOMMUDef *iommu = def->iommu;
+
+        switch (iommu->model) {
+        case VIR_DOMAIN_IOMMU_MODEL_VIRTIO:
+            if (virDeviceInfoPCIAddressIsWanted(&iommu->info) &&
+                qemuDomainPCIAddressReserveNextAddr(addrs, &iommu->info) < 0) {
+                return -1;
+            }
+            break;
+
+        case VIR_DOMAIN_IOMMU_MODEL_INTEL:
+        case VIR_DOMAIN_IOMMU_MODEL_SMMUV3:
+        case VIR_DOMAIN_IOMMU_MODEL_LAST:
+            /* These are not PCI devices */
+            break;
+        }
+    }
+
     if (def->vsock &&
         virDeviceInfoPCIAddressIsWanted(&def->vsock->info)) {
 
@@ -2443,16 +2448,63 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             return -1;
     }
 
+    for (i = 0; i < def->nmems; i++) {
+        virDomainMemoryDef *mem = def->mems[i];
+
+        switch (mem->model) {
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+            if (virDeviceInfoPCIAddressIsWanted(&mem->info) &&
+                qemuDomainPCIAddressReserveNextAddr(addrs, &mem->info) < 0)
+                return -1;
+            break;
+        case VIR_DOMAIN_MEMORY_MODEL_NONE:
+        case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+        case VIR_DOMAIN_MEMORY_MODEL_LAST:
+            break;
+        }
+    }
+
+    /* the qemu driver only accepts virtio crypto devices */
+    for (i = 0; i < def->ncryptos; i++) {
+        if (!virDeviceInfoPCIAddressIsWanted(&def->cryptos[i]->info))
+            continue;
+
+        if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->cryptos[i]->info) < 0)
+            return -1;
+    }
+
+    for (i = 0; i < def->npanics; i++) {
+        virDomainPanicDef *panic = def->panics[i];
+
+        switch (panic->model) {
+        case VIR_DOMAIN_PANIC_MODEL_PVPANIC:
+            if (virDeviceInfoPCIAddressIsWanted(&panic->info) &&
+                qemuDomainPCIAddressReserveNextAddr(addrs, &panic->info) < 0)
+                return -1;
+            break;
+        case VIR_DOMAIN_PANIC_MODEL_DEFAULT:
+        case VIR_DOMAIN_PANIC_MODEL_ISA:
+        case VIR_DOMAIN_PANIC_MODEL_PSERIES:
+        case VIR_DOMAIN_PANIC_MODEL_HYPERV:
+        case VIR_DOMAIN_PANIC_MODEL_S390:
+        case VIR_DOMAIN_PANIC_MODEL_LAST:
+            break;
+        }
+    }
+
     return 0;
 }
 
 
 static void
-qemuDomainPCIControllerSetDefaultModelName(virDomainControllerDefPtr cont,
-                                           virDomainDefPtr def,
-                                           virQEMUCapsPtr qemuCaps)
+qemuDomainPCIControllerSetDefaultModelName(virDomainControllerDef *cont,
+                                           virDomainDef *def,
+                                           virQEMUCaps *qemuCaps)
 {
-    int *modelName = &cont->opts.pciopts.modelName;
+    virDomainControllerPCIModelName *modelName = &cont->opts.pciopts.modelName;
 
     /* make sure it's not already set */
     if (*modelName != VIR_DOMAIN_CONTROLLER_PCI_MODEL_NAME_NONE)
@@ -2510,10 +2562,9 @@ qemuDomainPCIControllerSetDefaultModelName(virDomainControllerDefPtr cont,
  *          indexes are already taken.
  */
 static int
-qemuDomainAddressFindNewTargetIndex(virDomainDefPtr def)
+qemuDomainAddressFindNewTargetIndex(virDomainDef *def)
 {
     int targetIndex;
-    int ret = -1;
 
     /* Try all indexes between 1 and 31 - QEMU only supports 32
      * PHBs, and 0 is reserved for the default, implicit one */
@@ -2522,7 +2573,7 @@ qemuDomainAddressFindNewTargetIndex(virDomainDefPtr def)
         size_t i;
 
         for (i = 0; i < def->ncontrollers; i++) {
-            virDomainControllerDefPtr cont = def->controllers[i];
+            virDomainControllerDef *cont = def->controllers[i];
 
             /* Skip everything but PHBs */
             if (!virDomainControllerIsPSeriesPHB(cont))
@@ -2538,18 +2589,16 @@ qemuDomainAddressFindNewTargetIndex(virDomainDefPtr def)
 
         /* If no existing PCI controller uses this index, great,
          * it means it's free and we can return it to the caller */
-        if (!found) {
-            ret = targetIndex;
-            break;
-        }
+        if (!found)
+            return targetIndex;
     }
 
-    return ret;
+    return -1;
 }
 
 
 static int
-qemuDomainAddressFindNewBusNr(virDomainDefPtr def)
+qemuDomainAddressFindNewBusNr(virDomainDef *def)
 {
     /* Try to find a nice default for busNr for a new pci-expander-bus.
      * This is a bit tricky, since you need to satisfy the following:
@@ -2580,7 +2629,7 @@ qemuDomainAddressFindNewBusNr(virDomainDefPtr def)
      *  never need any additional child buses (probably only a few of the
      *  32 will ever be used). So for pci-expander-bus we find the lowest
      *  existing busNr, and set this one to the current lowest - 2 (one
-     *  for the pxb, one for the intergrated pci-bridge), thus leaving the
+     *  for the pxb, one for the integrated pci-bridge), thus leaving the
      *  maximum possible bus numbers available for other buses plugged
      *  into pci-root (i.e. pci-bridges and other
      *  pci-expander-buses). Anyone who needs more than 32 devices
@@ -2598,7 +2647,7 @@ qemuDomainAddressFindNewBusNr(virDomainDefPtr def)
     int lowestBusNr = 256;
 
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
 
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) {
             int thisBusNr = cont->opts.pciopts.busNr;
@@ -2620,21 +2669,21 @@ qemuDomainAddressFindNewBusNr(virDomainDefPtr def)
 
 
 static int
-qemuDomainAssignPCIAddresses(virDomainDefPtr def,
-                             virQEMUCapsPtr qemuCaps,
-                             virQEMUDriverPtr driver,
-                             virDomainObjPtr obj)
+qemuDomainAssignPCIAddresses(virDomainDef *def,
+                             virQEMUCaps *qemuCaps,
+                             virQEMUDriver *driver,
+                             virDomainObj *obj)
 {
     int ret = -1;
-    virDomainPCIAddressSetPtr addrs = NULL;
-    qemuDomainObjPrivatePtr priv = NULL;
+    virDomainPCIAddressSet *addrs = NULL;
+    qemuDomainObjPrivate *priv = NULL;
     int max_idx = -1;
     int nbuses = 0;
     size_t i;
     int rv;
 
     for (i = 0; i < def->ncontrollers; i++) {
-        virDomainControllerDefPtr cont = def->controllers[i];
+        virDomainControllerDef *cont = def->controllers[i];
 
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) {
             if ((int)cont->idx > max_idx)
@@ -2662,8 +2711,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
         if (!(addrs = qemuDomainPCIAddressSetCreate(def, qemuCaps, nbuses, true)))
             goto cleanup;
 
-        if (qemuDomainValidateDevicePCISlotsChipsets(def, qemuCaps,
-                                                     addrs) < 0)
+        if (qemuDomainValidateDevicePCISlotsChipsets(def, addrs) < 0)
             goto cleanup;
 
         /* For domains that have pci-root, reserve 1 extra slot for a
@@ -2747,7 +2795,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
         for (i = 1; i < addrs->nbuses; i++) {
             virDomainDeviceDef dev;
             int contIndex;
-            virDomainPCIAddressBusPtr bus = &addrs->buses[i];
+            virDomainPCIAddressBus *bus = &addrs->buses[i];
 
             if ((rv = virDomainDefMaybeAddController(
                      def, VIR_DOMAIN_CONTROLLER_TYPE_PCI,
@@ -2767,8 +2815,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
             if (contIndex < 0) {
                 /* this should never happen - we just added it */
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Could not find auto-added %s controller "
-                                 "with index %zu"),
+                               _("Could not find auto-added %1$s controller with index %2$zu"),
                                virDomainControllerModelPCITypeToString(bus->model),
                                i);
                 goto cleanup;
@@ -2790,16 +2837,14 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
         }
 
         nbuses = addrs->nbuses;
-        virDomainPCIAddressSetFree(addrs);
-        addrs = NULL;
+        g_clear_pointer(&addrs, virDomainPCIAddressSetFree);
     }
 
     if (!(addrs = qemuDomainPCIAddressSetCreate(def, qemuCaps, nbuses, false)))
         goto cleanup;
 
     if (qemuDomainSupportsPCI(def, qemuCaps)) {
-        if (qemuDomainValidateDevicePCISlotsChipsets(def, qemuCaps,
-                                                     addrs) < 0)
+        if (qemuDomainValidateDevicePCISlotsChipsets(def, addrs) < 0)
             goto cleanup;
 
         if (qemuDomainAssignDevicePCISlots(def, qemuCaps, addrs) < 0)
@@ -2814,10 +2859,10 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
         virDomainPCIAddressSetAllMulti(def);
 
         for (i = 0; i < def->ncontrollers; i++) {
-            virDomainControllerDefPtr cont = def->controllers[i];
+            virDomainControllerDef *cont = def->controllers[i];
             int idx = cont->idx;
-            virPCIDeviceAddressPtr addr;
-            virDomainPCIControllerOptsPtr options;
+            virPCIDeviceAddress *addr;
+            virDomainPCIControllerOpts *options;
 
             if (cont->type != VIR_DOMAIN_CONTROLLER_TYPE_PCI)
                 continue;
@@ -2858,10 +2903,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
                     options->busNr = qemuDomainAddressFindNewBusNr(def);
                 if (options->busNr == -1) {
                     virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                                   _("No free busNr lower than current "
-                                     "lowest busNr is available to "
-                                     "auto-assign to bus %d. Must be "
-                                     "manually assigned"),
+                                   _("No free busNr lower than current lowest busNr is available to auto-assign to bus %1$d. Must be manually assigned"),
                                    addr->bus);
                     goto cleanup;
                 }
@@ -2885,7 +2927,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
                 }
                 if (options->targetIndex == -1) {
                     virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                                   _("No usable target index found for %d"),
+                                   _("No usable target index found for %1$d"),
                                    addr->bus);
                     goto cleanup;
                 }
@@ -2905,9 +2947,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
             if (cont->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_BRIDGE &&
                 idx <= addr->bus) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("PCI controller at index %d (0x%02x) has "
-                                 "bus='0x%02x', but index must be "
-                                 "larger than bus"),
+                               _("PCI controller at index %1$d (0x%2$02x) has bus='0x%3$02x', but index must be larger than bus"),
                                idx, idx, addr->bus);
                 goto cleanup;
             }
@@ -2917,8 +2957,7 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
     if (obj && obj->privateData) {
         priv = obj->privateData;
         /* if this is the live domain object, we persist the PCI addresses */
-        priv->pciaddrs = addrs;
-        addrs = NULL;
+        priv->pciaddrs = g_steal_pointer(&addrs);
     }
 
     ret = 0;
@@ -2931,13 +2970,13 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
 
 
 struct qemuAssignUSBIteratorInfo {
-    virDomainUSBAddressSetPtr addrs;
+    virDomainUSBAddressSet *addrs;
     size_t count;
 };
 
 
 static int
-qemuDomainAssignUSBPortsIterator(virDomainDeviceInfoPtr info,
+qemuDomainAssignUSBPortsIterator(virDomainDeviceInfo *info,
                                  void *opaque)
 {
     struct qemuAssignUSBIteratorInfo *data = opaque;
@@ -2955,13 +2994,13 @@ qemuDomainAssignUSBPortsIterator(virDomainDeviceInfoPtr info,
 
 
 static int
-qemuDomainAssignUSBHubs(virDomainUSBAddressSetPtr addrs,
-                        virDomainDefPtr def)
+qemuDomainAssignUSBHubs(virDomainUSBAddressSet *addrs,
+                        virDomainDef *def)
 {
     size_t i;
 
     for (i = 0; i < def->nhubs; i++) {
-        virDomainHubDefPtr hub = def->hubs[i];
+        virDomainHubDef *hub = def->hubs[i];
         if (hub->type != VIR_DOMAIN_HUB_TYPE_USB)
             continue;
 
@@ -2980,8 +3019,8 @@ qemuDomainAssignUSBHubs(virDomainUSBAddressSetPtr addrs,
 
 
 static int
-qemuDomainAssignUSBPorts(virDomainUSBAddressSetPtr addrs,
-                         virDomainDefPtr def)
+qemuDomainAssignUSBPorts(virDomainUSBAddressSet *addrs,
+                         virDomainDef *def)
 {
     struct qemuAssignUSBIteratorInfo data = { .addrs = addrs };
 
@@ -2993,7 +3032,7 @@ qemuDomainAssignUSBPorts(virDomainUSBAddressSetPtr addrs,
 
 
 static int
-qemuDomainAssignUSBPortsCounter(virDomainDeviceInfoPtr info G_GNUC_UNUSED,
+qemuDomainAssignUSBPortsCounter(virDomainDeviceInfo *info G_GNUC_UNUSED,
                                 void *opaque)
 {
     struct qemuAssignUSBIteratorInfo *data = opaque;
@@ -3004,13 +3043,12 @@ qemuDomainAssignUSBPortsCounter(virDomainDeviceInfoPtr info G_GNUC_UNUSED,
 
 
 static int
-qemuDomainUSBAddressAddHubs(virDomainDefPtr def)
+qemuDomainUSBAddressAddHubs(virDomainDef *def)
 {
     struct qemuAssignUSBIteratorInfo data = { .count = 0 };
-    virDomainHubDefPtr hub = NULL;
+    virDomainHubDef *hub = NULL;
     size_t available_ports;
     size_t hubs_needed = 0;
-    int ret = -1;
     size_t i;
 
     available_ports = virDomainUSBAddressCountAllPorts(def);
@@ -3021,8 +3059,7 @@ qemuDomainUSBAddressAddHubs(virDomainDefPtr def)
 
     if (data.count > 0 && !virDomainDefHasUSB(def)) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("USB is disabled for this domain, but USB devices "
-                         "are present in the domain XML"));
+                       _("USB is disabled for this domain, but USB devices are present in the domain XML"));
         return -1;
     }
 
@@ -3034,30 +3071,22 @@ qemuDomainUSBAddressAddHubs(virDomainDefPtr def)
               data.count, available_ports, hubs_needed);
 
     for (i = 0; i < hubs_needed; i++) {
-        if (VIR_ALLOC(hub) < 0)
-            return -1;
+        hub = g_new0(virDomainHubDef, 1);
         hub->type = VIR_DOMAIN_HUB_TYPE_USB;
 
-        if (VIR_APPEND_ELEMENT(def->hubs, def->nhubs, hub) < 0)
-            goto cleanup;
+        VIR_APPEND_ELEMENT(def->hubs, def->nhubs, hub);
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(hub);
-    return ret;
+    return 0;
 }
 
 
-static virBitmapPtr
+static virBitmap *
 qemuDomainGetMemorySlotMap(const virDomainDef *def)
 {
-    virBitmapPtr ret;
-    virDomainMemoryDefPtr mem;
+    virBitmap *ret = virBitmapNew(def->mem.memory_slots);
+    virDomainMemoryDef *mem;
     size_t i;
-
-    if (!(ret = virBitmapNew(def->mem.memory_slots)))
-        return NULL;
 
     for (i = 0; i < def->nmems; i++) {
         mem = def->mems[i];
@@ -3071,8 +3100,8 @@ qemuDomainGetMemorySlotMap(const virDomainDef *def)
 
 
 static int
-qemuAssignMemoryDeviceSlot(virDomainMemoryDefPtr mem,
-                           virBitmapPtr slotmap)
+qemuAssignMemoryDeviceSlot(virDomainMemoryDef *mem,
+                           virBitmap *slotmap)
 {
     ssize_t nextslot = -1;
 
@@ -3094,27 +3123,65 @@ qemuAssignMemoryDeviceSlot(virDomainMemoryDefPtr mem,
 
 
 int
-qemuDomainAssignMemoryDeviceSlot(virDomainDefPtr def,
-                                 virDomainMemoryDefPtr mem)
+qemuDomainAssignMemoryDeviceSlot(virDomainObj *vm,
+                                 virDomainMemoryDef *mem)
 {
-    virBitmapPtr slotmap = NULL;
-    int ret;
+    g_autoptr(virBitmap) slotmap = NULL;
+    virDomainDeviceDef dev = {.type = VIR_DOMAIN_DEVICE_MEMORY, .data.memory = mem};
 
-    if (!(slotmap = qemuDomainGetMemorySlotMap(def)))
-        return -1;
+    switch (mem->model) {
+    case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+    case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+        if (!(slotmap = qemuDomainGetMemorySlotMap(vm->def)))
+            return -1;
 
-    ret = qemuAssignMemoryDeviceSlot(mem, slotmap);
+        return qemuAssignMemoryDeviceSlot(mem, slotmap);
+        break;
 
-    virBitmapFree(slotmap);
-    return ret;
+    case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+    case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+        return qemuDomainEnsurePCIAddress(vm, &dev);
+        break;
+
+    case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+    case VIR_DOMAIN_MEMORY_MODEL_NONE:
+    case VIR_DOMAIN_MEMORY_MODEL_LAST:
+        break;
+    }
+
+    return 0;
+}
+
+
+void
+qemuDomainReleaseMemoryDeviceSlot(virDomainObj *vm,
+                                  virDomainMemoryDef *mem)
+{
+    switch (mem->model) {
+    case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+    case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+        /* We don't need to release anything. Slot map is not
+         * kept around. It's constructed every time when
+         * assigning new slot. */
+        break;
+
+    case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+    case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+        qemuDomainReleaseDeviceAddress(vm, &mem->info);
+        break;
+
+    case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+    case VIR_DOMAIN_MEMORY_MODEL_NONE:
+    case VIR_DOMAIN_MEMORY_MODEL_LAST:
+        break;
+    }
 }
 
 
 static int
-qemuDomainAssignMemorySlots(virDomainDefPtr def)
+qemuDomainAssignMemorySlots(virDomainDef *def)
 {
-    virBitmapPtr slotmap = NULL;
-    int ret = -1;
+    g_autoptr(virBitmap) slotmap = NULL;
     size_t i;
 
     if (!virDomainDefHasMemoryHotplug(def))
@@ -3124,27 +3191,38 @@ qemuDomainAssignMemorySlots(virDomainDefPtr def)
         return -1;
 
     for (i = 0; i < def->nmems; i++) {
-        if (qemuAssignMemoryDeviceSlot(def->mems[i], slotmap) < 0)
-            goto cleanup;
+        virDomainMemoryDef *mem = def->mems[i];
+
+        switch (mem->model) {
+        case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+            if (qemuAssignMemoryDeviceSlot(def->mems[i], slotmap) < 0)
+                return -1;
+            break;
+
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+            /* handled in qemuDomainAssignPCIAddresses() */
+            break;
+        case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+        case VIR_DOMAIN_MEMORY_MODEL_NONE:
+        case VIR_DOMAIN_MEMORY_MODEL_LAST:
+            break;
+        }
     }
 
-    ret = 0;
-
- cleanup:
-    virBitmapFree(slotmap);
-    return ret;
-
+    return 0;
 }
 
 
 static int
-qemuDomainAssignUSBAddresses(virDomainDefPtr def,
-                             virDomainObjPtr obj,
+qemuDomainAssignUSBAddresses(virDomainDef *def,
+                             virDomainObj *obj,
                              bool newDomain)
 {
     int ret = -1;
-    virDomainUSBAddressSetPtr addrs = NULL;
-    qemuDomainObjPrivatePtr priv = NULL;
+    virDomainUSBAddressSet *addrs = NULL;
+    qemuDomainObjPrivate *priv = NULL;
 
     if (!newDomain) {
         /* only create the address cache for:
@@ -3182,8 +3260,7 @@ qemuDomainAssignUSBAddresses(virDomainDefPtr def,
 
     if (obj && obj->privateData) {
         priv = obj->privateData;
-        priv->usbaddrs = addrs;
-        addrs = NULL;
+        priv->usbaddrs = g_steal_pointer(&addrs);
     }
     ret = 0;
 
@@ -3194,10 +3271,10 @@ qemuDomainAssignUSBAddresses(virDomainDefPtr def,
 
 
 int
-qemuDomainAssignAddresses(virDomainDefPtr def,
-                          virQEMUCapsPtr qemuCaps,
-                          virQEMUDriverPtr driver,
-                          virDomainObjPtr obj,
+qemuDomainAssignAddresses(virDomainDef *def,
+                          virQEMUCaps *qemuCaps,
+                          virQEMUDriver *driver,
+                          virDomainObj *obj,
                           bool newDomain)
 {
     if (qemuDomainAssignVirtioSerialAddresses(def) < 0)
@@ -3226,7 +3303,7 @@ qemuDomainAssignAddresses(virDomainDefPtr def,
 /**
  * qemuDomainEnsurePCIAddress:
  *
- * @obj: the virDomainObjPtr for the domain. This will include
+ * @obj: the virDomainObj *f or the domain. This will include
  *       qemuCaps and address cache (if there is one)
  *
  * @dev: the device that we need to ensure has a PCI address
@@ -3239,17 +3316,16 @@ qemuDomainAssignAddresses(virDomainDefPtr def,
  * returns 0 on success -1 on failure.
  */
 int
-qemuDomainEnsurePCIAddress(virDomainObjPtr obj,
-                           virDomainDeviceDefPtr dev,
-                           virQEMUDriverPtr driver)
+qemuDomainEnsurePCIAddress(virDomainObj *obj,
+                           virDomainDeviceDef *dev)
 {
-    qemuDomainObjPrivatePtr priv = obj->privateData;
-    virDomainDeviceInfoPtr info = virDomainDeviceGetInfo(dev);
+    qemuDomainObjPrivate *priv = obj->privateData;
+    virDomainDeviceInfo *info = virDomainDeviceGetInfo(dev);
 
     if (!info)
         return 0;
 
-    qemuDomainFillDevicePCIConnectFlags(obj->def, dev, priv->qemuCaps, driver);
+    qemuDomainFillDevicePCIConnectFlags(obj->def, dev, priv->qemuCaps, priv->driver);
 
     qemuDomainFillDevicePCIExtensionFlags(dev, info, priv->qemuCaps);
 
@@ -3258,10 +3334,10 @@ qemuDomainEnsurePCIAddress(virDomainObjPtr obj,
 }
 
 void
-qemuDomainReleaseDeviceAddress(virDomainObjPtr vm,
-                               virDomainDeviceInfoPtr info)
+qemuDomainReleaseDeviceAddress(virDomainObj *vm,
+                               virDomainDeviceInfo *info)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
+    qemuDomainObjPrivate *priv = vm->privateData;
 
     if (virDeviceInfoPCIAddressIsPresent(info)) {
         virDomainPCIAddressReleaseAddr(priv->pciaddrs, &info->addr.pci);
@@ -3274,26 +3350,16 @@ qemuDomainReleaseDeviceAddress(virDomainObjPtr vm,
 
 int
 qemuDomainEnsureVirtioAddress(bool *releaseAddr,
-                              virDomainObjPtr vm,
-                              virDomainDeviceDefPtr dev,
-                              const char *devicename)
+                              virDomainObj *vm,
+                              virDomainDeviceDef *dev)
 {
-    virDomainDeviceInfoPtr info = virDomainDeviceGetInfo(dev);
-    qemuDomainObjPrivatePtr priv = vm->privateData;
-    virDomainCCWAddressSetPtr ccwaddrs = NULL;
-    virQEMUDriverPtr driver = priv->driver;
+    virDomainDeviceInfo *info = virDomainDeviceGetInfo(dev);
+    virDomainCCWAddressSet *ccwaddrs = NULL;
     int ret = -1;
 
     if (!info->type) {
-        if (qemuDomainIsS390CCW(vm->def) &&
-            virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_CCW))
+        if (qemuDomainIsS390CCW(vm->def))
             info->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW;
-        else if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_S390))
-            info->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390;
-    } else {
-        if (!qemuDomainCheckCCWS390AddressSupport(vm->def, info, priv->qemuCaps,
-                                                  devicename))
-            return -1;
     }
 
     if (info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW) {
@@ -3304,7 +3370,7 @@ qemuDomainEnsureVirtioAddress(bool *releaseAddr,
             goto cleanup;
     } else if (!info->type ||
                info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI) {
-        if (qemuDomainEnsurePCIAddress(vm, dev, driver) < 0)
+        if (qemuDomainEnsurePCIAddress(vm, dev) < 0)
             goto cleanup;
         *releaseAddr = true;
     }

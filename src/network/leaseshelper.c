@@ -24,12 +24,9 @@
 #include <config.h>
 
 
-#include "virthread.h"
 #include "virfile.h"
 #include "virpidfile.h"
-#include "virstring.h"
 #include "virerror.h"
-#include "viralloc.h"
 #include "virjson.h"
 #include "virlease.h"
 #include "virenum.h"
@@ -52,9 +49,9 @@ G_GNUC_NORETURN static void
 usage(int status)
 {
     if (status) {
-        fprintf(stderr, _("%s: try --help for more details\n"), program_name);
+        fprintf(stderr, _("%1$s: try --help for more details\n"), program_name);
     } else {
-        printf(_("Usage: %s add|old|del|init mac|clientid ip [hostname]\n"
+        printf(_("Usage: %1$s add|old|del|init mac|clientid ip [hostname]\n"
                  "Designed for use with 'dnsmasq --dhcp-script'\n"
                  "Refer to man page of dnsmasq for more details'\n"),
                program_name);
@@ -82,8 +79,8 @@ VIR_ENUM_IMPL(virLeaseAction,
 int
 main(int argc, char **argv)
 {
-    char *pid_file = NULL;
-    char *custom_lease_file = NULL;
+    g_autofree char *pid_file = NULL;
+    g_autofree char *custom_lease_file = NULL;
     const char *ip = NULL;
     const char *mac = NULL;
     const char *leases_str = NULL;
@@ -91,13 +88,13 @@ main(int argc, char **argv)
     const char *clientid = getenv("DNSMASQ_CLIENT_ID");
     const char *interface = getenv("DNSMASQ_INTERFACE");
     const char *hostname = getenv("DNSMASQ_SUPPLIED_HOSTNAME");
-    char *server_duid = NULL;
+    g_autofree char *server_duid = NULL;
     int action = -1;
     int pid_file_fd = -1;
     int rv = EXIT_FAILURE;
     bool delete = false;
-    virJSONValuePtr lease_new = NULL;
-    virJSONValuePtr leases_array_new = NULL;
+    g_autoptr(virJSONValue) lease_new = NULL;
+    g_autoptr(virJSONValue) leases_array_new = NULL;
 
     virSetErrorFunc(NULL, NULL);
     virSetErrorLogPriorityFunc(NULL);
@@ -106,7 +103,7 @@ main(int argc, char **argv)
 
     if (virGettextInitialize() < 0 ||
         virErrorInitialize() < 0) {
-        fprintf(stderr, _("%s: initialization failed\n"), program_name);
+        fprintf(stderr, _("%1$s: initialization failed\n"), program_name);
         exit(EXIT_FAILURE);
     }
 
@@ -140,7 +137,7 @@ main(int argc, char **argv)
     mac = argv[2];
 
     if ((action = virLeaseActionTypeFromString(argv[1])) < 0) {
-        fprintf(stderr, _("Unsupported action: %s\n"), argv[1]);
+        fprintf(stderr, _("Unsupported action: %1$s\n"), argv[1]);
         exit(EXIT_FAILURE);
     }
 
@@ -162,9 +159,9 @@ main(int argc, char **argv)
     pid_file = g_strdup(RUNSTATEDIR "/leaseshelper.pid");
 
     /* Try to claim the pidfile, exiting if we can't */
-    if ((pid_file_fd = virPidFileAcquirePath(pid_file, true, getpid())) < 0) {
+    if ((pid_file_fd = virPidFileAcquirePathFull(pid_file, true, false, getpid())) < 0) {
         fprintf(stderr,
-                _("Unable to acquire PID file: %s\n errno=%d"),
+                _("Unable to acquire PID file: %1$s\n errno=%2$d"),
                 pid_file, errno);
         goto cleanup;
     }
@@ -173,7 +170,7 @@ main(int argc, char **argv)
      * corresponding custom lease file exists. If not, 'touch' it */
     if (virFileTouch(custom_lease_file, 0644) < 0) {
         fprintf(stderr,
-                _("Unable to create: %s\n errno=%d"),
+                _("Unable to create: %1$s\n errno=%2$d"),
                 custom_lease_file, errno);
         goto cleanup;
     }
@@ -226,12 +223,11 @@ main(int argc, char **argv)
 
     case VIR_LEASE_ACTION_OLD:
     case VIR_LEASE_ACTION_ADD:
-        if (lease_new && virJSONValueArrayAppend(leases_array_new, lease_new) < 0) {
+        if (lease_new && virJSONValueArrayAppend(leases_array_new, &lease_new) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("failed to create json"));
             goto cleanup;
         }
-        lease_new = NULL;
 
         G_GNUC_FALLTHROUGH;
     case VIR_LEASE_ACTION_DEL:
@@ -253,14 +249,10 @@ main(int argc, char **argv)
     rv = EXIT_SUCCESS;
 
  cleanup:
+    if (rv != EXIT_SUCCESS)
+        virDispatchError(NULL);
     if (pid_file_fd != -1)
         virPidFileReleasePath(pid_file, pid_file_fd);
-
-    VIR_FREE(pid_file);
-    VIR_FREE(server_duid);
-    VIR_FREE(custom_lease_file);
-    virJSONValueFree(lease_new);
-    virJSONValueFree(leases_array_new);
 
     return rv;
 }

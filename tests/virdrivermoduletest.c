@@ -19,8 +19,6 @@
 #include <config.h>
 
 #include "testutils.h"
-#include "virerror.h"
-#include "viralloc.h"
 #include "virlog.h"
 #include "driver.h"
 
@@ -38,7 +36,6 @@ static int testDriverModule(const void *args)
 {
     const struct testDriverModuleData *data = args;
 
-    /* coverity[leaked_storage] */
     if (virDriverLoadModule(data->module, data->regfunc, true) != 0)
         return -1;
 

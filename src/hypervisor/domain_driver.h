@@ -20,7 +20,9 @@
 
 #pragma once
 
-#include "domain_conf.h"
+#include "node_device_conf.h"
+#include "virhostdev.h"
+#include "virpci.h"
 
 char *
 virDomainDriverGenerateRootHash(const char *drivername,
@@ -33,15 +35,39 @@ virDomainDriverGenerateMachineName(const char *drivername,
                                    const char *name,
                                    bool privileged);
 
-int virDomainDriverMergeBlkioDevice(virBlkioDevicePtr *dest_array,
+int virDomainDriverMergeBlkioDevice(virBlkioDevice **dest_array,
                                     size_t *dest_size,
-                                    virBlkioDevicePtr src_array,
+                                    virBlkioDevice *src_array,
                                     size_t src_size,
                                     const char *type);
 
 int virDomainDriverParseBlkioDeviceStr(char *blkioDeviceStr, const char *type,
-                                       virBlkioDevicePtr *dev, size_t *size);
+                                       virBlkioDevice **dev, size_t *size);
 
-int virDomainDriverSetupPersistentDefBlkioParams(virDomainDefPtr persistentDef,
+int virDomainDriverSetupPersistentDefBlkioParams(virDomainDef *persistentDef,
                                                  virTypedParameterPtr params,
                                                  int nparams);
+
+int virDomainDriverNodeDeviceGetPCIInfo(virNodeDeviceDef *def,
+                                        virPCIDeviceAddress *devAddr);
+
+int virDomainDriverNodeDeviceReset(virNodeDevicePtr dev,
+                                   virHostdevManager *hostdevMgr);
+
+int virDomainDriverNodeDeviceReAttach(virNodeDevicePtr dev,
+                                      virHostdevManager *hostdevMgr);
+
+int virDomainDriverNodeDeviceDetachFlags(virNodeDevicePtr dev,
+                                         virHostdevManager *hostdevMgr,
+                                         virPCIStubDriver driverType,
+                                         const char *driverName);
+
+int virDomainDriverAddIOThreadCheck(virDomainDef *def,
+                                    unsigned int iothread_id);
+
+int virDomainDriverDelIOThreadCheck(virDomainDef *def,
+                                    unsigned int iothread_id);
+
+int virDomainDriverGetIOThreadsConfig(virDomainDef *targetDef,
+                                      virDomainIOThreadInfoPtr **info,
+                                      unsigned int bitmap_size);

@@ -19,6 +19,8 @@
 
 . "$(dirname $0)/test-lib.sh"
 
+test_expensive
+
 if test "$VERBOSE" = yes; then
   set -x
   $abs_top_builddir/tools/virsh --version
@@ -98,11 +100,14 @@ Domain snapshot s1 created
 
 Domain snapshot s3 created
 Domain snapshot s2 created
+Domain snapshot s3 reverted
 
 Domain snapshot s6 created
 Domain snapshot s5 created
+Domain snapshot s6 reverted
 
 Domain snapshot s4 created
+Domain snapshot s1 reverted
 
 Domain snapshot s7 created
 Domain snapshot s8 created
@@ -135,25 +140,25 @@ Domain snapshot s1 deleted
  Name   Creation Time               State
 ---------------------------------------------
  s3     TIMESTAMP   running
- s7     TIMESTAMP   paused
+ s7     TIMESTAMP   running
 
  Name   Creation Time               State
 ---------------------------------------------
  s2     TIMESTAMP   running
- s4     TIMESTAMP   paused
- s5     TIMESTAMP   paused
- s8     TIMESTAMP   paused
+ s4     TIMESTAMP   running
+ s5     TIMESTAMP   running
+ s8     TIMESTAMP   running
 
  Name   Creation Time               State     Parent
 ------------------------------------------------------
  s3     TIMESTAMP   running
- s6     TIMESTAMP   paused    s3
- s7     TIMESTAMP   paused
+ s6     TIMESTAMP   running   s3
+ s7     TIMESTAMP   running
 
  Name   Creation Time               State
 ---------------------------------------------
  s2     TIMESTAMP   running
- s6     TIMESTAMP   paused
+ s6     TIMESTAMP   running
 
 s2
 s4

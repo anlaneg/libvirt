@@ -21,11 +21,13 @@
 #include <config.h>
 
 #include "virsh-completer-host.h"
-#include "viralloc.h"
 #include "virsh.h"
 #include "virstring.h"
 #include "virxml.h"
 #include "virutil.h"
+#include "virsh-host.h"
+#include "conf/domain_conf.h"
+#include "virarch.h"
 
 static char *
 virshPagesizeNodeToString(xmlNodePtr node)
@@ -41,7 +43,7 @@ virshPagesizeNodeToString(xmlNodePtr node)
     unit = virXMLPropString(node, "unit");
     if (virStrToLong_ull(pagesize, NULL, 10, &byteval) < 0)
         return NULL;
-    if (virScaleInteger(&byteval, unit, 1024, UINT_MAX) < 0)
+    if (virScaleInteger(&byteval, unit, 1024, ULLONG_MAX) < 0)
         return NULL;
     size = vshPrettyCapacity(byteval, &suffix);
     ret = g_strdup_printf("%.0f%s", size, suffix);
@@ -54,8 +56,8 @@ virshAllocpagesPagesizeCompleter(vshControl *ctl,
                                  unsigned int flags)
 {
     g_autoptr(xmlXPathContext) ctxt = NULL;
-    virshControlPtr priv = ctl->privData;
-    unsigned int npages = 0;
+    virshControl *priv = ctl->privData;
+    int npages = 0;
     g_autofree xmlNodePtr *pages = NULL;
     g_autoptr(xmlDoc) doc = NULL;
     size_t i = 0;
@@ -63,7 +65,7 @@ virshAllocpagesPagesizeCompleter(vshControl *ctl,
     bool cellno = vshCommandOptBool(cmd, "cellno");
     g_autofree char *path = NULL;
     g_autofree char *cap_xml = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -87,8 +89,7 @@ virshAllocpagesPagesizeCompleter(vshControl *ctl,
     if (npages <= 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, npages + 1) < 0)
-        return NULL;
+    tmp = g_new0(char *, npages + 1);
 
     for (i = 0; i < npages; i++) {
         if (!(tmp[i] = virshPagesizeNodeToString(pages[i])))
@@ -105,13 +106,13 @@ virshCellnoCompleter(vshControl *ctl,
                      unsigned int flags)
 {
     g_autoptr(xmlXPathContext) ctxt = NULL;
-    virshControlPtr priv = ctl->privData;
-    unsigned int ncells = 0;
+    virshControl *priv = ctl->privData;
+    int ncells = 0;
     g_autofree xmlNodePtr *cells = NULL;
     g_autoptr(xmlDoc) doc = NULL;
     size_t i = 0;
     g_autofree char *cap_xml = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -128,8 +129,7 @@ virshCellnoCompleter(vshControl *ctl,
     if (ncells <= 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, ncells + 1))
-        return NULL;
+    tmp = g_new0(char *, ncells + 1);
 
     for (i = 0; i < ncells; i++) {
         if (!(tmp[i] = virXMLPropString(cells[i], "id")))
@@ -137,4 +137,121 @@ virshCellnoCompleter(vshControl *ctl,
     }
 
     return g_steal_pointer(&tmp);
+}
+
+
+char **
+virshNodeCpuCompleter(vshControl *ctl,
+                      const vshCmd *cmd G_GNUC_UNUSED,
+                      unsigned int flags)
+{
+    virshControl *priv = ctl->privData;
+    g_auto(GStrv) tmp = NULL;
+    size_t i;
+    int cpunum;
+    size_t offset = 0;
+    unsigned int online;
+    g_autofree unsigned char *cpumap = NULL;
+
+    virCheckFlags(0, NULL);
+
+    if ((cpunum = virNodeGetCPUMap(priv->conn, &cpumap, &online, 0)) < 0)
+        return NULL;
+
+    tmp = g_new0(char *, online + 1);
+
+    for (i = 0; i < cpunum; i++) {
+        if (VIR_CPU_USED(cpumap, i) == 0)
+            continue;
+
+        tmp[offset++] = g_strdup_printf("%zu", i);
+    }
+
+    return g_steal_pointer(&tmp);
+}
+
+
+char **
+virshNodeSuspendTargetCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                const vshCmd *cmd G_GNUC_UNUSED,
+                                unsigned int flags)
+{
+    virCheckFlags(0, NULL);
+
+    return virshEnumComplete(VIR_NODE_SUSPEND_TARGET_LAST,
+                             virshNodeSuspendTargetTypeToString);
+}
+
+
+char **
+virshDomainVirtTypeCompleter(vshControl *ctl G_GNUC_UNUSED,
+                             const vshCmd *cmd G_GNUC_UNUSED,
+                             unsigned int flags)
+{
+    virCheckFlags(0, NULL);
+
+    return virshEnumComplete(VIR_DOMAIN_VIRT_LAST,
+                             virDomainVirtTypeToString);
+}
+
+
+char **
+virshArchCompleter(vshControl *ctl G_GNUC_UNUSED,
+                   const vshCmd *cmd G_GNUC_UNUSED,
+                   unsigned int flags)
+{
+    virCheckFlags(0, NULL);
+
+    return virshEnumComplete(VIR_ARCH_LAST,
+                             (const char *(*)(int))virArchToString);
+}
+
+
+char **
+virshCPUModelCompleter(vshControl *ctl,
+                       const vshCmd *cmd,
+                       unsigned int flags)
+{
+    virshControl *priv = ctl->privData;
+    const char *virttype = NULL;
+    const char *emulator = NULL;
+    const char *arch = NULL;
+    const char *machine = NULL;
+    g_autofree char *domcaps = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
+    g_auto(GStrv) models = NULL;
+    int nmodels = 0;
+    size_t i;
+
+    virCheckFlags(0, NULL);
+
+    if (vshCommandOptStringReq(ctl, cmd, "virttype", &virttype) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "emulator", &emulator) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "arch", &arch) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "machine", &machine) < 0)
+        return NULL;
+
+    if (!priv->conn || virConnectIsAlive(priv->conn) <= 0)
+        return NULL;
+
+    if (!(domcaps = virConnectGetDomainCapabilities(priv->conn, emulator, arch,
+                                                    machine, virttype, 0)))
+        return NULL;
+
+    if (!(xml = virXMLParseStringCtxt(domcaps, _("domain capabilities"), &ctxt)))
+        return NULL;
+
+    nmodels = virXPathNodeSet("/domainCapabilities/cpu/mode[@name='custom']/model",
+                              ctxt, &nodes);
+    if (nmodels <= 0)
+        return NULL;
+
+    models = g_new0(char *, nmodels + 1);
+
+    for (i = 0; i < nmodels; i++)
+        models[i] = virXMLNodeContentString(nodes[i]);
+
+    return g_steal_pointer(&models);
 }

@@ -28,12 +28,12 @@
 #define G_GNUC_UNUSED
 #define G_GNUC_NULL_TERMINATED
 #define G_GNUC_NORETURN
-#define G_GNUC_NO_INLINE
+#define G_NO_INLINE
 #define G_GNUC_FALLTHROUGH
 #define G_GNUC_PRINTF(a, b)
 
 #define g_autoptr(x) x##_autoptr
 #define g_autofree
-#define g_auto
+#define g_auto(x) x
 
 #define BAD_CAST

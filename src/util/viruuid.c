@@ -25,13 +25,10 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "internal.h"
-#include "virerror.h"
 #include "virlog.h"
-#include "viralloc.h"
 #include "virfile.h"
 #include "virrandom.h"
 
@@ -171,24 +168,21 @@ virUUIDFormat(const unsigned char *uuid, char *uuidstr)
  * Basic tests:
  *  - Not all of the digits may be equal
  */
-int
-virUUIDIsValid(unsigned char *uuid)
+bool
+virUUIDIsValid(const unsigned char *uuid)
 {
     size_t i;
-    unsigned int ctr = 1;
-    unsigned char c;
 
     if (!uuid)
-        return 0;
-
-    c = uuid[0];
+        return false;
 
     for (i = 1; i < VIR_UUID_BUFLEN; i++)
-        if (uuid[i] == c)
-            ctr++;
+        if (uuid[i] != uuid[0])
+            return true;
 
-    return ctr != VIR_UUID_BUFLEN;
+    return false;
 }
+
 
 static int
 getDMISystemUUID(char *uuid, int len)
@@ -222,13 +216,13 @@ int
 virSetHostUUIDStr(const char *uuid)
 {
     int rc;
-    char dmiuuid[VIR_UUID_STRING_BUFLEN];
 
     if (virUUIDIsValid(host_uuid))
         return EEXIST;
 
     if (!uuid) {
-        memset(dmiuuid, 0, sizeof(dmiuuid));
+        char dmiuuid[VIR_UUID_STRING_BUFLEN] = { 0 };
+
         if (!getDMISystemUUID(dmiuuid, sizeof(dmiuuid))) {
             if (!virUUIDParse(dmiuuid, host_uuid))
                 return 0;

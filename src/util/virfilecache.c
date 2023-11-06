@@ -24,7 +24,6 @@
 
 #include "internal.h"
 
-#include "viralloc.h"
 #include "virbuffer.h"
 #include "vircrypto.h"
 #include "virerror.h"
@@ -33,7 +32,6 @@
 #include "virhash.h"
 #include "virlog.h"
 #include "virobject.h"
-#include "virstring.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -47,7 +45,7 @@ VIR_LOG_INIT("util.filecache");
 struct _virFileCache {
     virObjectLockable parent;
 
-    virHashTablePtr table;
+    GHashTable *table;
 
     char *dir;
     char *suffix;
@@ -58,11 +56,11 @@ struct _virFileCache {
 };
 
 
-static virClassPtr virFileCacheClass;
+static virClass *virFileCacheClass;
 
 
 static void
-virFileCachePrivFree(virFileCachePtr cache)
+virFileCachePrivFree(virFileCache *cache)
 {
     if (cache->priv && cache->handlers.privFree)
         cache->handlers.privFree(cache->priv);
@@ -72,12 +70,12 @@ virFileCachePrivFree(virFileCachePtr cache)
 static void
 virFileCacheDispose(void *obj)
 {
-    virFileCachePtr cache = obj;
+    virFileCache *cache = obj;
 
-    VIR_FREE(cache->dir);
-    VIR_FREE(cache->suffix);
+    g_free(cache->dir);
+    g_free(cache->suffix);
 
-    virHashFree(cache->table);
+    g_clear_pointer(&cache->table, g_hash_table_unref);
 
     virFileCachePrivFree(cache);
 }
@@ -97,18 +95,18 @@ VIR_ONCE_GLOBAL_INIT(virFileCache);
 
 
 static char *
-virFileCacheGetFileName(virFileCachePtr cache,
+virFileCacheGetFileName(virFileCache *cache,
                         const char *name)
 {
     g_autofree char *namehash = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (virCryptoHashString(VIR_CRYPTO_HASH_SHA256, name, &namehash) < 0)
         return NULL;
 
-    if (virFileMakePath(cache->dir) < 0) {
+    if (g_mkdir_with_parents(cache->dir, 0777) < 0) {
         virReportSystemError(errno,
-                             _("Unable to create directory '%s'"),
+                             _("Unable to create directory '%1$s'"),
                              cache->dir);
         return NULL;
     }
@@ -123,7 +121,7 @@ virFileCacheGetFileName(virFileCachePtr cache,
 
 
 static int
-virFileCacheLoad(virFileCachePtr cache,
+virFileCacheLoad(virFileCache *cache,
                  const char *name,
                  void **data)
 {
@@ -144,7 +142,7 @@ virFileCacheLoad(virFileCachePtr cache,
             goto cleanup;
         }
         virReportSystemError(errno,
-                             _("Unable to access cache '%s' for '%s'"),
+                             _("Unable to access cache '%1$s' for '%2$s'"),
                              file, name);
         goto cleanup;
     }
@@ -172,13 +170,13 @@ virFileCacheLoad(virFileCachePtr cache,
     *data = g_steal_pointer(&loadData);
 
  cleanup:
-    virObjectUnref(loadData);
+    g_clear_pointer(&loadData, g_object_unref);
     return ret;
 }
 
 
 static int
-virFileCacheSave(virFileCachePtr cache,
+virFileCacheSave(virFileCache *cache,
                  const char *name,
                  void *data)
 {
@@ -195,7 +193,7 @@ virFileCacheSave(virFileCachePtr cache,
 
 
 static void *
-virFileCacheNewData(virFileCachePtr cache,
+virFileCacheNewData(virFileCache *cache,
                     const char *name)
 {
     void *data = NULL;
@@ -209,8 +207,7 @@ virFileCacheNewData(virFileCachePtr cache,
             return NULL;
 
         if (virFileCacheSave(cache, name, data) < 0) {
-            virObjectUnref(data);
-            data = NULL;
+            g_clear_object(&data);
         }
     }
 
@@ -229,12 +226,12 @@ virFileCacheNewData(virFileCachePtr cache,
  *
  * Returns new cache object or NULL on error.
  */
-virFileCachePtr
+virFileCache *
 virFileCacheNew(const char *dir,
                 const char *suffix,
                 virFileCacheHandlers *handlers)
 {
-    virFileCachePtr cache;
+    virFileCache *cache;
 
     if (virFileCacheInitialize() < 0)
         return NULL;
@@ -242,8 +239,7 @@ virFileCacheNew(const char *dir,
     if (!(cache = virObjectNew(virFileCacheClass)))
         return NULL;
 
-    if (!(cache->table = virHashCreate(10, virObjectFreeHashData)))
-        goto cleanup;
+    cache->table = virHashNew(g_object_unref);
 
     cache->dir = g_strdup(dir);
 
@@ -252,15 +248,11 @@ virFileCacheNew(const char *dir,
     cache->handlers = *handlers;
 
     return cache;
-
- cleanup:
-    virObjectUnref(cache);
-    return NULL;
 }
 
 
 static void
-virFileCacheValidate(virFileCachePtr cache,
+virFileCacheValidate(virFileCache *cache,
                      const char *name,
                      void **data)
 {
@@ -278,8 +270,7 @@ virFileCacheValidate(virFileCachePtr cache,
         if (*data) {
             VIR_DEBUG("Caching data '%p' for '%s'", *data, name);
             if (virHashAddEntry(cache->table, name, *data) < 0) {
-                virObjectUnref(*data);
-                *data = NULL;
+                g_clear_pointer(data, g_object_unref);
             }
         }
     }
@@ -299,7 +290,7 @@ virFileCacheValidate(virFileCachePtr cache,
  * unrefing the data.
  */
 void *
-virFileCacheLookup(virFileCachePtr cache,
+virFileCacheLookup(virFileCache *cache,
                    const char *name)
 {
     void *data = NULL;
@@ -309,7 +300,8 @@ virFileCacheLookup(virFileCachePtr cache,
     data = virHashLookup(cache->table, name);
     virFileCacheValidate(cache, name, &data);
 
-    virObjectRef(data);
+    if (data)
+        g_object_ref(data);
     virObjectUnlock(cache);
 
     return data;
@@ -328,7 +320,7 @@ virFileCacheLookup(virFileCachePtr cache,
  * unrefing the data.
  */
 void *
-virFileCacheLookupByFunc(virFileCachePtr cache,
+virFileCacheLookupByFunc(virFileCache *cache,
                          virHashSearcher iter,
                          const void *iterData)
 {
@@ -337,10 +329,11 @@ virFileCacheLookupByFunc(virFileCachePtr cache,
 
     virObjectLock(cache);
 
-    data = virHashSearch(cache->table, iter, iterData, (void **)&name);
+    data = virHashSearch(cache->table, iter, iterData, &name);
     virFileCacheValidate(cache, name, &data);
 
-    virObjectRef(data);
+    if (data)
+        g_object_ref(data);
     virObjectUnlock(cache);
 
     return data;
@@ -354,7 +347,7 @@ virFileCacheLookupByFunc(virFileCachePtr cache,
  * Returns private data used by @handlers.
  */
 void *
-virFileCacheGetPriv(virFileCachePtr cache)
+virFileCacheGetPriv(virFileCache *cache)
 {
     void *priv;
 
@@ -377,7 +370,7 @@ virFileCacheGetPriv(virFileCachePtr cache)
  * set, privFree() will be called on the old @priv before setting a new one.
  */
 void
-virFileCacheSetPriv(virFileCachePtr cache,
+virFileCacheSetPriv(virFileCache *cache,
                     void *priv)
 {
     virObjectLock(cache);
@@ -402,7 +395,7 @@ virFileCacheSetPriv(virFileCachePtr cache,
  * Returns 0 on success, -1 on error.
  */
 int
-virFileCacheInsertData(virFileCachePtr cache,
+virFileCacheInsertData(virFileCache *cache,
                        const char *name,
                        void *data)
 {
@@ -415,4 +408,20 @@ virFileCacheInsertData(virFileCachePtr cache,
     virObjectUnlock(cache);
 
     return ret;
+}
+
+
+/**
+ * virFileCacheClear:
+ * @cache: existing cache object
+ *
+ * Drops all entries from the cache. This is useful in tests to clean out
+ * previous usage.
+ */
+void
+virFileCacheClear(virFileCache *cache)
+{
+    virObjectLock(cache);
+    virHashRemoveAll(cache->table);
+    virObjectUnlock(cache);
 }

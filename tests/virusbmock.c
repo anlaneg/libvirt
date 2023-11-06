@@ -24,9 +24,6 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 
-#include "viralloc.h"
-#include "virfile.h"
-#include "virstring.h"
 #include "virusb.h"
 
 #define USB_SYSFS "/sys/bus/usb"
@@ -63,21 +60,18 @@ static char *get_fake_path(const char *real_path)
 
 DIR *opendir(const char *name)
 {
-    char *path;
-    DIR* ret;
+    g_autofree char *path = NULL;
 
     init_syms();
 
     path = get_fake_path(name);
 
-    ret = realopendir(path);
-    VIR_FREE(path);
-    return ret;
+    return realopendir(path);
 }
 
 int open(const char *pathname, int flags, ...)
 {
-    char *path;
+    g_autofree char *path = NULL;
     int ret;
     va_list ap;
     mode_t mode = 0;
@@ -98,7 +92,5 @@ int open(const char *pathname, int flags, ...)
     }
 
     ret = realopen(path, flags, mode);
-
-    VIR_FREE(path);
     return ret;
 }

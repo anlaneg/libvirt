@@ -28,13 +28,19 @@
 
 #include "internal.h"
 #include "virbitmap.h"
-#include "virstoragefile.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_FILE_CLOSE_PRESERVE_ERRNO = 1 << 0,
     VIR_FILE_CLOSE_IGNORE_EBADF = 1 << 1,
     VIR_FILE_CLOSE_DONT_LOG = 1 << 2,
 } virFileCloseFlags;
+
+#ifdef __APPLE__
+# define VIR_FILE_MODULE_EXT ".dylib"
+#else
+# define VIR_FILE_MODULE_EXT ".so"
+#endif
 
 ssize_t saferead(int fd, void *buf, size_t count) G_GNUC_WARN_UNUSED_RESULT;
 ssize_t safewrite(int fd, const void *buf, size_t count)
@@ -54,6 +60,11 @@ static inline void virForceCloseHelper(int *fd)
 {
     ignore_value(virFileClose(fd, VIR_FILE_CLOSE_PRESERVE_ERRNO));
 }
+
+int virCloseRange(unsigned int from, unsigned int to);
+int virCloseRangeInit(void);
+bool virCloseRangeIsSupported(void);
+int virCloseFrom(int fromfd);
 
 /* For use on normal paths; caller must check return value,
    and failure sets errno per close. */
@@ -95,7 +106,6 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(FILE, fclose);
 struct _virFileWrapperFd;
 
 typedef struct _virFileWrapperFd virFileWrapperFd;
-typedef virFileWrapperFd *virFileWrapperFdPtr;
 
 int virFileDirectFdFlag(void);
 
@@ -104,30 +114,35 @@ typedef enum {
     VIR_FILE_WRAPPER_NON_BLOCKING   = (1 << 1),
 } virFileWrapperFdFlags;
 
-virFileWrapperFdPtr virFileWrapperFdNew(int *fd,
+virFileWrapperFd *virFileWrapperFdNew(int *fd,
                                         const char *name,
                                         unsigned int flags)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
-int virFileWrapperFdClose(virFileWrapperFdPtr dfd);
+int virFileWrapperFdClose(virFileWrapperFd *dfd);
 
-void virFileWrapperFdFree(virFileWrapperFdPtr dfd);
+void virFileWrapperFdFree(virFileWrapperFd *dfd);
 
 int virFileLock(int fd, bool shared, off_t start, off_t len, bool waitForLock)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;
 int virFileUnlock(int fd, off_t start, off_t len)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;
 
-int virFileFlock(int fd, bool lock, bool shared);
-
-typedef int (*virFileRewriteFunc)(int fd, const void *opaque);
+typedef int (*virFileRewriteFunc)(int fd,
+                                  const char *path,
+                                  const void *opaque);
 int virFileRewrite(const char *path,
                    mode_t mode,
+                   uid_t uid, gid_t gid,
                    virFileRewriteFunc rewrite,
                    const void *opaque);
 int virFileRewriteStr(const char *path,
                       mode_t mode,
                       const char *str);
+
+int virFileResize(const char *path,
+                  unsigned long long capacity,
+                  bool pre_allocate);
 
 int virFileTouch(const char *path, mode_t mode);
 
@@ -139,7 +154,7 @@ int virFileLoopDeviceAssociate(const char *file,
                                char **dev);
 
 int virFileNBDDeviceAssociate(const char *file,
-                              virStorageFileFormat fmt,
+                              const char *fmtstr,
                               bool readonly,
                               char **dev);
 
@@ -177,7 +192,11 @@ int virFileResolveAllLinks(const char *linkpath,
 int virFileIsLink(const char *linkpath)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-char *virFindFileInPath(const char *file);
+char *virFindFileInPath(const char *file)
+    G_NO_INLINE;
+char *virFindFileInPathFull(const char *file,
+                            const char *const *extraDirs)
+    G_NO_INLINE;
 
 char *virFileFindResource(const char *filename,
                           const char *builddir,
@@ -196,25 +215,28 @@ void virFileActivateDirOverrideForLib(void);
 
 off_t virFileLength(const char *path, int fd) ATTRIBUTE_NONNULL(1);
 bool virFileIsDir (const char *file) ATTRIBUTE_NONNULL(1);
-bool virFileExists(const char *file) ATTRIBUTE_NONNULL(1) G_GNUC_NO_INLINE;
+bool virFileExists(const char *file) ATTRIBUTE_NONNULL(1) G_NO_INLINE;
 bool virFileIsExecutable(const char *file) ATTRIBUTE_NONNULL(1);
 bool virFileIsRegular(const char *file) ATTRIBUTE_NONNULL(1);
 
 enum {
     VIR_FILE_SHFS_NFS = (1 << 0),
-    VIR_FILE_SHFS_GFS2 = (1 << 1),
-    VIR_FILE_SHFS_OCFS = (1 << 2),
-    VIR_FILE_SHFS_AFS = (1 << 3),
-    VIR_FILE_SHFS_SMB = (1 << 4),
-    VIR_FILE_SHFS_CIFS = (1 << 5),
+    VIR_FILE_SHFS_GFS2 = (1 << 1), /* Global File System 2 */
+    VIR_FILE_SHFS_OCFS = (1 << 2), /* Oracle Cluster FS (2) */
+    VIR_FILE_SHFS_AFS = (1 << 3), /* Andrew File System */
+    VIR_FILE_SHFS_SMB = (1 << 4), /* Server message block - windows shares */
+    VIR_FILE_SHFS_CIFS = (1 << 5), /* Common Internet File System - windows shares */
     VIR_FILE_SHFS_CEPH = (1 << 6),
-    VIR_FILE_SHFS_GPFS = (1 << 7),
-    VIR_FILE_SHFS_QB = (1 << 8),
-    VIR_FILE_SHFS_ACFS = (1 << 9),
+    VIR_FILE_SHFS_GPFS = (1 << 7), /* General Parallel File System/IBM Spectrum Scale */
+    VIR_FILE_SHFS_QB = (1 << 8), /* Quobyte shared filesystem */
+    VIR_FILE_SHFS_ACFS = (1 << 9), /* Oracle ASM Cluster File System */
+    VIR_FILE_SHFS_GLUSTERFS = (1 << 10), /* gluster's FUSE-based client */
+    VIR_FILE_SHFS_BEEGFS = (1 << 11), /* BeeGFS/fhGFS */
 };
 
-int virFileIsSharedFSType(const char *path, int fstypes) ATTRIBUTE_NONNULL(1);
+int virFileIsSharedFSType(const char *path, unsigned int fstypes) ATTRIBUTE_NONNULL(1);
 int virFileIsSharedFS(const char *path) ATTRIBUTE_NONNULL(1);
+int virFileIsClusterFS(const char *path) ATTRIBUTE_NONNULL(1);
 int virFileIsMountPoint(const char *file) ATTRIBUTE_NONNULL(1);
 int virFileIsCDROM(const char *path)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
@@ -229,7 +251,7 @@ int virFileGetMountReverseSubtree(const char *mtabpath,
                                   size_t *nmountsret) G_GNUC_WARN_UNUSED_RESULT;
 
 char *virFileSanitizePath(const char *path);
-char *virFileCanonicalizePath(const char *path) G_GNUC_NO_INLINE;
+char *virFileCanonicalizePath(const char *path) G_NO_INLINE;
 
 enum {
     VIR_FILE_OPEN_NONE        = 0,
@@ -265,22 +287,18 @@ int virDirOpenQuiet(DIR **dirp, const char *dirname)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 int virDirRead(DIR *dirp, struct dirent **ent, const char *dirname)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
-void virDirClose(DIR **dirp)
-    ATTRIBUTE_NONNULL(1);
-#define VIR_DIR_CLOSE(dir)  virDirClose(&(dir))
+void virDirClose(DIR *dirp);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(DIR, virDirClose);
+int virDirIsEmpty(const char *path,
+                  bool hidden)
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-int virFileMakePath(const char *path) G_GNUC_WARN_UNUSED_RESULT;
-int virFileMakePathWithMode(const char *path,
-                            mode_t mode) G_GNUC_WARN_UNUSED_RESULT;
 int virFileMakeParentPath(const char *path) G_GNUC_WARN_UNUSED_RESULT;
 
 char *virFileBuildPath(const char *dir,
                        const char *name,
                        const char *ext) G_GNUC_WARN_UNUSED_RESULT;
 
-
-int virFileAbsPath(const char *path,
-                   char **abspath) G_GNUC_WARN_UNUSED_RESULT;
 void virFileRemoveLastComponent(char *path);
 
 int virFileOpenTty(int *ttymaster,
@@ -289,13 +307,7 @@ int virFileOpenTty(int *ttymaster,
 
 char *virFileFindMountPoint(const char *type);
 
-/* NB: this should be combined with virFileBuildPath */
-#define virBuildPath(path, ...) \
-    virBuildPathInternal(path, __VA_ARGS__, NULL)
-int virBuildPathInternal(char **path, ...) G_GNUC_NULL_TERMINATED;
-
 typedef struct _virHugeTLBFS virHugeTLBFS;
-typedef virHugeTLBFS *virHugeTLBFSPtr;
 struct _virHugeTLBFS {
     char *mnt_dir;                  /* Where the FS is mount to */
     unsigned long long size;        /* page size in kibibytes */
@@ -304,10 +316,10 @@ struct _virHugeTLBFS {
 
 int virFileGetHugepageSize(const char *path,
                            unsigned long long *size);
-int virFileFindHugeTLBFS(virHugeTLBFSPtr *ret_fs,
+int virFileFindHugeTLBFS(virHugeTLBFS **ret_fs,
                          size_t *ret_nfs);
 
-virHugeTLBFSPtr virFileGetDefaultHugepage(virHugeTLBFSPtr fs,
+virHugeTLBFS *virFileGetDefaultHugepage(virHugeTLBFS *fs,
                                           size_t nfs);
 
 int virFileSetupDev(const char *path,
@@ -338,7 +350,9 @@ int virFileReadValueUint(unsigned int *value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
 int virFileReadValueUllong(unsigned long long *value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
-int virFileReadValueBitmap(virBitmapPtr *value, const char *format, ...)
+int virFileReadValueUllongQuiet(unsigned long long *value, const char *format, ...)
+ G_GNUC_PRINTF(2, 3);
+int virFileReadValueBitmap(virBitmap **value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
 int virFileReadValueScaledInt(unsigned long long *value, const char *format, ...)
  G_GNUC_PRINTF(2, 3);
@@ -357,20 +371,25 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(virFileWrapperFd, virFileWrapperFdFree);
 int virFileGetXAttr(const char *path,
                     const char *name,
                     char **value)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;
 
 int virFileGetXAttrQuiet(const char *path,
                          const char *name,
                          char **value)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;
 
 int virFileSetXAttr(const char *path,
                     const char *name,
                     const char *value)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;
 
 int virFileRemoveXAttr(const char *path,
                        const char *name)
-    G_GNUC_NO_INLINE;
+    G_NO_INLINE;
 
 int virFileDataSync(int fd);
+
+int virFileSetCOW(const char *path,
+                  virTristateBool state);
+
+off_t virFileDiskCopy(int disk_fd, const char *disk_path, int remote_fd, const char *remote_path);

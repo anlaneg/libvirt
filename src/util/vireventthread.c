@@ -43,7 +43,7 @@ vir_event_thread_finalize(GObject *object)
 
     if (evt->thread) {
         g_main_loop_quit(evt->loop);
-        g_thread_unref(evt->thread);
+        g_thread_join(evt->thread);
     }
 
     g_main_loop_unref(evt->loop);
@@ -111,7 +111,11 @@ static void *
 virEventThreadWorker(void *opaque)
 {
     virEventThreadData *data = opaque;
-    g_autoptr(GSource) running = g_idle_source_new();
+    /*
+     * Do NOT use g_autoptr on this. We need to unref it
+     * before the GMainContext is unrefed
+     */
+    GSource *running = g_idle_source_new();
 
     g_source_set_callback(running, virEventThreadNotify, data, NULL);
 
@@ -119,6 +123,7 @@ virEventThreadWorker(void *opaque)
 
     g_main_loop_run(data->loop);
 
+    g_source_unref(running);
     virEventThreadDataFree(data);
 
     return NULL;
@@ -157,7 +162,7 @@ virEventThreadStart(virEventThread *evt, const char *name)
     if (!evt->thread) {
         virEventThreadDataFree(data);
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to start event thread: %s"),
+                       _("Unable to start event thread: %1$s"),
                        gerr->message);
         return -1;
     }

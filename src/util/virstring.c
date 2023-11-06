@@ -20,7 +20,7 @@
 
 #include <glib/gprintf.h>
 #include <locale.h>
-#ifdef HAVE_XLOCALE_H
+#ifdef WITH_XLOCALE_H
 # include <xlocale.h>
 #endif
 
@@ -35,354 +35,7 @@
 
 VIR_LOG_INIT("util.string");
 
-/*
- * The following virStringSplit & virStringListJoin methods
- * are derived from g_strsplit / g_strjoin in glib2,
- * also available under the LGPLv2+ license terms
- */
-
-/**
- * virStringSplitCount:
- * @string: a string to split
- * @delim: a string which specifies the places at which to split
- *     the string. The delimiter is not included in any of the resulting
- *     strings, unless @max_tokens is reached.
- * @max_tokens: the maximum number of pieces to split @string into.
- *     If this is 0, the string is split completely.
- * @tokcount: If provided, the value is set to the count of pieces the string
- *            was split to excluding the terminating NULL element.
- *
- * Splits a string into a maximum of @max_tokens pieces, using the given
- * @delim. If @max_tokens is reached, the remainder of @string is
- * appended to the last token.
- *
- * As a special case, the result of splitting the empty string "" is an empty
- * vector, not a vector containing a single string. The reason for this
- * special case is that being able to represent an empty vector is typically
- * more useful than consistent handling of empty elements. If you do need
- * to represent empty elements, you'll need to check for the empty string
- * before calling virStringSplit().
- *
- * Return value: a newly-allocated NULL-terminated array of strings. Use
- *    virStringListFree() to free it.
- */
-char **
-virStringSplitCount(const char *string,
-                    const char *delim,
-                    size_t max_tokens,
-                    size_t *tokcount)
-{
-    char **tokens = NULL;
-    size_t ntokens = 0;
-    size_t maxtokens = 0;
-    const char *remainder = string;
-    char *tmp;
-    size_t i;
-
-    if (max_tokens == 0)
-        max_tokens = INT_MAX;
-
-    tmp = strstr(remainder, delim);
-    if (tmp) {
-        size_t delimlen = strlen(delim);
-
-        while (--max_tokens && tmp) {
-            size_t len = tmp - remainder;
-
-            if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
-                goto error;
-
-            tokens[ntokens] = g_strndup(remainder, len);
-            ntokens++;
-            remainder = tmp + delimlen;
-            tmp = strstr(remainder, delim);
-        }
-    }
-    if (*string) {
-        if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
-            goto error;
-
-        tokens[ntokens] = g_strdup(remainder);
-        ntokens++;
-    }
-
-    if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
-        goto error;
-    tokens[ntokens++] = NULL;
-
-    if (tokcount)
-        *tokcount = ntokens - 1;
-
-    return tokens;
-
- error:
-    for (i = 0; i < ntokens; i++)
-        VIR_FREE(tokens[i]);
-    VIR_FREE(tokens);
-    return NULL;
-}
-
-
-char **
-virStringSplit(const char *string,
-               const char *delim,
-               size_t max_tokens)
-{
-    return virStringSplitCount(string, delim, max_tokens, NULL);
-}
-
-
-/**
- * virStringListJoin:
- * @strings: a NULL-terminated array of strings to join
- * @delim: a string to insert between each of the strings
- *
- * Joins a number of strings together to form one long string, with the
- * @delim inserted between each of them. The returned string
- * should be freed with VIR_FREE().
- *
- * Returns: a newly-allocated string containing all of the strings joined
- *     together, with @delim between them
- */
-char *virStringListJoin(const char **strings,
-                        const char *delim)
-{
-    char *ret;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    while (*strings) {
-        virBufferAdd(&buf, *strings, -1);
-        if (*(strings+1))
-            virBufferAdd(&buf, delim, -1);
-        strings++;
-    }
-    ret = virBufferContentAndReset(&buf);
-    if (!ret)
-        ret = g_strdup("");
-    return ret;
-}
-
-
-/**
- * virStringListAdd:
- * @strings: a NULL-terminated array of strings
- * @item: string to add
- *
- * Appends @item into string list @strings. If *@strings is not
- * allocated yet new string list is created.
- *
- * Returns: 0 on success,
- *         -1 otherwise
- */
-int
-virStringListAdd(char ***strings,
-                 const char *item)
-{
-    size_t i = virStringListLength((const char **) *strings);
-
-    if (VIR_EXPAND_N(*strings, i, 2) < 0)
-        return -1;
-
-    (*strings)[i - 2] = g_strdup(item);
-
-    return 0;
-}
-
-
-/**
- * virStringListRemove:
- * @strings: a NULL-terminated array of strings
- * @item: string to remove
- *
- * Remove every occurrence of @item in list of @strings.
- */
-void
-virStringListRemove(char ***strings,
-                    const char *item)
-{
-    size_t r, w = 0;
-
-    if (!strings || !*strings)
-        return;
-
-    for (r = 0; (*strings)[r]; r++) {
-        if (STREQ((*strings)[r], item)) {
-            VIR_FREE((*strings)[r]);
-            continue;
-        }
-        if (r != w)
-            (*strings)[w] = (*strings)[r];
-        w++;
-    }
-
-    if (w == 0) {
-        VIR_FREE(*strings);
-    } else {
-        (*strings)[w] = NULL;
-        ignore_value(VIR_REALLOC_N(*strings, w + 1));
-    }
-}
-
-
-/**
- * virStringListMerge:
- * @dst: a NULL-terminated array of strings to expand
- * @src: a NULL-terminated array of strings
- *
- * Merges @src into @dst. Upon successful return from this
- * function, @dst is resized to $(dst + src) elements and @src is
- * freed.
- *
- * Returns 0 on success, -1 otherwise.
- */
-int
-virStringListMerge(char ***dst,
-                   char ***src)
-{
-    size_t dst_len, src_len, i;
-
-    if (!src || !*src)
-        return 0;
-
-    dst_len = virStringListLength((const char **) *dst);
-    src_len = virStringListLength((const char **) *src);
-
-    if (VIR_REALLOC_N(*dst, dst_len + src_len + 1) < 0)
-        return -1;
-
-    for (i = 0; i <= src_len; i++)
-        (*dst)[i + dst_len] = (*src)[i];
-
-    /* Don't call virStringListFree() as it would free strings in
-     * @src. */
-    VIR_FREE(*src);
-    return 0;
-}
-
-
-/**
- * virStringListCopy:
- * @dst: where to store the copy of @strings
- * @src: a NULL-terminated array of strings
- *
- * Makes a deep copy of the @src string list and stores it in @dst. Callers
- * are responsible for freeing @dst.
- *
- * Returns 0 on success, -1 on error.
- */
-int
-virStringListCopy(char ***dst,
-                  const char **src)
-{
-    char **copy = NULL;
-    size_t i;
-
-    *dst = NULL;
-
-    if (!src)
-        return 0;
-
-    if (VIR_ALLOC_N(copy, virStringListLength(src) + 1) < 0)
-        goto error;
-
-    for (i = 0; src[i]; i++)
-        copy[i] = g_strdup(src[i]);
-
-    *dst = copy;
-    return 0;
-
- error:
-    virStringListFree(copy);
-    return -1;
-}
-
-
-/**
- * virStringListFree:
- * @strings: a NULL-terminated array of strings to free
- *
- * Frees a NULL-terminated array of strings, and the array itself.
- * If called on a NULL value, virStringListFree() simply returns.
- */
-void virStringListFree(char **strings)
-{
-    char **tmp = strings;
-    while (tmp && *tmp) {
-        VIR_FREE(*tmp);
-        tmp++;
-    }
-    VIR_FREE(strings);
-}
-
-
-void virStringListAutoFree(char ***strings)
-{
-    if (!*strings)
-        return;
-
-    virStringListFree(*strings);
-    *strings = NULL;
-}
-
-
-/**
- * virStringListFreeCount:
- * @strings: array of strings to free
- * @count: number of elements in the array
- *
- * Frees a string array of @count length.
- */
-void
-virStringListFreeCount(char **strings,
-                       size_t count)
-{
-    size_t i;
-
-    if (!strings)
-        return;
-
-    for (i = 0; i < count; i++)
-        VIR_FREE(strings[i]);
-
-    VIR_FREE(strings);
-}
-
-
-bool
-virStringListHasString(const char **strings,
-                       const char *needle)
-{
-    size_t i = 0;
-
-    if (!strings)
-        return false;
-
-    while (strings[i]) {
-        if (STREQ(strings[i++], needle))
-            return true;
-    }
-
-    return false;
-}
-
-char *
-virStringListGetFirstWithPrefix(char **strings,
-                                const char *prefix)
-{
-    size_t i = 0;
-
-    if (!strings)
-        return NULL;
-
-    while (strings[i]) {
-        if (STRPREFIX(strings[i], prefix))
-            return strings[i] + strlen(prefix);
-        i++;
-    }
-
-    return NULL;
-}
-
-/* Like strtol, but produce an "int" result, and check more carefully.
+/* Like strtol with C locale, but produce an "int" result, and check more carefully.
    Return 0 upon success;  return -1 to indicate failure.
    When END_PTR is NULL, the byte after the final valid digit must be NUL.
    Otherwise, it's like strtol and lets the caller check any suffix for
@@ -391,13 +44,13 @@ virStringListGetFirstWithPrefix(char **strings,
 int
 virStrToLong_i(char const *s, char **end_ptr, int base, int *result)
 {
-	//字符串转换为整数
-    long int val;
+    //字符串转换为整数
+    long long val;
     char *p;
     int err;
 
     errno = 0;
-    val = strtol(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoll(s, &p, base);
     err = (errno || (!end_ptr && *p) || p == s || (int) val != val);
     if (end_ptr)
         *end_ptr = p;
@@ -413,22 +66,22 @@ virStrToLong_i(char const *s, char **end_ptr, int base, int *result)
 int
 virStrToLong_ui(char const *s, char **end_ptr, int base, unsigned int *result)
 {
-    unsigned long int val;
+    unsigned long long val;
     char *p;
     bool err = false;
 
     errno = 0;
-    val = strtoul(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoull(s, &p, base);
 
     /* This one's tricky.  We _want_ to allow "-1" as shorthand for
      * UINT_MAX regardless of whether long is 32-bit or 64-bit.  But
-     * strtoul treats "-1" as ULONG_MAX, and going from ulong back
-     * to uint differs depending on the size of long. */
-    if (sizeof(long) > sizeof(int) && memchr(s, '-', p - s)) {
+     * g_ascii_strtoull treats "-1" as ULLONG_MAX, and going from ullong back
+     * to uint differs depending on the size of uint. */
+    if (memchr(s, '-', p - s)) {
         if (-val > UINT_MAX)
             err = true;
         else
-            val &= 0xffffffff;
+            val &= UINT_MAX;
     }
 
     err |= (errno || (!end_ptr && *p) || p == s || (unsigned int) val != val);
@@ -445,12 +98,12 @@ virStrToLong_ui(char const *s, char **end_ptr, int base, unsigned int *result)
 int
 virStrToLong_uip(char const *s, char **end_ptr, int base, unsigned int *result)
 {
-    unsigned long int val;
+    unsigned long long val;
     char *p;
     bool err = false;
 
     errno = 0;
-    val = strtoul(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoull(s, &p, base);
     err = (memchr(s, '-', p - s) ||
            errno || (!end_ptr && *p) || p == s || (unsigned int) val != val);
     if (end_ptr)
@@ -461,24 +114,7 @@ virStrToLong_uip(char const *s, char **end_ptr, int base, unsigned int *result)
     return 0;
 }
 
-/* Just like virStrToLong_i, above, but produce a "long" value.  */
-int
-virStrToLong_l(char const *s, char **end_ptr, int base, long *result)
-{
-    long int val;
-    char *p;
-    int err;
-
-    errno = 0;
-    val = strtol(s, &p, base); /* exempt from syntax-check */
-    err = (errno || (!end_ptr && *p) || p == s);
-    if (end_ptr)
-        *end_ptr = p;
-    if (err)
-        return -1;
-    *result = val;
-    return 0;
-}
+/* virStrToLong_l is intentionally skipped, consider virStrToLong_ll instead */
 
 /* Just like virStrToLong_i, above, but produce an "unsigned long"
  * value.  This version allows twos-complement wraparound of negative
@@ -486,13 +122,25 @@ virStrToLong_l(char const *s, char **end_ptr, int base, long *result)
 int
 virStrToLong_ul(char const *s, char **end_ptr, int base, unsigned long *result)
 {
-    unsigned long int val;
+    unsigned long long val;
     char *p;
-    int err;
+    bool err = false;
 
     errno = 0;
-    val = strtoul(s, &p, base); /* exempt from syntax-check */
-    err = (errno || (!end_ptr && *p) || p == s);
+    val = g_ascii_strtoull(s, &p, base);
+
+    /* This one's tricky.  We _want_ to allow "-1" as shorthand for
+     * ULONG_MAX regardless of whether long is 32-bit or 64-bit.  But
+     * g_ascii_strtoull treats "-1" as ULLONG_MAX, and going from ullong back
+     * to ulong differs depending on the size of ulong. */
+    if (memchr(s, '-', p - s)) {
+        if (-val > ULONG_MAX)
+            err = true;
+        else
+            val &= ULONG_MAX;
+    }
+
+    err |= (errno || (!end_ptr && *p) || p == s || (unsigned long) val != val);
     if (end_ptr)
         *end_ptr = p;
     if (err)
@@ -507,14 +155,14 @@ int
 virStrToLong_ulp(char const *s, char **end_ptr, int base,
                  unsigned long *result)
 {
-    unsigned long int val;
+    unsigned long long val;
     char *p;
     int err;
 
     errno = 0;
-    val = strtoul(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoull(s, &p, base);
     err = (memchr(s, '-', p - s) ||
-           errno || (!end_ptr && *p) || p == s);
+           errno || (!end_ptr && *p) || p == s || (unsigned long) val != val);
     if (end_ptr)
         *end_ptr = p;
     if (err)
@@ -532,7 +180,7 @@ virStrToLong_ll(char const *s, char **end_ptr, int base, long long *result)
     int err;
 
     errno = 0;
-    val = strtoll(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoll(s, &p, base);
     err = (errno || (!end_ptr && *p) || p == s);
     if (end_ptr)
         *end_ptr = p;
@@ -554,7 +202,7 @@ virStrToLong_ull(char const *s, char **end_ptr, int base,
     int err;
 
     errno = 0;
-    val = strtoull(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoull(s, &p, base);
     err = (errno || (!end_ptr && *p) || p == s);
     if (end_ptr)
         *end_ptr = p;
@@ -575,7 +223,7 @@ virStrToLong_ullp(char const *s, char **end_ptr, int base,
     int err;
 
     errno = 0;
-    val = strtoull(s, &p, base); /* exempt from syntax-check */
+    val = g_ascii_strtoull(s, &p, base);
     err = (memchr(s, '-', p - s) ||
            errno || (!end_ptr && *p) || p == s);
     if (end_ptr)
@@ -587,7 +235,7 @@ virStrToLong_ullp(char const *s, char **end_ptr, int base,
 }
 
 /* In case thread-safe locales are available */
-#if HAVE_NEWLOCALE
+#if WITH_NEWLOCALE
 
 typedef locale_t virLocale;
 static virLocale virLocaleRaw;
@@ -631,7 +279,7 @@ virLocaleFixupRadix(char **strp G_GNUC_UNUSED)
 {
 }
 
-#else /* !HAVE_NEWLOCALE */
+#else /* !WITH_NEWLOCALE */
 
 typedef int virLocale;
 
@@ -662,7 +310,7 @@ virLocaleFixupRadix(char **strp)
     }
 }
 
-#endif /* !HAVE_NEWLOCALE */
+#endif /* !WITH_NEWLOCALE */
 
 
 /**
@@ -722,66 +370,24 @@ virDoubleToStr(char **strp, double number)
 
 
 /**
- * virStrncpy:
- *
- * @dest: destination buffer
- * @src: source buffer
- * @n: number of bytes to copy
- * @destbytes: number of bytes the destination can accommodate
- *
- * Copies the first @n bytes of @src to @dest.
- *
- * @src must be NULL-terminated; if successful, @dest is guaranteed to
- * be NULL-terminated as well.
- *
- * @n must be a reasonable value, that is, it must not exceed either
- * the length of @src or the size of @dest. For the latter constraint,
- * the fact that @dest needs to accommodate a NULL byte in addition to
- * the bytes copied from @src must be taken into account.
- *
- * If you want to copy *all* of @src to @dest, use virStrcpy() or
- * virStrcpyStatic() instead.
- *
- * Returns: 0 on success, <0 on failure.
- */
-int
-virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
-{
-    size_t src_len = strlen(src);
-
-    /* As a special case, -1 means "copy the entire string".
-     *
-     * This is to avoid calling strlen() twice, once in the virStrcpy()
-     * wrapper and once here for bound checking purposes. */
-    if (n == -1)
-        n = src_len;
-
-    if (n > src_len || n > (destbytes - 1))
-        return -1;
-
-    memcpy(dest, src, n);
-    dest[n] = '\0';
-
-    return 0;
-}
-
-/**
  * virStrcpy:
  *
  * @dest: destination buffer
  * @src: source buffer
  * @destbytes: number of bytes the destination can accommodate
  *
- * Copies @src to @dest.
+ * Copies @src to @dest. @dest is guaranteed to be 'nul' terminated if
+ * destbytes is 1 or more.
  *
- * See virStrncpy() for more information.
- *
- * Returns: 0 on success, <0 on failure.
+ * Returns: 0 on success, -1 if @src doesn't fit into @dest and was truncated.
  */
 int
 virStrcpy(char *dest, const char *src, size_t destbytes)
 {
-    return virStrncpy(dest, src, -1, destbytes);
+    if (g_strlcpy(dest, src, destbytes) >= destbytes)
+        return -1;
+
+    return 0;
 }
 
 /**
@@ -817,6 +423,24 @@ virSkipSpacesAndBackslash(const char **str)
         cur++;
     *str = cur;
 }
+
+
+/**
+ * virSkipToDigit:
+ * @str: pointer to the char pointer used
+ *
+ * Skip over any character that is not 0-9
+ */
+void
+virSkipToDigit(const char **str)
+{
+    const char *cur = *str;
+
+    while (*cur && !g_ascii_isdigit(*cur))
+        cur++;
+    *str = cur;
+}
+
 
 /**
  * virTrimSpaces:
@@ -891,17 +515,6 @@ virStringIsEmpty(const char *str)
 }
 
 
-size_t virStringListLength(const char * const *strings)
-{
-    size_t i = 0;
-
-    while (strings && strings[i])
-        i++;
-
-    return i;
-}
-
-
 /**
  * virStringSortCompare:
  *
@@ -938,7 +551,7 @@ int virStringSortRevCompare(const void *a, const void *b)
  * @matches: pointer to an array to be filled with NULL terminated list of matches
  *
  * Performs a POSIX extended regex search against a string and return all matching substrings.
- * The @matches value should be freed with virStringListFree() when no longer
+ * The @matches value should be freed with g_strfreev() when no longer
  * required.
  *
  * @code
@@ -958,7 +571,7 @@ int virStringSortRevCompare(const void *a, const void *b)
  *  // matches[2] == "bbb3c75c-d60f-43b0-b802-fd56b84a4222"
  *  // matches[3] == NULL;
  *
- *  virStringListFree(matches);
+ *  g_strfreev(matches);
  * @endcode
  *
  * Returns: -1 on error, or number of matches
@@ -981,13 +594,13 @@ virStringSearch(const char *str,
     regex = g_regex_new(regexp, 0, 0, &err);
     if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to compile regex %s"), err->message);
+                       _("Failed to compile regex %1$s"), err->message);
         return -1;
     }
 
     if (g_regex_get_capture_count(regex) != 1) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Regular expression '%s' must have exactly 1 match group, not %d"),
+                       _("Regular expression '%1$s' must have exactly 1 match group, not %2$d"),
                        regexp, g_regex_get_capture_count(regex));
         goto cleanup;
     }
@@ -995,8 +608,7 @@ virStringSearch(const char *str,
     /* '*matches' must always be NULL terminated in every iteration
      * of the loop, so start by allocating 1 element
      */
-    if (VIR_EXPAND_N(*matches, nmatches, 1) < 0)
-        goto cleanup;
+    VIR_EXPAND_N(*matches, nmatches, 1);
 
     while ((nmatches - 1) < max_matches) {
         g_autoptr(GMatchInfo) info = NULL;
@@ -1006,8 +618,7 @@ virStringSearch(const char *str,
         if (!g_regex_match(regex, str, 0, &info))
             break;
 
-        if (VIR_EXPAND_N(*matches, nmatches, 1) < 0)
-            goto cleanup;
+        VIR_EXPAND_N(*matches, nmatches, 1);
 
         match = g_match_info_fetch(info, 1);
 
@@ -1023,8 +634,7 @@ virStringSearch(const char *str,
 
  cleanup:
     if (ret < 0) {
-        virStringListFree(*matches);
-        *matches = NULL;
+        g_clear_pointer(matches, g_strfreev);
     }
     return ret;
 }
@@ -1070,7 +680,7 @@ virStringReplace(const char *haystack,
                  const char *oldneedle,
                  const char *newneedle)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     const char *tmp1, *tmp2;
     size_t oldneedlelen = strlen(oldneedle);
     size_t newneedlelen = strlen(newneedle);
@@ -1282,8 +892,7 @@ virStringToUpper(char **dst, const char *src)
     if (!src)
         return 0;
 
-    if (VIR_ALLOC_N(cap, strlen(src) + 1) < 0)
-        return -1;
+    cap = g_new0(char, strlen(src) + 1);
 
     for (i = 0; src[i]; i++) {
         cap[i] = g_ascii_toupper(src[i]);
@@ -1373,13 +982,13 @@ virStringParsePort(const char *str,
 
     if (virStrToLong_uip(str, NULL, 10, &p) < 0) {
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("failed to parse port number '%s'"), str);
+                       _("failed to parse port number '%1$s'"), str);
         return -1;
     }
 
     if (p > UINT16_MAX) {
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("port '%s' out of range"), str);
+                       _("port '%1$s' out of range"), str);
         return -1;
     }
 
@@ -1406,6 +1015,54 @@ int virStringParseYesNo(const char *str, bool *result)
         *result = false;
     else
         return -1;
+
+    return 0;
+}
+
+
+/**
+ * virStringParseVersion:
+ * @version: unsigned long long pointer to output the version number
+ * @str: const char pointer to the version string
+ * @allowMissing: true to treat 3 like 3.0.0, false to error out on
+ * missing minor or micro
+ *
+ * Parse an unsigned version number from a version string. Expecting
+ * 'major.minor.micro' format, ignoring an optional suffix.
+ *
+ * The major, minor and micro numbers are encoded into a single version number:
+ *
+ *   1000000 * major + 1000 * minor + micro
+ *
+ * Returns the 0 for success, -1 for error.
+ */
+int
+virStringParseVersion(unsigned long long *version,
+                      const char *str,
+                      bool allowMissing)
+{
+    unsigned int major, minor = 0, micro = 0;
+    char *tmp;
+
+    if (virStrToLong_ui(str, &tmp, 10, &major) < 0)
+        return -1;
+
+    if (!allowMissing && *tmp != '.')
+        return -1;
+
+    if ((*tmp == '.') && virStrToLong_ui(tmp + 1, &tmp, 10, &minor) < 0)
+        return -1;
+
+    if (!allowMissing && *tmp != '.')
+        return -1;
+
+    if ((*tmp == '.') && virStrToLong_ui(tmp + 1, &tmp, 10, &micro) < 0)
+        return -1;
+
+    if (major > UINT_MAX / 1000000 || minor > 999 || micro > 999)
+        return -1;
+
+    *version = 1000000 * major + 1000 * minor + micro;
 
     return 0;
 }

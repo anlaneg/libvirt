@@ -58,16 +58,14 @@
       <model type='virtio-transitional'/>
       <address type='pci' domain='0x0000' bus='0x02' slot='0x02' function='0x0'/>
     </interface>
-    <input type='passthrough' bus='virtio' model='virtio-transitional'>
-      <source evdev='/dev/input/event1234'/>
-      <address type='pci' domain='0x0000' bus='0x02' slot='0x09' function='0x0'/>
-    </input>
     <input type='mouse' bus='ps2'/>
     <input type='keyboard' bus='ps2'/>
+    <audio id='1' type='none'/>
     <hostdev mode='subsystem' type='scsi_host' managed='no' model='virtio-transitional'>
       <source protocol='vhost' wwpn='naa.5123456789abcde0'/>
       <address type='pci' domain='0x0000' bus='0x02' slot='0x06' function='0x0'/>
     </hostdev>
+    <watchdog model='itco' action='reset'/>
     <memballoon model='virtio-transitional'>
       <address type='pci' domain='0x0000' bus='0x02' slot='0x07' function='0x0'/>
     </memballoon>
@@ -77,7 +75,7 @@
     </rng>
     <vsock model='virtio-transitional'>
       <cid auto='no' address='4'/>
-      <address type='pci' domain='0x0000' bus='0x02' slot='0x0a' function='0x0'/>
+      <address type='pci' domain='0x0000' bus='0x02' slot='0x09' function='0x0'/>
     </vsock>
   </devices>
 </domain>

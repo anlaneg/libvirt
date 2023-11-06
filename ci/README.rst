@@ -6,12 +6,19 @@ This document provides some information related to the CI capabilities for the
 libvirt project.
 
 
+GitLab CI tuning
+================
+
+The behaviour of GitLab CI can be tuned through a number of variables
+which can be set at push time, or through the UI. See ``ci/gitlab.yml``
+for further details.
+
 Cirrus CI integration
 =====================
 
 libvirt currently supports three non-Linux operating systems: Windows, FreeBSD
-and macOS. Windows cross-builds can be prepared on Linux by using `MinGW`_, but
-for both FreeBSD and macOS we need to use the actual operating system, and
+and macOS. Windows cross-builds can be prepared on Linux by using `MinGW-w64`_,
+but for both FreeBSD and macOS we need to use the actual operating system, and
 unfortunately GitLab shared runners are currently not available for either.
 
 To work around this limitation, we take advantage of `Cirrus CI`_'s free
@@ -34,6 +41,12 @@ builds to happen when you push to your GitLab repository, you need to
 
 * grab an API token from the `Cirrus CI settings`_ page;
 
+* it may be necessary to push an empty ``.cirrus.yml`` file to your github fork
+  for Cirrus CI to properly recognize the project. You can check whether
+  Cirrus CI knows about your project by navigating to:
+
+  ``https://cirrus-ci.com/yourusername/libvirt``
+
 * in the *CI/CD / Variables* section of the settings page for your GitLab
   repository, create two new variables:
 
@@ -55,5 +68,27 @@ repository as usual and you'll automatically get the additional CI coverage.
 .. _Cirrus CI GitHub app: https://github.com/marketplace/cirrus-ci
 .. _Cirrus CI settings: https://cirrus-ci.com/settings/profile/
 .. _Cirrus CI: https://cirrus-ci.com/
-.. _MinGW: http://mingw.org/
+.. _MinGW-w64: https://www.mingw-w64.org/
 .. _cirrus-run: https://github.com/sio/cirrus-run/
+
+
+Coverity scan integration
+=========================
+
+This will be used only by the main repository for master branch by running
+scheduled pipeline in GitLab.
+
+The service is proved by `Coverity Scan`_ and requires that the project is
+registered there to get free coverity analysis which we already have for
+`libvirt project`_.
+
+To run the coverity job it requires two new variables:
+
+  * ``COVERITY_SCAN_PROJECT_NAME``, containing the `libvirt project`_
+    name.
+
+  * ``COVERITY_SCAN_TOKEN``, token visible to admins of `libvirt project`_
+
+
+.. _Coverity Scan: https://scan.coverity.com/
+.. _libvirt project: https://scan.coverity.com/projects/libvirt

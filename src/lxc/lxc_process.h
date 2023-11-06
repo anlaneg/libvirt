@@ -23,33 +23,33 @@
 
 #include "lxc_conf.h"
 
-int virLXCProcessStart(virConnectPtr conn,
-                       virLXCDriverPtr  driver,
-                       virDomainObjPtr vm,
+int virLXCProcessStart(virLXCDriver * driver,
+                       virDomainObj *vm,
                        unsigned int nfiles, int *files,
-                       bool autoDestroy,
+                       virConnectPtr autoDestroyConn,
                        virDomainRunningReason reason);
-int virLXCProcessStop(virLXCDriverPtr driver,
-                      virDomainObjPtr vm,
-                      virDomainShutoffReason reason);
+int virLXCProcessStop(virLXCDriver *driver,
+                      virDomainObj *vm,
+                      virDomainShutoffReason reason,
+                      unsigned int cleanupFlags);
 
-void virLXCProcessAutoDestroyRun(virLXCDriverPtr driver,
+void virLXCProcessAutoDestroyRun(virLXCDriver *driver,
                                  virConnectPtr conn);
-void virLXCProcessAutoDestroyShutdown(virLXCDriverPtr driver);
-int virLXCProcessAutoDestroyAdd(virLXCDriverPtr driver,
-                                virDomainObjPtr vm,
+void virLXCProcessAutoDestroyShutdown(virLXCDriver *driver);
+int virLXCProcessAutoDestroyAdd(virLXCDriver *driver,
+                                virDomainObj *vm,
                                 virConnectPtr conn);
-int virLXCProcessAutoDestroyRemove(virLXCDriverPtr driver,
-                                   virDomainObjPtr vm);
+int virLXCProcessAutoDestroyRemove(virLXCDriver *driver,
+                                   virDomainObj *vm);
 
-void virLXCProcessAutostartAll(virLXCDriverPtr driver);
-int virLXCProcessReconnectAll(virLXCDriverPtr driver,
-                              virDomainObjListPtr doms);
+void virLXCProcessAutostartAll(virLXCDriver *driver);
+int virLXCProcessReconnectAll(virLXCDriver *driver,
+                              virDomainObjList *doms);
 
-int virLXCProcessValidateInterface(virDomainNetDefPtr net);
-char *virLXCProcessSetupInterfaceTap(virDomainDefPtr vm,
-                                     virDomainNetDefPtr net,
+int virLXCProcessValidateInterface(virDomainNetDef *net);
+char *virLXCProcessSetupInterfaceTap(virDomainDef *vm,
+                                     virDomainNetDef *net,
                                      const char *brname);
-char *virLXCProcessSetupInterfaceDirect(virLXCDriverPtr driver,
-                                        virDomainDefPtr def,
-                                        virDomainNetDefPtr net);
+char *virLXCProcessSetupInterfaceDirect(virLXCDriver *driver,
+                                        virDomainDef *def,
+                                        virDomainNetDef *net);

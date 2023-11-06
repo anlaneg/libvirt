@@ -56,6 +56,7 @@ struct daemonConfig {
     bool tls_no_sanity_certificate;
     char **tls_allowed_dn_list;
     char *tls_priority;
+    unsigned int tcp_min_ssf;
 
     char *key_file;
     char *cert_file;
@@ -98,7 +99,7 @@ struct daemonConfig {
 };
 
 
-int daemonConfigFilePath(bool privileged, char **configfile);
+void daemonConfigFilePath(bool privileged, char **configfile);
 struct daemonConfig* daemonConfigNew(bool privileged);
 void daemonConfigFree(struct daemonConfig *data);
 int daemonConfigLoadFile(struct daemonConfig *data,

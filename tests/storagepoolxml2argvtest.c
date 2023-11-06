@@ -2,10 +2,7 @@
 
 #include "internal.h"
 #include "testutils.h"
-#include "datatypes.h"
 #include "storage/storage_util.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -23,14 +20,14 @@ testCompareXMLToArgvFiles(bool shouldFail,
                           const char *cmdline)
 {
     int ret = -1;
-    virStoragePoolDefPtr def = NULL;
-    virStoragePoolObjPtr pool = NULL;
+    virStoragePoolDef *def = NULL;
+    virStoragePoolObj *pool = NULL;
     const char *defTypeStr;
     g_autofree char *actualCmdline = NULL;
     g_autofree char *src = NULL;
     g_autoptr(virCommand) cmd = NULL;
 
-    if (!(def = virStoragePoolDefParseFile(poolxml)))
+    if (!(def = virStoragePoolDefParse(NULL, poolxml, 0)))
         goto cleanup;
     defTypeStr = virStoragePoolTypeToString(def->type);
 
@@ -74,13 +71,12 @@ testCompareXMLToArgvFiles(bool shouldFail,
         goto cleanup;
     };
 
-    if (!(actualCmdline = virCommandToString(cmd, false))) {
+    if (!(actualCmdline = virCommandToStringFull(cmd, true, true))) {
         VIR_TEST_DEBUG("pool type '%s' failed to get commandline", defTypeStr);
         goto cleanup;
     }
 
-    virTestClearCommandPath(actualCmdline);
-    if (virTestCompareToFile(actualCmdline, cmdline) < 0)
+    if (virTestCompareToFileFull(actualCmdline, cmdline, false) < 0)
         goto cleanup;
 
     ret = 0;
@@ -179,7 +175,6 @@ mymain(void)
     DO_TEST_FAIL("pool-mpath");
     DO_TEST_FAIL("pool-iscsi-multiiqn");
     DO_TEST_FAIL("pool-iscsi-vendor-product");
-    DO_TEST_FAIL("pool-sheepdog");
     DO_TEST_FAIL("pool-gluster");
     DO_TEST_FAIL("pool-gluster-sub");
     DO_TEST_FAIL("pool-scsi-type-scsi-host-stable");

@@ -35,6 +35,8 @@ VIR_LOG_INIT("libvirt.nwfilter");
  * Provides the number of nwfilters.
  *
  * Returns the number of nwfilters found or -1 in case of error
+ *
+ * Since: 0.8.0
  */
 int
 virConnectNumOfNWFilters(virConnectPtr conn)
@@ -77,6 +79,8 @@ virConnectNumOfNWFilters(virConnectPtr conn)
  * have an extra allocated element set to NULL but not included in the return count,
  * to make iteration easier.  The caller is responsible for calling
  * virNWFilterFree() on each array element, then calling free() on @filters.
+ *
+ * Since: 0.10.2
  */
 int
 virConnectListAllNWFilters(virConnectPtr conn,
@@ -117,7 +121,12 @@ virConnectListAllNWFilters(virConnectPtr conn,
  *
  * Collect the list of network filters, and store their names in @names
  *
+ * The use of this function is discouraged. Instead, use
+ * virConnectListAllNWFilters().
+ *
  * Returns the number of network filters found or -1 in case of error
+ *
+ * Since: 0.8.0
  */
 int
 virConnectListNWFilters(virConnectPtr conn, char **const names, int maxnames)
@@ -158,6 +167,8 @@ virConnectListNWFilters(virConnectPtr conn, char **const names, int maxnames)
  *
  * Returns a new nwfilter object or NULL in case of failure.  If the
  * network filter cannot be found, then VIR_ERR_NO_NWFILTER error is raised.
+ *
+ * Since: 0.8.0
  */
 virNWFilterPtr
 virNWFilterLookupByName(virConnectPtr conn, const char *name)
@@ -197,6 +208,8 @@ virNWFilterLookupByName(virConnectPtr conn, const char *name)
  *
  * Returns a new nwfilter object or NULL in case of failure.  If the
  * nwfdilter cannot be found, then VIR_ERR_NO_NWFILTER error is raised.
+ *
+ * Since: 0.8.0
  */
 virNWFilterPtr
 virNWFilterLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
@@ -236,6 +249,8 @@ virNWFilterLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
  *
  * Returns a new nwfilter object or NULL in case of failure.  If the
  * nwfilter cannot be found, then VIR_ERR_NO_NWFILTER error is raised.
+ *
+ * Since: 0.8.0
  */
 virNWFilterPtr
 virNWFilterLookupByUUIDString(virConnectPtr conn, const char *uuidstr)
@@ -250,7 +265,7 @@ virNWFilterLookupByUUIDString(virConnectPtr conn, const char *uuidstr)
 
     if (virUUIDParse(uuidstr, uuid) < 0) {
         virReportInvalidArg(uuidstr,
-                            _("uuidstr in %s must be a valid UUID"),
+                            _("uuidstr in %1$s must be a valid UUID"),
                             __FUNCTION__);
         goto error;
     }
@@ -271,6 +286,8 @@ virNWFilterLookupByUUIDString(virConnectPtr conn, const char *uuidstr)
  * The data structure is freed and should not be used thereafter.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 0.8.0
  */
 int
 virNWFilterFree(virNWFilterPtr nwfilter)
@@ -294,6 +311,8 @@ virNWFilterFree(virNWFilterPtr nwfilter)
  *
  * Returns a pointer to the name or NULL, the string need not be deallocated
  * its lifetime will be the same as the nwfilter object.
+ *
+ * Since: 0.8.0
  */
 const char *
 virNWFilterGetName(virNWFilterPtr nwfilter)
@@ -316,6 +335,8 @@ virNWFilterGetName(virNWFilterPtr nwfilter)
  * Get the UUID for a network filter
  *
  * Returns -1 in case of error, 0 in case of success
+ *
+ * Since: 0.8.0
  */
 int
 virNWFilterGetUUID(virNWFilterPtr nwfilter, unsigned char *uuid)
@@ -346,6 +367,8 @@ virNWFilterGetUUID(virNWFilterPtr nwfilter, unsigned char *uuid)
  * UUID see RFC4122.
  *
  * Returns -1 in case of error, 0 in case of success
+ *
+ * Since: 0.8.0
  */
 int
 virNWFilterGetUUIDString(virNWFilterPtr nwfilter, char *buf)
@@ -378,6 +401,8 @@ virNWFilterGetUUIDString(virNWFilterPtr nwfilter, char *buf)
  * nwfilter object is no longer needed.
  *
  * Returns a new nwfilter object or NULL in case of failure
+ *
+ * Since: 0.8.0
  */
 virNWFilterPtr
 virNWFilterDefineXML(virConnectPtr conn, const char *xmlDesc)
@@ -407,6 +432,49 @@ virNWFilterDefineXML(virConnectPtr conn, const char *xmlDesc)
 
 
 /**
+ * virNWFilterDefineXMLFlags:
+ * @conn: pointer to the hypervisor connection
+ * @xmlDesc: an XML description of the nwfilter
+ * @flags: bitwise-OR of virNWFilterDefineFlags
+ *
+ * Define a new network filter, based on an XML description
+ * similar to the one returned by virNWFilterGetXMLDesc()
+ *
+ * virNWFilterFree should be used to free the resources after the
+ * nwfilter object is no longer needed.
+ *
+ * Returns a new nwfilter object or NULL in case of failure
+ *
+ * Since: 7.7.0
+ */
+virNWFilterPtr
+virNWFilterDefineXMLFlags(virConnectPtr conn, const char *xmlDesc, unsigned int flags)
+{
+    VIR_DEBUG("conn=%p, xmlDesc=%s flags=0x%x", conn, NULLSTR(xmlDesc), flags);
+
+    virResetLastError();
+
+    virCheckConnectReturn(conn, NULL);
+    virCheckNonNullArgGoto(xmlDesc, error);
+    virCheckReadOnlyGoto(conn->flags, error);
+
+    if (conn->nwfilterDriver && conn->nwfilterDriver->nwfilterDefineXMLFlags) {
+        virNWFilterPtr ret;
+        ret = conn->nwfilterDriver->nwfilterDefineXMLFlags(conn, xmlDesc, flags);
+        if (!ret)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(conn);
+    return NULL;
+}
+
+
+/**
  * virNWFilterUndefine:
  * @nwfilter: a nwfilter object
  *
@@ -415,6 +483,8 @@ virNWFilterDefineXML(virConnectPtr conn, const char *xmlDesc)
  * associated virNWFilterPtr object.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 0.8.0
  */
 int
 virNWFilterUndefine(virNWFilterPtr nwfilter)
@@ -455,6 +525,8 @@ virNWFilterUndefine(virNWFilterPtr nwfilter)
  *
  * Returns a 0 terminated UTF-8 encoded XML instance, or NULL in case
  * of error. The caller must free() the returned value.
+ *
+ * Since: 0.8.0
  */
 char *
 virNWFilterGetXMLDesc(virNWFilterPtr nwfilter, unsigned int flags)
@@ -499,6 +571,8 @@ virNWFilterGetXMLDesc(virNWFilterPtr nwfilter, unsigned int flags)
  * the reference count.
  *
  * Returns 0 in case of success, -1 in case of failure.
+ *
+ * Since: 0.8.0
  */
 int
 virNWFilterRef(virNWFilterPtr nwfilter)
@@ -530,6 +604,8 @@ virNWFilterRef(virNWFilterPtr nwfilter)
  * have an extra allocated element set to NULL but not included in the return count,
  * to make iteration easier.  The caller is responsible for calling
  * virNWFilterFree() on each array element, then calling free() on @filters.
+ *
+ * Since: 4.5.0
  */
 int
 virConnectListAllNWFilterBindings(virConnectPtr conn,
@@ -576,6 +652,8 @@ virConnectListAllNWFilterBindings(virConnectPtr conn,
  * Returns a new binding object or NULL in case of failure.  If the
  * network filter cannot be found, then VIR_ERR_NO_NWFILTER_BINDING
  * error is raised.
+ *
+ * Since: 4.5.0
  */
 virNWFilterBindingPtr
 virNWFilterBindingLookupByPortDev(virConnectPtr conn, const char *portdev)
@@ -611,6 +689,8 @@ virNWFilterBindingLookupByPortDev(virConnectPtr conn, const char *portdev)
  * The data structure is freed and should not be used thereafter.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 4.5.0
  */
 int
 virNWFilterBindingFree(virNWFilterBindingPtr binding)
@@ -634,6 +714,8 @@ virNWFilterBindingFree(virNWFilterBindingPtr binding)
  *
  * Returns a pointer to the name or NULL, the string need not be deallocated
  * its lifetime will be the same as the binding object.
+ *
+ * Since: 4.5.0
  */
 const char *
 virNWFilterBindingGetPortDev(virNWFilterBindingPtr binding)
@@ -656,6 +738,8 @@ virNWFilterBindingGetPortDev(virNWFilterBindingPtr binding)
  *
  * Returns a pointer to the name or NULL, the string need not be deallocated
  * its lifetime will be the same as the binding object.
+ *
+ * Since: 4.5.0
  */
 const char *
 virNWFilterBindingGetFilterName(virNWFilterBindingPtr binding)
@@ -674,7 +758,7 @@ virNWFilterBindingGetFilterName(virNWFilterBindingPtr binding)
  * virNWFilterBindingCreateXML:
  * @conn: pointer to the hypervisor connection
  * @xml: an XML description of the binding
- * @flags: currently unused, pass 0
+ * @flags: bitwise-OR of virNWFilterBindingCreateFlags
  *
  * Define a new network filter, based on an XML description
  * similar to the one returned by virNWFilterGetXMLDesc(). This
@@ -690,6 +774,8 @@ virNWFilterBindingGetFilterName(virNWFilterBindingPtr binding)
  * binding object is no longer needed.
  *
  * Returns a new binding object or NULL in case of failure
+ *
+ * Since: 4.5.0
  */
 virNWFilterBindingPtr
 virNWFilterBindingCreateXML(virConnectPtr conn, const char *xml, unsigned int flags)
@@ -731,6 +817,8 @@ virNWFilterBindingCreateXML(virConnectPtr conn, const char *xml, unsigned int fl
  * would be accomplished by using virNWFilterBindingCreateXML.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 4.5.0
  */
 int
 virNWFilterBindingDelete(virNWFilterBindingPtr binding)
@@ -771,6 +859,8 @@ virNWFilterBindingDelete(virNWFilterBindingPtr binding)
  *
  * Returns a 0 terminated UTF-8 encoded XML instance, or NULL in case
  * of error. The caller must free() the returned value.
+ *
+ * Since: 4.5.0
  */
 char *
 virNWFilterBindingGetXMLDesc(virNWFilterBindingPtr binding, unsigned int flags)
@@ -815,6 +905,8 @@ virNWFilterBindingGetXMLDesc(virNWFilterBindingPtr binding, unsigned int flags)
  * the reference count.
  *
  * Returns 0 in case of success, -1 in case of failure.
+ *
+ * Since: 4.5.0
  */
 int
 virNWFilterBindingRef(virNWFilterBindingPtr binding)

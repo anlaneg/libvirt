@@ -43,10 +43,12 @@ int
 virDaemonForkIntoBackground(const char *argv0)
 {
     int statuspipe[2];
+    pid_t pid;
+
     if (virPipeQuiet(statuspipe) < 0)
         return -1;
 
-    pid_t pid = fork();
+    pid = fork();
     switch (pid) {
     case 0:
         {
@@ -121,14 +123,14 @@ virDaemonForkIntoBackground(const char *argv0)
 
             if (ret != 1) {
                 fprintf(stderr,
-                        _("%s: error: unable to determine if daemon is "
-                          "running: %s\n"), argv0,
+                        _("%1$s: error: unable to determine if daemon is running: %2$s\n"),
+                        argv0,
                         g_strerror(errno));
                 exit(EXIT_FAILURE);
             } else if (status != 0) {
                 fprintf(stderr,
-                        _("%s: error: %s. Check /var/log/messages or run without "
-                          "--daemon for more info.\n"), argv0,
+                        _("%1$s: error: %2$s. Check /var/log/messages or run without --daemon for more info.\n"),
+                        argv0,
                         virDaemonErrTypeToString(status));
                 exit(EXIT_FAILURE);
             }
@@ -149,7 +151,7 @@ virDaemonForkIntoBackground(const char *argv0)
  * but if verbose or error debugging is asked for then also output
  * informational and debug messages. Default size if 64 kB.
  */
-void
+int
 virDaemonSetupLogging(const char *daemon_name,
                       unsigned int log_level,
                       char *log_filters,
@@ -158,7 +160,8 @@ virDaemonSetupLogging(const char *daemon_name,
                       bool verbose,
                       bool godaemon)
 {
-    virLogReset();
+    if (virLogReset() < 0)
+        return -1;
 
     /*
      * Libvirtd's order of precedence is:
@@ -167,32 +170,41 @@ virDaemonSetupLogging(const char *daemon_name,
      * Given the precedence, we must process the variables in the opposite
      * order, each one overriding the previous.
      */
-    if (log_level != 0)
-        virLogSetDefaultPriority(log_level);
+    if (log_level != 0 &&
+        virLogSetDefaultPriority(log_level) < 0)
+        return -1;
 
     /* In case the config is empty, both filters and outputs will become empty,
      * however we can't start with empty outputs, thus we'll need to define and
      * setup a default one.
      */
-    ignore_value(virLogSetFilters(log_filters));
-    ignore_value(virLogSetOutputs(log_outputs));
+    if (virLogSetFilters(log_filters) < 0 ||
+        virLogSetOutputs(log_outputs) < 0)
+        return -1;
 
     /* If there are some environment variables defined, use those instead */
-    virLogSetFromEnv();
+    if (virLogSetFromEnv() < 0)
+        return -1;
 
     /*
      * Command line override for --verbose
      */
-    if ((verbose) && (virLogGetDefaultPriority() > VIR_LOG_INFO))
-        virLogSetDefaultPriority(VIR_LOG_INFO);
+    if (verbose &&
+        virLogGetDefaultPriority() > VIR_LOG_INFO &&
+        virLogSetDefaultPriority(VIR_LOG_INFO) < 0)
+        return -1;
 
     /* Define the default output. This is only applied if there was no setting
      * from either the config or the environment.
      */
-    virLogSetDefaultOutput(daemon_name, godaemon, privileged);
+    if (virLogSetDefaultOutput(daemon_name, godaemon, privileged) < 0)
+        return -1;
 
-    if (virLogGetNbOutputs() == 0)
-        virLogSetOutputs(virLogGetDefaultOutput());
+    if (virLogGetNbOutputs() == 0 &&
+        virLogSetOutputs(virLogGetDefaultOutput()) < 0)
+        return -1;
+
+    return 0;
 }
 
 
@@ -237,7 +249,7 @@ virDaemonUnixSocketPaths(const char *sock_prefix,
             rundir = virGetUserRuntimeDirectory();
 
             old_umask = umask(077);
-            if (virFileMakePath(rundir) < 0) {
+            if (g_mkdir_with_parents(rundir, 0777) < 0) {
                 umask(old_umask);
                 goto cleanup;
             }
@@ -264,17 +276,17 @@ int virDaemonForkIntoBackground(const char *argv0 G_GNUC_UNUSED)
     return -1;
 }
 
-void virDaemonSetupLogging(const char *daemon_name G_GNUC_UNUSED,
-                           unsigned int log_level G_GNUC_UNUSED,
-                           char *log_filters G_GNUC_UNUSED,
-                           char *log_outputs G_GNUC_UNUSED,
-                           bool privileged G_GNUC_UNUSED,
-                           bool verbose G_GNUC_UNUSED,
-                           bool godaemon G_GNUC_UNUSED)
+int virDaemonSetupLogging(const char *daemon_name G_GNUC_UNUSED,
+                          unsigned int log_level G_GNUC_UNUSED,
+                          char *log_filters G_GNUC_UNUSED,
+                          char *log_outputs G_GNUC_UNUSED,
+                          bool privileged G_GNUC_UNUSED,
+                          bool verbose G_GNUC_UNUSED,
+                          bool godaemon G_GNUC_UNUSED)
 {
     /* NOOP */
     errno = ENOTSUP;
-    return;
+    return -1;
 }
 
 int virDaemonUnixSocketPaths(const char *sock_prefix G_GNUC_UNUSED,

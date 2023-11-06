@@ -2,447 +2,88 @@ variables:
   GIT_DEPTH: 100
 
 stages:
-  - sanity_checks
   - containers
   - builds
+  - integration_tests
+  - sanity_checks
 
 .script_variables: &script_variables |
-  export MAKEFLAGS="-j$(getconf _NPROCESSORS_ONLN)"
   export CCACHE_BASEDIR="$(pwd)"
   export CCACHE_DIR="$CCACHE_BASEDIR/ccache"
   export CCACHE_MAXSIZE="500M"
   export PATH="$CCACHE_WRAPPERSDIR:$PATH"
+  export VIR_TEST_VERBOSE="1"
+  export VIR_TEST_DEBUG="1"
 
-# Common templates
+include:
+  - '/ci/gitlab.yml'
+  - '/ci/integration.yml'
 
-.container_job_template: &container_job_definition
-  image: docker:stable
-  stage: containers
-  services:
-    - docker:dind
-  before_script:
-    - export TAG="$CI_REGISTRY_IMAGE/ci-$NAME:latest"
-    - export COMMON_TAG="$CI_REGISTRY/libvirt/libvirt/ci-$NAME:latest"
-    - docker info
-    - docker login registry.gitlab.com -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+.native_build_job:
+  cache:
+    paths:
+      - ccache/
+    key: "$CI_JOB_NAME"
   script:
-    - docker pull "$TAG" || docker pull "$COMMON_TAG" || true
-    - docker build --cache-from "$TAG" --cache-from "$COMMON_TAG" --tag "$TAG" -f "ci/containers/libvirt-$NAME.Dockerfile" ci/containers
-    - docker push "$TAG"
+    - source ci/jobs.sh
+    - if test -x /usr/bin/rpmbuild && test "$RPM" != "skip";
+      then
+        run_rpmbuild;
+      else
+        run_build;
+        run_test;
+      fi
   after_script:
-    - docker logout
+    - test "$CI_JOB_STATUS" != "success" && exit 1;
+    - if test -x /usr/bin/rpmbuild && test "$RPM" != "skip";
+      then
+        mv "$HOME"/rpmbuild/RPMS/x86_64/ libvirt-rpms/;
+      fi
 
-# We build many containers which can be useful to debug problems but are not
-# needed for the pipeline itself to complete: those sometimes fail, and when
-# that happens it's mostly because of temporary issues with Debian sid. We
-# don't want those failures to affect the overall pipeline status
-.container_optional_job_template: &container_optional_job_definition
-  <<: *container_job_definition
-  allow_failure: true
+.native_build_job_prebuilt_env:
+  extends:
+    - .native_build_job
+    - .gitlab_native_build_job_prebuilt_env
 
-.native_build_job_template: &native_build_job_definition
-  stage: builds
-  image: $CI_REGISTRY_IMAGE/ci-$NAME:latest
+.native_build_job_local_env:
+  extends:
+    - .native_build_job
+    - .gitlab_native_build_job_local_env
+
+.cross_build_job:
   cache:
     paths:
       - ccache/
     key: "$CI_JOB_NAME"
-  before_script:
-    - *script_variables
   script:
-    - mkdir build
-    - cd build
-    - ../autogen.sh || (cat config.log && exit 1)
-    - $MAKE distcheck
-
-# Jobs that we delegate to Cirrus CI because they require an operating
-# system other than Linux. These jobs will only run if the required
-# setup has been performed on the GitLab account (see ci/README.rst).
-.cirrus_build_job_template: &cirrus_build_job_definition
-  stage: builds
-  image: registry.gitlab.com/libvirt/libvirt-ci/cirrus-run:master
-  script:
-    - cirrus-run ci/cirrus/$NAME.yml.j2
-  only:
-    variables:
-      - $CIRRUS_GITHUB_REPO
-      - $CIRRUS_API_TOKEN
-
-.cross_build_default_job_template: &cross_build_job_definition
-  stage: builds
-  image: $CI_REGISTRY_IMAGE/ci-$NAME-cross-$CROSS:latest
-  cache:
-    paths:
-      - ccache/
-    key: "$CI_JOB_NAME"
-  before_script:
-    - *script_variables
-  script:
-    - mkdir build
-    - cd build
-    - ../autogen.sh $CONFIGURE_OPTS || (cat config.log && exit 1)
-    - $MAKE
-
-
-# Native container build jobs
-
-x64-centos-7-container:
-  <<: *container_job_definition
-  variables:
-    NAME: centos-7
-
-x64-centos-8-container:
-  <<: *container_job_definition
-  variables:
-    NAME: centos-8
-
-x64-centos-stream-container:
-  <<: *container_job_definition
-  variables:
-    NAME: centos-stream
-
-x64-debian-9-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-9
-
-x64-debian-10-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-10
-
-x64-debian-sid-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-sid
-
-x64-fedora-31-container:
-  <<: *container_job_definition
-  variables:
-    NAME: fedora-31
-
-x64-fedora-32-container:
-  <<: *container_job_definition
-  variables:
-    NAME: fedora-32
-
-x64-fedora-rawhide-container:
-  <<: *container_job_definition
-  variables:
-    NAME: fedora-rawhide
-
-x64-opensuse-151-container:
-  <<: *container_job_definition
-  variables:
-    NAME: opensuse-151
-
-x64-ubuntu-1804-container:
-  <<: *container_job_definition
-  variables:
-    NAME: ubuntu-1804
-
-x64-ubuntu-2004-container:
-  <<: *container_job_definition
-  variables:
-    NAME: ubuntu-2004
-
-
-# Cross-build containers build jobs
-
-aarch64-debian-9-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-9-cross-aarch64
-
-armv6l-debian-9-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-9-cross-armv6l
-
-armv7l-debian-9-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-9-cross-armv7l
-
-mips-debian-9-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-9-cross-mips
-
-mips64el-debian-9-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-9-cross-mips64el
-
-mipsel-debian-9-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-9-cross-mipsel
-
-ppc64le-debian-9-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-9-cross-ppc64le
-
-s390x-debian-9-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-9-cross-s390x
-
-aarch64-debian-10-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-10-cross-aarch64
-
-armv6l-debian-10-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-10-cross-armv6l
-
-armv7-ldebian-10-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-10-cross-armv7l
-
-i686-debian-10-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-10-cross-i686
-
-mips-debian-10-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-10-cross-mips
-
-mips64el-debian-10-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-10-cross-mips64el
-
-mipsel-debian-10-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-10-cross-mipsel
-
-ppc64le-debian-10-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-10-cross-ppc64le
-
-s390x-debian-10-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-10-cross-s390x
-
-aarch64-debian-sid-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-sid-cross-aarch64
-
-armv6l-debian-sid-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-sid-cross-armv6l
-
-armv7-ldebian-sid-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-sid-cross-armv7l
-
-i686-debian-sid-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-sid-cross-i686
-
-mips64el-debian-sid-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-sid-cross-mips64el
-
-mipsel-debian-sid-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-sid-cross-mipsel
-
-ppc64le-debian-sid-container:
-  <<: *container_job_definition
-  variables:
-    NAME: debian-sid-cross-ppc64le
-
-s390x-debian-sid-container:
-  <<: *container_optional_job_definition
-  variables:
-    NAME: debian-sid-cross-s390x
-
-mingw32-fedora-rawhide-container:
-  <<: *container_job_definition
-  variables:
-    NAME: fedora-rawhide-cross-mingw32
-
-mingw64-fedora-rawhide-container:
-  <<: *container_job_definition
-  variables:
-    NAME: fedora-rawhide-cross-mingw64
-
-
-# Native architecture build + test jobs
-
-x64-debian-9:
-  <<: *native_build_job_definition
-  variables:
-    NAME: debian-9
-
-x64-debian-10:
-  <<: *native_build_job_definition
-  variables:
-    NAME: debian-10
-
-x64-debian-sid:
-  <<: *native_build_job_definition
-  variables:
-    NAME: debian-sid
-
-x64-centos-7:
-  <<: *native_build_job_definition
-  variables:
-    NAME: centos-7
-
-x64-centos-8:
-  <<: *native_build_job_definition
-  variables:
-    NAME: centos-8
-
-x64-centos-stream:
-  <<: *native_build_job_definition
-  variables:
-    NAME: centos-stream
-
-x64-fedora-31:
-  <<: *native_build_job_definition
-  variables:
-    NAME: fedora-31
-
-x64-fedora-32:
-  <<: *native_build_job_definition
-  variables:
-    NAME: fedora-32
-
-x64-fedora-rawhide:
-  <<: *native_build_job_definition
-  variables:
-    NAME: fedora-rawhide
-
-x64-opensuse-151:
-  <<: *native_build_job_definition
-  variables:
-    NAME: opensuse-151
-
-x64-ubuntu-1804:
-  <<: *native_build_job_definition
-  variables:
-    NAME: ubuntu-1804
-
-x64-ubuntu-2004:
-  <<: *native_build_job_definition
-  variables:
-    NAME: ubuntu-2004
-
-x64-freebsd-12-build:
-  <<: *cirrus_build_job_definition
-  variables:
-    NAME: freebsd-12
-
-x64-macos-1015-build:
-  <<: *cirrus_build_job_definition
-  variables:
-    NAME: macos-1015
-
-
-# Cross compiled build jobs
-
-armv6l-debian-9:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-9
-    CROSS: armv6l
-
-mips64el-debian-9:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-9
-    CROSS: mips64el
-
-mips-debian-9:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-9
-    CROSS: mips
-
-aarch64-debian-10:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-10
-    CROSS: aarch64
-
-mipsel-debian-10:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-10
-    CROSS: mipsel
-
-s390x-debian-10:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-10
-    CROSS: s390x
-
-armv7l-debian-sid:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-sid
-    CROSS: armv7l
-
-i686-debian-sid:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-sid
-    CROSS: i686
-
-ppc64le-debian-sid:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: debian-sid
-    CROSS: ppc64le
-
-mingw32-fedora-rawhide:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: fedora-rawhide
-    CROSS: mingw32
-
-mingw64-fedora-rawhide:
-  <<: *cross_build_job_definition
-  variables:
-    NAME: fedora-rawhide
-    CROSS: mingw64
+    - source ci/jobs.sh
+    - run_build
+    - if test "$CROSS" = "i686" ;
+      then
+        run_test;
+      fi
+
+.cross_build_job_prebuilt_env:
+  extends:
+    - .cross_build_job
+    - .gitlab_cross_build_job_prebuilt_env
+
+.cross_build_job_local_env:
+  extends:
+    - .cross_build_job
+    - .gitlab_cross_build_job_local_env
 
 
 # This artifact published by this job is downloaded by libvirt.org to
 # be deployed to the web root:
 #    https://gitlab.com/libvirt/libvirt/-/jobs/artifacts/master/download?job=website
-website:
-  stage: builds
-  image: $CI_REGISTRY_IMAGE/ci-centos-8:latest
-  before_script:
-    - *script_variables
+.website_job:
   script:
-    - mkdir build
-    - cd build
-    - ../autogen.sh --prefix=$(pwd)/../vroot || (cat config.log && exit 1)
-    - $MAKE -C docs
-    - $MAKE -C docs install
-    - cd ..
-    - mv vroot/share/doc/libvirt/html/ website
+    - source ci/jobs.sh
+    - run_website_build
+  after_script:
+    - test "$CI_JOB_STATUS" != "success" && exit 1;
+    - mv install/usr/share/doc/libvirt/html/ website
   artifacts:
     expose_as: 'Website'
     name: 'website'
@@ -451,36 +92,74 @@ website:
     paths:
       - website
 
+website_prebuilt_env:
+  extends:
+    - .website_job
+    - .gitlab_native_build_job_prebuilt_env
+  needs:
+    - job: x86_64-almalinux-8-container
+      optional: true
+  variables:
+    NAME: almalinux-8
 
-codestyle:
-  stage: builds
-  image: $CI_REGISTRY_IMAGE/ci-opensuse-151:latest
-  before_script:
-    - *script_variables
+website_local_env:
+  extends:
+    - .website_job
+    - .gitlab_native_build_job_local_env
+  variables:
+    IMAGE: docker.io/library/almalinux:8
+    NAME: almalinux-8
+
+
+.codestyle_job:
+  stage: sanity_checks
   script:
-    - mkdir build
-    - cd build
-    - ../autogen.sh || (cat config.log && exit 1)
-    - $MAKE syntax-check
+    - source ci/jobs.sh
+    - run_codestyle
+
+codestyle_prebuilt_env:
+  extends:
+    - .codestyle_job
+    - .gitlab_native_build_job_prebuilt_env
+  needs:
+    - job: x86_64-opensuse-leap-15-container
+      optional: true
+  variables:
+    NAME: opensuse-leap-15
+
+codestyle_local_env:
+  extends:
+    - .codestyle_job
+    - .gitlab_native_build_job_local_env
+  variables:
+    IMAGE: registry.opensuse.org/opensuse/leap:15.4
+    NAME: opensuse-leap-15
 
 
 # This artifact published by this job is downloaded to push to Weblate
 # for translation usage:
 #    https://gitlab.com/libvirt/libvirt/-/jobs/artifacts/master/download?job=potfile
 potfile:
+  image: $CI_REGISTRY/$RUN_UPSTREAM_NAMESPACE/libvirt/ci-$NAME:latest
   stage: builds
-  image: $CI_REGISTRY_IMAGE/ci-centos-8:latest
-  only:
-    - master
+  variables:
+    NAME: almalinux-8
+  before_script:
+    - cat /packages.txt
+  needs:
+    - job: x86_64-almalinux-8-container
+      optional: true
+  rules:
+    - if: '$CI_PROJECT_NAMESPACE == $RUN_UPSTREAM_NAMESPACE && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: on_success
+    - when: never
   before_script:
     - *script_variables
   script:
-    - mkdir build
-    - cd build
-    - ../autogen.sh || (cat config.log && exit 1)
-    - $MAKE -C src generated-sources
-    - $MAKE -C po libvirt.pot
-    - cd ..
+    - source ci/jobs.sh
+    - run_potfile
+  after_script:
+    - test "$CI_JOB_STATUS" != "success" && exit 1;
     - cp po/libvirt.pot libvirt.pot
   artifacts:
     expose_as: 'Potfile'
@@ -490,16 +169,27 @@ potfile:
     paths:
       - libvirt.pot
 
-
-# Check that all commits are signed-off for the DCO.
-# Skip on "libvirt" namespace, since we only need to run
-# this test on developer's personal forks from which
-# merge requests are submitted
-check-dco:
-  stage: sanity_checks
-  image: registry.gitlab.com/libvirt/libvirt-ci/check-dco:master
+# Coverity job that is run only by schedules
+coverity:
+  image: $CI_REGISTRY/$RUN_UPSTREAM_NAMESPACE/libvirt/ci-$NAME:latest
+  stage: builds
+  needs:
+    - job: x86_64-almalinux-8-container
+      optional: true
+  before_script:
+    - cat /packages.txt
   script:
-    - /check-dco
-  except:
-    variables:
-      - $CI_PROJECT_NAMESPACE == 'libvirt'
+    - curl https://scan.coverity.com/download/linux64 --form project=$COVERITY_SCAN_PROJECT_NAME --form token=$COVERITY_SCAN_TOKEN -o /tmp/cov-analysis-linux64.tgz
+    - tar xfz /tmp/cov-analysis-linux64.tgz
+    - meson setup build --werror || (cat build/meson-logs/meson-log.txt && exit 1)
+    - cov-analysis-linux64-*/bin/cov-build --dir cov-int meson compile -C build
+    - tar cfz cov-int.tar.gz cov-int
+    - curl https://scan.coverity.com/builds?project=$COVERITY_SCAN_PROJECT_NAME --form token=$COVERITY_SCAN_TOKEN --form email=$GITLAB_USER_EMAIL --form file=@cov-int.tar.gz --form version="$(git describe --tags)" --form description="$(git describe --tags) / $CI_COMMIT_TITLE / $CI_COMMIT_REF_NAME:$CI_PIPELINE_ID"
+  variables:
+    NAME: almalinux-8
+  rules:
+    - if: '$COVERITY_SCAN_PROJECT_NAME == null || $COVERITY_SCAN_TOKEN == null'
+      when: never
+    - if: '$CI_PROJECT_NAMESPACE == $RUN_UPSTREAM_NAMESPACE && $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+      when: on_success
+    - when: never

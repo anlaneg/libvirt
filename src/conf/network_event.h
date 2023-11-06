@@ -23,11 +23,11 @@
 
 #include "internal.h"
 #include "object_event.h"
-#include "object_event_private.h"
+#include "virnetworkobj.h"
 
 int
 virNetworkEventStateRegisterID(virConnectPtr conn,
-                               virObjectEventStatePtr state,
+                               virObjectEventState *state,
                                virNetworkPtr net,
                                int eventID,
                                virConnectNetworkEventGenericCallback cb,
@@ -39,7 +39,7 @@ virNetworkEventStateRegisterID(virConnectPtr conn,
 
 int
 virNetworkEventStateRegisterClient(virConnectPtr conn,
-                                   virObjectEventStatePtr state,
+                                   virObjectEventState *state,
                                    virNetworkPtr net,
                                    int eventID,
                                    virConnectNetworkEventGenericCallback cb,
@@ -49,8 +49,18 @@ virNetworkEventStateRegisterClient(virConnectPtr conn,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(5)
     ATTRIBUTE_NONNULL(8);
 
-virObjectEventPtr
+virObjectEvent *
 virNetworkEventLifecycleNew(const char *name,
                             const unsigned char *uuid,
                             int type,
                             int detail);
+
+virObjectEvent *
+virNetworkEventMetadataChangeNewFromObj(virNetworkObj *obj,
+                                        int type,
+                                        const char *nsuri);
+
+virObjectEvent *
+virNetworkEventMetadataChangeNewFromNet(virNetworkPtr net,
+                                        int type,
+                                        const char *nsuri);

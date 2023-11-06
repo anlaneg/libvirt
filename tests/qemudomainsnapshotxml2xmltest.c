@@ -11,9 +11,7 @@
 
 # include "internal.h"
 # include "qemu/qemu_conf.h"
-# include "qemu/qemu_domain.h"
 # include "testutilsqemu.h"
-# include "virstring.h"
 
 # define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -31,11 +29,9 @@ testCompareXMLToXMLFiles(const char *inxml,
                          const char *uuid,
                          unsigned int flags)
 {
-    char *inXmlData = NULL;
-    char *outXmlData = NULL;
-    char *actual = NULL;
-    int ret = -1;
-    unsigned int parseflags = VIR_DOMAIN_SNAPSHOT_PARSE_DISKS;
+    g_autofree char *inXmlData = NULL;
+    g_autofree char *actual = NULL;
+    unsigned int parseflags = 0;
     unsigned int formatflags = VIR_DOMAIN_SNAPSHOT_FORMAT_SECURE;
     bool cur = false;
     g_autoptr(virDomainSnapshotDef) def = NULL;
@@ -49,43 +45,32 @@ testCompareXMLToXMLFiles(const char *inxml,
         parseflags |= VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE;
 
     if (virTestLoadFile(inxml, &inXmlData) < 0)
-        goto cleanup;
-
-    if (virTestLoadFile(outxml, &outXmlData) < 0)
-        goto cleanup;
+        return -1;
 
     if (!(def = virDomainSnapshotDefParseString(inXmlData,
                                                 driver.xmlopt, NULL, &cur,
                                                 parseflags)))
-        goto cleanup;
+        return -1;
     if (cur) {
         if (!(flags & TEST_INTERNAL))
-            goto cleanup;
+            return -1;
         formatflags |= VIR_DOMAIN_SNAPSHOT_FORMAT_CURRENT;
     }
     if (flags & TEST_RUNNING) {
         if (def->state)
-            goto cleanup;
+            return -1;
         def->state = VIR_DOMAIN_RUNNING;
     }
 
     if (!(actual = virDomainSnapshotDefFormat(uuid, def,
                                               driver.xmlopt,
                                               formatflags)))
-        goto cleanup;
+        return -1;
 
-    if (STRNEQ(outXmlData, actual)) {
-        virTestDifferenceFull(stderr, outXmlData, outxml, actual, inxml);
-        goto cleanup;
-    }
+    if (virTestCompareToFile(actual, outxml) < 0)
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(inXmlData);
-    VIR_FREE(outXmlData);
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 struct testInfo {
@@ -98,7 +83,7 @@ struct testInfo {
 static long long mocktime;
 
 static int
-testSnapshotPostParse(virDomainMomentDefPtr def)
+testSnapshotPostParse(virDomainMomentDef *def)
 {
     if (!mocktime)
         return 0;
@@ -124,9 +109,15 @@ testCompareXMLToXMLHelper(const void *data)
 static int
 mymain(void)
 {
+    g_autoptr(GHashTable) capslatest = testQemuGetLatestCaps();
+    g_autoptr(GHashTable) capscache = virHashNew(virObjectUnref);
     int ret = 0;
 
     if (qemuTestDriverInit(&driver) < 0)
+        return EXIT_FAILURE;
+
+    if (testQemuInsertRealCaps(driver.qemuCapsCache, "x86_64", "latest", "",
+                               capslatest, capscache, NULL, NULL) < 0)
         return EXIT_FAILURE;
 
     virDomainXMLOptionSetMomentPostParse(driver.xmlopt,
@@ -175,6 +166,8 @@ mymain(void)
     DO_TEST_OUT("external_vm_redefine", "c7a5fdbd-edaf-9455-926a-d65c16db1809",
                 0);
 
+    DO_TEST_OUT("memory-snapshot-inactivedomain", "14beef2c-8cae-4ea8-bf55-e48fe0cd4b73", 0);
+
     DO_TEST_INOUT("empty", "9d37b878-a7cc-9f9a-b78f-49b3abad25a8",
                   1386166249, 0);
     DO_TEST_INOUT("noparent", "9d37b878-a7cc-9f9a-b78f-49b3abad25a8",
@@ -187,6 +180,9 @@ mymain(void)
     DO_TEST_IN("name_and_description", NULL);
     DO_TEST_IN("description_only", NULL);
     DO_TEST_IN("name_only", NULL);
+
+    DO_TEST_INOUT("qcow2-metadata-cache", "9d37b878-a7cc-9f9a-b78f-49b3abad25a8",
+                  1386166249, 0);
 
     qemuTestDriverFree(&driver);
 

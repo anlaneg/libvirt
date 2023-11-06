@@ -473,6 +473,7 @@ typedef enum {
     /**
      * @desc: Read node device
      * @message: Reading node device configuration requires authorization
+     * @anonymous: 1
      */
     VIR_ACCESS_PERM_NODE_DEVICE_READ,
 
@@ -499,6 +500,12 @@ typedef enum {
      * @message: Detaching node device driver requires authorization
      */
     VIR_ACCESS_PERM_NODE_DEVICE_DETACH,
+
+    /**
+     * @desc: Delete node device
+     * @message: Deleting node device driver requires authorization
+     */
+    VIR_ACCESS_PERM_NODE_DEVICE_DELETE,
 
     VIR_ACCESS_PERM_NODE_DEVICE_LAST
 } virAccessPermNodeDevice;

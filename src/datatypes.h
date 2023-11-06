@@ -28,24 +28,24 @@
 #include "virobject.h"
 #include "viruuid.h"
 
-extern virClassPtr virConnectClass;
-extern virClassPtr virDomainClass;
-extern virClassPtr virDomainCheckpointClass;
-extern virClassPtr virDomainSnapshotClass;
-extern virClassPtr virInterfaceClass;
-extern virClassPtr virNetworkClass;
-extern virClassPtr virNetworkPortClass;
-extern virClassPtr virNodeDeviceClass;
-extern virClassPtr virNWFilterClass;
-extern virClassPtr virNWFilterBindingClass;
-extern virClassPtr virSecretClass;
-extern virClassPtr virStreamClass;
-extern virClassPtr virStorageVolClass;
-extern virClassPtr virStoragePoolClass;
+extern virClass *virConnectClass;
+extern virClass *virDomainClass;
+extern virClass *virDomainCheckpointClass;
+extern virClass *virDomainSnapshotClass;
+extern virClass *virInterfaceClass;
+extern virClass *virNetworkClass;
+extern virClass *virNetworkPortClass;
+extern virClass *virNodeDeviceClass;
+extern virClass *virNWFilterClass;
+extern virClass *virNWFilterBindingClass;
+extern virClass *virSecretClass;
+extern virClass *virStreamClass;
+extern virClass *virStorageVolClass;
+extern virClass *virStoragePoolClass;
 
-extern virClassPtr virAdmConnectClass;
-extern virClassPtr virAdmServerClass;
-extern virClassPtr virAdmClientClass;
+extern virClass *virAdmConnectClass;
+extern virClass *virAdmServerClass;
+extern virClass *virAdmClientClass;
 
 #define virCheckConnectReturn(obj, retval) \
     do { \
@@ -480,9 +480,7 @@ extern virClassPtr virAdmClientClass;
 
 
 typedef struct _virConnectCloseCallbackData virConnectCloseCallbackData;
-typedef virConnectCloseCallbackData *virConnectCloseCallbackDataPtr;
 typedef struct _virAdmConnectCloseCallbackData virAdmConnectCloseCallbackData;
-typedef virAdmConnectCloseCallbackData *virAdmConnectCloseCallbackDataPtr;
 
 /**
  * Internal structures holding data related to connection close callbacks.
@@ -519,25 +517,24 @@ struct _virConnect {
      * them.
      */
     unsigned int flags;     /* a set of connection flags */
-    virURIPtr uri;          /* connection URI */
+    virURI *uri;          /* connection URI */
 
     /* The underlying hypervisor driver and network driver. */
     //hypervisor对应的Driver
-    virHypervisorDriverPtr driver;
+    virHypervisorDriver *driver;
     //network对应的driver
-    virNetworkDriverPtr networkDriver;
+    virNetworkDriver *networkDriver;
     //interface对应的driver
-    virInterfaceDriverPtr interfaceDriver;
-    virStorageDriverPtr storageDriver;
-    virNodeDeviceDriverPtr nodeDeviceDriver;
-    virSecretDriverPtr secretDriver;
-    virNWFilterDriverPtr nwfilterDriver;
+    virInterfaceDriver *interfaceDriver;
+    virStorageDriver *storageDriver;
+    virNodeDeviceDriver *nodeDeviceDriver;
+    virSecretDriver *secretDriver;
+    virNWFilterDriver *nwfilterDriver;
 
-    /* Private data pointer which can be used by domain driver as
-     * it pleases.
+    /* Private data pointer which can be used by domain driver as it pleases.
      * NB: 'private' is a reserved word in C++.
      */
-    void *            privateData;
+    void *privateData;
 
     /*
      * Object lock must be acquired before accessing/changing any of
@@ -561,13 +558,13 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(virConnect, virObjectUnref);
  */
 struct _virAdmConnect {
     virObjectLockable parent;
-    virURIPtr uri;
+    virURI *uri;
 
     void *privateData;
     virFreeCallback privateDataFreeFunc;
 
     /* Per-connection close callback */
-    virAdmConnectCloseCallbackDataPtr closeCallback;
+    virAdmConnectCloseCallbackData *closeCallback;
 };
 
 /**
@@ -639,6 +636,8 @@ struct _virNetworkPort {
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetworkPort, virObjectUnref);
 
+/* virNetworkDHCPLease is defined in the public API - libvirt-network.h */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetworkDHCPLease, virNetworkDHCPLeaseFree);
 
 /**
 * _virInterface:
@@ -709,6 +708,8 @@ struct _virNodeDevice {
     char *parentName;                   /* parent device name */
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNodeDevice, virObjectUnref);
+
 /**
  * _virSecret:
  *
@@ -722,6 +723,7 @@ struct _virSecret {
     char *usageID;                       /* the usage's unique identifier */
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSecret, virObjectUnref);
 
 typedef int (*virStreamAbortFunc)(virStreamPtr, void *opaque);
 typedef int (*virStreamFinishFunc)(virStreamPtr, void *opaque);
@@ -736,7 +738,7 @@ struct _virStream {
     virConnectPtr conn;
     unsigned int flags;
 
-    virStreamDriverPtr driver;
+    virStreamDriver *driver;
     void *privateData;
     virFreeCallback ff;
 };
@@ -853,23 +855,23 @@ bool virConnectWasDisposed(void);
 void virAdmConnectWatchDispose(void);
 bool virAdmConnectWasDisposed(void);
 
-virConnectCloseCallbackDataPtr virNewConnectCloseCallbackData(void);
-void virConnectCloseCallbackDataRegister(virConnectCloseCallbackDataPtr close,
+virConnectCloseCallbackData *virNewConnectCloseCallbackData(void);
+void virConnectCloseCallbackDataRegister(virConnectCloseCallbackData *close,
                                          virConnectPtr conn,
                                          virConnectCloseFunc cb,
                                          void *opaque,
                                          virFreeCallback freecb);
-void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackDataPtr close,
+void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackData *close,
                                            virConnectCloseFunc cb);
-void virConnectCloseCallbackDataCall(virConnectCloseCallbackDataPtr close,
+void virConnectCloseCallbackDataCall(virConnectCloseCallbackData *close,
                                      int reason);
 virConnectCloseFunc
-virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackDataPtr close);
-void virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackDataPtr cbdata);
-int virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackDataPtr cbdata,
+virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackData *close);
+void virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackData *cbdata);
+int virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackData *cbdata,
                                            virAdmConnectPtr conn,
                                            virAdmConnectCloseFunc cb,
                                            void *opaque,
                                            virFreeCallback freecb);
-int virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackDataPtr cbdata,
+int virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackData *cbdata,
                                              virAdmConnectCloseFunc cb);

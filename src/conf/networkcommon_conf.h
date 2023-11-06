@@ -27,10 +27,9 @@
 
 #include "internal.h"
 #include "virbuffer.h"
-#include "virsocketaddr.h"
 #include "virnetdevip.h"
 
-virNetDevIPRoutePtr
+virNetDevIPRoute *
 virNetDevIPRouteCreate(const char *networkName,
                        const char *family,
                        const char *address,
@@ -41,10 +40,9 @@ virNetDevIPRouteCreate(const char *networkName,
                        unsigned int metric,
                        bool hasMetric);
 
-virNetDevIPRoutePtr
+virNetDevIPRoute *
 virNetDevIPRouteParseXML(const char *networkName,
-                         xmlNodePtr node,
-                         xmlXPathContextPtr ctxt);
+                         xmlNodePtr node);
 int
-virNetDevIPRouteFormat(virBufferPtr buf,
+virNetDevIPRouteFormat(virBuffer *buf,
                        const virNetDevIPRoute *def);

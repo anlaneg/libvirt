@@ -49,6 +49,11 @@ typedef virNWFilterPtr
 (*virDrvNWFilterDefineXML)(virConnectPtr conn,
                            const char *xmlDesc);
 
+typedef virNWFilterPtr
+(*virDrvNWFilterDefineXMLFlags)(virConnectPtr conn,
+                                const char *xmlDesc,
+                                unsigned int flags);
+
 typedef int
 (*virDrvNWFilterUndefine)(virNWFilterPtr nwfilter);
 
@@ -83,7 +88,6 @@ typedef int
 
 
 typedef struct _virNWFilterDriver virNWFilterDriver;
-typedef virNWFilterDriver *virNWFilterDriverPtr;
 
 /**
  * _virNWFilterDriver:
@@ -99,6 +103,7 @@ struct _virNWFilterDriver {
     virDrvNWFilterLookupByName nwfilterLookupByName;
     virDrvNWFilterLookupByUUID nwfilterLookupByUUID;
     virDrvNWFilterDefineXML nwfilterDefineXML;
+    virDrvNWFilterDefineXMLFlags nwfilterDefineXMLFlags;
     virDrvNWFilterUndefine nwfilterUndefine;
     virDrvNWFilterGetXMLDesc nwfilterGetXMLDesc;
     virDrvConnectListAllNWFilterBindings connectListAllNWFilterBindings;

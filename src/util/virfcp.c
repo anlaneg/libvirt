@@ -22,10 +22,8 @@
 
 #include "internal.h"
 
-#include "viralloc.h"
 #include "virfile.h"
 #include "virerror.h"
-#include "virstring.h"
 
 #include "virfcp.h"
 
@@ -40,8 +38,7 @@ virFCIsCapableRport(const char *rport)
 {
     g_autofree char *path = NULL;
 
-    if (virBuildPath(&path, SYSFS_FC_RPORT_PATH, rport) < 0)
-        return false;
+    path = g_build_filename(SYSFS_FC_RPORT_PATH, rport, NULL);
 
     return virFileExists(path);
 }

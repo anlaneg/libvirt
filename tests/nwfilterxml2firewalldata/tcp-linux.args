@@ -1,4 +1,5 @@
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 -m mac \
@@ -6,19 +7,25 @@ iptables \
 --destination 10.1.2.3/32 \
 -m dscp \
 --dscp 2 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --source 10.1.2.3/32 \
 -m dscp \
 --dscp 2 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 -m mac \
@@ -26,10 +33,13 @@ iptables \
 --destination 10.1.2.3/32 \
 -m dscp \
 --dscp 2 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --destination 10.1.2.3/32 \
@@ -39,6 +49,7 @@ iptables \
 --sport 100:1111 \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 -m mac \
@@ -50,6 +61,7 @@ iptables \
 --dport 100:1111 \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --destination 10.1.2.3/32 \
@@ -59,6 +71,7 @@ iptables \
 --sport 100:1111 \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --destination 10.1.2.3/32 \
@@ -68,6 +81,7 @@ iptables \
 --sport 65535:65535 \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 -m mac \
@@ -79,6 +93,7 @@ iptables \
 --dport 65535:65535 \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --destination 10.1.2.3/32 \
@@ -88,21 +103,25 @@ iptables \
 --sport 65535:65535 \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --tcp-flags SYN ALL \
 -j ACCEPT
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --tcp-flags SYN SYN,ACK \
 -j ACCEPT
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --tcp-flags RST NONE \
 -j ACCEPT
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --tcp-flags PSH NONE \

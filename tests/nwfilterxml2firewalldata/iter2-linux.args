@@ -1,274 +1,356 @@
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 1 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 1 \
 --dport 80 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 1 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 1 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 1 \
 --dport 90 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 1 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 1 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 1 \
 --dport 80 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 1 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 2 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 2 \
 --dport 80 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 2 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 2 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 2 \
 --dport 80 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 2 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 2 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 2 \
 --dport 80 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 2 \
 --sport 80 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 2 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 2 \
 --dport 90 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 2 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 2 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 2 \
 --dport 90 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 2 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 2 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 2 \
 --dport 90 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 2 \
 --sport 90 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -276,10 +358,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 1.1.1.1 \
@@ -287,10 +372,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -298,10 +386,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -309,10 +400,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 2.2.2.2 \
@@ -320,10 +414,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -331,10 +428,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -342,10 +442,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 3.3.3.3 \
@@ -353,10 +456,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -364,10 +470,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -375,10 +484,13 @@ iptables \
 --dscp 3 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 1.1.1.1 \
@@ -386,10 +498,13 @@ iptables \
 --dscp 3 \
 --dport 90 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -397,10 +512,13 @@ iptables \
 --dscp 3 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -408,10 +526,13 @@ iptables \
 --dscp 3 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 2.2.2.2 \
@@ -419,10 +540,13 @@ iptables \
 --dscp 3 \
 --dport 90 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -430,10 +554,13 @@ iptables \
 --dscp 3 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -441,10 +568,13 @@ iptables \
 --dscp 3 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 3.3.3.3 \
@@ -452,10 +582,13 @@ iptables \
 --dscp 3 \
 --dport 90 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -463,10 +596,13 @@ iptables \
 --dscp 3 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -474,10 +610,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 1.1.1.1 \
@@ -485,10 +624,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -496,10 +638,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -507,10 +652,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 2.2.2.2 \
@@ -518,10 +666,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -529,10 +680,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -540,10 +694,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 3.3.3.3 \
@@ -551,10 +708,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -562,10 +722,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -573,10 +736,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 1.1.1.1 \
@@ -584,10 +750,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
@@ -595,10 +764,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -606,10 +778,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 2.2.2.2 \
@@ -617,10 +792,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
@@ -628,10 +806,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -639,10 +820,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 3.3.3.3 \
@@ -650,10 +834,13 @@ iptables \
 --dscp 3 \
 --dport 80 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
@@ -661,10 +848,13 @@ iptables \
 --dscp 3 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -672,10 +862,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -683,10 +876,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -694,10 +890,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -705,10 +904,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -716,10 +918,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -727,10 +932,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -738,10 +946,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -749,10 +960,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -760,10 +974,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -771,10 +988,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -782,10 +1002,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -793,10 +1016,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -804,10 +1030,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -815,10 +1044,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -826,10 +1058,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -837,10 +1072,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -848,10 +1086,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1080 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -859,10 +1100,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1080 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -870,10 +1114,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -881,10 +1128,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -892,10 +1142,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -903,10 +1156,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -914,10 +1170,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -925,10 +1184,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -936,10 +1198,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -947,10 +1212,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -958,10 +1226,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -969,10 +1240,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -980,10 +1254,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -991,10 +1268,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1002,10 +1282,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -1013,10 +1296,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1024,10 +1310,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1035,10 +1324,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -1046,10 +1338,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1090 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1057,10 +1352,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1090 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1068,10 +1366,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -1079,10 +1380,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1090,10 +1394,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1101,10 +1408,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -1112,10 +1422,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1123,10 +1436,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1134,10 +1450,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -1145,10 +1464,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1156,10 +1478,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1167,10 +1492,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -1178,10 +1506,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1189,10 +1520,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1200,10 +1534,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -1211,10 +1548,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1222,10 +1562,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1233,10 +1576,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -1244,10 +1590,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1100 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1255,10 +1604,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1100 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1266,10 +1618,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -1277,10 +1632,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1288,10 +1646,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1299,10 +1660,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -1310,10 +1674,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1321,10 +1688,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1332,10 +1702,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -1343,10 +1716,13 @@ iptables \
 --dscp 4 \
 --dport 80 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1354,10 +1730,13 @@ iptables \
 --dscp 4 \
 --sport 80 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1365,10 +1744,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 1.1.1.1 \
@@ -1376,10 +1758,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 1.1.1.1 \
@@ -1387,10 +1772,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1398,10 +1786,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 2.2.2.2 \
@@ -1409,10 +1800,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 2.2.2.2 \
@@ -1420,10 +1814,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1431,10 +1828,13 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p tcp \
 --destination 3.3.3.3 \
@@ -1442,10 +1842,13 @@ iptables \
 --dscp 4 \
 --dport 90 \
 --sport 1110 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p tcp \
 --source 3.3.3.3 \
@@ -1453,366 +1856,476 @@ iptables \
 --dscp 4 \
 --sport 90 \
 --dport 1110 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 1.1.1.1 \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 2.2.2.2 \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 3.3.3.3 \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 1.1.1.1 \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 2.2.2.2 \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 3.3.3.3 \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 1.1.1.1 \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 1.1.1.1 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 2.2.2.2 \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 2.2.2.2 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udp \
 --destination 3.3.3.3 \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udp \
 --source 3.3.3.3 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 5 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 6 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 1.1.1.1 \
 --source 1.1.1.1 \
 -m dscp \
 --dscp 6 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 1.1.1.1 \
 --destination 1.1.1.1 \
 -m dscp \
 --dscp 6 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 6 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 2.2.2.2 \
 --source 2.2.2.2 \
 -m dscp \
 --dscp 6 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 2.2.2.2 \
 --destination 2.2.2.2 \
 -m dscp \
 --dscp 6 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 6 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p sctp \
 --destination 3.3.3.3 \
 --source 3.3.3.3 \
 -m dscp \
 --dscp 6 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p sctp \
 --source 3.3.3.3 \
 --destination 3.3.3.3 \
 -m dscp \
 --dscp 6 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN

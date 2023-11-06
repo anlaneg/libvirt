@@ -24,11 +24,9 @@
 #define VIR_PARENT_REQUIRED /* empty, to allow virObject to have no parent */
 #include "virobject.h"
 #include "virthread.h"
-#include "viralloc.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "virprobe.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -37,7 +35,7 @@ VIR_LOG_INIT("util.object");
 static unsigned int magicCounter = 0xCAFE0000;
 
 struct _virClass {
-    virClassPtr parent;
+    virClass *parent;
 
     GType type;
     unsigned int magic;
@@ -49,7 +47,7 @@ struct _virClass {
 
 typedef struct _virObjectPrivate virObjectPrivate;
 struct _virObjectPrivate {
-    virClassPtr klass;
+    virClass *klass;
 };
 
 
@@ -59,7 +57,7 @@ G_DEFINE_TYPE_WITH_PRIVATE(virObject, vir_object, G_TYPE_OBJECT)
 
 #define VIR_OBJECT_USAGE_PRINT_WARNING(anyobj, objclass) \
     do { \
-        virObjectPtr obj = anyobj; \
+        virObject *obj = anyobj; \
         if (!obj) \
             VIR_WARN("Object cannot be NULL"); \
         if (VIR_OBJECT_NOTVALID(obj)) \
@@ -68,9 +66,9 @@ G_DEFINE_TYPE_WITH_PRIVATE(virObject, vir_object, G_TYPE_OBJECT)
     } while (0)
 
 
-static virClassPtr virObjectClassImpl;
-static virClassPtr virObjectLockableClass;
-static virClassPtr virObjectRWLockableClass;
+static virClass *virObjectClassImpl;
+static virClass *virObjectLockableClass;
+static virClass *virObjectRWLockableClass;
 
 static void virObjectLockableDispose(void *anyobj);
 static void virObjectRWLockableDispose(void *anyobj);
@@ -102,7 +100,7 @@ VIR_ONCE_GLOBAL_INIT(virObject);
  *
  * Returns the class instance for the base virObject type
  */
-virClassPtr
+virClass *
 virClassForObject(void)
 {
     if (virObjectInitialize() < 0)
@@ -117,7 +115,7 @@ virClassForObject(void)
  *
  * Returns the class instance for the virObjectLockable type
  */
-virClassPtr
+virClass *
 virClassForObjectLockable(void)
 {
     if (virObjectInitialize() < 0)
@@ -132,7 +130,7 @@ virClassForObjectLockable(void)
  *
  * Returns the class instance for the virObjectRWLockable type
  */
-virClassPtr
+virClass *
 virClassForObjectRWLockable(void)
 {
     if (virObjectInitialize() < 0)
@@ -167,14 +165,14 @@ static void virObjectDummyInit(void *obj G_GNUC_UNUSED)
  *
  * Returns a new class instance
  */
-virClassPtr
-virClassNew(virClassPtr parent,
+virClass *
+virClassNew(virClass *parent,
             const char *name,
             size_t objectSize,
             size_t parentSize,
             virObjectDisposeCallback dispose)
 {
-    virClassPtr klass;
+    virClass *klass;
 
     if (parent == NULL &&
         STRNEQ(name, "virObject")) {
@@ -182,9 +180,8 @@ virClassNew(virClassPtr parent,
         return NULL;
     } else if (objectSize <= parentSize ||
                parentSize != (parent ? parent->objectSize : 0)) {
-        sa_assert(parent);
         virReportInvalidArg(objectSize,
-                            _("object size %zu of %s is not larger than parent class %zu"),
+                            _("object size %1$zu of %2$s is not larger than parent class %3$zu"),
                             objectSize, name, parent->objectSize);
         return NULL;
     }
@@ -222,8 +219,8 @@ virClassNew(virClassPtr parent,
  * Return true if @klass is derived from @parent, false otherwise
  */
 bool
-virClassIsDerivedFrom(virClassPtr klass,
-                      virClassPtr parent)
+virClassIsDerivedFrom(virClass *klass,
+                      virClass *parent)
 {
 	//检查klass是否为parent的子类
     while (klass) {
@@ -240,7 +237,7 @@ virClassIsDerivedFrom(virClassPtr klass,
  * @klass: the klass of object to create
  *
  * Allocates a new object of type @klass. The returned
- * object will be an instance of "virObjectPtr", which
+ * object will be an instance of "virObject *", which
  * can be cast to the struct associated with @klass.
  *
  * The initial reference count of the object will be 1.
@@ -248,9 +245,9 @@ virClassIsDerivedFrom(virClassPtr klass,
  * Returns the new object
  */
 void *
-virObjectNew(virClassPtr klass)
+virObjectNew(virClass *klass)
 {
-    virObjectPtr obj = NULL;
+    virObject *obj = NULL;
     virObjectPrivate *priv;
 
     obj = g_object_new(klass->type, NULL);
@@ -264,14 +261,14 @@ virObjectNew(virClassPtr klass)
 
 //new一个obj
 void *
-virObjectLockableNew(virClassPtr klass)
+virObjectLockableNew(virClass *klass)
 {
-    virObjectLockablePtr obj;
+    virObjectLockable *obj;
 
     //klass必须为virClassForObjectLockable的子类
     if (!virClassIsDerivedFrom(klass, virClassForObjectLockable())) {
         virReportInvalidArg(klass,
-                            _("Class %s must derive from virObjectLockable"),
+                            _("Class %1$s must derive from virObjectLockable"),
                             virClassName(klass));
         return NULL;
     }
@@ -292,13 +289,13 @@ virObjectLockableNew(virClassPtr klass)
 
 
 void *
-virObjectRWLockableNew(virClassPtr klass)
+virObjectRWLockableNew(virClass *klass)
 {
-    virObjectRWLockablePtr obj;
+    virObjectRWLockable *obj;
 
     if (!virClassIsDerivedFrom(klass, virClassForObjectRWLockable())) {
         virReportInvalidArg(klass,
-                            _("Class %s must derive from virObjectRWLockable"),
+                            _("Class %1$s must derive from virObjectRWLockable"),
                             virClassName(klass));
         return NULL;
     }
@@ -318,11 +315,12 @@ virObjectRWLockableNew(virClassPtr klass)
 
 static void vir_object_finalize(GObject *gobj)
 {
-    PROBE(OBJECT_DISPOSE, "obj=%p", gobj);
-    virObjectPtr obj = VIR_OBJECT(gobj);
+    virObject *obj = VIR_OBJECT(gobj);
     virObjectPrivate *priv = vir_object_get_instance_private(obj);
+    virClass *klass = priv->klass;
 
-    virClassPtr klass = priv->klass;
+    PROBE(OBJECT_DISPOSE, "obj=%p", gobj);
+
     while (klass) {
         if (klass->dispose)
             klass->dispose(obj);
@@ -347,7 +345,7 @@ static void vir_object_class_init(virObjectClass *klass)
 static void
 virObjectLockableDispose(void *anyobj)
 {
-    virObjectLockablePtr obj = anyobj;
+    virObjectLockable *obj = anyobj;
 
     virMutexDestroy(&obj->lock);
 }
@@ -356,7 +354,7 @@ virObjectLockableDispose(void *anyobj)
 static void
 virObjectRWLockableDispose(void *anyobj)
 {
-    virObjectRWLockablePtr obj = anyobj;
+    virObjectRWLockable *obj = anyobj;
 
     virRWLockDestroy(&obj->lock);
 }
@@ -364,7 +362,7 @@ virObjectRWLockableDispose(void *anyobj)
 
 /**
  * virObjectUnref:
- * @anyobj: any instance of virObjectPtr
+ * @anyobj: any instance of virObject *
  *
  * Decrement the reference count on @anyobj and if
  * it hits zero, runs the "dispose" callbacks associated
@@ -374,7 +372,7 @@ virObjectRWLockableDispose(void *anyobj)
 void
 virObjectUnref(void *anyobj)
 {
-    virObjectPtr obj = anyobj;
+    virObject *obj = anyobj;
 
     if (VIR_OBJECT_NOTVALID(obj))
         return;
@@ -386,7 +384,7 @@ virObjectUnref(void *anyobj)
 
 /**
  * virObjectRef:
- * @anyobj: any instance of virObjectPtr
+ * @anyobj: any instance of virObject *
  *
  * Increment the reference count on @anyobj and return
  * the same pointer
@@ -396,7 +394,7 @@ virObjectUnref(void *anyobj)
 void *
 virObjectRef(void *anyobj)
 {
-    virObjectPtr obj = anyobj;
+    virObject *obj = anyobj;
 
     if (VIR_OBJECT_NOTVALID(obj))
         return NULL;
@@ -407,7 +405,7 @@ virObjectRef(void *anyobj)
 }
 
 
-static virObjectLockablePtr
+static virObjectLockable *
 virObjectGetLockableObj(void *anyobj)
 {
     if (virObjectIsClass(anyobj, virObjectLockableClass))
@@ -418,7 +416,7 @@ virObjectGetLockableObj(void *anyobj)
 }
 
 
-static virObjectRWLockablePtr
+static virObjectRWLockable *
 virObjectGetRWLockableObj(void *anyobj)
 {
     if (virObjectIsClass(anyobj, virObjectRWLockableClass))
@@ -426,6 +424,22 @@ virObjectGetRWLockableObj(void *anyobj)
 
     VIR_OBJECT_USAGE_PRINT_WARNING(anyobj, virObjectRWLockable);
     return NULL;
+}
+
+
+/**
+ * virObjectLockGuard:
+ * @anyobj: any instance of virObjectLockable
+ *
+ * Acquire a lock on @anyobj that will be managed by the virLockGuard object
+ * returned to the caller.
+ */
+virLockGuard
+virObjectLockGuard(void *anyobj)
+{
+    virObjectLockable *obj = virObjectGetLockableObj(anyobj);
+
+    return virLockGuardLock(&obj->lock);
 }
 
 
@@ -444,7 +458,7 @@ virObjectGetRWLockableObj(void *anyobj)
 void
 virObjectLock(void *anyobj)
 {
-    virObjectLockablePtr obj = virObjectGetLockableObj(anyobj);
+    virObjectLockable *obj = virObjectGetLockableObj(anyobj);
 
     if (!obj)
         return;
@@ -473,7 +487,7 @@ virObjectLock(void *anyobj)
 void
 virObjectRWLockRead(void *anyobj)
 {
-    virObjectRWLockablePtr obj = virObjectGetRWLockableObj(anyobj);
+    virObjectRWLockable *obj = virObjectGetRWLockableObj(anyobj);
 
     if (!obj)
         return;
@@ -503,7 +517,7 @@ virObjectRWLockRead(void *anyobj)
 void
 virObjectRWLockWrite(void *anyobj)
 {
-    virObjectRWLockablePtr obj = virObjectGetRWLockableObj(anyobj);
+    virObjectRWLockable *obj = virObjectGetRWLockableObj(anyobj);
 
     if (!obj)
         return;
@@ -522,7 +536,7 @@ virObjectRWLockWrite(void *anyobj)
 void
 virObjectUnlock(void *anyobj)
 {
-    virObjectLockablePtr obj = virObjectGetLockableObj(anyobj);
+    virObjectLockable *obj = virObjectGetLockableObj(anyobj);
 
     if (!obj)
         return;
@@ -541,7 +555,7 @@ virObjectUnlock(void *anyobj)
 void
 virObjectRWUnlock(void *anyobj)
 {
-    virObjectRWLockablePtr obj = virObjectGetRWLockableObj(anyobj);
+    virObjectRWLockable *obj = virObjectGetRWLockableObj(anyobj);
 
     if (!obj)
         return;
@@ -552,7 +566,7 @@ virObjectRWUnlock(void *anyobj)
 
 /**
  * virObjectIsClass:
- * @anyobj: any instance of virObjectPtr
+ * @anyobj: any instance of virObject *
  * @klass: the class to check
  *
  * Checks whether @anyobj is an instance of
@@ -562,9 +576,9 @@ virObjectRWUnlock(void *anyobj)
  */
 bool
 virObjectIsClass(void *anyobj,
-                 virClassPtr klass)
+                 virClass *klass)
 {
-    virObjectPtr obj = anyobj;
+    virObject *obj = anyobj;
     virObjectPrivate *priv;
 
     if (VIR_OBJECT_NOTVALID(obj))
@@ -582,39 +596,9 @@ virObjectIsClass(void *anyobj,
  * Returns the name of @klass
  */
 const char *
-virClassName(virClassPtr klass)
+virClassName(virClass *klass)
 {
     return klass->name;
-}
-
-
-/**
- * virObjectFreeCallback:
- * @opaque: a pointer to a virObject instance
- *
- * Provides identical functionality to virObjectUnref,
- * but with the signature matching the virFreeCallback
- * typedef.
- */
-void virObjectFreeCallback(void *opaque)
-{
-    virObjectUnref(opaque);
-}
-
-
-/**
- * virObjectFreeHashData:
- * @opaque: a pointer to a virObject instance
- * @name: ignored, name of the hash key being deleted
- *
- * Provides identical functionality to virObjectUnref,
- * but with the signature matching the virHashDataFree
- * typedef.
- */
-void
-virObjectFreeHashData(void *opaque)
-{
-    virObjectUnref(opaque);
 }
 
 
@@ -635,7 +619,7 @@ virObjectListFree(void *list)
     for (next = (void **) list; *next; next++)
         virObjectUnref(*next);
 
-    VIR_FREE(list);
+    g_free(list);
 }
 
 
@@ -658,5 +642,5 @@ virObjectListFreeCount(void *list,
     for (i = 0; i < count; i++)
         virObjectUnref(((void **)list)[i]);
 
-    VIR_FREE(list);
+    g_free(list);
 }

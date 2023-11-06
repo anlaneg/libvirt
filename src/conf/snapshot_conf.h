@@ -26,17 +26,6 @@
 #include "moment_conf.h"
 #include "virenum.h"
 
-/* Items related to snapshot state */
-
-typedef enum {
-    VIR_DOMAIN_SNAPSHOT_LOCATION_DEFAULT = 0,
-    VIR_DOMAIN_SNAPSHOT_LOCATION_NONE,
-    VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL,
-    VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL,
-
-    VIR_DOMAIN_SNAPSHOT_LOCATION_LAST
-} virDomainSnapshotLocation;
-
 /**
  * This enum has to map all known domain states from the public enum
  * virDomainState, before adding one additional state possible only
@@ -60,16 +49,23 @@ G_STATIC_ASSERT((int)VIR_DOMAIN_SNAPSHOT_DISK_SNAPSHOT == VIR_DOMAIN_LAST);
 
 /* Stores disk-snapshot information */
 typedef struct _virDomainSnapshotDiskDef virDomainSnapshotDiskDef;
-typedef virDomainSnapshotDiskDef *virDomainSnapshotDiskDefPtr;
 struct _virDomainSnapshotDiskDef {
     char *name;     /* name matching the <target dev='...' of the domain */
-    int idx;        /* index within snapshot->dom->disks that matches name */
-    int snapshot;   /* virDomainSnapshotLocation */
+    virDomainSnapshotLocation snapshot;
+    bool snapshotDeleteInProgress;
 
     /* details of wrapper external file. src is always non-NULL.
      * XXX optimize this to allow NULL for internal snapshots? */
-    virStorageSourcePtr src;
+    virStorageSource *src;
 };
+
+void
+virDomainSnapshotDiskDefClear(virDomainSnapshotDiskDef *disk);
+
+void
+virDomainSnapshotDiskDefFree(virDomainSnapshotDiskDef *disk);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainSnapshotDiskDef, virDomainSnapshotDiskDefFree);
 
 /* Stores the complete snapshot metadata */
 struct _virDomainSnapshotDef {
@@ -78,13 +74,18 @@ struct _virDomainSnapshotDef {
     /* Additional public XML.  */
     int state; /* virDomainSnapshotState */
 
-    int memory; /* virDomainMemorySnapshot */
-    char *file; /* memory state file when snapshot is external */
+    virDomainSnapshotLocation memory;
+    char *memorysnapshotfile; /* memory state file when snapshot is external */
 
     size_t ndisks; /* should not exceed dom->ndisks */
     virDomainSnapshotDiskDef *disks;
 
-    virObjectPtr cookie;
+    /* When we revert to non-leaf snapshot we need to
+     * store the new overlay disks. */
+    size_t nrevertdisks;
+    virDomainSnapshotDiskDef *revertdisks;
+
+    virObject *cookie;
 };
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainSnapshotDef, virObjectUnref);
@@ -92,10 +93,9 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainSnapshotDef, virObjectUnref);
 
 typedef enum {
     VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE = 1 << 0,
-    VIR_DOMAIN_SNAPSHOT_PARSE_DISKS    = 1 << 1,
-    VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL = 1 << 2,
-    VIR_DOMAIN_SNAPSHOT_PARSE_OFFLINE  = 1 << 3,
-    VIR_DOMAIN_SNAPSHOT_PARSE_VALIDATE = 1 << 4,
+    VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL = 1 << 1,
+    VIR_DOMAIN_SNAPSHOT_PARSE_OFFLINE  = 1 << 2,
+    VIR_DOMAIN_SNAPSHOT_PARSE_VALIDATE = 1 << 3,
 } virDomainSnapshotParseFlags;
 
 typedef enum {
@@ -106,40 +106,36 @@ typedef enum {
 
 unsigned int virDomainSnapshotFormatConvertXMLFlags(unsigned int flags);
 
-virDomainSnapshotDefPtr virDomainSnapshotDefParseString(const char *xmlStr,
-                                                        virDomainXMLOptionPtr xmlopt,
-                                                        void *parseOpaque,
-                                                        bool *current,
-                                                        unsigned int flags);
-virDomainSnapshotDefPtr virDomainSnapshotDefParseNode(xmlDocPtr xml,
-                                                      xmlNodePtr root,
-                                                      virDomainXMLOptionPtr xmlopt,
+virDomainSnapshotDef *virDomainSnapshotDefParseString(const char *xmlStr,
+                                                      virDomainXMLOption *xmlopt,
                                                       void *parseOpaque,
                                                       bool *current,
                                                       unsigned int flags);
-virDomainSnapshotDefPtr virDomainSnapshotDefNew(void);
+virDomainSnapshotDef *
+virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
+                          virDomainXMLOption *xmlopt,
+                          void *parseOpaque,
+                          bool *current,
+                          unsigned int flags);
+
+virDomainSnapshotDef *virDomainSnapshotDefNew(void);
 char *virDomainSnapshotDefFormat(const char *uuidstr,
-                                 virDomainSnapshotDefPtr def,
-                                 virDomainXMLOptionPtr xmlopt,
+                                 virDomainSnapshotDef *def,
+                                 virDomainXMLOption *xmlopt,
                                  unsigned int flags);
-int virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr snapshot,
-                                int default_snapshot,
-                                bool require_match);
+int virDomainSnapshotAlignDisks(virDomainSnapshotDef *snapshot,
+                                virDomainDef *existingDomainDef,
+                                virDomainSnapshotLocation default_snapshot,
+                                bool uniform_internal_snapshot,
+                                bool force_default_location);
 
-bool virDomainSnapshotDefIsExternal(virDomainSnapshotDefPtr def);
-bool virDomainSnapshotIsExternal(virDomainMomentObjPtr snap);
+bool virDomainSnapshotDefIsExternal(virDomainSnapshotDef *def);
+bool virDomainSnapshotIsExternal(virDomainMomentObj *snap);
 
-int virDomainSnapshotRedefinePrep(virDomainObjPtr vm,
-                                  virDomainSnapshotDefPtr *def,
-                                  virDomainMomentObjPtr *snap,
-                                  virDomainXMLOptionPtr xmlopt,
+int virDomainSnapshotRedefinePrep(virDomainObj *vm,
+                                  virDomainSnapshotDef *snapdef,
+                                  virDomainMomentObj **snap,
+                                  virDomainXMLOption *xmlopt,
                                   unsigned int flags);
 
-int virDomainSnapshotRedefineValidate(virDomainSnapshotDefPtr def,
-                                      const unsigned char *domain_uuid,
-                                      virDomainMomentObjPtr other,
-                                      virDomainXMLOptionPtr xmlopt,
-                                      unsigned int flags);
-
-VIR_ENUM_DECL(virDomainSnapshotLocation);
 VIR_ENUM_DECL(virDomainSnapshotState);

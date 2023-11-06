@@ -35,6 +35,8 @@ VIR_LOG_INIT("libvirt.domain-snapshot");
  *
  * Returns a pointer to the name or NULL, the string need not be deallocated
  * as its lifetime will be the same as the snapshot object.
+ *
+ * Since: 0.9.5
  */
 const char *
 virDomainSnapshotGetName(virDomainSnapshotPtr snapshot)
@@ -58,6 +60,8 @@ virDomainSnapshotGetName(virDomainSnapshotPtr snapshot)
  * call.
  *
  * Returns the domain or NULL.
+ *
+ * Since: 0.9.5
  */
 virDomainPtr
 virDomainSnapshotGetDomain(virDomainSnapshotPtr snapshot)
@@ -81,6 +85,8 @@ virDomainSnapshotGetDomain(virDomainSnapshotPtr snapshot)
  * call.
  *
  * Returns the connection or NULL.
+ *
+ * Since: 0.9.5
  */
 virConnectPtr
 virDomainSnapshotGetConnect(virDomainSnapshotPtr snapshot)
@@ -174,6 +180,9 @@ virDomainSnapshotGetConnect(virDomainSnapshotPtr snapshot)
  * file systems in use within domain OS. However, if the guest agent
  * is not present, an error is thrown. Moreover, this flag requires
  * VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY to be passed as well.
+ * For better control and error recovery users should invoke virDomainFSFreeze
+ * manually before taking the snapshot and then virDomainFSThaw to restore the
+ * VM rather than using VIR_DOMAIN_SNAPSHOT_CREATE_QUIESCE.
  *
  * By default, if the snapshot involves external files, and any of the
  * destination files already exist as a non-empty regular file, the
@@ -210,6 +219,8 @@ virDomainSnapshotGetConnect(virDomainSnapshotPtr snapshot)
  *
  * Returns an (opaque) new virDomainSnapshotPtr on success or NULL on
  * failure.
+ *
+ * Since: 0.8.0
  */
 virDomainSnapshotPtr
 virDomainSnapshotCreateXML(virDomainPtr domain,
@@ -268,6 +279,8 @@ virDomainSnapshotCreateXML(virDomainPtr domain,
  *
  * Returns a 0 terminated UTF-8 encoded XML instance or NULL in case
  * of error. The caller must free() the returned value.
+ *
+ * Since: 0.8.0
  */
 char *
 virDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot,
@@ -321,6 +334,8 @@ virDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot,
  * virDomainListAllSnapshots().
  *
  * Returns the number of domain snapshots found or -1 in case of error.
+ *
+ * Since: 0.8.0
  */
 int
 virDomainSnapshotNum(virDomainPtr domain, unsigned int flags)
@@ -378,11 +393,15 @@ virDomainSnapshotNum(virDomainPtr domain, unsigned int flags)
  * snapshots were listed if the return is less than @nameslen.  Likewise,
  * you should be prepared for virDomainSnapshotLookupByName() to fail when
  * converting a name from this call into a snapshot object, if another
- * connection deletes the snapshot in the meantime.  For more control over
- * the results, see virDomainListAllSnapshots().
+ * connection deletes the snapshot in the meantime.
+ *
+ * The use of this function is discouraged. Instead, use
+ * virDomainListAllSnapshots().
  *
  * Returns the number of domain snapshots found or -1 in case of error.
  * The caller is responsible to call free() for each member of the array.
+ *
+ * Since: 0.8.0
  */
 int
 virDomainSnapshotListNames(virDomainPtr domain, char **names, int nameslen,
@@ -471,6 +490,8 @@ virDomainSnapshotListNames(virDomainPtr domain, char **names, int nameslen,
  * in the return count, to make iteration easier.  The caller is responsible
  * for calling virDomainSnapshotFree() on each array element, then calling
  * free() on @snaps.
+ *
+ * Since: 0.9.13
  */
 int
 virDomainListAllSnapshots(virDomainPtr domain, virDomainSnapshotPtr **snaps,
@@ -520,6 +541,8 @@ virDomainListAllSnapshots(virDomainPtr domain, virDomainSnapshotPtr **snaps,
  * virDomainSnapshotListAllChildren().
  *
  * Returns the number of domain snapshots found or -1 in case of error.
+ *
+ * Since: 0.9.7
  */
 int
 virDomainSnapshotNumChildren(virDomainSnapshotPtr snapshot, unsigned int flags)
@@ -579,11 +602,15 @@ virDomainSnapshotNumChildren(virDomainSnapshotPtr snapshot, unsigned int flags)
  * snapshots were listed if the return is less than @nameslen.  Likewise,
  * you should be prepared for virDomainSnapshotLookupByName() to fail when
  * converting a name from this call into a snapshot object, if another
- * connection deletes the snapshot in the meantime.  For more control over
- * the results, see virDomainSnapshotListAllChildren().
+ * connection deletes the snapshot in the meantime.
+ *
+ * The use of this function is discouraged. Instead, use
+ * virDomainSnapshotListAllChildren().
  *
  * Returns the number of domain snapshots found or -1 in case of error.
  * The caller is responsible to call free() for each member of the array.
+ *
+ * Since: 0.9.7
  */
 int
 virDomainSnapshotListChildrenNames(virDomainSnapshotPtr snapshot,
@@ -655,6 +682,8 @@ virDomainSnapshotListChildrenNames(virDomainSnapshotPtr snapshot,
  * in the return count, to make iteration easier.  The caller is responsible
  * for calling virDomainSnapshotFree() on each array element, then calling
  * free() on @snaps.
+ *
+ * Since: 0.9.13
  */
 int
 virDomainSnapshotListAllChildren(virDomainSnapshotPtr snapshot,
@@ -699,6 +728,8 @@ virDomainSnapshotListAllChildren(virDomainSnapshotPtr snapshot,
  * Returns a domain snapshot object or NULL in case of failure.  If the
  * domain snapshot cannot be found, then the VIR_ERR_NO_DOMAIN_SNAPSHOT
  * error is raised.
+ *
+ * Since: 0.8.0
  */
 virDomainSnapshotPtr
 virDomainSnapshotLookupByName(virDomainPtr domain,
@@ -739,6 +770,8 @@ virDomainSnapshotLookupByName(virDomainPtr domain,
  * Determine if the domain has a current snapshot.
  *
  * Returns 1 if such snapshot exists, 0 if it doesn't, -1 on error.
+ *
+ * Since: 0.8.0
  */
 int
 virDomainHasCurrentSnapshot(virDomainPtr domain, unsigned int flags)
@@ -779,6 +812,8 @@ virDomainHasCurrentSnapshot(virDomainPtr domain, unsigned int flags)
  * Returns a domain snapshot object or NULL in case of failure.  If the
  * current domain snapshot cannot be found, then the VIR_ERR_NO_DOMAIN_SNAPSHOT
  * error is raised.
+ *
+ * Since: 0.8.0
  */
 virDomainSnapshotPtr
 virDomainSnapshotCurrent(virDomainPtr domain,
@@ -821,6 +856,8 @@ virDomainSnapshotCurrent(virDomainPtr domain,
  * Returns a domain snapshot object or NULL in case of failure.  If the
  * given snapshot is a root (no parent), then the VIR_ERR_NO_DOMAIN_SNAPSHOT
  * error is raised.
+ *
+ * Since: 0.9.7
  */
 virDomainSnapshotPtr
 virDomainSnapshotGetParent(virDomainSnapshotPtr snapshot,
@@ -859,6 +896,8 @@ virDomainSnapshotGetParent(virDomainSnapshotPtr snapshot,
  * also virDomainHasCurrentSnapshot().
  *
  * Returns 1 if current, 0 if not current, or -1 on error.
+ *
+ * Since: 0.9.13
  */
 int
 virDomainSnapshotIsCurrent(virDomainSnapshotPtr snapshot,
@@ -898,6 +937,8 @@ virDomainSnapshotIsCurrent(virDomainSnapshotPtr snapshot,
  *
  * Returns 1 if the snapshot has metadata, 0 if the snapshot exists without
  * help from libvirt, or -1 on error.
+ *
+ * Since: 0.9.13
  */
 int
 virDomainSnapshotHasMetadata(virDomainSnapshotPtr snapshot,
@@ -953,6 +994,10 @@ virDomainSnapshotHasMetadata(virDomainSnapshotPtr snapshot,
  * implies the intent to roll back state, no additional confirmation is
  * normally required for these lossy effects.
  *
+ * Since libvirt 7.10.0 the VM process is always restarted so the following
+ * paragraph is no longer valid. If the snapshot metadata lacks the full
+ * VM XML it's no longer possible to revert to such snapshot.
+ *
  * However, there are two particular situations where reverting will
  * be refused by default, and where @flags must include
  * VIR_DOMAIN_SNAPSHOT_REVERT_FORCE to acknowledge the risks.  1) Any
@@ -968,7 +1013,13 @@ virDomainSnapshotHasMetadata(virDomainSnapshotPtr snapshot,
  * inactive snapshots with a @flags request to start the domain after
  * the revert.
  *
+ * If @flags includes VIR_DOMAIN_SNAPSHOT_REVERT_RESET_NVRAM, then
+ * libvirt will discard any existing NVRAM file and re-initialize
+ * NVRAM from the pristine template.
+ *
  * Returns 0 if the creation is successful, -1 on error.
+ *
+ * Since: 0.8.0
  */
 int
 virDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
@@ -1024,8 +1075,17 @@ virDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
  * libvirt metadata to track snapshots, then this flag is silently
  * ignored.
  *
+ * Since libvirt 9.0.0 deletion of external snapshots is supported
+ * for QEMU driver. Using @flags VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN
+ * and VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN_ONLY is not supported with
+ * external snapshots. In case that daemon process is terminated
+ * while the snapshot delete is in process the operation will be
+ * aborted when the daemon starts again.
+ *
  * Returns 0 if the selected snapshot(s) were successfully deleted,
  * -1 on error.
+ *
+ * Since: 0.8.0
  */
 int
 virDomainSnapshotDelete(virDomainSnapshotPtr snapshot,
@@ -1076,6 +1136,8 @@ virDomainSnapshotDelete(virDomainSnapshotPtr snapshot,
  * increment the reference count.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 0.9.13
  */
 int
 virDomainSnapshotRef(virDomainSnapshotPtr snapshot)
@@ -1099,6 +1161,8 @@ virDomainSnapshotRef(virDomainSnapshotPtr snapshot)
  * The data structure is freed and should not be used thereafter.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 0.8.0
  */
 int
 virDomainSnapshotFree(virDomainSnapshotPtr snapshot)

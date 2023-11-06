@@ -20,7 +20,7 @@
  */
 
 #ifndef LIBVIRT_QEMU_PROCESSPRIV_H_ALLOW
-# error "qemu_process_priv.h may only be included by qemu_process.c or test suites"
+# error "qemu_processpriv.h may only be included by qemu_process.c or test suites"
 #endif /* LIBVIRT_QEMU_PROCESSPRIV_H_ALLOW */
 
 #pragma once
@@ -32,9 +32,8 @@
  * This header file should never be used outside unit tests.
  */
 
-int qemuProcessHandleDeviceDeleted(qemuMonitorPtr mon,
-                                   virDomainObjPtr vm,
-                                   const char *devAlias,
-                                   void *opaque);
+void qemuProcessHandleDeviceDeleted(qemuMonitor *mon,
+                                    virDomainObj *vm,
+                                    const char *devAlias);
 
-int qemuProcessQMPInitMonitor(qemuMonitorPtr mon);
+int qemuProcessQMPInitMonitor(qemuMonitor *mon);

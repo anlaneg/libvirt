@@ -23,11 +23,7 @@
 
 #include "viralloc.h"
 #include "virerror.h"
-#include "virstring.h"
-#include "nwfilter_params.h"
 #include "virnwfilterbindingobj.h"
-#include "viruuid.h"
-#include "virfile.h"
 
 
 #define VIR_FROM_THIS VIR_FROM_NWFILTER
@@ -36,11 +32,11 @@ struct _virNWFilterBindingObj {
     virObjectLockable parent;
 
     bool removing;
-    virNWFilterBindingDefPtr def;
+    virNWFilterBindingDef *def;
 };
 
 
-static virClassPtr virNWFilterBindingObjClass;
+static virClass *virNWFilterBindingObjClass;
 static void virNWFilterBindingObjDispose(void *obj);
 
 static int
@@ -54,57 +50,62 @@ virNWFilterBindingObjOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(virNWFilterBindingObj);
 
-virNWFilterBindingObjPtr
+virNWFilterBindingObj *
 virNWFilterBindingObjNew(void)
 {
+    virNWFilterBindingObj *ret;
     if (virNWFilterBindingObjInitialize() < 0)
         return NULL;
 
-    return virObjectNew(virNWFilterBindingObjClass);
+    if (!(ret = virObjectLockableNew(virNWFilterBindingObjClass)))
+        return NULL;
+
+    virObjectLock(ret);
+    return ret;
 }
 
 
 static void
 virNWFilterBindingObjDispose(void *obj)
 {
-    virNWFilterBindingObjPtr bobj = obj;
+    virNWFilterBindingObj *bobj = obj;
 
     virNWFilterBindingDefFree(bobj->def);
 }
 
 
-virNWFilterBindingDefPtr
-virNWFilterBindingObjGetDef(virNWFilterBindingObjPtr obj)
+virNWFilterBindingDef *
+virNWFilterBindingObjGetDef(virNWFilterBindingObj *obj)
 {
     return obj->def;
 }
 
 
 void
-virNWFilterBindingObjSetDef(virNWFilterBindingObjPtr obj,
-                            virNWFilterBindingDefPtr def)
+virNWFilterBindingObjSetDef(virNWFilterBindingObj *obj,
+                            virNWFilterBindingDef *def)
 {
     virNWFilterBindingDefFree(obj->def);
     obj->def = def;
 }
 
 
-virNWFilterBindingDefPtr
-virNWFilterBindingObjStealDef(virNWFilterBindingObjPtr obj)
+virNWFilterBindingDef *
+virNWFilterBindingObjStealDef(virNWFilterBindingObj *obj)
 {
     return g_steal_pointer(&obj->def);
 }
 
 
 bool
-virNWFilterBindingObjGetRemoving(virNWFilterBindingObjPtr obj)
+virNWFilterBindingObjGetRemoving(virNWFilterBindingObj *obj)
 {
     return obj->removing;
 }
 
 
 void
-virNWFilterBindingObjSetRemoving(virNWFilterBindingObjPtr obj,
+virNWFilterBindingObjSetRemoving(virNWFilterBindingObj *obj,
                                  bool removing)
 {
     obj->removing = removing;
@@ -123,14 +124,13 @@ virNWFilterBindingObjSetRemoving(virNWFilterBindingObjPtr obj,
  * the object, the pointer is cleared.
  */
 void
-virNWFilterBindingObjEndAPI(virNWFilterBindingObjPtr *obj)
+virNWFilterBindingObjEndAPI(virNWFilterBindingObj **obj)
 {
     if (!*obj)
         return;
 
     virObjectUnlock(*obj);
-    virObjectUnref(*obj);
-    *obj = NULL;
+    g_clear_pointer(obj, virObjectUnref);
 }
 
 
@@ -138,10 +138,7 @@ char *
 virNWFilterBindingObjConfigFile(const char *dir,
                                 const char *name)
 {
-    char *ret;
-
-    ret = g_strdup_printf("%s/%s.xml", dir, name);
-    return ret;
+    return g_strdup_printf("%s/%s.xml", dir, name);
 }
 
 
@@ -149,8 +146,8 @@ int
 virNWFilterBindingObjSave(const virNWFilterBindingObj *obj,
                           const char *statusDir)
 {
-    char *filename;
-    char *xml = NULL;
+    g_autofree char *filename = NULL;
+    g_autofree char *xml = NULL;
     int ret = -1;
 
     if (!(filename = virNWFilterBindingObjConfigFile(statusDir,
@@ -158,22 +155,19 @@ virNWFilterBindingObjSave(const virNWFilterBindingObj *obj,
         return -1;
 
     if (!(xml = virNWFilterBindingObjFormat(obj)))
-        goto cleanup;
+        return -1;
 
-    if (virFileMakePath(statusDir) < 0) {
+    if (g_mkdir_with_parents(statusDir, 0777) < 0) {
         virReportSystemError(errno,
-                             _("cannot create config directory '%s'"),
+                             _("cannot create config directory '%1$s'"),
                              statusDir);
-        goto cleanup;
+        return -1;
     }
 
     ret = virXMLSaveFile(filename,
                          obj->def->portdevname, "nwfilter-binding-create",
                          xml);
 
- cleanup:
-    VIR_FREE(xml);
-    VIR_FREE(filename);
     return ret;
 }
 
@@ -182,8 +176,7 @@ int
 virNWFilterBindingObjDelete(const virNWFilterBindingObj *obj,
                             const char *statusDir)
 {
-    char *filename;
-    int ret = -1;
+    g_autofree char *filename = NULL;
 
     if (!(filename = virNWFilterBindingObjConfigFile(statusDir,
                                                      obj->def->portdevname)))
@@ -192,25 +185,26 @@ virNWFilterBindingObjDelete(const virNWFilterBindingObj *obj,
     if (unlink(filename) < 0 &&
         errno != ENOENT) {
         virReportSystemError(errno,
-                             _("Unable to remove status '%s' for nwfilter binding %s'"),
+                             _("Unable to remove status '%1$s' for nwfilter binding %2$s'"),
                              filename, obj->def->portdevname);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(filename);
-    return ret;
+    return 0;
 }
 
 
-static virNWFilterBindingObjPtr
-virNWFilterBindingObjParseXML(xmlDocPtr doc,
-                              xmlXPathContextPtr ctxt)
+virNWFilterBindingObj *
+virNWFilterBindingObjParse(const char *filename)
 {
-    virNWFilterBindingObjPtr ret;
+    g_autoptr(virNWFilterBindingObj) ret = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     xmlNodePtr node;
+
+    if (!(xml = virXMLParse(filename, NULL, _("(nwfilterbinding_status)"),
+                            "filterbindingstatus", &ctxt, NULL, false)))
+        return NULL;
 
     if (!(ret = virNWFilterBindingObjNew()))
         return NULL;
@@ -218,82 +212,29 @@ virNWFilterBindingObjParseXML(xmlDocPtr doc,
     if (!(node = virXPathNode("./filterbinding", ctxt))) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("filter binding status missing content"));
-        goto cleanup;
+        return NULL;
     }
 
-    if (!(ret->def = virNWFilterBindingDefParseNode(doc, node)))
-        goto cleanup;
+    ctxt->node = node;
 
-    return ret;
+    if (!(ret->def = virNWFilterBindingDefParseXML(ctxt)))
+        return NULL;
 
- cleanup:
-    virObjectUnref(ret);
-    return NULL;
-}
-
-
-static virNWFilterBindingObjPtr
-virNWFilterBindingObjParseNode(xmlDocPtr doc,
-                               xmlNodePtr root)
-{
-    xmlXPathContextPtr ctxt = NULL;
-    virNWFilterBindingObjPtr obj = NULL;
-
-    if (STRNEQ((const char *)root->name, "filterbindingstatus")) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("unknown root element '%s' for filter binding"),
-                       root->name);
-        goto cleanup;
-    }
-
-    if (!(ctxt = virXMLXPathContextNew(doc)))
-        goto cleanup;
-
-    ctxt->node = root;
-    obj = virNWFilterBindingObjParseXML(doc, ctxt);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return obj;
-}
-
-
-static virNWFilterBindingObjPtr
-virNWFilterBindingObjParse(const char *xmlStr,
-                           const char *filename)
-{
-    virNWFilterBindingObjPtr obj = NULL;
-    xmlDocPtr xml;
-
-    if ((xml = virXMLParse(filename, xmlStr, _("(nwfilterbinding_status)")))) {
-        obj = virNWFilterBindingObjParseNode(xml, xmlDocGetRootElement(xml));
-        xmlFreeDoc(xml);
-    }
-
-    return obj;
-}
-
-
-virNWFilterBindingObjPtr
-virNWFilterBindingObjParseFile(const char *filename)
-{
-    return virNWFilterBindingObjParse(NULL, filename);
+    return g_steal_pointer(&ret);
 }
 
 
 char *
 virNWFilterBindingObjFormat(const virNWFilterBindingObj *obj)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     virBufferAddLit(&buf, "<filterbindingstatus>\n");
 
     virBufferAdjustIndent(&buf, 2);
 
-    if (virNWFilterBindingDefFormatBuf(&buf, obj->def) < 0) {
-        virBufferFreeAndReset(&buf);
+    if (virNWFilterBindingDefFormatBuf(&buf, obj->def) < 0)
         return NULL;
-    }
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</filterbindingstatus>\n");

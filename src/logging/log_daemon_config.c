@@ -23,15 +23,12 @@
 
 #include "log_daemon_config.h"
 #include "virconf.h"
-#include "viralloc.h"
-#include "virerror.h"
 #include "virlog.h"
-#include "rpc/virnetserver.h"
 #include "configmake.h"
-#include "virstring.h"
 #include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_CONF
+#define DEFAULT_LOG_ROOT LOCALSTATEDIR "/log/libvirt/"
 
 VIR_LOG_INIT("logging.log_daemon_config");
 
@@ -53,37 +50,38 @@ virLogDaemonConfigFilePath(bool privileged, char **configfile)
 }
 
 
-virLogDaemonConfigPtr
+virLogDaemonConfig *
 virLogDaemonConfigNew(bool privileged G_GNUC_UNUSED)
 {
-    virLogDaemonConfigPtr data;
+    virLogDaemonConfig *data;
 
-    if (VIR_ALLOC(data) < 0)
-        return NULL;
+    data = g_new0(virLogDaemonConfig, 1);
 
     data->max_clients = 1024;
     data->admin_max_clients = 5000;
     data->max_size = 1024 * 1024 * 2;
     data->max_backups = 3;
+    data->max_age_days = 0;
 
     return data;
 }
 
 void
-virLogDaemonConfigFree(virLogDaemonConfigPtr data)
+virLogDaemonConfigFree(virLogDaemonConfig *data)
 {
     if (!data)
         return;
 
-    VIR_FREE(data->log_filters);
-    VIR_FREE(data->log_outputs);
+    g_free(data->log_filters);
+    g_free(data->log_outputs);
+    g_free(data->log_root);
 
-    VIR_FREE(data);
+    g_free(data);
 }
 
 static int
-virLogDaemonConfigLoadOptions(virLogDaemonConfigPtr data,
-                              virConfPtr conf)
+virLogDaemonConfigLoadOptions(virLogDaemonConfig *data,
+                              virConf *conf)
 {
     if (virConfGetValueUInt(conf, "log_level", &data->log_level) < 0)
         return -1;
@@ -99,6 +97,12 @@ virLogDaemonConfigLoadOptions(virLogDaemonConfigPtr data,
         return -1;
     if (virConfGetValueSizeT(conf, "max_backups", &data->max_backups) < 0)
         return -1;
+    if (virConfGetValueSizeT(conf, "max_age_days", &data->max_age_days) < 0)
+        return -1;
+    if (virConfGetValueString(conf, "log_root", &data->log_root) < 0)
+        return -1;
+    if (!data->log_root)
+        data->log_root = g_strdup(DEFAULT_LOG_ROOT);
 
     return 0;
 }
@@ -107,7 +111,7 @@ virLogDaemonConfigLoadOptions(virLogDaemonConfigPtr data,
 /* Read the config file if it exists.
  */
 int
-virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
+virLogDaemonConfigLoadFile(virLogDaemonConfig *data,
                            const char *filename,
                            bool allow_missing)
 {

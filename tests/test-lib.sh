@@ -200,7 +200,7 @@ test_expensive()
   if test "$VIR_TEST_EXPENSIVE" != 1; then
     skip_test_ '
 This test is very expensive, so it is disabled by default.
-To run it anyway, rerun: make check VIR_TEST_EXPENSIVE=1
+To change the default, configure with: meson -Dexpensive_tests=enabled
 '
   fi
 }

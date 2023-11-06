@@ -22,15 +22,14 @@
 #pragma once
 
 #include "internal.h"
-#include "virbuffer.h"
 
 #ifdef PACKAGER_VERSION
 # ifdef PACKAGER
 #  define VIR_LOG_VERSION_STRING \
-     "libvirt version: " VERSION ", package: " PACKAGER_VERSION " (" PACKAGER ")"
+    "libvirt version: " VERSION ", package: " PACKAGER_VERSION " (" PACKAGER ")"
 # else
 #  define VIR_LOG_VERSION_STRING \
-     "libvirt version: " VERSION ", package: " PACKAGER_VERSION
+    "libvirt version: " VERSION ", package: " PACKAGER_VERSION
 # endif
 #else
 # define VIR_LOG_VERSION_STRING \
@@ -58,8 +57,6 @@ typedef enum {
 } virLogDestination;
 
 typedef struct _virLogSource virLogSource;
-typedef virLogSource *virLogSourcePtr;
-
 struct _virLogSource {
     const char *name;
     unsigned int priority;
@@ -79,29 +76,8 @@ struct _virLogSource {
         .serial = 0, \
     }
 
-/*
- * If configured with --enable-debug=yes then library calls
- * are printed to stderr for debugging or to an appropriate channel
- * defined at runtime from the libvirt daemon configuration file
- */
-#ifdef ENABLE_DEBUG
-# define VIR_DEBUG_INT(src, filename, linenr, funcname, ...) \
+#define VIR_DEBUG_INT(src, filename, linenr, funcname, ...) \
     virLogMessage(src, VIR_LOG_DEBUG, filename, linenr, funcname, NULL, __VA_ARGS__)
-#else
-/**
- * virLogEatParams:
- *
- * Do nothing but eat parameters.
- */
-static inline void virLogEatParams(virLogSourcePtr unused, ...)
-{
-    /* Silence gcc */
-    unused = unused;
-}
-# define VIR_DEBUG_INT(src, filename, linenr, funcname, ...) \
-    virLogEatParams(src, filename, linenr, funcname, __VA_ARGS__)
-#endif /* !ENABLE_DEBUG */
-
 #define VIR_INFO_INT(src, filename, linenr, funcname, ...) \
     virLogMessage(src, VIR_LOG_INFO, filename, linenr, funcname, NULL, __VA_ARGS__)
 #define VIR_WARN_INT(src, filename, linenr, funcname, ...) \
@@ -110,7 +86,7 @@ static inline void virLogEatParams(virLogSourcePtr unused, ...)
     virLogMessage(src, VIR_LOG_ERROR, filename, linenr, funcname, NULL, __VA_ARGS__)
 
 #define VIR_DEBUG(...) \
-   VIR_DEBUG_INT(&virLogSelf, __FILE__, __LINE__, __func__, __VA_ARGS__)
+    VIR_DEBUG_INT(&virLogSelf, __FILE__, __LINE__, __func__, __VA_ARGS__)
 #define VIR_INFO(...) \
     VIR_INFO_INT(&virLogSelf, __FILE__, __LINE__, __func__, __VA_ARGS__)
 #define VIR_WARN(...) \
@@ -126,13 +102,10 @@ struct _virLogMetadata {
 };
 
 typedef struct _virLogMetadata virLogMetadata;
-typedef struct _virLogMetadata *virLogMetadataPtr;
 
 typedef struct _virLogOutput virLogOutput;
-typedef virLogOutput *virLogOutputPtr;
 
 typedef struct _virLogFilter virLogFilter;
-typedef virLogFilter *virLogFilterPtr;
 
 /**
  * virLogOutputFunc:
@@ -149,13 +122,13 @@ typedef virLogFilter *virLogFilterPtr;
  *
  * Callback function used to output messages
  */
-typedef void (*virLogOutputFunc) (virLogSourcePtr src,
+typedef void (*virLogOutputFunc) (virLogSource *src,
                                   virLogPriority priority,
                                   const char *filename,
                                   int linenr,
                                   const char *funcname,
                                   const char *timestamp,
-                                  virLogMetadataPtr metadata,
+                                  struct _virLogMetadata *metadata,
                                   const char *rawstr,
                                   const char *str,
                                   void *data);
@@ -174,15 +147,15 @@ char *virLogGetFilters(void);
 char *virLogGetOutputs(void);
 virLogPriority virLogGetDefaultPriority(void);
 int virLogSetDefaultPriority(virLogPriority priority);
-void virLogSetFromEnv(void);
-void virLogOutputFree(virLogOutputPtr output);
-void virLogOutputListFree(virLogOutputPtr *list, int count);
-void virLogFilterFree(virLogFilterPtr filter);
-void virLogFilterListFree(virLogFilterPtr *list, int count);
+int virLogSetFromEnv(void) G_GNUC_WARN_UNUSED_RESULT;
+void virLogOutputFree(virLogOutput *output);
+void virLogOutputListFree(virLogOutput **list, int count);
+void virLogFilterFree(virLogFilter *filter);
+void virLogFilterListFree(virLogFilter **list, int count);
 int virLogSetOutputs(const char *outputs);
 int virLogSetFilters(const char *filters);
 char *virLogGetDefaultOutput(void);
-void virLogSetDefaultOutput(const char *fname, bool godaemon, bool privileged);
+int virLogSetDefaultOutput(const char *fname, bool godaemon, bool privileged);
 
 /*
  * Internal logging API
@@ -193,39 +166,31 @@ void virLogUnlock(void);
 int virLogReset(void);
 int virLogParseDefaultPriority(const char *priority);
 int virLogPriorityFromSyslog(int priority);
-void virLogMessage(virLogSourcePtr source,
+void virLogMessage(virLogSource *source,
                    virLogPriority priority,
                    const char *filename,
                    int linenr,
                    const char *funcname,
-                   virLogMetadataPtr metadata,
+                   struct _virLogMetadata *metadata,
                    const char *fmt, ...) G_GNUC_PRINTF(7, 8);
-void virLogVMessage(virLogSourcePtr source,
-                    virLogPriority priority,
-                    const char *filename,
-                    int linenr,
-                    const char *funcname,
-                    virLogMetadataPtr metadata,
-                    const char *fmt,
-                    va_list vargs) G_GNUC_PRINTF(7, 0);
 
 bool virLogProbablyLogMessage(const char *str);
-virLogOutputPtr virLogOutputNew(virLogOutputFunc f,
+virLogOutput *virLogOutputNew(virLogOutputFunc f,
                                 virLogCloseFunc c,
                                 void *data,
                                 virLogPriority priority,
                                 virLogDestination dest,
                                 const char *name) ATTRIBUTE_NONNULL(1);
-virLogFilterPtr virLogFilterNew(const char *match,
+virLogFilter *virLogFilterNew(const char *match,
                                 virLogPriority priority) ATTRIBUTE_NONNULL(1);
-int virLogFindOutput(virLogOutputPtr *outputs, size_t noutputs,
+int virLogFindOutput(virLogOutput **outputs, size_t noutputs,
                      virLogDestination dest, const void *opaque);
-int virLogDefineOutputs(virLogOutputPtr *outputs,
+int virLogDefineOutputs(virLogOutput **outputs,
                         size_t noutputs) ATTRIBUTE_NONNULL(1);
-int virLogDefineFilters(virLogFilterPtr *filters, size_t nfilters);
-virLogOutputPtr virLogParseOutput(const char *src) ATTRIBUTE_NONNULL(1);
-virLogFilterPtr virLogParseFilter(const char *src) ATTRIBUTE_NONNULL(1);
+int virLogDefineFilters(virLogFilter **filters, size_t nfilters);
+virLogOutput *virLogParseOutput(const char *src) ATTRIBUTE_NONNULL(1);
+virLogFilter *virLogParseFilter(const char *src) ATTRIBUTE_NONNULL(1);
 int virLogParseOutputs(const char *src,
-                       virLogOutputPtr **outputs) ATTRIBUTE_NONNULL(1);
+                       virLogOutput ***outputs) ATTRIBUTE_NONNULL(1);
 int virLogParseFilters(const char *src,
-                       virLogFilterPtr **filters) ATTRIBUTE_NONNULL(1);
+                       virLogFilter ***filters) ATTRIBUTE_NONNULL(1);

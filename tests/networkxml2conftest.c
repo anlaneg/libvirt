@@ -8,31 +8,30 @@
 #include "internal.h"
 #include "testutils.h"
 #include "network_conf.h"
-#include "vircommand.h"
 #include "viralloc.h"
 #include "network/bridge_driver.h"
-#include "virstring.h"
+#define LIBVIRT_VIRCOMMANDPRIV_H_ALLOW
+#include "vircommandpriv.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 static int
 testCompareXMLToConfFiles(const char *inxml, const char *outconf,
-                          char *outhostsfile, dnsmasqCapsPtr caps)
+                          char *outhostsfile, dnsmasqCaps *caps)
 {
     char *confactual = NULL;
-    char *hostsfileactual = NULL;
+    g_autofree char *hostsfileactual = NULL;
     int ret = -1;
-    virNetworkDefPtr def = NULL;
-    virNetworkObjPtr obj = NULL;
-    virCommandPtr cmd = NULL;
-    char *pidfile = NULL;
-    dnsmasqContext *dctx = NULL;
-    virNetworkXMLOptionPtr xmlopt = NULL;
+    virNetworkDef *def = NULL;
+    virNetworkObj *obj = NULL;
+    g_autofree char *pidfile = NULL;
+    g_autoptr(dnsmasqContext) dctx = NULL;
+    g_autoptr(virNetworkXMLOption) xmlopt = NULL;
 
     if (!(xmlopt = networkDnsmasqCreateXMLConf()))
         goto fail;
 
-    if (!(def = virNetworkDefParseFile(inxml, xmlopt)))
+    if (!(def = virNetworkDefParse(NULL, inxml, xmlopt, false)))
         goto fail;
 
     if (!(obj = virNetworkObjNew()))
@@ -51,14 +50,16 @@ testCompareXMLToConfFiles(const char *inxml, const char *outconf,
 
     /* Any changes to this function ^^ should be reflected here too. */
 #ifndef __linux__
-    char * tmp;
+    {
+        char * tmp;
 
-    if (!(tmp = virStringReplace(confactual,
-                                 "except-interface=lo0\n",
-                                 "except-interface=lo\n")))
-        goto fail;
-    VIR_FREE(confactual);
-    confactual = g_steal_pointer(&tmp);
+        if (!(tmp = virStringReplace(confactual,
+                                     "except-interface=lo0\n",
+                                     "except-interface=lo\n")))
+            goto fail;
+        VIR_FREE(confactual);
+        confactual = g_steal_pointer(&tmp);
+    }
 #endif
 
     if (virTestCompareToFile(confactual, outconf) < 0)
@@ -82,18 +83,13 @@ testCompareXMLToConfFiles(const char *inxml, const char *outconf,
 
  fail:
     VIR_FREE(confactual);
-    VIR_FREE(hostsfileactual);
-    VIR_FREE(pidfile);
-    virCommandFree(cmd);
-    virObjectUnref(xmlopt);
     virNetworkObjEndAPI(&obj);
-    dnsmasqContextFree(dctx);
     return ret;
 }
 
 typedef struct {
     const char *name;
-    dnsmasqCapsPtr caps;
+    dnsmasqCaps *caps;
 } testInfo;
 
 static int
@@ -101,9 +97,9 @@ testCompareXMLToConfHelper(const void *data)
 {
     int result = -1;
     const testInfo *info = data;
-    char *inxml = NULL;
-    char *outconf = NULL;
-    char *outhostsfile = NULL;
+    g_autofree char *inxml = NULL;
+    g_autofree char *outconf = NULL;
+    g_autofree char *outhostsfile = NULL;
 
     inxml = g_strdup_printf("%s/networkxml2confdata/%s.xml", abs_srcdir, info->name);
     outconf = g_strdup_printf("%s/networkxml2confdata/%s.conf", abs_srcdir, info->name);
@@ -111,23 +107,51 @@ testCompareXMLToConfHelper(const void *data)
 
     result = testCompareXMLToConfFiles(inxml, outconf, outhostsfile, info->caps);
 
-    VIR_FREE(inxml);
-    VIR_FREE(outconf);
-    VIR_FREE(outhostsfile);
-
     return result;
 }
+
+static void
+buildCapsCallback(const char *const*args,
+                  const char *const*env G_GNUC_UNUSED,
+                  const char *input G_GNUC_UNUSED,
+                  char **output,
+                  char **error G_GNUC_UNUSED,
+                  int *status,
+                  void *opaque G_GNUC_UNUSED)
+{
+    if (STREQ(args[0], "/usr/sbin/dnsmasq") && STREQ(args[1], "--version")) {
+        *output = g_strdup("Dnsmasq version 2.67\n");
+        *status = EXIT_SUCCESS;
+    } else {
+        *status = EXIT_FAILURE;
+    }
+}
+
+static dnsmasqCaps *
+buildCaps(void)
+{
+    g_autoptr(dnsmasqCaps) caps = NULL;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
+
+    virCommandSetDryRun(dryRunToken, NULL, true, true, buildCapsCallback, NULL);
+
+    caps = dnsmasqCapsNewFromBinary();
+
+    return g_steal_pointer(&caps);
+}
+
 
 static int
 mymain(void)
 {
     int ret = 0;
-    dnsmasqCapsPtr restricted
-        = dnsmasqCapsNewFromBuffer("Dnsmasq version 2.48", DNSMASQ);
-    dnsmasqCapsPtr full
-        = dnsmasqCapsNewFromBuffer("Dnsmasq version 2.63\n--bind-dynamic", DNSMASQ);
-    dnsmasqCapsPtr dhcpv6
-        = dnsmasqCapsNewFromBuffer("Dnsmasq version 2.64\n--bind-dynamic", DNSMASQ);
+    g_autoptr(dnsmasqCaps) full = NULL;
+
+    if (!(full = buildCaps())) {
+        fprintf(stderr, "failed to create the fake capabilities: %s",
+                virGetLastErrorMessage());
+        return EXIT_FAILURE;
+    }
 
 #define DO_TEST(xname, xcaps) \
     do { \
@@ -141,15 +165,16 @@ mymain(void)
         } \
     } while (0)
 
-    DO_TEST("isolated-network", restricted);
-    DO_TEST("netboot-network", restricted);
-    DO_TEST("netboot-proxy-network", restricted);
-    DO_TEST("nat-network-dns-srv-record-minimal", restricted);
-    DO_TEST("nat-network-name-with-quotes", restricted);
+    DO_TEST("isolated-network", full);
+    DO_TEST("netboot-network", full);
+    DO_TEST("netboot-proxy-network", full);
+    DO_TEST("netboot-tftp", full);
+    DO_TEST("nat-network-dns-srv-record-minimal", full);
+    DO_TEST("nat-network-name-with-quotes", full);
     DO_TEST("routed-network", full);
     DO_TEST("routed-network-no-dns", full);
     DO_TEST("open-network", full);
-    DO_TEST("nat-network", dhcpv6);
+    DO_TEST("nat-network", full);
     DO_TEST("nat-network-dns-txt-record", full);
     DO_TEST("nat-network-dns-srv-record", full);
     DO_TEST("nat-network-dns-hosts", full);
@@ -157,22 +182,19 @@ mymain(void)
     DO_TEST("nat-network-dns-forwarders", full);
     DO_TEST("nat-network-dns-forwarder-no-resolv", full);
     DO_TEST("nat-network-dns-local-domain", full);
-    DO_TEST("nat-network-mtu", dhcpv6);
-    DO_TEST("dhcp6-network", dhcpv6);
-    DO_TEST("dhcp6-nat-network", dhcpv6);
-    DO_TEST("dhcp6host-routed-network", dhcpv6);
-    DO_TEST("ptr-domains-auto", dhcpv6);
-    DO_TEST("dnsmasq-options", dhcpv6);
+    DO_TEST("nat-network-mtu", full);
+    DO_TEST("dhcp6-network", full);
+    DO_TEST("dhcp6-nat-network", full);
+    DO_TEST("dhcp6host-routed-network", full);
+    DO_TEST("ptr-domains-auto", full);
+    DO_TEST("dnsmasq-options", full);
     DO_TEST("leasetime-seconds", full);
     DO_TEST("leasetime-minutes", full);
     DO_TEST("leasetime-hours", full);
     DO_TEST("leasetime-infinite", full);
 
-    virObjectUnref(dhcpv6);
-    virObjectUnref(full);
-    virObjectUnref(restricted);
-
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN(mymain)
+VIR_TEST_MAIN_PRELOAD(mymain,
+                      VIR_TEST_MOCK("virdnsmasq"))

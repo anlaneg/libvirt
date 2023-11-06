@@ -22,9 +22,6 @@
 #include <config.h>
 
 #include "domain_lock.h"
-#include "viralloc.h"
-#include "viruuid.h"
-#include "virerror.h"
 #include "virlog.h"
 
 #define VIR_FROM_THIS VIR_FROM_LOCKING
@@ -32,8 +29,8 @@
 VIR_LOG_INIT("locking.domain_lock");
 
 
-static int virDomainLockManagerAddLease(virLockManagerPtr lock,
-                                        virDomainLeaseDefPtr lease)
+static int virDomainLockManagerAddLease(virLockManager *lock,
+                                        virDomainLeaseDef *lease)
 {
     unsigned int leaseFlags = 0;
     virLockManagerParam lparams[] = {
@@ -68,11 +65,11 @@ static int virDomainLockManagerAddLease(virLockManagerPtr lock,
 }
 
 
-static int virDomainLockManagerAddImage(virLockManagerPtr lock,
-                                        virStorageSourcePtr src)
+static int virDomainLockManagerAddImage(virLockManager *lock,
+                                        virStorageSource *src)
 {
     unsigned int diskFlags = 0;
-    int type = virStorageSourceGetActualType(src);
+    virStorageType type = virStorageSourceGetActualType(src);
 
     if (!src->path)
         return 0;
@@ -101,13 +98,13 @@ static int virDomainLockManagerAddImage(virLockManagerPtr lock,
 }
 
 
-static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
+static virLockManager *virDomainLockManagerNew(virLockManagerPlugin *plugin,
                                                  const char *uri,
-                                                 virDomainObjPtr dom,
+                                                 virDomainObj *dom,
                                                  bool withResources,
                                                  unsigned int flags)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     size_t i;
     virLockManagerParam params[] = {
         { .type = VIR_LOCK_MANAGER_PARAM_TYPE_UUID,
@@ -150,7 +147,7 @@ static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
 
         VIR_DEBUG("Adding disks");
         for (i = 0; i < dom->def->ndisks; i++) {
-            virDomainDiskDefPtr disk = dom->def->disks[i];
+            virDomainDiskDef *disk = dom->def->disks[i];
 
             if (virDomainLockManagerAddImage(lock, disk->src) < 0)
                 goto error;
@@ -165,13 +162,13 @@ static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
 }
 
 
-int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
+int virDomainLockProcessStart(virLockManagerPlugin *plugin,
                               const char *uri,
-                              virDomainObjPtr dom,
+                              virDomainObj *dom,
                               bool paused,
                               int *fd)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret;
     int flags = VIR_LOCK_MANAGER_ACQUIRE_RESTRICT;
 
@@ -193,11 +190,11 @@ int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
     return ret;
 }
 
-int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
-                              virDomainObjPtr dom,
+int virDomainLockProcessPause(virLockManagerPlugin *plugin,
+                              virDomainObj *dom,
                               char **state)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret;
 
     VIR_DEBUG("plugin=%p dom=%p state=%p",
@@ -212,12 +209,12 @@ int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
     return ret;
 }
 
-int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
+int virDomainLockProcessResume(virLockManagerPlugin *plugin,
                                const char *uri,
-                               virDomainObjPtr dom,
+                               virDomainObj *dom,
                                const char *state)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret;
 
     VIR_DEBUG("plugin=%p dom=%p state=%s",
@@ -232,11 +229,11 @@ int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
     return ret;
 }
 
-int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
-                                virDomainObjPtr dom,
+int virDomainLockProcessInquire(virLockManagerPlugin *plugin,
+                                virDomainObj *dom,
                                 char **state)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret;
 
     VIR_DEBUG("plugin=%p dom=%p state=%p",
@@ -252,12 +249,12 @@ int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
 }
 
 
-int virDomainLockImageAttach(virLockManagerPluginPtr plugin,
+int virDomainLockImageAttach(virLockManagerPlugin *plugin,
                              const char *uri,
-                             virDomainObjPtr dom,
-                             virStorageSourcePtr src)
+                             virDomainObj *dom,
+                             virStorageSource *src)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret = -1;
 
     VIR_DEBUG("plugin=%p dom=%p src=%p", plugin, dom, src);
@@ -281,11 +278,11 @@ int virDomainLockImageAttach(virLockManagerPluginPtr plugin,
 }
 
 
-int virDomainLockImageDetach(virLockManagerPluginPtr plugin,
-                             virDomainObjPtr dom,
-                             virStorageSourcePtr src)
+int virDomainLockImageDetach(virLockManagerPlugin *plugin,
+                             virDomainObj *dom,
+                             virStorageSource *src)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret = -1;
 
     VIR_DEBUG("plugin=%p dom=%p src=%p", plugin, dom, src);
@@ -308,12 +305,12 @@ int virDomainLockImageDetach(virLockManagerPluginPtr plugin,
 }
 
 
-int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
+int virDomainLockLeaseAttach(virLockManagerPlugin *plugin,
                              const char *uri,
-                             virDomainObjPtr dom,
-                             virDomainLeaseDefPtr lease)
+                             virDomainObj *dom,
+                             virDomainLeaseDef *lease)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret = -1;
 
     VIR_DEBUG("plugin=%p dom=%p lease=%p",
@@ -337,11 +334,11 @@ int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
     return ret;
 }
 
-int virDomainLockLeaseDetach(virLockManagerPluginPtr plugin,
-                             virDomainObjPtr dom,
-                             virDomainLeaseDefPtr lease)
+int virDomainLockLeaseDetach(virLockManagerPlugin *plugin,
+                             virDomainObj *dom,
+                             virDomainLeaseDef *lease)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     int ret = -1;
 
     VIR_DEBUG("plugin=%p dom=%p lease=%p",

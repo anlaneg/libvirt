@@ -20,12 +20,9 @@
 
 #include <config.h>
 
-#include "viralloc.h"
 #include "virthread.h"
-#include "virfile.h"
 #include "virlog.h"
 #include "virerror.h"
-#include "virnetsocket.h"
 #include "virkeepaliveprotocol.h"
 #include "virkeepalive.h"
 #include "virprobe.h"
@@ -40,8 +37,8 @@ struct _virKeepAlive {
     int interval;
     unsigned int count;
     unsigned int countToDeath;
-    time_t lastPacketReceived;
-    time_t intervalStart;
+    gint64 lastPacketReceived;
+    gint64 intervalStart;
     int timer;
 
     virKeepAliveSendFunc sendCB;
@@ -51,7 +48,7 @@ struct _virKeepAlive {
 };
 
 
-static virClassPtr virKeepAliveClass;
+static virClass *virKeepAliveClass;
 static void virKeepAliveDispose(void *obj);
 
 static int virKeepAliveOnceInit(void)
@@ -64,10 +61,10 @@ static int virKeepAliveOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(virKeepAlive);
 
-static virNetMessagePtr
-virKeepAliveMessage(virKeepAlivePtr ka, int proc)
+static virNetMessage *
+virKeepAliveMessage(virKeepAlive *ka, int proc)
 {
-    virNetMessagePtr msg;
+    virNetMessage *msg;
     const char *procstr = NULL;
 
     switch (proc) {
@@ -91,7 +88,7 @@ virKeepAliveMessage(virKeepAlivePtr ka, int proc)
     msg->header.proc = proc;
 
     if (virNetMessageEncodeHeader(msg) < 0 ||
-        virNetMessageEncodePayloadEmpty(msg) < 0) {
+        virNetMessageEncodePayloadRaw(msg, NULL, 0) < 0) {
         virNetMessageFree(msg);
         goto error;
     }
@@ -110,10 +107,10 @@ virKeepAliveMessage(virKeepAlivePtr ka, int proc)
 
 
 static bool
-virKeepAliveTimerInternal(virKeepAlivePtr ka,
-                          virNetMessagePtr *msg)
+virKeepAliveTimerInternal(virKeepAlive *ka,
+                          virNetMessage **msg)
 {
-    time_t now = time(NULL);
+    gint64 now = g_get_monotonic_time() / G_USEC_PER_SEC;
     int timeval;
 
     if (ka->interval <= 0 || ka->intervalStart == 0)
@@ -150,8 +147,8 @@ virKeepAliveTimerInternal(virKeepAlivePtr ka,
 static void
 virKeepAliveTimer(int timer G_GNUC_UNUSED, void *opaque)
 {
-    virKeepAlivePtr ka = opaque;
-    virNetMessagePtr msg = NULL;
+    virKeepAlive *ka = opaque;
+    virNetMessage *msg = NULL;
     bool dead;
     void *client;
 
@@ -178,7 +175,7 @@ virKeepAliveTimer(int timer G_GNUC_UNUSED, void *opaque)
 }
 
 
-virKeepAlivePtr
+virKeepAlive *
 virKeepAliveNew(int interval,
                 unsigned int count,
                 void *client,
@@ -186,7 +183,7 @@ virKeepAliveNew(int interval,
                 virKeepAliveDeadFunc deadCB,
                 virKeepAliveFreeFunc freeCB)
 {
-    virKeepAlivePtr ka;
+    virKeepAlive *ka;
 
     VIR_DEBUG("client=%p, interval=%d, count=%u", client, interval, count);
 
@@ -216,7 +213,7 @@ virKeepAliveNew(int interval,
 void
 virKeepAliveDispose(void *obj)
 {
-    virKeepAlivePtr ka = obj;
+    virKeepAlive *ka = obj;
 
     PROBE(RPC_KEEPALIVE_DISPOSE,
           "ka=%p", ka);
@@ -226,14 +223,14 @@ virKeepAliveDispose(void *obj)
 
 
 int
-virKeepAliveStart(virKeepAlivePtr ka,
+virKeepAliveStart(virKeepAlive *ka,
                   int interval,
                   unsigned int count)
 {
     int ret = -1;
-    time_t delay;
+    gint64 delay;
     int timeout;
-    time_t now;
+    gint64 now;
 
     virObjectLock(ka);
 
@@ -252,7 +249,7 @@ virKeepAliveStart(virKeepAlivePtr ka,
         /* Guard against overflow */
         if (interval > INT_MAX / 1000) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("keepalive interval %d too large"), interval);
+                           _("keepalive interval %1$d too large"), interval);
             goto cleanup;
         }
         ka->interval = interval;
@@ -270,7 +267,7 @@ virKeepAliveStart(virKeepAlivePtr ka,
           "ka=%p client=%p interval=%d count=%u",
           ka, ka->client, interval, count);
 
-    now = time(NULL);
+    now = g_get_monotonic_time() / G_USEC_PER_SEC;
     delay = now - ka->lastPacketReceived;
     if (delay > ka->interval)
         timeout = 0;
@@ -278,7 +275,7 @@ virKeepAliveStart(virKeepAlivePtr ka,
         timeout = ka->interval - delay;
     ka->intervalStart = now - (ka->interval - timeout);
     ka->timer = virEventAddTimeout(timeout * 1000, virKeepAliveTimer,
-                                   ka, virObjectFreeCallback);
+                                   ka, virObjectUnref);
     if (ka->timer < 0)
         goto cleanup;
 
@@ -293,7 +290,7 @@ virKeepAliveStart(virKeepAlivePtr ka,
 
 
 void
-virKeepAliveStop(virKeepAlivePtr ka)
+virKeepAliveStop(virKeepAlive *ka)
 {
     virObjectLock(ka);
 
@@ -311,7 +308,7 @@ virKeepAliveStop(virKeepAlivePtr ka)
 
 
 int
-virKeepAliveTimeout(virKeepAlivePtr ka)
+virKeepAliveTimeout(virKeepAlive *ka)
 {
     int timeout;
 
@@ -341,8 +338,8 @@ virKeepAliveTimeout(virKeepAlivePtr ka)
 
 
 bool
-virKeepAliveTrigger(virKeepAlivePtr ka,
-                    virNetMessagePtr *msg)
+virKeepAliveTrigger(virKeepAlive *ka,
+                    virNetMessage **msg)
 {
     bool dead;
 
@@ -359,9 +356,9 @@ virKeepAliveTrigger(virKeepAlivePtr ka,
 
 
 bool
-virKeepAliveCheckMessage(virKeepAlivePtr ka,
-                         virNetMessagePtr msg,
-                         virNetMessagePtr *response)
+virKeepAliveCheckMessage(virKeepAlive *ka,
+                         virNetMessage *msg,
+                         virNetMessage **response)
 {
     bool ret = false;
 
@@ -375,7 +372,8 @@ virKeepAliveCheckMessage(virKeepAlivePtr ka,
     virObjectLock(ka);
 
     ka->countToDeath = ka->count;
-    ka->lastPacketReceived = ka->intervalStart = time(NULL);
+    ka->intervalStart = g_get_monotonic_time() / G_USEC_PER_SEC;
+    ka->lastPacketReceived = ka->intervalStart;
 
     if (msg->header.prog == KEEPALIVE_PROGRAM &&
         msg->header.vers == KEEPALIVE_PROTOCOL_VERSION &&

@@ -5,7 +5,7 @@
   <currentMemory unit='KiB'>219136</currentMemory>
   <vcpu placement='static'>1</vcpu>
   <os>
-    <type arch='i686' machine='pc'>hvm</type>
+    <type arch='x86_64' machine='pc'>hvm</type>
     <boot dev='hd'/>
   </os>
   <cpu mode='custom' match='exact' check='none'>
@@ -16,12 +16,12 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i386</emulator>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <disk type='file' device='disk'>
       <driver name='qemu' type='raw'/>
       <source file='/var/lib/libvirt/images/raw.img'>
         <slices>
-          <slice type='storage' offset='1234' size='321'/>
+          <slice type='storage' offset='0' size='321'/>
         </slices>
       </source>
       <backingStore/>
@@ -49,7 +49,7 @@
         <slices>
           <slice type='storage' offset='1234' size='321'/>
         </slices>
-        <encryption format='luks'>
+        <encryption format='luks' engine='qemu'>
           <secret type='passphrase' uuid='0a81f5b2-8403-7b23-c8d6-21ccc2f80d6f'/>
         </encryption>
       </source>
@@ -57,12 +57,38 @@
       <target dev='vdc' bus='virtio'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
     </disk>
+    <disk type='nvme' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source type='pci' managed='no' namespace='1'>
+        <address domain='0x0000' bus='0x02' slot='0x00' function='0x0'/>
+        <slices>
+          <slice type='storage' offset='1234' size='321'/>
+        </slices>
+      </source>
+      <target dev='vdd' bus='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x06' function='0x0'/>
+    </disk>
+    <disk type='nvme' device='disk'>
+      <driver name='qemu' type='qcow2' cache='none'/>
+      <source type='pci' managed='no' namespace='2'>
+        <address domain='0x0001' bus='0x02' slot='0x00' function='0x0'/>
+        <slices>
+          <slice type='storage' offset='1234' size='321'/>
+        </slices>
+        <encryption format='luks' engine='qemu'>
+          <secret type='passphrase' uuid='0a81f5b2-8403-7b23-c8d6-21ccc2f80d6f'/>
+        </encryption>
+      </source>
+      <target dev='vde' bus='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+    </disk>
     <controller type='usb' index='0' model='piix3-uhci'>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
     </controller>
     <controller type='pci' index='0' model='pci-root'/>
     <input type='mouse' bus='ps2'/>
     <input type='keyboard' bus='ps2'/>
+    <audio id='1' type='none'/>
     <memballoon model='virtio'>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x0'/>
     </memballoon>

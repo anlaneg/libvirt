@@ -24,11 +24,10 @@
 
 #include "internal.h"
 #include "object_event.h"
-#include "object_event_private.h"
 
 int
 virStoragePoolEventStateRegisterID(virConnectPtr conn,
-                                   virObjectEventStatePtr state,
+                                   virObjectEventState *state,
                                    virStoragePoolPtr pool,
                                    int eventID,
                                    virConnectStoragePoolEventGenericCallback cb,
@@ -40,7 +39,7 @@ virStoragePoolEventStateRegisterID(virConnectPtr conn,
 
 int
 virStoragePoolEventStateRegisterClient(virConnectPtr conn,
-                                   virObjectEventStatePtr state,
+                                   virObjectEventState *state,
                                    virStoragePoolPtr pool,
                                    int eventID,
                                    virConnectStoragePoolEventGenericCallback cb,
@@ -50,12 +49,12 @@ virStoragePoolEventStateRegisterClient(virConnectPtr conn,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(5)
     ATTRIBUTE_NONNULL(8);
 
-virObjectEventPtr
+virObjectEvent *
 virStoragePoolEventLifecycleNew(const char *name,
                                 const unsigned char *uuid,
                                 int type,
                                 int detail);
 
-virObjectEventPtr
+virObjectEvent *
 virStoragePoolEventRefreshNew(const char *name,
                               const unsigned char *uuid);

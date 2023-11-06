@@ -8,8 +8,6 @@
 #include "internal.h"
 #include "testutils.h"
 #include "storage_conf.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #include "storage/storage_util.h"
 
@@ -21,7 +19,7 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml)
     g_autofree char *actual = NULL;
     g_autoptr(virStoragePoolDef) dev = NULL;
 
-    if (!(dev = virStoragePoolDefParseFile(inxml)))
+    if (!(dev = virStoragePoolDefParse(NULL, inxml, 0)))
         return -1;
 
     if (!(actual = virStoragePoolDefFormat(dev)))
@@ -62,6 +60,7 @@ mymain(void)
 
     DO_TEST("pool-dir");
     DO_TEST("pool-dir-naming");
+    DO_TEST("pool-dir-cow");
     DO_TEST("pool-fs");
     DO_TEST("pool-logical");
     DO_TEST("pool-logical-nopath");
@@ -87,7 +86,6 @@ mymain(void)
     DO_TEST("pool-mpath");
     DO_TEST("pool-iscsi-multiiqn");
     DO_TEST("pool-iscsi-vendor-product");
-    DO_TEST("pool-sheepdog");
     DO_TEST("pool-gluster");
     DO_TEST("pool-gluster-sub");
     DO_TEST("pool-scsi-type-scsi-host-stable");

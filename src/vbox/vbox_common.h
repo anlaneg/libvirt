@@ -34,7 +34,7 @@
  * vbox_CAPI_v*.h, or it would cause multiple
  * definitions.
  *
- * You can see the more informations in vbox_api.h
+ * You can see the more information in vbox_api.h
  */
 
 /* Copied definitions from vbox_CAPI_*.h.
@@ -109,6 +109,7 @@ typedef unsigned long PRUword;
 
 #define nsnull 0
 typedef PRUint32 nsresult;
+#define HRESULT nsresult
 
 #if defined(__GNUC__) && (__GNUC__ > 2)
 # define NS_LIKELY(x)    (__builtin_expect((x), 1))
@@ -361,6 +362,8 @@ typedef nsISupports IHost;
 typedef nsISupports IHostNetworkInterface;
 typedef nsISupports IDHCPServer;
 typedef nsISupports IKeyboard;
+typedef nsISupports IVirtualBoxErrorInfo;
+typedef struct nsIException nsIException;
 
 /* Macros for all vbox drivers. */
 
@@ -391,8 +394,22 @@ typedef nsISupports IKeyboard;
         } \
     } while (0)
 
-#define VBOX_UTF16_TO_UTF8(arg1, arg2)  gVBoxAPI.UPFN.Utf16ToUtf8(data->pFuncs, arg1, arg2)
-#define VBOX_UTF8_TO_UTF16(arg1, arg2)  gVBoxAPI.UPFN.Utf8ToUtf16(data->pFuncs, arg1, arg2)
+#define VBOX_UTF16_TO_UTF8(arg1, arg2) \
+    do { \
+        gVBoxAPI.UPFN.Utf16ToUtf8(data->pFuncs, arg1, arg2); \
+        if (!*(arg2)) \
+            abort(); \
+    } while (0)
+
+#define VBOX_UTF8_TO_UTF16(arg1, arg2) \
+    do { \
+        gVBoxAPI.UPFN.Utf8ToUtf16(data->pFuncs, arg1, arg2); \
+        if (!*(arg2)) \
+            abort(); \
+    } while (0)
+
+#define VBOX_QUERY_INTERFACE(nsi, iid, resultp) \
+    gVBoxAPI.nsUISupports.QueryInterface((void*)(nsi), iid, resultp)
 
 #define VBOX_ADDREF(arg)                gVBoxAPI.nsUISupports.AddRef((void *)(arg))
 
@@ -429,12 +446,10 @@ typedef nsISupports IKeyboard;
 #define installUniformedAPI(gVBoxAPI, result) \
     do { \
         result = 0; \
-        if (uVersion >= 5001051 && uVersion < 5002051) { \
-            vbox52InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 6000000 && uVersion < 6000051) { \
-            vbox60InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 6000051 && uVersion < 6001051) { \
+        if (uVersion >= 6000051 && uVersion < 6001051) { \
             vbox61InstallUniformedAPI(&gVBoxAPI); \
+        } else if (uVersion >= 7000000 && uVersion < 7001000) { \
+            vbox70InstallUniformedAPI(&gVBoxAPI); \
         } else { \
             result = -1; \
         } \

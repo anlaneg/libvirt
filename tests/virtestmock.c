@@ -26,8 +26,6 @@
 
 #include "virsocket.h"
 #include "configmake.h"
-#include "virstring.h"
-#include "viralloc.h"
 #include "virfile.h"
 
 static int (*real_open)(const char *path, int flags, ...);
@@ -69,7 +67,7 @@ printFile(const char *file,
             output = VIR_FILE_ACCESS_DEFAULT;
     }
 
-    if (!(fp = real_fopen(output, "a"))) {
+    if (!(fp = real_fopen(output, "w"))) {
         fprintf(stderr, "Unable to open %s: %s\n", output, g_strerror(errno));
         abort();
     }
@@ -100,11 +98,11 @@ static void
 checkPath(const char *path,
           const char *func)
 {
-    char *fullPath = NULL;
-    char *relPath = NULL;
-    char *crippledPath = NULL;
+    g_autofree char *fullPath = NULL;
+    g_autofree char *relPath = NULL;
+    g_autofree char *crippledPath = NULL;
 
-    if (path[0] != '/')
+    if (!g_path_is_absolute(path))
         relPath = g_strdup_printf("./%s", path);
 
     /* Le sigh. virFileCanonicalizePath() expects @path to exist, otherwise
@@ -129,10 +127,6 @@ checkPath(const char *path,
         !STRPREFIX(path, abs_top_builddir)) {
         printFile(path, func);
     }
-
-    VIR_FREE(crippledPath);
-    VIR_FREE(relPath);
-    VIR_FREE(fullPath);
 
     return;
 }

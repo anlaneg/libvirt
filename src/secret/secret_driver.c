@@ -35,10 +35,9 @@
 #include "virthread.h"
 #include "viruuid.h"
 #include "virerror.h"
-#include "virfile.h"
+#include "viridentity.h"
 #include "virpidfile.h"
 #include "configmake.h"
-#include "virstring.h"
 #include "viraccessapicheck.h"
 #include "secret_event.h"
 #include "virutil.h"
@@ -51,14 +50,14 @@ enum { SECRET_MAX_XML_FILE = 10*1024*1024 };
 
 /* Internal driver state */
 
+static virMutex mutex = VIR_MUTEX_INITIALIZER;
+
 typedef struct _virSecretDriverState virSecretDriverState;
-typedef virSecretDriverState *virSecretDriverStatePtr;
 struct _virSecretDriverState {
-    virMutex lock;
     bool privileged; /* readonly */
     char *embeddedRoot; /* readonly */
     int embeddedRefs;
-    virSecretObjListPtr secrets;
+    virSecretObjList *secrets;
     char *stateDir;
     char *configDir;
 
@@ -66,38 +65,45 @@ struct _virSecretDriverState {
     int lockFD;
 
     /* Immutable pointer, self-locking APIs */
-    virObjectEventStatePtr secretEventState;
+    virObjectEventState *secretEventState;
+
+    /* Immutable pointers. Caller must provide locking */
+    virStateInhibitCallback inhibitCallback;
+    void *inhibitOpaque;
 };
 
-static virSecretDriverStatePtr driver;
+static virSecretDriverState *driver;
 
-static void
-secretDriverLock(void)
-{
-    virMutexLock(&driver->lock);
-}
-
-
-static void
-secretDriverUnlock(void)
-{
-    virMutexUnlock(&driver->lock);
-}
-
-
-static virSecretObjPtr
+static virSecretObj *
 secretObjFromSecret(virSecretPtr secret)
 {
-    virSecretObjPtr obj;
+    virSecretObj *obj;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(secret->uuid, uuidstr);
     if (!(obj = virSecretObjListFindByUUID(driver->secrets, uuidstr))) {
         virReportError(VIR_ERR_NO_SECRET,
-                       _("no secret with matching uuid '%s'"), uuidstr);
+                       _("no secret with matching uuid '%1$s'"), uuidstr);
         return NULL;
     }
     return obj;
+}
+
+
+static bool
+secretNumOfEphemeralSecretsHelper(virConnectPtr conn G_GNUC_UNUSED,
+                                  virSecretDef *def)
+{
+    return def->isephemeral;
+}
+
+
+static int
+secretNumOfEphemeralSecrets(void)
+{
+    return virSecretObjListNumOfSecrets(driver->secrets,
+                                        secretNumOfEphemeralSecretsHelper,
+                                        NULL);
 }
 
 
@@ -151,14 +157,14 @@ secretLookupByUUID(virConnectPtr conn,
                    const unsigned char *uuid)
 {
     virSecretPtr ret = NULL;
-    virSecretObjPtr obj;
-    virSecretDefPtr def;
+    virSecretObj *obj;
+    virSecretDef *def;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(uuid, uuidstr);
     if (!(obj = virSecretObjListFindByUUID(driver->secrets, uuidstr))) {
         virReportError(VIR_ERR_NO_SECRET,
-                       _("no secret with matching uuid '%s'"), uuidstr);
+                       _("no secret with matching uuid '%1$s'"), uuidstr);
         goto cleanup;
     }
 
@@ -183,13 +189,13 @@ secretLookupByUsage(virConnectPtr conn,
                     const char *usageID)
 {
     virSecretPtr ret = NULL;
-    virSecretObjPtr obj;
-    virSecretDefPtr def;
+    virSecretObj *obj;
+    virSecretDef *def;
 
     if (!(obj = virSecretObjListFindByUsage(driver->secrets,
                                             usageType, usageID))) {
         virReportError(VIR_ERR_NO_SECRET,
-                       _("no secret with matching usage '%s'"), usageID);
+                       _("no secret with matching usage '%1$s'"), usageID);
         goto cleanup;
     }
 
@@ -214,24 +220,24 @@ secretDefineXML(virConnectPtr conn,
                 unsigned int flags)
 {
     virSecretPtr ret = NULL;
-    virSecretObjPtr obj = NULL;
-    virSecretDefPtr objDef;
-    virSecretDefPtr backup = NULL;
-    virSecretDefPtr def;
-    virObjectEventPtr event = NULL;
+    virSecretObj *obj = NULL;
+    virSecretDef *objDef;
+    virSecretDef *backup = NULL;
+    virSecretDef *def;
+    virObjectEvent *event = NULL;
 
-    virCheckFlags(0, NULL);
+    virCheckFlags(VIR_SECRET_DEFINE_VALIDATE, NULL);
 
-    if (!(def = virSecretDefParseString(xml)))
+    if (!(def = virSecretDefParse(xml, NULL, flags)))
         return NULL;
 
     if (virSecretDefineXMLEnsureACL(conn, def) < 0)
         goto cleanup;
 
-    if (!(obj = virSecretObjListAdd(driver->secrets, def,
+    if (!(obj = virSecretObjListAdd(driver->secrets, &def,
                                     driver->configDir, &backup)))
         goto cleanup;
-    objDef = g_steal_pointer(&def);
+    objDef = virSecretObjGetDef(obj);
 
     if (!objDef->isephemeral) {
         if (backup && backup->isephemeral) {
@@ -275,13 +281,16 @@ secretDefineXML(virConnectPtr conn,
         def = g_steal_pointer(&objDef);
     } else {
         virSecretObjListRemove(driver->secrets, obj);
-        virObjectUnref(obj);
-        obj = NULL;
+        g_clear_pointer(&obj, virObjectUnref);
     }
 
  cleanup:
     virSecretDefFree(def);
     virSecretObjEndAPI(&obj);
+
+    if (secretNumOfEphemeralSecrets() > 0)
+        driver->inhibitCallback(true, driver->inhibitOpaque);
+
     virObjectEventStateQueue(driver->secretEventState, event);
 
     return ret;
@@ -293,8 +302,8 @@ secretGetXMLDesc(virSecretPtr secret,
                  unsigned int flags)
 {
     char *ret = NULL;
-    virSecretObjPtr obj;
-    virSecretDefPtr def;
+    virSecretObj *obj;
+    virSecretDef *def;
 
     virCheckFlags(0, NULL);
 
@@ -321,9 +330,9 @@ secretSetValue(virSecretPtr secret,
                unsigned int flags)
 {
     int ret = -1;
-    virSecretObjPtr obj;
-    virSecretDefPtr def;
-    virObjectEventPtr event = NULL;
+    virSecretObj *obj;
+    virSecretDef *def;
+    virObjectEvent *event = NULL;
 
     virCheckFlags(0, -1);
 
@@ -353,12 +362,11 @@ secretSetValue(virSecretPtr secret,
 static unsigned char *
 secretGetValue(virSecretPtr secret,
                size_t *value_size,
-               unsigned int flags,
-               unsigned int internalFlags)
+               unsigned int flags)
 {
     unsigned char *ret = NULL;
-    virSecretObjPtr obj;
-    virSecretDefPtr def;
+    virSecretObj *obj;
+    virSecretDef *def;
 
     virCheckFlags(0, NULL);
 
@@ -369,11 +377,31 @@ secretGetValue(virSecretPtr secret,
     if (virSecretGetValueEnsureACL(secret->conn, def) < 0)
         goto cleanup;
 
-    if ((internalFlags & VIR_SECRET_GET_VALUE_INTERNAL_CALL) == 0 &&
-        def->isprivate) {
-        virReportError(VIR_ERR_INVALID_SECRET, "%s",
-                       _("secret is private"));
-        goto cleanup;
+    /*
+     * For historical compat we want to deny access to
+     * private secrets, even if no ACL driver is
+     * present.
+     *
+     * We need to validate the identity requesting
+     * the secret value is running as the same user
+     * credentials as this driver.
+     *
+     * ie a non-root libvirt client should not be
+     * able to request the value from privileged
+     * libvirt driver.
+     *
+     * To apply restrictions to processes running under
+     * the same user account is out of scope.
+     */
+    if (def->isprivate) {
+        int rv = virIdentityIsCurrentElevated();
+        if (rv < 0)
+            goto cleanup;
+        if (rv == 0) {
+            virReportError(VIR_ERR_INVALID_SECRET, "%s",
+                           _("secret is private"));
+            goto cleanup;
+        }
     }
 
     if (!(ret = virSecretObjGetValue(obj)))
@@ -392,9 +420,9 @@ static int
 secretUndefine(virSecretPtr secret)
 {
     int ret = -1;
-    virSecretObjPtr obj;
-    virSecretDefPtr def;
-    virObjectEventPtr event = NULL;
+    virSecretObj *obj;
+    virSecretDef *def;
+    virObjectEvent *event = NULL;
 
     if (!(obj = secretObjFromSecret(secret)))
         goto cleanup;
@@ -415,13 +443,16 @@ secretUndefine(virSecretPtr secret)
     virSecretObjDeleteData(obj);
 
     virSecretObjListRemove(driver->secrets, obj);
-    virObjectUnref(obj);
-    obj = NULL;
+    g_clear_pointer(&obj, virObjectUnref);
 
     ret = 0;
 
  cleanup:
     virSecretObjEndAPI(&obj);
+
+    if (secretNumOfEphemeralSecrets() == 0)
+        driver->inhibitCallback(false, driver->inhibitOpaque);
+
     virObjectEventStateQueue(driver->secretEventState, event);
 
     return ret;
@@ -429,12 +460,10 @@ secretUndefine(virSecretPtr secret)
 
 
 static int
-secretStateCleanup(void)
+secretStateCleanupLocked(void)
 {
     if (!driver)
         return -1;
-
-    secretDriverLock();
 
     virObjectUnref(driver->secrets);
     VIR_FREE(driver->configDir);
@@ -445,32 +474,36 @@ secretStateCleanup(void)
         virPidFileRelease(driver->stateDir, "driver", driver->lockFD);
 
     VIR_FREE(driver->stateDir);
-    secretDriverUnlock();
-    virMutexDestroy(&driver->lock);
     VIR_FREE(driver);
 
     return 0;
+}
+
+static int
+secretStateCleanup(void)
+{
+    VIR_LOCK_GUARD lock = virLockGuardLock(&mutex);
+
+    return secretStateCleanupLocked();
 }
 
 
 static int
 secretStateInitialize(bool privileged,
                       const char *root,
-                      virStateInhibitCallback callback G_GNUC_UNUSED,
-                      void *opaque G_GNUC_UNUSED)
+                      bool monolithic G_GNUC_UNUSED,
+                      virStateInhibitCallback callback,
+                      void *opaque)
 {
-    if (VIR_ALLOC(driver) < 0)
-        return VIR_DRV_STATE_INIT_ERROR;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&mutex);
+
+    driver = g_new0(virSecretDriverState, 1);
 
     driver->lockFD = -1;
-    if (virMutexInit(&driver->lock) < 0) {
-        VIR_FREE(driver);
-        return VIR_DRV_STATE_INIT_ERROR;
-    }
-    secretDriverLock();
-
     driver->secretEventState = virObjectEventStateNew();
     driver->privileged = privileged;
+    driver->inhibitCallback = callback;
+    driver->inhibitOpaque = opaque;
 
     if (root) {
         driver->embeddedRoot = g_strdup(root);
@@ -490,20 +523,20 @@ secretStateInitialize(bool privileged,
         driver->stateDir = g_strdup_printf("%s/secrets/run", rundir);
     }
 
-    if (virFileMakePathWithMode(driver->configDir, S_IRWXU) < 0) {
-        virReportSystemError(errno, _("cannot create config directory '%s'"),
+    if (g_mkdir_with_parents(driver->configDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create config directory '%1$s'"),
                              driver->configDir);
         goto error;
     }
 
-    if (virFileMakePathWithMode(driver->stateDir, S_IRWXU) < 0) {
-        virReportSystemError(errno, _("cannot create state directory '%s'"),
+    if (g_mkdir_with_parents(driver->stateDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create state directory '%1$s'"),
                              driver->stateDir);
         goto error;
     }
 
     if ((driver->lockFD =
-         virPidFileAcquire(driver->stateDir, "driver", false, getpid())) < 0)
+         virPidFileAcquire(driver->stateDir, "driver", getpid())) < 0)
         goto error;
 
     if (!(driver->secrets = virSecretObjListNew()))
@@ -512,12 +545,10 @@ secretStateInitialize(bool privileged,
     if (virSecretLoadAllConfigs(driver->secrets, driver->configDir) < 0)
         goto error;
 
-    secretDriverUnlock();
     return VIR_DRV_STATE_INIT_COMPLETE;
 
  error:
-    secretDriverUnlock();
-    secretStateCleanup();
+    secretStateCleanupLocked();
     return VIR_DRV_STATE_INIT_ERROR;
 }
 
@@ -525,14 +556,13 @@ secretStateInitialize(bool privileged,
 static int
 secretStateReload(void)
 {
+    VIR_LOCK_GUARD lock = virLockGuardLock(&mutex);
+
     if (!driver)
         return -1;
 
-    secretDriverLock();
-
     ignore_value(virSecretLoadAllConfigs(driver->secrets, driver->configDir));
 
-    secretDriverUnlock();
     return 0;
 }
 
@@ -540,7 +570,7 @@ secretStateReload(void)
 static virDrvOpenStatus
 secretConnectOpen(virConnectPtr conn,
                   virConnectAuthPtr auth G_GNUC_UNUSED,
-                  virConfPtr conf G_GNUC_UNUSED,
+                  virConf *conf G_GNUC_UNUSED,
                   unsigned int flags)
 {
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
@@ -564,8 +594,7 @@ secretConnectOpen(virConnectPtr conn,
 
         if (STRNEQ(root, driver->embeddedRoot)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Cannot open embedded driver at path '%s', "
-                             "already open with path '%s'"),
+                           _("Cannot open embedded driver at path '%1$s', already open with path '%2$s'"),
                            root, driver->embeddedRoot);
             return VIR_DRV_OPEN_ERROR;
         }
@@ -580,11 +609,11 @@ secretConnectOpen(virConnectPtr conn,
         return VIR_DRV_OPEN_ERROR;
 
     if (driver->embeddedRoot) {
-        secretDriverLock();
-        if (driver->embeddedRefs == 0)
-            virSetConnectSecret(conn);
-        driver->embeddedRefs++;
-        secretDriverUnlock();
+        VIR_WITH_MUTEX_LOCK_GUARD(&mutex) {
+            if (driver->embeddedRefs == 0)
+                virSetConnectSecret(conn);
+            driver->embeddedRefs++;
+        }
     }
 
     return VIR_DRV_OPEN_SUCCESS;
@@ -592,12 +621,12 @@ secretConnectOpen(virConnectPtr conn,
 
 static int secretConnectClose(virConnectPtr conn G_GNUC_UNUSED)
 {
+    VIR_LOCK_GUARD lock = virLockGuardLock(&mutex);
+
     if (driver->embeddedRoot) {
-        secretDriverLock();
         driver->embeddedRefs--;
         if (driver->embeddedRefs == 0)
             virSetConnectSecret(NULL);
-        secretDriverUnlock();
     }
     return 0;
 }

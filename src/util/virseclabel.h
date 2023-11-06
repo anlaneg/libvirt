@@ -32,13 +32,12 @@ typedef enum {
 
 /* Security configuration for domain */
 typedef struct _virSecurityLabelDef virSecurityLabelDef;
-typedef virSecurityLabelDef *virSecurityLabelDefPtr;
 struct _virSecurityLabelDef {
     char *model;        /* name of security model */
     char *label;        /* security label string */
     char *imagelabel;   /* security image label string */
     char *baselabel;    /* base name of label string */
-    int type;           /* virDomainSeclabelType */
+    virDomainSeclabelType type; /* virDomainSeclabelType */
     bool relabel;       /* true (default) for allowing relabels */
     bool implicit;      /* true if seclabel is auto-added */
 };
@@ -46,7 +45,6 @@ struct _virSecurityLabelDef {
 
 /* Security configuration for device */
 typedef struct _virSecurityDeviceLabelDef virSecurityDeviceLabelDef;
-typedef virSecurityDeviceLabelDef *virSecurityDeviceLabelDefPtr;
 struct _virSecurityDeviceLabelDef {
     char *model;
     char *label;        /* image label string */
@@ -54,15 +52,18 @@ struct _virSecurityDeviceLabelDef {
     bool labelskip;     /* live-only; true if skipping failed label attempt */
 };
 
-virSecurityLabelDefPtr
+virSecurityLabelDef *
 virSecurityLabelDefNew(const char *model);
 
-virSecurityDeviceLabelDefPtr
+virSecurityDeviceLabelDef *
 virSecurityDeviceLabelDefNew(const char *model);
 
-virSecurityDeviceLabelDefPtr
+virSecurityDeviceLabelDef *
 virSecurityDeviceLabelDefCopy(const virSecurityDeviceLabelDef *src)
     ATTRIBUTE_NONNULL(1);
 
-void virSecurityLabelDefFree(virSecurityLabelDefPtr def);
-void virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDefPtr def);
+void virSecurityLabelDefFree(virSecurityLabelDef *def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSecurityLabelDef, virSecurityLabelDefFree);
+
+void virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDef *def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSecurityDeviceLabelDef, virSecurityDeviceLabelDefFree);

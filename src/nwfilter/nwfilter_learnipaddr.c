@@ -23,7 +23,7 @@
 
 #include <config.h>
 
-#ifdef HAVE_LIBPCAP
+#ifdef WITH_LIBPCAP
 # include <pcap.h>
 #endif
 
@@ -37,20 +37,15 @@
 #include "internal.h"
 
 #include "virbuffer.h"
-#include "viralloc.h"
 #include "virlog.h"
-#include "datatypes.h"
 #include "virnetdev.h"
 #include "virerror.h"
 #include "virthread.h"
 #include "conf/nwfilter_params.h"
-#include "conf/domain_conf.h"
 #include "nwfilter_gentech_driver.h"
-#include "nwfilter_ebiptables_driver.h"
 #include "nwfilter_ipaddrmap.h"
 #include "nwfilter_learnipaddr.h"
 #include "virstring.h"
-#include "virsocket.h"
 
 #define VIR_FROM_THIS VIR_FROM_NWFILTER
 
@@ -112,13 +107,12 @@ struct ether_vlan_header
 
 
 static virMutex pendingLearnReqLock = VIR_MUTEX_INITIALIZER;
-static virHashTablePtr pendingLearnReq;
+static GHashTable *pendingLearnReq;
 
 static virMutex ifaceMapLock = VIR_MUTEX_INITIALIZER;
-static virHashTablePtr ifaceLockMap;
+static GHashTable *ifaceLockMap;
 
 typedef struct _virNWFilterIfaceLock virNWFilterIfaceLock;
-typedef virNWFilterIfaceLock *virNWFilterIfaceLockPtr;
 struct _virNWFilterIfaceLock {
     char ifname[IF_NAMESIZE];
     virMutex lock;
@@ -126,12 +120,11 @@ struct _virNWFilterIfaceLock {
 };
 
 typedef struct _virNWFilterIPAddrLearnReq virNWFilterIPAddrLearnReq;
-typedef virNWFilterIPAddrLearnReq *virNWFilterIPAddrLearnReqPtr;
 struct _virNWFilterIPAddrLearnReq {
-    virNWFilterTechDriverPtr techdriver;
+    virNWFilterTechDriver *techdriver;
     int ifindex;
-    virNWFilterBindingDefPtr binding;
-    virNWFilterDriverStatePtr driver;
+    virNWFilterBindingDef *binding;
+    virNWFilterDriverState *driver;
     int howDetect; /* bitmask of enum howDetect */
 
     int status;
@@ -145,62 +138,51 @@ static bool threadsTerminate;
 int
 virNWFilterLockIface(const char *ifname)
 {
-    virNWFilterIfaceLockPtr ifaceLock;
+    virNWFilterIfaceLock *ifaceLock = NULL;
 
-    virMutexLock(&ifaceMapLock);
+    VIR_WITH_MUTEX_LOCK_GUARD(&ifaceMapLock) {
+        ifaceLock = virHashLookup(ifaceLockMap, ifname);
 
-    ifaceLock = virHashLookup(ifaceLockMap, ifname);
-    if (!ifaceLock) {
-        if (VIR_ALLOC(ifaceLock) < 0)
-            goto err_exit;
+        if (!ifaceLock) {
+            ifaceLock = g_new0(virNWFilterIfaceLock, 1);
 
-        if (virMutexInitRecursive(&ifaceLock->lock) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("mutex initialization failed"));
-            VIR_FREE(ifaceLock);
-            goto err_exit;
+            if (virMutexInitRecursive(&ifaceLock->lock) < 0) {
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                               _("mutex initialization failed"));
+                g_free(ifaceLock);
+                return -1;
+            }
+
+            if (virStrcpyStatic(ifaceLock->ifname, ifname) < 0) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("interface name %1$s does not fit into buffer"),
+                               ifaceLock->ifname);
+                g_free(ifaceLock);
+                return -1;
+            }
+
+            while (virHashAddEntry(ifaceLockMap, ifname, ifaceLock)) {
+                g_free(ifaceLock);
+                return -1;
+            }
+
+            ifaceLock->refctr = 0;
         }
 
-        if (virStrcpyStatic(ifaceLock->ifname, ifname) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("interface name %s does not fit into "
-                             "buffer "),
-                           ifaceLock->ifname);
-            VIR_FREE(ifaceLock);
-            goto err_exit;
-        }
-
-        while (virHashAddEntry(ifaceLockMap, ifname, ifaceLock)) {
-            VIR_FREE(ifaceLock);
-            goto err_exit;
-        }
-
-        ifaceLock->refctr = 0;
+        ifaceLock->refctr++;
     }
-
-    ifaceLock->refctr++;
-
-    virMutexUnlock(&ifaceMapLock);
 
     virMutexLock(&ifaceLock->lock);
 
     return 0;
-
- err_exit:
-    virMutexUnlock(&ifaceMapLock);
-
-    return -1;
 }
 
 
 void
 virNWFilterUnlockIface(const char *ifname)
 {
-    virNWFilterIfaceLockPtr ifaceLock;
-
-    virMutexLock(&ifaceMapLock);
-
-    ifaceLock = virHashLookup(ifaceLockMap, ifname);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&ifaceMapLock);
+    virNWFilterIfaceLock *ifaceLock = virHashLookup(ifaceLockMap, ifname);
 
     if (ifaceLock) {
         virMutexUnlock(&ifaceLock->lock);
@@ -209,39 +191,33 @@ virNWFilterUnlockIface(const char *ifname)
         if (ifaceLock->refctr == 0)
             virHashRemoveEntry(ifaceLockMap, ifname);
     }
-
-    virMutexUnlock(&ifaceMapLock);
 }
 
 
 static void
-virNWFilterIPAddrLearnReqFree(virNWFilterIPAddrLearnReqPtr req)
+virNWFilterIPAddrLearnReqFree(virNWFilterIPAddrLearnReq *req)
 {
     if (!req)
         return;
 
     virNWFilterBindingDefFree(req->binding);
 
-    VIR_FREE(req);
+    g_free(req);
 }
 
 
-#if HAVE_LIBPCAP
+#if WITH_LIBPCAP
 
 static int
-virNWFilterRegisterLearnReq(virNWFilterIPAddrLearnReqPtr req)
+virNWFilterRegisterLearnReq(virNWFilterIPAddrLearnReq *req)
 {
-    int res = -1;
     g_autofree char *ifindex_str = g_strdup_printf("%d", req->ifindex);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&pendingLearnReqLock);
 
-    virMutexLock(&pendingLearnReqLock);
+    if (virHashLookup(pendingLearnReq, ifindex_str))
+        return -1;
 
-    if (!virHashLookup(pendingLearnReq, ifindex_str))
-        res = virHashAddEntry(pendingLearnReq, ifindex_str, req);
-
-    virMutexUnlock(&pendingLearnReqLock);
-
-    return res;
+    return virHashAddEntry(pendingLearnReq, ifindex_str, req);
 }
 
 
@@ -250,9 +226,7 @@ virNWFilterRegisterLearnReq(virNWFilterIPAddrLearnReqPtr req)
 int
 virNWFilterTerminateLearnReq(const char *ifname)
 {
-    int rc = -1;
     int ifindex;
-    virNWFilterIPAddrLearnReqPtr req;
     g_autofree char *ifindex_str = NULL;
 
     /* It's possible that it's already been removed as a result of
@@ -265,38 +239,30 @@ virNWFilterTerminateLearnReq(const char *ifname)
 
     if (virNetDevGetIndex(ifname, &ifindex) < 0) {
         virResetLastError();
-        return rc;
+        return -1;
     }
 
     ifindex_str = g_strdup_printf("%d", ifindex);
 
-    virMutexLock(&pendingLearnReqLock);
-
-    req = virHashLookup(pendingLearnReq, ifindex_str);
-    if (req) {
-        rc = 0;
-        req->terminate = true;
+    VIR_WITH_MUTEX_LOCK_GUARD(&pendingLearnReqLock) {
+        virNWFilterIPAddrLearnReq *req;
+        if ((req = virHashLookup(pendingLearnReq, ifindex_str))) {
+            req->terminate = true;
+            return 0;
+        }
     }
 
-    virMutexUnlock(&pendingLearnReqLock);
-
-    return rc;
+    return -1;
 }
 
 
 bool
 virNWFilterHasLearnReq(int ifindex)
 {
-    void *res;
     g_autofree char *ifindex_str = g_strdup_printf("%d", ifindex);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&pendingLearnReqLock);
 
-    virMutexLock(&pendingLearnReqLock);
-
-    res = virHashLookup(pendingLearnReq, ifindex_str);
-
-    virMutexUnlock(&pendingLearnReqLock);
-
-    return res != NULL;
+    return virHashLookup(pendingLearnReq, ifindex_str) != NULL;
 }
 
 
@@ -307,26 +273,20 @@ freeLearnReqEntry(void *payload)
 }
 
 
-#ifdef HAVE_LIBPCAP
+#ifdef WITH_LIBPCAP
 
-static virNWFilterIPAddrLearnReqPtr
+static virNWFilterIPAddrLearnReq *
 virNWFilterDeregisterLearnReq(int ifindex)
 {
-    virNWFilterIPAddrLearnReqPtr res;
     g_autofree char *ifindex_str = g_strdup_printf("%d", ifindex);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&pendingLearnReqLock);
 
-    virMutexLock(&pendingLearnReqLock);
-
-    res = virHashSteal(pendingLearnReq, ifindex_str);
-
-    virMutexUnlock(&pendingLearnReqLock);
-
-    return res;
+    return virHashSteal(pendingLearnReq, ifindex_str);
 }
 
 #endif
 
-#ifdef HAVE_LIBPCAP
+#ifdef WITH_LIBPCAP
 
 static void
 procDHCPOpts(struct dhcp *dhcp, int dhcp_opts_len,
@@ -387,9 +347,9 @@ learnIPAddressThread(void *arg)
     struct bpf_program fp;
     struct pcap_pkthdr header;
     const u_char *packet;
-    struct ether_header *ether_hdr;
+    struct ether_header ether_hdr;
     struct ether_vlan_header *vlan_hdr;
-    virNWFilterIPAddrLearnReqPtr req = arg;
+    virNWFilterIPAddrLearnReq *req = arg;
     uint32_t vmaddr = 0, bcastaddr = 0;
     unsigned int ethHdrSize;
     char *listen_if = (req->binding->linkdevname ?
@@ -397,12 +357,12 @@ learnIPAddressThread(void *arg)
                        req->binding->portdevname);
     int dhcp_opts_len;
     char macaddr[VIR_MAC_STRING_BUFLEN];
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *filter = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *filter = NULL;
     uint16_t etherType;
     bool showError = true;
     enum howDetect howDetected = 0;
-    virNWFilterTechDriverPtr techdriver = req->techdriver;
+    virNWFilterTechDriver *techdriver = req->techdriver;
     struct pollfd fds[1];
 
     if (virNWFilterLockIface(req->binding->portdevname) < 0)
@@ -414,7 +374,7 @@ learnIPAddressThread(void *arg)
     if (virNetDevValidateConfig(req->binding->portdevname, NULL, req->ifindex) <= 0) {
         virResetLastError();
         req->status = ENODEV;
-        goto done;
+        goto cleanup;
     }
 
     handle = pcap_open_live(listen_if, BUFSIZ, 0, PKT_TIMEOUT_MS, errbuf);
@@ -422,7 +382,7 @@ learnIPAddressThread(void *arg)
     if (handle == NULL) {
         VIR_DEBUG("Couldn't open device %s: %s", listen_if, errbuf);
         req->status = ENODEV;
-        goto done;
+        goto cleanup;
     }
 
     fds[0].fd = pcap_fileno(handle);
@@ -436,7 +396,7 @@ learnIPAddressThread(void *arg)
                                            NULL, false) < 0) {
             VIR_DEBUG("Unable to apply DHCP only rules");
             req->status = EINVAL;
-            goto done;
+            goto cleanup;
         }
         virBufferAddLit(&buf, "src port 67 and dst port 68");
     } else {
@@ -444,7 +404,7 @@ learnIPAddressThread(void *arg)
                                         &req->binding->mac) < 0) {
             VIR_DEBUG("Unable to apply basic rules");
             req->status = EINVAL;
-            goto done;
+            goto cleanup;
         }
         virBufferAsprintf(&buf, "ether host %s or ether dst ff:ff:ff:ff:ff:ff",
                           macaddr);
@@ -455,14 +415,14 @@ learnIPAddressThread(void *arg)
     if (pcap_compile(handle, &fp, filter, 1, 0) != 0) {
         VIR_DEBUG("Couldn't compile filter '%s'", filter);
         req->status = EINVAL;
-        goto done;
+        goto cleanup;
     }
 
     if (pcap_setfilter(handle, &fp) != 0) {
         VIR_DEBUG("Couldn't set filter '%s'", filter);
         req->status = EINVAL;
         pcap_freecode(&fp);
-        goto done;
+        goto cleanup;
     }
 
     pcap_freecode(&fp);
@@ -509,13 +469,14 @@ learnIPAddressThread(void *arg)
         }
 
         if (header.len >= sizeof(struct ether_header)) {
-            ether_hdr = (struct ether_header*)packet;
+            /* Avoid alignment issues */
+            memcpy(&ether_hdr, packet, sizeof(struct ether_header));
 
-            switch (ntohs(ether_hdr->ether_type)) {
+            switch (ntohs(ether_hdr.ether_type)) {
 
             case ETHERTYPE_IP:
                 ethHdrSize = sizeof(struct ether_header);
-                etherType = ntohs(ether_hdr->ether_type);
+                etherType = ntohs(ether_hdr.ether_type);
                 break;
 
             case ETHERTYPE_VLAN:
@@ -531,7 +492,7 @@ learnIPAddressThread(void *arg)
                 continue;
             }
 
-            if (virMacAddrCmpRaw(&req->binding->mac, ether_hdr->ether_shost) == 0) {
+            if (virMacAddrCmpRaw(&req->binding->mac, ether_hdr.ether_shost) == 0) {
                 /* packets from the VM */
 
                 if (etherType == ETHERTYPE_IP &&
@@ -571,9 +532,9 @@ learnIPAddressThread(void *arg)
                     }
                 }
             } else if (virMacAddrCmpRaw(&req->binding->mac,
-                                        ether_hdr->ether_dhost) == 0 ||
+                                        ether_hdr.ether_dhost) == 0 ||
                        /* allow Broadcast replies from DHCP server */
-                       virMacAddrIsBroadcastRaw(ether_hdr->ether_dhost)) {
+                       virMacAddrIsBroadcastRaw(ether_hdr.ether_dhost)) {
                 /* packets to the VM */
                 if (etherType == ETHERTYPE_IP &&
                     (header.len >= ethHdrSize +
@@ -622,19 +583,17 @@ learnIPAddressThread(void *arg)
         }
     } /* while */
 
- done:
-    VIR_FREE(filter);
-
+ cleanup:
     if (handle)
         pcap_close(handle);
 
     if (req->status == 0) {
+        g_autofree char *inetaddr = NULL;
         int ret;
         virSocketAddr sa;
         sa.len = sizeof(sa.data.inet4);
         sa.data.inet4.sin_family = AF_INET;
         sa.data.inet4.sin_addr.s_addr = vmaddr;
-        char *inetaddr;
 
         /* It is necessary to unlock interface here to avoid updateMutex and
          * interface ordering deadlocks. Otherwise we are going to
@@ -648,8 +607,8 @@ learnIPAddressThread(void *arg)
 
         if ((inetaddr = virSocketAddrFormat(&sa)) != NULL) {
             if (virNWFilterIPAddrMapAddIPAddr(req->binding->portdevname, inetaddr) < 0) {
-                VIR_ERROR(_("Failed to add IP address %s to IP address "
-                          "cache for interface %s"), inetaddr, req->binding->portdevname);
+                VIR_ERROR(_("Failed to add IP address %1$s to IP address cache for interface %2$s"),
+                          inetaddr, req->binding->portdevname);
             }
 
             ret = virNWFilterInstantiateFilterLate(req->driver,
@@ -657,13 +616,11 @@ learnIPAddressThread(void *arg)
                                                    req->ifindex);
             VIR_DEBUG("Result from applying firewall rules on "
                       "%s with IP addr %s : %d", req->binding->portdevname, inetaddr, ret);
-            VIR_FREE(inetaddr);
         }
     } else {
         if (showError)
             virReportSystemError(req->status,
-                                 _("encountered an error on interface %s "
-                                   "index %d"),
+                                 _("encountered an error on interface %1$s index %2$d"),
                                  req->binding->portdevname, req->ifindex);
 
         techdriver->applyDropAllRules(req->binding->portdevname);
@@ -697,29 +654,26 @@ learnIPAddressThread(void *arg)
  * firewall rules on the interface.
  */
 int
-virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver,
-                          virNWFilterBindingDefPtr binding,
+virNWFilterLearnIPAddress(virNWFilterTechDriver *techdriver,
+                          virNWFilterBindingDef *binding,
                           int ifindex,
-                          virNWFilterDriverStatePtr driver,
+                          virNWFilterDriverState *driver,
                           int howDetect)
 {
     int rc;
     virThread thread;
-    virNWFilterIPAddrLearnReqPtr req = NULL;
+    virNWFilterIPAddrLearnReq *req = NULL;
 
     if (howDetect == 0)
         return -1;
 
     if (!techdriver->canApplyBasicRules()) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("IP parameter must be provided since "
-                         "snooping the IP address does not work "
-                         "possibly due to missing tools"));
+                       _("IP parameter must be provided since snooping the IP address does not work possibly due to missing tools"));
         return -1;
     }
 
-    if (VIR_ALLOC(req) < 0)
-        return -1;
+    req = g_new0(virNWFilterIPAddrLearnReq, 1);
 
     if (!(req->binding = virNWFilterBindingDefCopy(binding)))
         goto err_free_req;
@@ -754,19 +708,17 @@ virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver,
 #else
 
 int
-virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver G_GNUC_UNUSED,
-                          virNWFilterBindingDefPtr binding G_GNUC_UNUSED,
+virNWFilterLearnIPAddress(virNWFilterTechDriver *techdriver G_GNUC_UNUSED,
+                          virNWFilterBindingDef *binding G_GNUC_UNUSED,
                           int ifindex G_GNUC_UNUSED,
-                          virNWFilterDriverStatePtr driver G_GNUC_UNUSED,
+                          virNWFilterDriverState *driver G_GNUC_UNUSED,
                           int howDetect G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("IP parameter must be given since libvirt "
-                     "was not compiled with IP address learning "
-                     "support"));
+                   _("IP parameter must be given since libvirt was not compiled with IP address learning support"));
     return -1;
 }
-#endif /* HAVE_LIBPCAP */
+#endif /* WITH_LIBPCAP */
 
 
 /**
@@ -781,16 +733,8 @@ virNWFilterLearnInit(void)
 
     VIR_DEBUG("Initializing IP address learning");
     threadsTerminate = false;
-
-    pendingLearnReq = virHashCreate(0, freeLearnReqEntry);
-    if (!pendingLearnReq)
-        return -1;
-
-    ifaceLockMap = virHashCreate(0, virHashValueFree);
-    if (!ifaceLockMap) {
-        virNWFilterLearnShutdown();
-        return -1;
-    }
+    pendingLearnReq = virHashNew(freeLearnReqEntry);
+    ifaceLockMap = virHashNew(g_free);
 
     return 0;
 }
@@ -820,9 +764,6 @@ virNWFilterLearnShutdown(void)
 
     virNWFilterLearnThreadsTerminate(false);
 
-    virHashFree(pendingLearnReq);
-    pendingLearnReq = NULL;
-
-    virHashFree(ifaceLockMap);
-    ifaceLockMap = NULL;
+    g_clear_pointer(&pendingLearnReq, g_hash_table_unref);
+    g_clear_pointer(&ifaceLockMap, g_hash_table_unref);
 }

@@ -27,46 +27,39 @@
 #include <pthread.h>
 
 typedef struct virMutex virMutex;
-typedef virMutex *virMutexPtr;
-
 struct virMutex {
     /*使用pthread mutex*/
     pthread_mutex_t lock;
 };
 
-typedef struct virRWLock virRWLock;
-typedef virRWLock *virRWLockPtr;
+typedef struct virLockGuard virLockGuard;
+struct virLockGuard {
+    virMutex *mutex;
+};
 
+typedef struct virRWLock virRWLock;
 struct virRWLock {
     pthread_rwlock_t lock;
 };
 
 
 typedef struct virCond virCond;
-typedef virCond *virCondPtr;
-
 struct virCond {
     pthread_cond_t cond;
 };
 
 typedef struct virThreadLocal virThreadLocal;
-typedef virThreadLocal *virThreadLocalPtr;
-
 struct virThreadLocal {
     pthread_key_t key;
 };
 
 typedef struct virThread virThread;
-typedef virThread *virThreadPtr;
-
 struct virThread {
     /*线程id*/
     pthread_t thread;
 };
 
 typedef struct virOnceControl virOnceControl;
-typedef virOnceControl *virOnceControlPtr;
-
 struct virOnceControl {
     pthread_once_t once;
 };
@@ -89,28 +82,28 @@ typedef void (*virThreadFunc)(void *opaque);
 #define virThreadCreate(thread, joinable, func, opaque) \
     virThreadCreateFull(thread, joinable, func, #func, false, opaque)
 
-int virThreadCreateFull(virThreadPtr thread,
+int virThreadCreateFull(virThread *thread,
                         bool joinable,
                         virThreadFunc func,
                         const char *name,
                         bool worker,
                         void *opaque) G_GNUC_WARN_UNUSED_RESULT;
-void virThreadSelf(virThreadPtr thread);
-bool virThreadIsSelf(virThreadPtr thread);
-void virThreadJoin(virThreadPtr thread);
+void virThreadSelf(virThread *thread);
+bool virThreadIsSelf(virThread *thread);
+void virThreadJoin(virThread *thread);
 
 size_t virThreadMaxName(void);
 
 /* This API is *NOT* for general use. It exists solely as a stub
  * for integration with libselinux AVC callbacks */
-void virThreadCancel(virThreadPtr thread);
+void virThreadCancel(virThread *thread);
 
 /* These next two functions are for debugging only, since they are not
  * guaranteed to give unique values for distinct threads on all
  * architectures, nor are the two functions guaranteed to give the same
  * value for the same thread. */
 unsigned long long virThreadSelfID(void);
-unsigned long long virThreadID(virThreadPtr thread);
+unsigned long long virThreadID(virThread *thread);
 
 /* Static initialization of mutexes is not possible, so we instead
  * provide for guaranteed one-time initialization via a callback
@@ -124,45 +117,50 @@ unsigned long long virThreadID(virThreadPtr thread);
  *     ...now guaranteed that initializer has completed exactly once
  * }
  */
-int virOnce(virOnceControlPtr once, virOnceFunc init)
+int virOnce(virOnceControl *once, virOnceFunc init)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
-int virMutexInit(virMutexPtr m) G_GNUC_WARN_UNUSED_RESULT;
-int virMutexInitRecursive(virMutexPtr m) G_GNUC_WARN_UNUSED_RESULT;
-void virMutexDestroy(virMutexPtr m);
+int virMutexInit(virMutex *m) G_GNUC_WARN_UNUSED_RESULT;
+int virMutexInitRecursive(virMutex *m) G_GNUC_WARN_UNUSED_RESULT;
+void virMutexDestroy(virMutex *m);
 
-void virMutexLock(virMutexPtr m);
-void virMutexUnlock(virMutexPtr m);
-
-
-int virRWLockInit(virRWLockPtr m) G_GNUC_WARN_UNUSED_RESULT;
-void virRWLockDestroy(virRWLockPtr m);
-
-void virRWLockRead(virRWLockPtr m);
-void virRWLockWrite(virRWLockPtr m);
-void virRWLockUnlock(virRWLockPtr m);
+void virMutexLock(virMutex *m);
+void virMutexUnlock(virMutex *m);
 
 
-int virCondInit(virCondPtr c) G_GNUC_WARN_UNUSED_RESULT;
-int virCondDestroy(virCondPtr c);
+virLockGuard virLockGuardLock(virMutex *m);
+void virLockGuardUnlock(virLockGuard *l);
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(virLockGuard, virLockGuardUnlock);
+#define VIR_LOCK_GUARD g_auto(virLockGuard) G_GNUC_UNUSED
+
+int virRWLockInit(virRWLock *m) G_GNUC_WARN_UNUSED_RESULT;
+void virRWLockDestroy(virRWLock *m);
+
+void virRWLockRead(virRWLock *m);
+void virRWLockWrite(virRWLock *m);
+void virRWLockUnlock(virRWLock *m);
+
+
+int virCondInit(virCond *c) G_GNUC_WARN_UNUSED_RESULT;
+int virCondDestroy(virCond *c);
 
 /* virCondWait, virCondWaitUntil:
  * These functions can return without the associated predicate
  * changing value. Therefore in nearly all cases they
  * should be enclosed in a while loop that checks the predicate.
  */
-int virCondWait(virCondPtr c, virMutexPtr m) G_GNUC_WARN_UNUSED_RESULT;
-int virCondWaitUntil(virCondPtr c, virMutexPtr m, unsigned long long whenms) G_GNUC_WARN_UNUSED_RESULT;
+int virCondWait(virCond *c, virMutex *m) G_GNUC_WARN_UNUSED_RESULT;
+int virCondWaitUntil(virCond *c, virMutex *m, unsigned long long whenms) G_GNUC_WARN_UNUSED_RESULT;
 
-void virCondSignal(virCondPtr c);
-void virCondBroadcast(virCondPtr c);
+void virCondSignal(virCond *c);
+void virCondBroadcast(virCond *c);
 
 
 typedef void (*virThreadLocalCleanup)(void *);
-int virThreadLocalInit(virThreadLocalPtr l,
+int virThreadLocalInit(virThreadLocal *l,
                        virThreadLocalCleanup c) G_GNUC_WARN_UNUSED_RESULT;
-void *virThreadLocalGet(virThreadLocalPtr l);
-int virThreadLocalSet(virThreadLocalPtr l, void*) G_GNUC_WARN_UNUSED_RESULT;
+void *virThreadLocalGet(virThreadLocal *l);
+int virThreadLocalSet(virThreadLocal *l, void*) G_GNUC_WARN_UNUSED_RESULT;
 
 
 /**
@@ -213,3 +211,24 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) G_GNUC_WARN_UNUSED_RESULT;
         return 0; \
     } \
     struct classname ## EatSemicolon
+
+#define VIR_WITH_MUTEX_LOCK_GUARD_(m, name) \
+    for (g_auto(virLockGuard) name = virLockGuardLock(m); name.mutex; \
+        name.mutex = (virLockGuardUnlock(&name), NULL))
+/**
+ * VIR_WITH_MUTEX_LOCK_GUARD:
+ *
+ * This macro defines a lock scope such that entering the scope takes the lock
+ * and leaving the scope releases the lock. Return statements are allowed
+ * within the scope and release the lock. Break and continue statements leave
+ * the scope early and release the lock.
+ *
+ *     virMutex *mutex = ...;
+ *
+ *     VIR_WITH_MUTEX_LOCK_GUARD(mutex) {
+ *         // `mutex` is locked, and released automatically on scope exit
+ *         ...
+ *     }
+ */
+#define VIR_WITH_MUTEX_LOCK_GUARD(m) \
+    VIR_WITH_MUTEX_LOCK_GUARD_(m, CONCAT(var, __COUNTER__))

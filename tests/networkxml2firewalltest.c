@@ -22,15 +22,14 @@
 #include <config.h>
 
 #include "testutils.h"
-#include "viralloc.h"
 
 #if defined (__linux__)
 
+# include <gio/gio.h>
+
 # include "network/bridge_driver_platform.h"
 # include "virbuffer.h"
-
-# define LIBVIRT_VIRFIREWALLPRIV_H_ALLOW
-# include "virfirewallpriv.h"
+# include "virmock.h"
 
 # define LIBVIRT_VIRCOMMANDPRIV_H_ALLOW
 # include "vircommandpriv.h"
@@ -42,6 +41,33 @@
 # else
 #  error "test case not ported to this platform"
 # endif
+
+VIR_MOCK_WRAP_RET_ARGS(g_dbus_connection_call_sync,
+                       GVariant *,
+                       GDBusConnection *, connection,
+                       const gchar *, bus_name,
+                       const gchar *, object_path,
+                       const gchar *, interface_name,
+                       const gchar *, method_name,
+                       GVariant *, parameters,
+                       const GVariantType *, reply_type,
+                       GDBusCallFlags, flags,
+                       gint, timeout_msec,
+                       GCancellable *, cancellable,
+                       GError **, error)
+{
+    if (parameters) {
+        g_variant_ref_sink(parameters);
+        g_variant_unref(parameters);
+    }
+
+    VIR_MOCK_REAL_INIT(g_dbus_connection_call_sync);
+
+    *error = g_dbus_error_new_for_dbus_error("org.freedesktop.error",
+                                             "dbus is disabled");
+
+    return NULL;
+}
 
 static void
 testCommandDryRun(const char *const*args G_GNUC_UNUSED,
@@ -61,23 +87,21 @@ static int testCompareXMLToArgvFiles(const char *xml,
                                      const char *cmdline,
                                      const char *baseargs)
 {
-    char *actualargv = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    virNetworkDefPtr def = NULL;
-    int ret = -1;
+    g_autofree char *actualargv = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autoptr(virNetworkDef) def = NULL;
     char *actual;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
 
-    virCommandSetDryRun(&buf, testCommandDryRun, NULL);
+    virCommandSetDryRun(dryRunToken, &buf, true, true, testCommandDryRun, NULL);
 
-    if (!(def = virNetworkDefParseFile(xml, NULL)))
-        goto cleanup;
+    if (!(def = virNetworkDefParse(NULL, xml, NULL, false)))
+        return -1;
 
     if (networkAddFirewallRules(def) < 0)
-        goto cleanup;
+        return -1;
 
     actual = actualargv = virBufferContentAndReset(&buf);
-    virTestClearCommandPath(actualargv);
-    virCommandSetDryRun(NULL, NULL, NULL);
 
     /* The first network to be created populates the
      * libvirt global chains. We must skip args for
@@ -86,16 +110,10 @@ static int testCompareXMLToArgvFiles(const char *xml,
     if (STRPREFIX(actual, baseargs))
         actual += strlen(baseargs);
 
-    if (virTestCompareToFile(actual, cmdline) < 0)
-        goto cleanup;
+    if (virTestCompareToFileFull(actual, cmdline, false) < 0)
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    virBufferFreeAndReset(&buf);
-    VIR_FREE(actualargv);
-    virNetworkDefFree(def);
-    return ret;
+    return 0;
 }
 
 struct testInfo {
@@ -109,8 +127,8 @@ testCompareXMLToIPTablesHelper(const void *data)
 {
     int result = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *args = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *args = NULL;
 
     xml = g_strdup_printf("%s/networkxml2firewalldata/%s.xml",
                           abs_srcdir, info->name);
@@ -119,17 +137,7 @@ testCompareXMLToIPTablesHelper(const void *data)
 
     result = testCompareXMLToArgvFiles(xml, args, info->baseargs);
 
-    VIR_FREE(xml);
-    VIR_FREE(args);
     return result;
-}
-
-static bool
-hasNetfilterTools(void)
-{
-    return virFileIsExecutable(IPTABLES_PATH) &&
-        virFileIsExecutable(IP6TABLES_PATH) &&
-        virFileIsExecutable(EBTABLES_PATH);
 }
 
 
@@ -150,20 +158,9 @@ mymain(void)
             ret = -1; \
     } while (0)
 
-    virFirewallSetLockOverride(true);
-
-    if (virFirewallSetBackend(VIR_FIREWALL_BACKEND_DIRECT) < 0) {
-        if (!hasNetfilterTools()) {
-            fprintf(stderr, "iptables/ip6tables/ebtables tools not present");
-            return EXIT_AM_SKIP;
-        }
-
-        return EXIT_FAILURE;
-    }
-
     basefile = g_strdup_printf("%s/networkxml2firewalldata/base.args", abs_srcdir);
 
-    if (virTestLoadFile(basefile, &baseargs) < 0)
+    if (virFileReadAll(basefile, INT_MAX, &baseargs) < 0)
         return EXIT_FAILURE;
 
     DO_TEST("nat-default");
@@ -177,7 +174,14 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN(mymain)
+/* NB: virgdbus must be mocked because this test calls
+ * networkAddFirewallRules(), which will always call
+ * virFirewallDIsRegistered(), which calls
+ * virGDBusIsServiceRegistered().
+ */
+
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virgdbus"),
+                      VIR_TEST_MOCK("virfirewall"))
 
 #else /* ! defined (__linux__) */
 

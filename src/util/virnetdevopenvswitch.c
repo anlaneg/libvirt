@@ -29,13 +29,15 @@
 #include "virstring.h"
 #include "virlog.h"
 #include "virjson.h"
+#include "virfile.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.netdevopenvswitch");
 
 /*
- * Set openvswitch default timout
+ * Set openvswitch default timeout
  */
 static unsigned int virNetDevOpenvswitchTimeout = VIR_NETDEV_OVS_DEFAULT_TIMEOUT;
 
@@ -51,10 +53,16 @@ virNetDevOpenvswitchSetTimeout(unsigned int timeout)
     virNetDevOpenvswitchTimeout = timeout;
 }
 
-static void
-virNetDevOpenvswitchAddTimeout(virCommandPtr cmd)
+static virCommand *
+virNetDevOpenvswitchCreateCmd(char **errbuf)
 {
+    virCommand *cmd = virCommandNew(OVS_VSCTL);
+
     virCommandAddArgFormat(cmd, "--timeout=%u", virNetDevOpenvswitchTimeout);
+    if (errbuf)
+        virCommandSetErrorBuffer(cmd, errbuf);
+
+    return cmd;
 }
 
 /**
@@ -66,7 +74,7 @@ virNetDevOpenvswitchAddTimeout(virCommandPtr cmd)
  * ovs-vsctl command.
  */
 static void
-virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, const virNetDevVlan *virtVlan)
+virNetDevOpenvswitchConstructVlans(virCommand *cmd, const virNetDevVlan *virtVlan)
 {
     g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
@@ -133,10 +141,12 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
     char ifuuidstr[VIR_UUID_STRING_BUFLEN];
     char vmuuidstr[VIR_UUID_STRING_BUFLEN];
     g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
     g_autofree char *attachedmac_ex_id = NULL;
     g_autofree char *ifaceid_ex_id = NULL;
     g_autofree char *profile_ex_id = NULL;
     g_autofree char *vmid_ex_id = NULL;
+    g_autofree char *ifname_ex_id = NULL;
 
     virMacAddrFormat(macaddr, macaddrstr);
     virUUIDFormat(ovsport->interfaceID, ifuuidstr);
@@ -146,15 +156,15 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
                                         macaddrstr);
     ifaceid_ex_id = g_strdup_printf("external-ids:iface-id=\"%s\"", ifuuidstr);
     vmid_ex_id = g_strdup_printf("external-ids:vm-id=\"%s\"", vmuuidstr);
+    ifname_ex_id = g_strdup_printf("external-ids:ifname=\"%s\"", ifname);
     if (ovsport->profileID[0] != '\0') {
         profile_ex_id = g_strdup_printf("external-ids:port-profile=\"%s\"",
                                         ovsport->profileID);
     }
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
-    virCommandAddArgList(cmd, "--", "--if-exists", "del-port",
-                         ifname, "--", "add-port", brname, ifname, NULL);
+    cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
+    virCommandAddArgList(cmd, "--", "--may-exist",
+                         "add-port", brname, ifname, NULL);
 
     virNetDevOpenvswitchConstructVlans(cmd, virtVlan);
 
@@ -172,6 +182,7 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
                              "--", "set", "Interface", ifname, ifaceid_ex_id,
                              "--", "set", "Interface", ifname, vmid_ex_id,
                              "--", "set", "Interface", ifname, profile_ex_id,
+                             "--", "set", "Interface", ifname, ifname_ex_id,
                              "--", "set", "Interface", ifname,
                              "external-ids:iface-status=active",
                              NULL);
@@ -179,8 +190,8 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
 
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to add port %s to OVS bridge %s"),
-                       ifname, brname);
+                       _("Unable to add port %1$s to OVS bridge %2$s: %3$s"),
+                       ifname, brname, NULLSTR(errbuf));
         return -1;
     }
 
@@ -197,15 +208,15 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
  */
 int virNetDevOpenvswitchRemovePort(const char *brname G_GNUC_UNUSED, const char *ifname)
 {
-    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "--", "--if-exists", "del-port", ifname, NULL);
 
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to delete port %s from OVS"), ifname);
+                       _("Unable to delete port %1$s from OVS: %2$s"),
+                       ifname, NULLSTR(errbuf));
         return -1;
     }
 
@@ -224,10 +235,9 @@ int virNetDevOpenvswitchRemovePort(const char *brname G_GNUC_UNUSED, const char 
 int virNetDevOpenvswitchGetMigrateData(char **migrate, const char *ifname)
 {
     size_t len;
-    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "--if-exists", "get", "Interface",
                          ifname, "external_ids:PortData", NULL);
 
@@ -236,8 +246,8 @@ int virNetDevOpenvswitchGetMigrateData(char **migrate, const char *ifname)
     /* Run the command */
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to run command to get OVS port data for "
-                         "interface %s"), ifname);
+                       _("Unable to run command to get OVS port data for interface %1$s: %2$s"),
+                       ifname, NULLSTR(errbuf));
         return -1;
     }
 
@@ -261,22 +271,22 @@ int virNetDevOpenvswitchGetMigrateData(char **migrate, const char *ifname)
 int virNetDevOpenvswitchSetMigrateData(char *migrate, const char *ifname)
 {
     g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
 
     if (!migrate) {
         VIR_DEBUG("No OVS port data for interface %s", ifname);
         return 0;
     }
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
+    cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
     virCommandAddArgList(cmd, "set", "Interface", ifname, NULL);
     virCommandAddArgFormat(cmd, "external_ids:PortData=%s", migrate);
 
     /* Run the command */
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to run command to set OVS port data for "
-                         "interface %s"), ifname);
+                       _("Unable to run command to set OVS port data for interface %1$s: %2$s"),
+                       ifname, NULLSTR(errbuf));
         return -1;
     }
 
@@ -300,7 +310,7 @@ virNetDevOpenvswitchInterfaceParseStats(const char *json,
                                         virDomainInterfaceStatsPtr stats)
 {
     g_autoptr(virJSONValue) jsonStats = NULL;
-    virJSONValuePtr jsonMap = NULL;
+    virJSONValue *jsonMap = NULL;
     size_t i;
 
     stats->rx_bytes = stats->rx_packets = stats->rx_errs = stats->rx_drop = -1;
@@ -315,9 +325,9 @@ virNetDevOpenvswitchInterfaceParseStats(const char *json,
     }
 
     for (i = 0; i < virJSONValueArraySize(jsonMap); i++) {
-        virJSONValuePtr item = virJSONValueArrayGet(jsonMap, i);
-        virJSONValuePtr jsonKey;
-        virJSONValuePtr jsonVal;
+        virJSONValue *item = virJSONValueArrayGet(jsonMap, i);
+        virJSONValue *jsonKey;
+        virJSONValue *jsonVal;
         const char *key;
         long long val;
 
@@ -370,11 +380,10 @@ int
 virNetDevOpenvswitchInterfaceStats(const char *ifname,
                                    virDomainInterfaceStatsPtr stats)
 {
-    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
     g_autofree char *output = NULL;
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "--if-exists", "--format=list", "--data=json",
                          "--no-headings", "--columns=statistics", "list",
                          "Interface", ifname, NULL);
@@ -391,8 +400,9 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
     if (virCommandRun(cmd, NULL) < 0 ||
         STREQ_NULLABLE(output, "")) {
         /* no ovs-vsctl or interface 'ifname' doesn't exists in ovs */
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Interface not found"));
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Interface not found: %1$s"),
+                       NULLSTR(errbuf));
         return -1;
     }
 
@@ -434,20 +444,19 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
 int
 virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
 {
-    virCommandPtr cmd = NULL;
+    g_autofree char *errbuf = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
     int exitstatus;
 
     *master = NULL;
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "iface-to-br", ifname, NULL);
     virCommandSetOutputBuffer(cmd, master);
 
     if (virCommandRun(cmd, &exitstatus) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to run command to get OVS master for "
-                         "interface %s"), ifname);
+                       _("Unable to run command to get OVS master for interface %1$s: %2$s"),
+                       ifname, NULLSTR(errbuf));
         return -1;
     }
 
@@ -469,11 +478,64 @@ virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
 
 
 /**
- * virNetDevOpenvswitchVhostuserGetIfname:
+ * virNetDevOpenvswitchMaybeUnescapeReply:
+ * @reply: a string to unescape
+ *
+ * Depending on ovs-vsctl version a string might be escaped. For instance:
+ *  -version 2.11.4 allows only is_alpha(), an underscore, a dash or a dot,
+ *  -version 2.14.0 allows only is_alnum(), an underscore, a dash or a dot,
+ * any other character causes the string to be escaped.
+ *
+ * What this function does, is it checks whether @reply string consists solely
+ * from safe, not escaped characters (as defined by version 2.14.0) and if not
+ * an error is reported. If @reply is a string enclosed in double quotes, but
+ * otherwise safe those double quotes are removed.
+ *
+ * Returns: 0 on success,
+ *         -1 otherwise (with error reported).
+ */
+int
+virNetDevOpenvswitchMaybeUnescapeReply(char *reply)
+{
+    g_autoptr(virJSONValue) json = NULL;
+    g_autofree char *jsonStr = NULL;
+    const char *tmp = NULL;
+    size_t replyLen = strlen(reply);
+
+    if (*reply != '"')
+        return 0;
+
+    jsonStr = g_strdup_printf("{\"name\": %s}", reply);
+    if (!(json = virJSONValueFromString(jsonStr)))
+        return -1;
+
+    if (!(tmp = virJSONValueObjectGetString(json, "name"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Malformed ovs-vsctl output"));
+        return -1;
+    }
+
+    return virStrcpy(reply, tmp, replyLen);
+}
+
+
+/**
+ * virNetDevOpenvswitchGetVhostuserIfname:
  * @path: the path of the unix socket
+ * @server: true if OVS creates the @path
  * @ifname: the retrieved name of the interface
  *
- * Retreives the ovs ifname from vhostuser unix socket path.
+ * Retrieves the OVS ifname from vhostuser UNIX socket path.
+ * There are two types of vhostuser ports which differ in client/server
+ * role:
+ *
+ * dpdkvhostuser - OVS creates the socket and QEMU connects to it
+ *                 (@server = true)
+ * dpdkvhostuserclient - QEMU creates the socket and OVS connects to it
+ *                       (@server = false)
+ *
+ * Since the way of retrieving ifname is different in these two cases,
+ * caller must set @server according to the interface definition.
  *
  * Returns: 1 if interface is an openvswitch interface,
  *          0 if it is not, but no other error occurred,
@@ -481,33 +543,60 @@ virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
  */
 int
 virNetDevOpenvswitchGetVhostuserIfname(const char *path,
+                                       bool server,
                                        char **ifname)
 {
-    const char *tmpIfname = NULL;
-    int status;
     g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *absoluteOvsVsctlPath = NULL;
+    int status;
 
-    /* Openvswitch vhostuser path are hardcoded to
-     * /<runstatedir>/openvswitch/<ifname>
-     * for example: /var/run/openvswitch/dpdkvhostuser0
-     *
-     * so we pick the filename and check it's a openvswitch interface
-     */
-    if (!path ||
-        !(tmpIfname = strrchr(path, '/')))
+    if (!(absoluteOvsVsctlPath = virFindFileInPath(OVS_VSCTL))) {
+        /* If there is no 'ovs-vsctl' then the interface is
+         * probably not an OpenVSwitch interface and the @path to
+         * socket was created by some DPDK testing script (e.g.
+         * dpdk-testpmd). */
         return 0;
+    }
 
-    tmpIfname++;
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
-    virCommandAddArgList(cmd, "get", "Interface", tmpIfname, "name", NULL);
-    if (virCommandRun(cmd, &status) < 0 ||
-        status) {
+    cmd = virNetDevOpenvswitchCreateCmd(NULL);
+
+    if (server) {
+        virCommandAddArgList(cmd, "--no-headings", "--columns=name", "find",
+                             "Interface", NULL);
+        virCommandAddArgPair(cmd, "options:vhost-server-path", path);
+    } else {
+        const char *tmpIfname = NULL;
+
+        /* Openvswitch vhostuser path is hardcoded to
+         * /<runstatedir>/openvswitch/<ifname>
+         * for example: /var/run/openvswitch/dpdkvhostuser0
+         *
+         * so we pick the filename and check it's an openvswitch interface
+         */
+        if (!path ||
+            !(tmpIfname = strrchr(path, '/'))) {
+            return 0;
+        }
+
+        tmpIfname++;
+        virCommandAddArgList(cmd, "get", "Interface", tmpIfname, "name", NULL);
+    }
+
+    virCommandSetOutputBuffer(cmd, ifname);
+    if (virCommandRun(cmd, &status) < 0)
+        return -1;
+
+    if (status != 0) {
         /* it's not a openvswitch vhostuser interface. */
         return 0;
     }
 
-    *ifname = g_strdup(tmpIfname);
+    virStringTrimOptionalNewline(*ifname);
+    if (virNetDevOpenvswitchMaybeUnescapeReply(*ifname) < 0) {
+        VIR_FREE(*ifname);
+        return -1;
+    }
+
     return 1;
 }
 
@@ -523,23 +612,372 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
 int virNetDevOpenvswitchUpdateVlan(const char *ifname,
                                    const virNetDevVlan *virtVlan)
 {
-    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
 
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd,
                          "--", "--if-exists", "clear", "Port", ifname, "tag",
                          "--", "--if-exists", "clear", "Port", ifname, "trunk",
-                         "--", "--if-exists", "clear", "Port", ifname, "vlan_mode",
-                         "--", "--if-exists", "set", "Port", ifname, NULL);
+                         "--", "--if-exists", "clear", "Port", ifname, "vlan_mode", NULL);
+
+    if (virtVlan && virtVlan->nTags > 0)
+        virCommandAddArgList(cmd, "--", "--if-exists", "set", "Port", ifname, NULL);
 
     virNetDevOpenvswitchConstructVlans(cmd, virtVlan);
 
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to set vlan configuration on port %s"), ifname);
+                       _("Unable to set vlan configuration on port %1$s: %2$s"),
+                       ifname, NULLSTR(errbuf));
         return -1;
     }
 
     return 0;
+}
+
+static char*
+virNetDevOpenvswitchFindUUID(const char *table,
+                             const char *vmid_ex_id,
+                             const char *ifname_ex_id)
+{
+    g_autoptr(virCommand) cmd = NULL;
+    char *uuid = NULL;
+
+    cmd = virNetDevOpenvswitchCreateCmd(NULL);
+    virCommandAddArgList(cmd, "--no-heading", "--columns=_uuid", "find", table,
+                         vmid_ex_id, ifname_ex_id, NULL);
+    virCommandSetOutputBuffer(cmd, &uuid);
+    if (virCommandRun(cmd, NULL) < 0) {
+        VIR_WARN("Unable to find queue on port with %s", ifname_ex_id);
+    }
+    return uuid;
+}
+
+static int
+virNetDevOpenvswitchInterfaceClearTxQos(const char *ifname,
+                                        const unsigned char *vmuuid)
+{
+    int ret = 0;
+    char vmuuidstr[VIR_UUID_STRING_BUFLEN];
+    g_autofree char *ifname_ex_id = NULL;
+    g_autofree char *vmid_ex_id = NULL;
+    g_autofree char *qos_uuid = NULL;
+    g_autofree char *queue_uuid = NULL;
+    g_autofree char *port_qos = NULL;
+    size_t i;
+
+    /* find qos */
+    virUUIDFormat(vmuuid, vmuuidstr);
+    vmid_ex_id = g_strdup_printf("external-ids:vm-id=\"%s\"", vmuuidstr);
+    ifname_ex_id = g_strdup_printf("external-ids:ifname=\"%s\"", ifname);
+    /* find queue */
+    queue_uuid = virNetDevOpenvswitchFindUUID("queue", vmid_ex_id, ifname_ex_id);
+    /* find qos */
+    qos_uuid = virNetDevOpenvswitchFindUUID("qos", vmid_ex_id, ifname_ex_id);
+
+    if (qos_uuid && *qos_uuid) {
+        g_auto(GStrv) lines = g_strsplit(qos_uuid, "\n", 0);
+
+        /* destroy qos */
+        for (i = 0; lines[i] != NULL; i++) {
+            const char *line = lines[i];
+            g_autoptr(virCommand) listcmd = NULL;
+            g_autoptr(virCommand) destroycmd = NULL;
+
+            if (!*line) {
+                continue;
+            }
+            listcmd = virNetDevOpenvswitchCreateCmd(NULL);
+            virCommandAddArgList(listcmd, "--no-heading", "--columns=_uuid", "--if-exists",
+                                 "list", "port", ifname, "qos", NULL);
+            virCommandSetOutputBuffer(listcmd, &port_qos);
+            if (virCommandRun(listcmd, NULL) < 0) {
+                VIR_WARN("Unable to remove port qos on port %s", ifname);
+            }
+            if (port_qos && *port_qos) {
+                g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd(NULL);
+                virCommandAddArgList(cmd, "remove", "port", ifname, "qos", line, NULL);
+                if (virCommandRun(cmd, NULL) < 0) {
+                    VIR_WARN("Unable to remove port qos on port %s", ifname);
+                }
+            }
+            destroycmd = virNetDevOpenvswitchCreateCmd(NULL);
+            virCommandAddArgList(destroycmd, "destroy", "qos", line, NULL);
+            if (virCommandRun(destroycmd, NULL) < 0) {
+                VIR_WARN("Unable to destroy qos on port %s", ifname);
+                ret = -1;
+            }
+        }
+    }
+    /* destroy queue */
+    if (queue_uuid && *queue_uuid) {
+        g_auto(GStrv) lines = g_strsplit(queue_uuid, "\n", 0);
+
+        for (i = 0; lines[i] != NULL; i++) {
+            g_autoptr(virCommand) cmd = NULL;
+            const char *line = lines[i];
+            if (!*line) {
+                continue;
+            }
+
+            cmd = virNetDevOpenvswitchCreateCmd(NULL);
+            virCommandAddArgList(cmd, "destroy", "queue", line, NULL);
+            if (virCommandRun(cmd, NULL) < 0) {
+                VIR_WARN("Unable to destroy queue on port %s", ifname);
+                ret = -1;
+            }
+        }
+    }
+
+    return ret;
+}
+
+static int
+virNetDevOpenvswitchInterfaceClearRxQos(const char *ifname)
+{
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+
+    cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
+    virCommandAddArgList(cmd, "set", "Interface", ifname, NULL);
+    virCommandAddArgFormat(cmd, "ingress_policing_rate=%llu", 0llu);
+    virCommandAddArgFormat(cmd, "ingress_policing_burst=%llu", 0llu);
+
+    if (virCommandRun(cmd, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Unable to reset ingress on port %1$s: %2$s"),
+                       ifname, NULLSTR(errbuf));
+        return -1;
+    }
+
+    return 0;
+}
+
+/*
+ * In virNetDevBandwidthRate, average, peak, floor are in kilobyes and burst in
+ * kibibytes. However other_config in ovs qos is in bits and
+ * ingress_policing_rate in ovs interface is in kilobit and
+ * ingress_policing_burst is in kibibits.
+ */
+#define KBYTE_TO_BITS(x) (x * 8000ULL)
+#define KIBIBYTE_TO_BITS(x) (x * 8192ULL)
+#define VIR_NETDEV_RX_TO_OVS 8
+
+static int
+virNetDevOpenvswitchInterfaceSetTxQos(const char *ifname,
+                                      const virNetDevBandwidthRate *tx,
+                                      const unsigned char *vmuuid)
+{
+    char vmuuidstr[VIR_UUID_STRING_BUFLEN];
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+    g_autofree char *vmid_ex_id = NULL;
+    g_autofree char *ifname_ex_id = NULL;
+    g_autofree char *average = NULL;
+    g_autofree char *peak = NULL;
+    g_autofree char *burst = NULL;
+    g_autofree char *qos_uuid = NULL;
+    g_autofree char *queue_uuid = NULL;
+
+    average = g_strdup_printf("%llu", KBYTE_TO_BITS(tx->average));
+    if (tx->burst)
+        burst = g_strdup_printf("%llu", KIBIBYTE_TO_BITS(tx->burst));
+    if (tx->peak)
+        peak = g_strdup_printf("%llu", KBYTE_TO_BITS(tx->peak));
+
+    virUUIDFormat(vmuuid, vmuuidstr);
+    vmid_ex_id = g_strdup_printf("external-ids:vm-id=\"%s\"", vmuuidstr);
+    ifname_ex_id = g_strdup_printf("external-ids:ifname=\"%s\"", ifname);
+    /* find queue */
+    queue_uuid = virNetDevOpenvswitchFindUUID("queue", vmid_ex_id, ifname_ex_id);
+    /* find qos */
+    qos_uuid = virNetDevOpenvswitchFindUUID("qos", vmid_ex_id, ifname_ex_id);
+
+    /* create qos and set */
+    cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
+    if (queue_uuid && *queue_uuid) {
+        g_auto(GStrv) lines = g_strsplit(queue_uuid, "\n", 0);
+        virCommandAddArgList(cmd, "set", "queue", lines[0], NULL);
+    } else {
+        virCommandAddArgList(cmd, "set", "port", ifname, "qos=@qos1",
+                             vmid_ex_id, ifname_ex_id,
+                             "--", "--id=@qos1", "create", "qos", "type=linux-htb", NULL);
+        virCommandAddArgFormat(cmd, "other_config:min-rate=%s", average);
+        if (burst) {
+            virCommandAddArgFormat(cmd, "other_config:burst=%s", burst);
+        }
+        if (peak) {
+            virCommandAddArgFormat(cmd, "other_config:max-rate=%s", peak);
+        }
+        virCommandAddArgList(cmd, "queues:0=@queue0", vmid_ex_id, ifname_ex_id,
+                             "--", "--id=@queue0", "create", "queue", NULL);
+    }
+    virCommandAddArgFormat(cmd, "other_config:min-rate=%s", average);
+    if (burst) {
+        virCommandAddArgFormat(cmd, "other_config:burst=%s", burst);
+    }
+    if (peak) {
+        virCommandAddArgFormat(cmd, "other_config:max-rate=%s", peak);
+    }
+    virCommandAddArgList(cmd, vmid_ex_id, ifname_ex_id, NULL);
+    if (virCommandRun(cmd, NULL) < 0) {
+        if (queue_uuid && *queue_uuid) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Unable to set queue configuration on port %1$s: %2$s"),
+                           ifname, NULLSTR(errbuf));
+        } else {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Unable to create and set qos configuration on port %1$s: %2$s"),
+                           ifname, NULLSTR(errbuf));
+        }
+        return -1;
+    }
+
+    if (qos_uuid && *qos_uuid) {
+        g_auto(GStrv) lines = g_strsplit(qos_uuid, "\n", 0);
+        g_autofree char *qoserrbuf = NULL;
+        g_autoptr(virCommand) qoscmd = virNetDevOpenvswitchCreateCmd(&qoserrbuf);
+
+        virCommandAddArgList(qoscmd, "set", "qos", lines[0], NULL);
+        virCommandAddArgFormat(qoscmd, "other_config:min-rate=%s", average);
+        if (burst) {
+            virCommandAddArgFormat(qoscmd, "other_config:burst=%s", burst);
+        }
+        if (peak) {
+            virCommandAddArgFormat(qoscmd, "other_config:max-rate=%s", peak);
+        }
+        virCommandAddArgList(qoscmd, vmid_ex_id, ifname_ex_id, NULL);
+        if (virCommandRun(qoscmd, NULL) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Unable to set qos configuration on port %1$s: %2$s"),
+                           ifname, NULLSTR(qoserrbuf));
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
+virNetDevOpenvswitchInterfaceSetRxQos(const char *ifname,
+                                      const virNetDevBandwidthRate *rx)
+{
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *errbuf = NULL;
+
+    cmd = virNetDevOpenvswitchCreateCmd(&errbuf);
+    virCommandAddArgList(cmd, "set", "Interface", ifname, NULL);
+    virCommandAddArgFormat(cmd, "ingress_policing_rate=%llu",
+                           rx->average * VIR_NETDEV_RX_TO_OVS);
+    if (rx->burst)
+        virCommandAddArgFormat(cmd, "ingress_policing_burst=%llu",
+                               rx->burst * VIR_NETDEV_RX_TO_OVS);
+
+    if (virCommandRun(cmd, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Unable to set vlan configuration on port %1$s: %2$s"),
+                       ifname, NULLSTR(errbuf));
+        return -1;
+    }
+
+    return 0;
+}
+
+/**
+ * virNetDevOpenvswitchInterfaceSetQos:
+ * @ifname: on which interface
+ * @bandwidth: rates to set (may be NULL)
+ * @vmuuid: the Domain UUID that has this interface
+ * @swapped: true if IN/OUT should be set contrariwise
+ *
+ * Update qos configuration of an OVS port.
+ *
+ * If @swapped is set, the IN part of @bandwidth is set on
+ * @ifname's TX, and vice versa. If it is not set, IN is set on
+ * RX and OUT on TX. This is because for some types of interfaces
+ * domain and the host live on the same side of the interface (so
+ * domain's RX/TX is host's RX/TX), and for some it's swapped
+ * (domain's RX/TX is hosts's TX/RX).
+ *
+ * Return 0 on success, -1 otherwise.
+ */
+int
+virNetDevOpenvswitchInterfaceSetQos(const char *ifname,
+                                    const virNetDevBandwidth *bandwidth,
+                                    const unsigned char *vmuuid,
+                                    bool swapped)
+{
+    virNetDevBandwidthRate *rx = NULL; /* From domain POV */
+    virNetDevBandwidthRate *tx = NULL; /* From domain POV */
+
+    if (!bandwidth) {
+        /* nothing to be enabled */
+        return 0;
+    }
+
+    if (geteuid() != 0) {
+        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                       _("Network bandwidth tuning is not available in session mode"));
+        return -1;
+    }
+
+    if (!ifname) {
+        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                       _("Unable to set bandwidth for interface because device name is unknown"));
+        return -1;
+    }
+
+    if (swapped) {
+        rx = bandwidth->out;
+        tx = bandwidth->in;
+    } else {
+        rx = bandwidth->in;
+        tx = bandwidth->out;
+    }
+
+    if (!bandwidth->out && !bandwidth->in) {
+        if (virNetDevOpenvswitchInterfaceClearQos(ifname, vmuuid) < 0) {
+            VIR_WARN("Clean qos for interface %s failed", ifname);
+        }
+        return 0;
+    }
+
+    if (tx && tx->average) {
+        if (virNetDevOpenvswitchInterfaceSetTxQos(ifname, tx, vmuuid) < 0)
+            return -1;
+    } else {
+        if (virNetDevOpenvswitchInterfaceClearTxQos(ifname, vmuuid) < 0) {
+            VIR_WARN("Clean tx qos for interface %s failed", ifname);
+        }
+    }
+
+    if (rx) {
+        if (virNetDevOpenvswitchInterfaceSetRxQos(ifname, rx) < 0)
+            return -1;
+    } else {
+        if (virNetDevOpenvswitchInterfaceClearRxQos(ifname) < 0) {
+            VIR_WARN("Clean rx qos for interface %s failed", ifname);
+        }
+    }
+
+    return 0;
+}
+
+int
+virNetDevOpenvswitchInterfaceClearQos(const char *ifname,
+                                      const unsigned char *vmuuid)
+{
+    int ret = 0;
+
+    if (virNetDevOpenvswitchInterfaceClearTxQos(ifname, vmuuid) < 0) {
+        VIR_WARN("Clean tx qos for interface %s failed", ifname);
+        ret = -1;
+    }
+
+    if (virNetDevOpenvswitchInterfaceClearRxQos(ifname) < 0) {
+        VIR_WARN("Clean rx qos for interface %s failed", ifname);
+        ret = -1;
+    }
+
+    return ret;
 }

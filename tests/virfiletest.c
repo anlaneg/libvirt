@@ -23,7 +23,6 @@
 
 #include "testutils.h"
 #include "virfile.h"
-#include "virstring.h"
 
 #ifdef __linux__
 # include <linux/falloc.h>
@@ -31,7 +30,7 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-#if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+#if defined WITH_MNTENT_H && defined WITH_GETMNTENT_R
 static int testFileCheckMounts(const char *prefix,
                                char **gotmounts,
                                size_t gotnmounts,
@@ -64,8 +63,7 @@ struct testFileGetMountSubtreeData {
 
 static int testFileGetMountSubtree(const void *opaque)
 {
-    int ret = -1;
-    char **gotmounts = NULL;
+    g_auto(GStrv) gotmounts = NULL;
     size_t gotnmounts = 0;
     const struct testFileGetMountSubtreeData *data = opaque;
 
@@ -74,24 +72,20 @@ static int testFileGetMountSubtree(const void *opaque)
                                           data->prefix,
                                           &gotmounts,
                                           &gotnmounts) < 0)
-            goto cleanup;
+            return -1;
     } else {
         if (virFileGetMountSubtree(data->path,
                                    data->prefix,
                                    &gotmounts,
                                    &gotnmounts) < 0)
-            goto cleanup;
+            return -1;
     }
 
-    ret = testFileCheckMounts(data->prefix,
-                              gotmounts, gotnmounts,
-                              data->mounts, data->nmounts);
-
- cleanup:
-    virStringListFree(gotmounts);
-    return ret;
+    return testFileCheckMounts(data->prefix,
+                               gotmounts, gotnmounts,
+                               data->mounts, data->nmounts);
 }
-#endif /* ! defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R */
+#endif /* ! defined WITH_MNTENT_H && defined WITH_GETMNTENT_R */
 
 struct testFileSanitizePathData
 {
@@ -103,26 +97,21 @@ static int
 testFileSanitizePath(const void *opaque)
 {
     const struct testFileSanitizePathData *data = opaque;
-    int ret = -1;
-    char *actual;
+    g_autofree char *actual = NULL;
 
     if (!(actual = virFileSanitizePath(data->path)))
         return -1;
 
     if (STRNEQ(actual, data->expect)) {
         fprintf(stderr, "\nexpect: '%s'\nactual: '%s'\n", data->expect, actual);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 
-#if HAVE_DECL_SEEK_HOLE && defined(__linux__)
+#if WITH_DECL_SEEK_HOLE && defined(__linux__)
 
 /* Create a sparse file. @offsets in KiB. */
 static int
@@ -195,46 +184,42 @@ holesSupported(void)
 {
     off_t offsets[] = {EXTENT, EXTENT, EXTENT, -1};
     off_t tmp;
-    int fd;
-    bool ret = false;
+    VIR_AUTOCLOSE fd = -1;
 
     if ((fd = makeSparseFile(offsets, true)) < 0)
-        goto cleanup;
+        return false;
 
     /* The way this works is: there are 4K of data followed by 4K hole followed
      * by 4K hole again. Check if the filesystem we are running the test suite
      * on supports holes. */
     if ((tmp = lseek(fd, 0, SEEK_DATA)) == (off_t) -1)
-        goto cleanup;
+        return false;
 
     if (tmp != 0)
-        goto cleanup;
+        return false;
 
     if ((tmp = lseek(fd, tmp, SEEK_HOLE)) == (off_t) -1)
-        goto cleanup;
+        return false;
 
     if (tmp != EXTENT * 1024)
-        goto cleanup;
+        return false;
 
     if ((tmp = lseek(fd, tmp, SEEK_DATA)) == (off_t) -1)
-        goto cleanup;
+        return false;
 
     if (tmp != 2 * EXTENT * 1024)
-        goto cleanup;
+        return false;
 
     if ((tmp = lseek(fd, tmp, SEEK_HOLE)) == (off_t) -1)
-        goto cleanup;
+        return false;
 
     if (tmp != 3 * EXTENT * 1024)
-        goto cleanup;
+        return false;
 
-    ret = true;
- cleanup:
-    VIR_FORCE_CLOSE(fd);
-    return ret;
+    return true;
 }
 
-#else /* !HAVE_DECL_SEEK_HOLE || !defined(__linux__)*/
+#else /* !WITH_DECL_SEEK_HOLE || !defined(__linux__)*/
 
 static int
 makeSparseFile(const off_t offsets[] G_GNUC_UNUSED,
@@ -250,7 +235,7 @@ holesSupported(void)
     return false;
 }
 
-#endif /* !HAVE_DECL_SEEK_HOLE || !defined(__linux__)*/
+#endif /* !WITH_DECL_SEEK_HOLE || !defined(__linux__)*/
 
 struct testFileInData {
     bool startData;     /* whether the list of offsets starts with data section */
@@ -262,12 +247,11 @@ static int
 testFileInData(const void *opaque)
 {
     const struct testFileInData *data = opaque;
-    int fd = -1;
-    int ret = -1;
+    VIR_AUTOCLOSE fd = -1;
     size_t i;
 
     if ((fd = makeSparseFile(data->offsets, data->startData)) < 0)
-        goto cleanup;
+        return -1;
 
     for (i = 0; data->offsets[i] != (off_t) -1; i++) {
         bool shouldInData = data->startData;
@@ -279,33 +263,29 @@ testFileInData(const void *opaque)
             shouldInData = !shouldInData;
 
         if (virFileInData(fd, &realInData, &realLen) < 0)
-            goto cleanup;
+            return -1;
 
         if (realInData != shouldInData) {
             fprintf(stderr, "Unexpected data/hole. Expected %s got %s\n",
                     shouldInData ? "data" : "hole",
                     realInData ? "data" : "hole");
-            goto cleanup;
+            return -1;
         }
 
         shouldLen = data->offsets[i] * 1024;
         if (realLen != shouldLen) {
             fprintf(stderr, "Unexpected section length. Expected %lld got %lld\n",
                     shouldLen, realLen);
-            goto cleanup;
+            return -1;
         }
 
         if (lseek(fd, shouldLen, SEEK_CUR) < 0) {
             fprintf(stderr, "Unable to seek\n");
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FORCE_CLOSE(fd);
-    return ret;
+    return 0;
 }
 
 
@@ -322,7 +302,7 @@ testFileIsSharedFSType(const void *opaque G_GNUC_UNUSED)
     return EXIT_AM_SKIP;
 #else
     const struct testFileIsSharedFSType *data = opaque;
-    char *mtabFile = NULL;
+    g_autofree char *mtabFile = NULL;
     bool actual;
     int ret = -1;
 
@@ -343,7 +323,6 @@ testFileIsSharedFSType(const void *opaque G_GNUC_UNUSED)
 
     ret = 0;
  cleanup:
-    VIR_FREE(mtabFile);
     g_unsetenv("LIBVIRT_MTAB");
     return ret;
 #endif
@@ -356,7 +335,7 @@ mymain(void)
     int ret = 0;
     struct testFileSanitizePathData data1;
 
-#if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+#if defined WITH_MNTENT_H && defined WITH_GETMNTENT_R
 # define MTAB_PATH1 abs_srcdir "/virfiledata/mounts1.txt"
 # define MTAB_PATH2 abs_srcdir "/virfiledata/mounts2.txt"
 
@@ -386,7 +365,7 @@ mymain(void)
     DO_TEST_MOUNT_SUBTREE("/proc reverse", MTAB_PATH1, "/proc", wantmounts1rev, true);
     DO_TEST_MOUNT_SUBTREE("/etc/aliases", MTAB_PATH2, "/etc/aliases", wantmounts2a, false);
     DO_TEST_MOUNT_SUBTREE("/etc/aliases.db", MTAB_PATH2, "/etc/aliases.db", wantmounts2b, false);
-#endif /* ! defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R */
+#endif /* ! defined WITH_MNTENT_H && defined WITH_GETMNTENT_R */
 
 #define DO_TEST_SANITIZE_PATH(PATH, EXPECT) \
     do { \

@@ -8,21 +8,21 @@
 
 #define VIR_FROM_THIS VIR_FROM_LIBXL
 
-static virCapsPtr
+static virCaps *
 testXLInitCaps(void)
 {
-    virCapsPtr caps;
-    virCapsGuestPtr guest;
-    virCapsGuestMachinePtr *machines;
+    g_autoptr(virCaps) caps = NULL;
+    virCapsGuest *guest;
+    virCapsGuestMachine **machines;
     int nmachines;
     static const char *const x86_machines[] = {
-        "xenfv"
+        "xenfv", NULL,
     };
     static const char *const xen_machines[] = {
-        "xenpv",
+        "xenpv", NULL,
     };
     static const char *const pvh_machines[] = {
-        "xenpvh",
+        "xenpvh", NULL,
     };
 
     if ((caps = virCapabilitiesNew(virArchFromHost(),
@@ -31,61 +31,42 @@ testXLInitCaps(void)
 
     caps->host.cpu = virCPUDefCopy(&cpuDefaultData);
 
-    nmachines = G_N_ELEMENTS(x86_machines);
-    if ((machines = virCapabilitiesAllocMachines(x86_machines, nmachines)) == NULL)
-        goto cleanup;
-    if ((guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
-                                         VIR_ARCH_X86_64,
-                                         "/usr/lib/xen/bin/qemu-system-i386",
-                                         "/usr/lib/xen/boot/hvmloader",
-                                         nmachines, machines)) == NULL)
-        goto cleanup;
-    machines = NULL;
-    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN, NULL,
-                                      NULL, 0, NULL) == NULL)
-        goto cleanup;
-    nmachines = G_N_ELEMENTS(xen_machines);
-    if ((machines = virCapabilitiesAllocMachines(xen_machines, nmachines)) == NULL)
-        goto cleanup;
+    machines = virCapabilitiesAllocMachines(x86_machines, &nmachines);
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
+                                    VIR_ARCH_X86_64,
+                                    "/usr/lib/xen/bin/qemu-system-i386",
+                                    "/usr/lib/xen/boot/hvmloader",
+                                    nmachines, machines);
 
-    if ((guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_XEN,
-                                         VIR_ARCH_X86_64,
-                                         "/usr/lib/xen/bin/qemu-system-i386",
-                                         NULL,
-                                         nmachines, machines)) == NULL)
-        goto cleanup;
-    machines = NULL;
+    virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN,
+                                  NULL, NULL, 0, NULL);
 
-    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN, NULL,
-                                      NULL, 0, NULL) == NULL)
-        goto cleanup;
-    nmachines = G_N_ELEMENTS(pvh_machines);
-    if ((machines = virCapabilitiesAllocMachines(pvh_machines, nmachines)) == NULL)
-        goto cleanup;
+    machines = virCapabilitiesAllocMachines(xen_machines, &nmachines);
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_XEN,
+                                    VIR_ARCH_X86_64,
+                                    "/usr/lib/xen/bin/qemu-system-i386",
+                                    NULL,
+                                    nmachines, machines);
 
-    if ((guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_XENPVH,
-                                         VIR_ARCH_X86_64,
-                                         "/usr/lib/xen/bin/qemu-system-i386",
-                                         NULL,
-                                         nmachines, machines)) == NULL)
-        goto cleanup;
-    machines = NULL;
+    virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN,
+                                  NULL, NULL, 0, NULL);
 
-    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN, NULL,
-                                      NULL, 0, NULL) == NULL)
-        goto cleanup;
-    return caps;
+    machines = virCapabilitiesAllocMachines(pvh_machines, &nmachines);
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_XENPVH,
+                                    VIR_ARCH_X86_64,
+                                    "/usr/lib/xen/bin/qemu-system-i386",
+                                    NULL,
+                                    nmachines, machines);
 
- cleanup:
-    virCapabilitiesFreeMachines(machines, nmachines);
-    virObjectUnref(caps);
-    return NULL;
+    virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN,
+                                  NULL, NULL, 0, NULL);
+    return g_steal_pointer(&caps);
 }
 
 
-libxlDriverPrivatePtr testXLInitDriver(void)
+libxlDriverPrivate *testXLInitDriver(void)
 {
-    libxlDriverPrivatePtr driver = g_new0(libxlDriverPrivate, 1);
+    libxlDriverPrivate *driver = g_new0(libxlDriverPrivate, 1);
 
     if (virMutexInit(&driver->lock) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -110,7 +91,7 @@ libxlDriverPrivatePtr testXLInitDriver(void)
     return driver;
 }
 
-void testXLFreeDriver(libxlDriverPrivatePtr driver)
+void testXLFreeDriver(libxlDriverPrivate *driver)
 {
     virObjectUnref(driver->config);
     virObjectUnref(driver->xmlopt);

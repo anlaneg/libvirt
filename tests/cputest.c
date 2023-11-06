@@ -33,8 +33,6 @@
 #include "cpu_conf.h"
 #include "cpu/cpu.h"
 #include "cpu/cpu_x86.h"
-#include "cpu/cpu_map.h"
-#include "virstring.h"
 
 #if WITH_QEMU
 # include "testutilsqemu.h"
@@ -56,8 +54,10 @@ struct data {
     virArch arch;
     const char *host;
     const char *name;
-    virDomainCapsCPUModelsPtr models;
+    virDomainCapsCPUModels *models;
     const char *modelsName;
+    const char **cpus;
+    int ncpus;
     unsigned int flags;
     int result;
 };
@@ -67,40 +67,36 @@ static virQEMUDriver driver;
 #endif
 
 
-static virCPUDefPtr
+static virCPUDef *
 cpuTestLoadXML(virArch arch, const char *name)
 {
-    char *xml = NULL;
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    virCPUDefPtr cpu = NULL;
+    g_autofree char *xml = NULL;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    virCPUDef *cpu = NULL;
 
     xml = g_strdup_printf("%s/cputestdata/%s-%s.xml", abs_srcdir,
                           virArchToString(arch), name);
 
     if (!(doc = virXMLParseFileCtxt(xml, &ctxt)))
-        goto cleanup;
+        return NULL;
 
-    virCPUDefParseXML(ctxt, NULL, VIR_CPU_TYPE_AUTO, &cpu);
+    virCPUDefParseXML(ctxt, NULL, VIR_CPU_TYPE_AUTO, &cpu, false);
 
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
-    VIR_FREE(xml);
     return cpu;
 }
 
 
-static virCPUDefPtr *
+static virCPUDef **
 cpuTestLoadMultiXML(virArch arch,
                     const char *name,
                     unsigned int *count)
 {
-    char *xml = NULL;
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    xmlNodePtr *nodes = NULL;
-    virCPUDefPtr *cpus = NULL;
+    g_autofree char *xml = NULL;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
+    virCPUDef **cpus = NULL;
     int n;
     size_t i;
 
@@ -108,34 +104,32 @@ cpuTestLoadMultiXML(virArch arch,
                           virArchToString(arch), name);
 
     if (!(doc = virXMLParseFileCtxt(xml, &ctxt)))
-        goto cleanup;
+        return NULL;
 
     n = virXPathNodeSet("/cpuTest/cpu", ctxt, &nodes);
-    if (n <= 0 || (VIR_ALLOC_N(cpus, n) < 0)) {
+    if (n <= 0) {
         fprintf(stderr, "\nNo /cpuTest/cpu elements found in %s\n", xml);
-        goto cleanup;
+        return NULL;
     }
+
+    cpus = g_new0(virCPUDef *, n);
 
     for (i = 0; i < n; i++) {
         ctxt->node = nodes[i];
-        if (virCPUDefParseXML(ctxt, NULL, VIR_CPU_TYPE_HOST, &cpus[i]) < 0)
-            goto cleanup_cpus;
+        if (virCPUDefParseXML(ctxt, NULL, VIR_CPU_TYPE_HOST, &cpus[i],
+                              false) < 0)
+            goto error;
     }
 
     *count = n;
 
- cleanup:
-    VIR_FREE(xml);
-    VIR_FREE(nodes);
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
     return cpus;
 
- cleanup_cpus:
+ error:
     for (i = 0; i < n; i++)
         virCPUDefFree(cpus[i]);
     VIR_FREE(cpus);
-    goto cleanup;
+    return NULL;
 }
 
 
@@ -144,25 +138,19 @@ cpuTestCompareXML(virArch arch,
                   virCPUDef *cpu,
                   const char *name)
 {
-    char *xml = NULL;
-    char *actual = NULL;
-    int ret = -1;
+    g_autofree char *xml = NULL;
+    g_autofree char *actual = NULL;
 
     xml = g_strdup_printf("%s/cputestdata/%s-%s.xml", abs_srcdir,
                           virArchToString(arch), name);
 
     if (!(actual = virCPUDefFormat(cpu, NULL)))
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(actual, xml) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(xml);
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 
@@ -198,14 +186,13 @@ static int
 cpuTestCompare(const void *arg)
 {
     const struct data *data = arg;
-    int ret = -1;
-    virCPUDefPtr host = NULL;
-    virCPUDefPtr cpu = NULL;
+    g_autoptr(virCPUDef) host = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
     virCPUCompareResult result;
 
     if (!(host = cpuTestLoadXML(data->arch, data->host)) ||
         !(cpu = cpuTestLoadXML(data->arch, data->name)))
-        goto cleanup;
+        return -1;
 
     result = virCPUCompare(host->arch, host, cpu, false);
     if (data->result == VIR_CPU_COMPARE_ERROR)
@@ -217,15 +204,10 @@ cpuTestCompare(const void *arg)
                     cpuTestCompResStr(result));
         /* Pad to line up with test name ... in virTestRun */
         VIR_TEST_VERBOSE("%74s", "... ");
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virCPUDefFree(host);
-    virCPUDefFree(cpu);
-    return ret;
+    return 0;
 }
 
 
@@ -234,11 +216,11 @@ cpuTestGuestCPU(const void *arg)
 {
     const struct data *data = arg;
     int ret = -2;
-    virCPUDefPtr host = NULL;
-    virCPUDefPtr cpu = NULL;
+    g_autoptr(virCPUDef) host = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
     virCPUCompareResult cmpResult;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *result = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *result = NULL;
 
     if (!(host = cpuTestLoadXML(data->arch, data->host)) ||
         !(cpu = cpuTestLoadXML(data->arch, data->name)))
@@ -273,10 +255,6 @@ cpuTestGuestCPU(const void *arg)
     ret = 0;
 
  cleanup:
-    VIR_FREE(result);
-    virCPUDefFree(host);
-    virCPUDefFree(cpu);
-
     if (ret == data->result) {
         /* We got the result we expected, whether it was
          * a success or a failure */
@@ -299,10 +277,10 @@ cpuTestBaseline(const void *arg)
 {
     const struct data *data = arg;
     int ret = -1;
-    virCPUDefPtr *cpus = NULL;
-    virCPUDefPtr baseline = NULL;
+    virCPUDef **cpus = NULL;
+    virCPUDef *baseline = NULL;
     unsigned int ncpus = 0;
-    char *result = NULL;
+    g_autofree char *result = NULL;
     const char *suffix;
     size_t i;
 
@@ -315,8 +293,7 @@ cpuTestBaseline(const void *arg)
     if (baseline &&
         (data->flags & VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES) &&
         virCPUExpandFeatures(data->arch, baseline) < 0) {
-        virCPUDefFree(baseline);
-        baseline = NULL;
+        g_clear_pointer(&baseline, virCPUDefFree);
     }
 
     if (data->result < 0) {
@@ -366,7 +343,6 @@ cpuTestBaseline(const void *arg)
         VIR_FREE(cpus);
     }
     virCPUDefFree(baseline);
-    VIR_FREE(result);
     return ret;
 }
 
@@ -375,32 +351,24 @@ static int
 cpuTestUpdate(const void *arg)
 {
     const struct data *data = arg;
-    int ret = -1;
-    virCPUDefPtr host = NULL;
-    virCPUDefPtr migHost = NULL;
-    virCPUDefPtr cpu = NULL;
-    char *result = NULL;
+    g_autoptr(virCPUDef) host = NULL;
+    g_autoptr(virCPUDef) migHost = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
+    g_autofree char *result = NULL;
 
     if (!(host = cpuTestLoadXML(data->arch, data->host)) ||
         !(cpu = cpuTestLoadXML(data->arch, data->name)))
-        goto cleanup;
+        return -1;
 
     if (!(migHost = virCPUCopyMigratable(data->arch, host)))
-        goto cleanup;
+        return -1;
 
     if (virCPUUpdate(host->arch, cpu, migHost) < 0)
-        goto cleanup;
+        return -1;
 
     result = g_strdup_printf("%s+%s", data->host, data->name);
 
-    ret = cpuTestCompareXML(data->arch, cpu, result);
-
- cleanup:
-    virCPUDefFree(host);
-    virCPUDefFree(cpu);
-    virCPUDefFree(migHost);
-    VIR_FREE(result);
-    return ret;
+    return cpuTestCompareXML(data->arch, cpu, result);
 }
 
 
@@ -408,17 +376,16 @@ static int
 cpuTestHasFeature(const void *arg)
 {
     const struct data *data = arg;
-    int ret = -1;
-    virCPUDefPtr host = NULL;
-    virCPUDataPtr hostData = NULL;
+    g_autoptr(virCPUDef) host = NULL;
+    g_autoptr(virCPUData) hostData = NULL;
     int result;
 
     if (!(host = cpuTestLoadXML(data->arch, data->host)))
-        goto cleanup;
+        return -1;
 
     if (cpuEncode(host->arch, host, NULL, &hostData,
                   NULL, NULL, NULL, NULL) < 0)
-        goto cleanup;
+        return -1;
 
     result = virCPUCheckFeature(host->arch, host, data->name);
 
@@ -434,15 +401,10 @@ cpuTestHasFeature(const void *arg)
             cpuTestBoolWithErrorStr(result));
         /* Pad to line up with test name ... in virTestRun */
         VIR_TEST_VERBOSE("%74s", "... ");
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virCPUDataFree(hostData);
-    virCPUDefFree(host);
-    return ret;
+    return 0;
 }
 
 
@@ -466,21 +428,21 @@ typedef enum {
 } cpuTestCPUIDJson;
 
 #if WITH_QEMU
-static virQEMUCapsPtr
+static virQEMUCaps *
 cpuTestMakeQEMUCaps(const struct data *data)
 {
-    virQEMUCapsPtr qemuCaps = NULL;
-    qemuMonitorTestPtr testMon = NULL;
-    qemuMonitorCPUModelInfoPtr model = NULL;
-    virCPUDefPtr cpu = NULL;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
+    g_autoptr(qemuMonitorTest) testMon = NULL;
+    g_autoptr(qemuMonitorCPUModelInfo) model = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
     bool fail_no_props = true;
-    char *json = NULL;
+    g_autofree char *json = NULL;
 
     json = g_strdup_printf("%s/cputestdata/%s-cpuid-%s.json", abs_srcdir,
                            virArchToString(data->arch), data->host);
 
     if (!(testMon = qemuMonitorTestNewFromFile(json, driver.xmlopt, true)))
-        goto error;
+        return NULL;
 
     qemuMonitorTestAllowUnusedCommands(testMon);
 
@@ -493,11 +455,10 @@ cpuTestMakeQEMUCaps(const struct data *data)
 
     if (qemuMonitorGetCPUModelExpansion(qemuMonitorTestGetMonitor(testMon),
                                         QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC,
-                                        cpu, true, fail_no_props, &model) < 0)
-        goto error;
+                                        cpu, true, false, fail_no_props, &model) < 0)
+        return NULL;
 
-    if (!(qemuCaps = virQEMUCapsNew()))
-        goto error;
+    qemuCaps = virQEMUCapsNew();
 
     virQEMUCapsSet(qemuCaps, QEMU_CAPS_KVM);
     if (data->flags == JSON_MODELS ||
@@ -510,28 +471,17 @@ cpuTestMakeQEMUCaps(const struct data *data)
 
     if (virQEMUCapsProbeCPUDefinitionsTest(qemuCaps,
                                            qemuMonitorTestGetMonitor(testMon)) < 0)
-        goto error;
+        return NULL;
 
- cleanup:
-    qemuMonitorCPUModelInfoFree(model);
-    qemuMonitorTestFree(testMon);
-    virCPUDefFree(cpu);
-    VIR_FREE(json);
-
-    return qemuCaps;
-
- error:
-    virObjectUnref(qemuCaps);
-    qemuCaps = NULL;
-    goto cleanup;
+    return g_steal_pointer(&qemuCaps);
 }
 
 
 static int
 cpuTestGetCPUModels(const struct data *data,
-                    virDomainCapsCPUModelsPtr *models)
+                    virDomainCapsCPUModels **models)
 {
-    virQEMUCapsPtr qemuCaps;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
 
     *models = NULL;
 
@@ -544,8 +494,6 @@ cpuTestGetCPUModels(const struct data *data,
 
     *models = virQEMUCapsGetCPUModels(qemuCaps, VIR_DOMAIN_VIRT_KVM, NULL, NULL);
 
-    virObjectUnref(qemuCaps);
-
     return 0;
 }
 
@@ -553,7 +501,7 @@ cpuTestGetCPUModels(const struct data *data,
 
 static int
 cpuTestGetCPUModels(const struct data *data,
-                    virDomainCapsCPUModelsPtr *models)
+                    virDomainCapsCPUModels **models)
 {
     *models = NULL;
 
@@ -570,20 +518,19 @@ static int
 cpuTestCPUID(bool guest, const void *arg)
 {
     const struct data *data = arg;
-    int ret = -1;
-    virCPUDataPtr hostData = NULL;
-    char *hostFile = NULL;
-    char *host = NULL;
-    virCPUDefPtr cpu = NULL;
-    char *result = NULL;
-    virDomainCapsCPUModelsPtr models = NULL;
+    g_autoptr(virCPUData) hostData = NULL;
+    g_autofree char *hostFile = NULL;
+    g_autofree char *host = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
+    g_autofree char *result = NULL;
+    g_autoptr(virDomainCapsCPUModels) models = NULL;
 
     hostFile = g_strdup_printf("%s/cputestdata/%s-cpuid-%s.xml", abs_srcdir,
                                virArchToString(data->arch), data->host);
 
     if (virTestLoadFile(hostFile, &host) < 0 ||
         !(hostData = virCPUDataParse(host)))
-        goto cleanup;
+        return -1;
 
     cpu = virCPUDefNew();
     cpu->arch = hostData->arch;
@@ -599,26 +546,69 @@ cpuTestCPUID(bool guest, const void *arg)
         int rc;
 
         rc = cpuTestGetCPUModels(data, &models);
-        if (rc != 0) {
-            ret = rc;
+        if (rc != 0)
+            return rc;
+    }
+
+    if (cpuDecode(cpu, hostData, models) < 0)
+        return -1;
+
+    result = g_strdup_printf("cpuid-%s-%s", data->host, guest ? "guest" : "host");
+
+    return cpuTestCompareXML(data->arch, cpu, result);
+}
+
+
+static int
+cpuTestCPUIDBaseline(const void *arg)
+{
+    const struct data *data = arg;
+    int ret = -1;
+    virCPUDef **cpus = NULL;
+    virCPUDef *baseline = NULL;
+    g_autofree char *result = NULL;
+    size_t i;
+
+    cpus = g_new0(virCPUDef *, data->ncpus);
+    for (i = 0; i < data->ncpus; i++) {
+        g_autofree char *name = NULL;
+
+        name = g_strdup_printf("cpuid-%s-json", data->cpus[i]);
+        if (!(cpus[i] = cpuTestLoadXML(data->arch, name)))
+            goto cleanup;
+    }
+
+    baseline = virCPUBaseline(data->arch, cpus, data->ncpus, NULL, NULL, false);
+    if (!baseline)
+        goto cleanup;
+
+    result = g_strdup_printf("cpuid-baseline-%s", data->name);
+
+    if (cpuTestCompareXML(data->arch, baseline, result) < 0)
+        goto cleanup;
+
+    for (i = 0; i < data->ncpus; i++) {
+        virCPUCompareResult cmp;
+
+        cmp = virCPUCompare(data->arch, cpus[i], baseline, false);
+        if (cmp != VIR_CPU_COMPARE_SUPERSET &&
+            cmp != VIR_CPU_COMPARE_IDENTICAL) {
+            VIR_TEST_VERBOSE("\nbaseline CPU is incompatible with CPU %zu", i);
+            VIR_TEST_VERBOSE("%74s", "... ");
+            ret = -1;
             goto cleanup;
         }
     }
 
-    if (cpuDecode(cpu, hostData, models) < 0)
-        goto cleanup;
-
-    result = g_strdup_printf("cpuid-%s-%s", data->host, guest ? "guest" : "host");
-
-    ret = cpuTestCompareXML(data->arch, cpu, result);
+    ret = 0;
 
  cleanup:
-    VIR_FREE(hostFile);
-    VIR_FREE(host);
-    virCPUDataFree(hostData);
-    virCPUDefFree(cpu);
-    VIR_FREE(result);
-    virObjectUnref(models);
+    if (cpus) {
+        for (i = 0; i < data->ncpus; i++)
+            virCPUDefFree(cpus[i]);
+        VIR_FREE(cpus);
+    }
+    virCPUDefFree(baseline);
     return ret;
 }
 
@@ -639,7 +629,7 @@ cpuTestGuestCPUID(const void *arg)
 
 static int
 cpuTestCompareSignature(const struct data *data,
-                        virCPUDataPtr hostData)
+                        virCPUData *hostData)
 {
     g_autofree char *result = NULL;
     g_autofree char *sigStr = NULL;
@@ -665,32 +655,25 @@ static int
 cpuTestCPUIDSignature(const void *arg)
 {
     const struct data *data = arg;
-    virCPUDataPtr hostData = NULL;
-    char *hostFile = NULL;
-    char *host = NULL;
-    int ret = -1;
+    g_autoptr(virCPUData) hostData = NULL;
+    g_autofree char *hostFile = NULL;
+    g_autofree char *host = NULL;
 
     hostFile = g_strdup_printf("%s/cputestdata/%s-cpuid-%s.xml", abs_srcdir,
                                virArchToString(data->arch), data->host);
 
     if (virTestLoadFile(hostFile, &host) < 0 ||
         !(hostData = virCPUDataParse(host)))
-        goto cleanup;
+        return -1;
 
-    ret = cpuTestCompareSignature(data, hostData);
-
- cleanup:
-    virCPUDataFree(hostData);
-    VIR_FREE(hostFile);
-    VIR_FREE(host);
-    return ret;
+    return cpuTestCompareSignature(data, hostData);
 }
 
 
 static int
 cpuTestUpdateLiveCompare(virArch arch,
-                         virCPUDefPtr actual,
-                         virCPUDefPtr expected)
+                         virCPUDef *actual,
+                         virCPUDef *expected)
 {
     size_t i, j;
     int ret = 0;
@@ -707,8 +690,8 @@ cpuTestUpdateLiveCompare(virArch arch,
 
     i = j = 0;
     while (i < actual->nfeatures || j < expected->nfeatures) {
-        virCPUFeatureDefPtr featAct = NULL;
-        virCPUFeatureDefPtr featExp = NULL;
+        virCPUFeatureDef *featAct = NULL;
+        virCPUFeatureDef *featExp = NULL;
         int cmp;
 
         if (i < actual->nfeatures)
@@ -762,7 +745,7 @@ cpuTestUpdateLiveCompare(virArch arch,
         if ((cmp == 0 &&
              featAct->policy == VIR_CPU_FEATURE_REQUIRE &&
              featExp->policy == VIR_CPU_FEATURE_DISABLE) ||
-            (cmp < 0 &&
+            (cmp < 0 && featAct &&
              featAct->policy == VIR_CPU_FEATURE_REQUIRE) ||
             (cmp > 0 &&
              featExp->policy == VIR_CPU_FEATURE_DISABLE)) {
@@ -780,60 +763,57 @@ static int
 cpuTestUpdateLive(const void *arg)
 {
     const struct data *data = arg;
-    char *cpuFile = NULL;
-    virCPUDefPtr cpu = NULL;
-    char *enabledFile = NULL;
-    char *enabled = NULL;
-    virCPUDataPtr enabledData = NULL;
-    char *disabledFile = NULL;
-    char *disabled = NULL;
-    virCPUDataPtr disabledData = NULL;
-    char *expectedFile = NULL;
-    virCPUDefPtr expected = NULL;
-    virDomainCapsCPUModelsPtr hvModels = NULL;
-    virDomainCapsCPUModelsPtr models = NULL;
-    int ret = -1;
+    g_autofree char *cpuFile = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
+    g_autofree char *enabledFile = NULL;
+    g_autofree char *enabled = NULL;
+    g_autoptr(virCPUData) enabledData = NULL;
+    g_autofree char *disabledFile = NULL;
+    g_autofree char *disabled = NULL;
+    g_autoptr(virCPUData) disabledData = NULL;
+    g_autofree char *expectedFile = NULL;
+    g_autoptr(virCPUDef) expected = NULL;
+    g_autoptr(virDomainCapsCPUModels) hvModels = NULL;
+    g_autoptr(virDomainCapsCPUModels) models = NULL;
 
     cpuFile = g_strdup_printf("cpuid-%s-guest", data->host);
     if (!(cpu = cpuTestLoadXML(data->arch, cpuFile)))
-        goto cleanup;
+        return -1;
 
     enabledFile = g_strdup_printf("%s/cputestdata/%s-cpuid-%s-enabled.xml",
                                   abs_srcdir, virArchToString(data->arch), data->host);
     if (virTestLoadFile(enabledFile, &enabled) < 0 ||
         !(enabledData = virCPUDataParse(enabled)))
-        goto cleanup;
+        return -1;
 
     disabledFile = g_strdup_printf("%s/cputestdata/%s-cpuid-%s-disabled.xml",
                                    abs_srcdir, virArchToString(data->arch), data->host);
     if (virTestLoadFile(disabledFile, &disabled) < 0 ||
         !(disabledData = virCPUDataParse(disabled)))
-        goto cleanup;
+        return -1;
 
     expectedFile = g_strdup_printf("cpuid-%s-json", data->host);
     if (!(expected = cpuTestLoadXML(data->arch, expectedFile)))
-        goto cleanup;
+        return -1;
 
-    /* In case the host CPU signature does not exactly match any CPU model from
-     * cpu_map.xml, the CPU model we detect from CPUID may differ from the one
+    /* In case the host CPU signature does not exactly match any CPU model in
+     * src/cpu_map, the CPU model we detect from CPUID may differ from the one
      * we compute by asking QEMU. Since this test expands both CPU models and
      * compares their features, we can try to translate the 'actual' CPU to
      * use the CPU model from 'expected'.
      */
     if (STRNEQ(cpu->model, expected->model)) {
-        virDomainCapsCPUModelPtr hvModel;
+        virDomainCapsCPUModel *hvModel;
         char **blockers = NULL;
         virDomainCapsCPUUsable usable = VIR_DOMCAPS_CPU_USABLE_UNKNOWN;
         int rc;
 
         if (!(models = virDomainCapsCPUModelsNew(0)))
-            goto cleanup;
+            return -1;
 
         rc = cpuTestGetCPUModels(data, &hvModels);
-        if (rc != 0) {
-            ret = rc;
-            goto cleanup;
-        }
+        if (rc != 0)
+            return rc;
 
         hvModel = virDomainCapsCPUModelsGet(hvModels, expected->model);
 
@@ -842,9 +822,8 @@ cpuTestUpdateLive(const void *arg)
             usable = hvModel->usable;
         }
 
-        if (virDomainCapsCPUModelsAdd(models, expected->model,
-                                      usable, blockers) < 0)
-            goto cleanup;
+        virDomainCapsCPUModelsAdd(models, expected->model,
+                                  usable, blockers, false, expected->vendor);
 
         cpu->fallback = VIR_CPU_FALLBACK_ALLOW;
         ignore_value(virCPUTranslate(data->arch, cpu, models));
@@ -852,24 +831,9 @@ cpuTestUpdateLive(const void *arg)
     }
 
     if (virCPUUpdateLive(data->arch, cpu, enabledData, disabledData) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = cpuTestUpdateLiveCompare(data->arch, cpu, expected);
-
- cleanup:
-    VIR_FREE(cpuFile);
-    virCPUDefFree(cpu);
-    VIR_FREE(enabledFile);
-    VIR_FREE(enabled);
-    virCPUDataFree(enabledData);
-    VIR_FREE(disabledFile);
-    VIR_FREE(disabled);
-    virCPUDataFree(disabledData);
-    VIR_FREE(expectedFile);
-    virCPUDefFree(expected);
-    virObjectUnref(hvModels);
-    virObjectUnref(models);
-    return ret;
+    return cpuTestUpdateLiveCompare(data->arch, cpu, expected);
 }
 
 
@@ -878,15 +842,14 @@ static int
 cpuTestJSONCPUID(const void *arg)
 {
     const struct data *data = arg;
-    virQEMUCapsPtr qemuCaps = NULL;
-    virCPUDefPtr cpu = NULL;
-    char *result = NULL;
-    int ret = -1;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
+    g_autoptr(virCPUDef) cpu = NULL;
+    g_autofree char *result = NULL;
 
     result = g_strdup_printf("cpuid-%s-json", data->host);
 
     if (!(qemuCaps = cpuTestMakeQEMUCaps(data)))
-        goto cleanup;
+        return -1;
 
     cpu = virCPUDefNew();
     cpu->arch = data->arch;
@@ -895,15 +858,9 @@ cpuTestJSONCPUID(const void *arg)
     cpu->fallback = VIR_CPU_FALLBACK_FORBID;
 
     if (virQEMUCapsInitCPUModel(qemuCaps, VIR_DOMAIN_VIRT_KVM, cpu, false) != 0)
-        goto cleanup;
+        return -1;
 
-    ret = cpuTestCompareXML(data->arch, cpu, result);
-
- cleanup:
-    virObjectUnref(qemuCaps);
-    virCPUDefFree(cpu);
-    VIR_FREE(result);
-    return ret;
+    return cpuTestCompareXML(data->arch, cpu, result);
 }
 
 
@@ -911,24 +868,18 @@ static int
 cpuTestJSONSignature(const void *arg)
 {
     const struct data *data = arg;
-    virQEMUCapsPtr qemuCaps = NULL;
-    virCPUDataPtr hostData = NULL;
-    qemuMonitorCPUModelInfoPtr modelInfo;
-    int ret = -1;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
+    g_autoptr(virCPUData) hostData = NULL;
+    qemuMonitorCPUModelInfo *modelInfo;
 
     if (!(qemuCaps = cpuTestMakeQEMUCaps(data)))
-        goto cleanup;
+        return -1;
 
     modelInfo = virQEMUCapsGetCPUModelInfo(qemuCaps, VIR_DOMAIN_VIRT_KVM);
     if (!(hostData = virQEMUCapsGetCPUModelX86Data(qemuCaps, modelInfo, false)))
-        goto cleanup;
+        return -1;
 
-    ret = cpuTestCompareSignature(data, hostData);
-
- cleanup:
-    virObjectUnref(qemuCaps);
-    virCPUDataFree(hostData);
-    return ret;
+    return cpuTestCompareSignature(data, hostData);
 }
 #endif
 
@@ -939,37 +890,33 @@ static const char *models_list[]     = { "qemu64", "core2duo", "Nehalem", NULL }
 static const char *haswell_list[]    = { "SandyBridge", "Haswell", NULL };
 static const char *ppc_models_list[] = { "POWER6", "POWER7", "POWER8", NULL };
 
-static virDomainCapsCPUModelsPtr
+static virDomainCapsCPUModels *
 cpuTestInitModels(const char **list)
 {
-    virDomainCapsCPUModelsPtr cpus;
+    virDomainCapsCPUModels *cpus;
     const char **model;
 
     if (!(cpus = virDomainCapsCPUModelsNew(0)))
         return NULL;
 
     for (model = list; *model; model++) {
-        if (virDomainCapsCPUModelsAdd(cpus, *model,
-                                      VIR_DOMCAPS_CPU_USABLE_UNKNOWN, NULL) < 0)
-            goto error;
+        virDomainCapsCPUModelsAdd(cpus, *model,
+                                  VIR_DOMCAPS_CPU_USABLE_UNKNOWN,
+                                  NULL, false, NULL);
     }
 
     return cpus;
-
- error:
-    virObjectUnref(cpus);
-    return NULL;
 }
 
 
 static int
 mymain(void)
 {
-    virDomainCapsCPUModelsPtr model486 = NULL;
-    virDomainCapsCPUModelsPtr nomodel = NULL;
-    virDomainCapsCPUModelsPtr models = NULL;
-    virDomainCapsCPUModelsPtr haswell = NULL;
-    virDomainCapsCPUModelsPtr ppc_models = NULL;
+    virDomainCapsCPUModels *model486 = NULL;
+    virDomainCapsCPUModels *nomodel = NULL;
+    virDomainCapsCPUModels *models = NULL;
+    virDomainCapsCPUModels *haswell = NULL;
+    virDomainCapsCPUModels *ppc_models = NULL;
     int ret = 0;
 
 #if WITH_QEMU
@@ -988,44 +935,31 @@ mymain(void)
         goto cleanup;
     }
 
-#define DO_TEST(arch, api, name, host, cpu, \
+#define DO_TEST(arch, api, name, host, cpu, cpus, ncpus, \
                 models, flags, result) \
     do { \
         struct data data = { \
             arch, host, cpu, models, \
             models == NULL ? NULL : #models, \
-            flags, result \
+            cpus, ncpus, flags, result \
         }; \
-        char *testLabel; \
- \
-        g_free(virTestLogContentAndReset());\
+        g_autofree char *testLabel = NULL; \
  \
         testLabel = g_strdup_printf("%s(%s): %s", #api, \
                                     virArchToString(arch), name); \
  \
-        if (virTestRun(testLabel, api, &data) < 0) { \
-            if (virTestGetDebug()) { \
-                char *log; \
-                if ((log = virTestLogContentAndReset()) && \
-                     strlen(log) > 0) \
-                    VIR_TEST_DEBUG("\n%s", log); \
-                VIR_FREE(log); \
-            } \
-            ret = -1; \
-        } \
- \
-        VIR_FREE(testLabel); \
+        virTestRunLog(&ret, testLabel, api, &data); \
     } while (0)
 
 #define DO_TEST_COMPARE(arch, host, cpu, result) \
     DO_TEST(arch, cpuTestCompare, \
             host "/" cpu " (" #result ")", \
-            host, cpu, NULL, 0, result)
+            host, cpu, NULL, 0, NULL, 0, result)
 
 #define DO_TEST_UPDATE_ONLY(arch, host, cpu) \
     DO_TEST(arch, cpuTestUpdate, \
             cpu " on " host, \
-            host, cpu, NULL, 0, 0)
+            host, cpu, NULL, 0, NULL, 0, 0)
 
 #define DO_TEST_UPDATE(arch, host, cpu, result) \
     do { \
@@ -1036,39 +970,38 @@ mymain(void)
 #define DO_TEST_BASELINE(arch, name, flags, result) \
     do { \
         const char *suffix = ""; \
-        char *label; \
+        g_autofree char *label = NULL; \
         if ((flags) & VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES) \
             suffix = " (expanded)"; \
         if ((flags) & VIR_CONNECT_BASELINE_CPU_MIGRATABLE) \
             suffix = " (migratable)"; \
         label = g_strdup_printf("%s%s", name, suffix); \
         DO_TEST(arch, cpuTestBaseline, label, NULL, \
-                "baseline-" name, NULL, flags, result); \
-        VIR_FREE(label); \
+                "baseline-" name, NULL, 0, NULL, flags, result); \
     } while (0)
 
 #define DO_TEST_HASFEATURE(arch, host, feature, result) \
     DO_TEST(arch, cpuTestHasFeature, \
             host "/" feature " (" #result ")", \
-            host, feature, NULL, 0, result)
+            host, feature, NULL, 0, NULL, 0, result)
 
 #define DO_TEST_GUESTCPU(arch, host, cpu, models, result) \
     DO_TEST(arch, cpuTestGuestCPU, \
             host "/" cpu " (" #models ")", \
-            host, cpu, models, 0, result)
+            host, cpu, NULL, 0, models, 0, result)
 
 #if WITH_QEMU
 # define DO_TEST_JSON(arch, host, json) \
     do { \
         if (json == JSON_MODELS) { \
             DO_TEST(arch, cpuTestGuestCPUID, host, host, \
-                    NULL, NULL, 0, 0); \
+                    NULL, NULL, 0, NULL, 0, 0); \
         } \
         if (json != JSON_NONE) { \
             DO_TEST(arch, cpuTestJSONCPUID, host, host, \
-                    NULL, NULL, json, 0); \
+                    NULL, NULL, 0, NULL, json, 0); \
             DO_TEST(arch, cpuTestJSONSignature, host, host, \
-                    NULL, NULL, 0, 0); \
+                    NULL, NULL, 0, NULL, 0, 0); \
         } \
     } while (0)
 #else
@@ -1078,16 +1011,24 @@ mymain(void)
 #define DO_TEST_CPUID(arch, host, json) \
     do { \
         DO_TEST(arch, cpuTestHostCPUID, host, host, \
-                NULL, NULL, 0, 0); \
+                NULL, NULL, 0, NULL, 0, 0); \
         DO_TEST(arch, cpuTestGuestCPUID, host, host, \
-                NULL, NULL, json, 0); \
+                NULL, NULL, 0, NULL, json, 0); \
         DO_TEST(arch, cpuTestCPUIDSignature, host, host, \
-                NULL, NULL, 0, 0); \
+                NULL, NULL, 0, NULL, 0, 0); \
         DO_TEST_JSON(arch, host, json); \
         if (json != JSON_NONE) { \
             DO_TEST(arch, cpuTestUpdateLive, host, host, \
-                    NULL, NULL, json, 0); \
+                    NULL, NULL, 0, NULL, json, 0); \
         } \
+    } while (0)
+
+#define DO_TEST_CPUID_BASELINE(arch, label, cpu1, cpu2) \
+    do { \
+        const char *cpus[] = {cpu1, cpu2}; \
+        DO_TEST(arch, cpuTestCPUIDBaseline, \
+                label " (" cpu1 ", " cpu2 ")", \
+                NULL, label, cpus, 2, NULL, 0, 0); \
     } while (0)
 
     /* host to host comparison */
@@ -1134,10 +1075,10 @@ mymain(void)
     DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-exact", VIR_CPU_COMPARE_INCOMPATIBLE);
     DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-legacy", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-legacy-incompatible", VIR_CPU_COMPARE_INCOMPATIBLE);
-    DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-legacy-invalid", VIR_CPU_COMPARE_ERROR);
+    DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-legacy-bad", VIR_CPU_COMPARE_ERROR);
     DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-compat-none", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-compat-valid", VIR_CPU_COMPARE_IDENTICAL);
-    DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-compat-invalid", VIR_CPU_COMPARE_ERROR);
+    DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-compat-bad", VIR_CPU_COMPARE_ERROR);
     DO_TEST_COMPARE(VIR_ARCH_PPC64, "host", "guest-compat-incompatible", VIR_CPU_COMPARE_INCOMPATIBLE);
 
     /* guest updates for migration
@@ -1155,28 +1096,22 @@ mymain(void)
     DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-nofallback", VIR_CPU_COMPARE_INCOMPATIBLE);
     DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-legacy", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-legacy-incompatible", VIR_CPU_COMPARE_INCOMPATIBLE);
-    DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-legacy-invalid", VIR_CPU_COMPARE_ERROR);
+    DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-legacy-bad", VIR_CPU_COMPARE_ERROR);
     DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-compat-none", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-compat-valid", VIR_CPU_COMPARE_IDENTICAL);
-    DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-compat-invalid", VIR_CPU_COMPARE_ERROR);
+    DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-compat-bad", VIR_CPU_COMPARE_ERROR);
     DO_TEST_UPDATE(VIR_ARCH_PPC64, "host", "guest-compat-incompatible", VIR_CPU_COMPARE_INCOMPATIBLE);
 
     /* computing baseline CPUs */
     DO_TEST_BASELINE(VIR_ARCH_X86_64, "incompatible-vendors", 0, -1);
     DO_TEST_BASELINE(VIR_ARCH_X86_64, "no-vendor", 0, 0);
     DO_TEST_BASELINE(VIR_ARCH_X86_64, "some-vendors", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "1", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "2", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "3", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "3", VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "4", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "4", VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "5", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "5", VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "6", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "6", VIR_CONNECT_BASELINE_CPU_MIGRATABLE, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "7", 0, 0);
-    DO_TEST_BASELINE(VIR_ARCH_X86_64, "8", 0, 0);
+    DO_TEST_BASELINE(VIR_ARCH_X86_64, "simple", 0, 0);
+    DO_TEST_BASELINE(VIR_ARCH_X86_64, "simple", VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES, 0);
+    DO_TEST_BASELINE(VIR_ARCH_X86_64, "features", 0, 0);
+    DO_TEST_BASELINE(VIR_ARCH_X86_64, "features", VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES, 0);
+    DO_TEST_BASELINE(VIR_ARCH_X86_64, "Westmere+Nehalem", 0, 0);
+    DO_TEST_BASELINE(VIR_ARCH_X86_64, "Westmere+Nehalem", VIR_CONNECT_BASELINE_CPU_MIGRATABLE, 0);
 
     DO_TEST_BASELINE(VIR_ARCH_PPC64, "incompatible-vendors", 0, -1);
     DO_TEST_BASELINE(VIR_ARCH_PPC64, "no-vendor", 0, 0);
@@ -1213,11 +1148,12 @@ mymain(void)
     DO_TEST_GUESTCPU(VIR_ARCH_PPC64, "host", "guest-nofallback", ppc_models, -1);
     DO_TEST_GUESTCPU(VIR_ARCH_PPC64, "host", "guest-legacy", ppc_models, 0);
     DO_TEST_GUESTCPU(VIR_ARCH_PPC64, "host", "guest-legacy-incompatible", ppc_models, -1);
-    DO_TEST_GUESTCPU(VIR_ARCH_PPC64, "host", "guest-legacy-invalid", ppc_models, -1);
+    DO_TEST_GUESTCPU(VIR_ARCH_PPC64, "host", "guest-legacy-bad", ppc_models, -1);
 
     DO_TEST_CPUID(VIR_ARCH_X86_64, "A10-5800K", JSON_HOST);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Atom-D510", JSON_NONE);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Atom-N450", JSON_NONE);
+    DO_TEST_CPUID(VIR_ARCH_X86_64, "Atom-P5362", JSON_MODELS_REQUIRED);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Core-i5-650", JSON_MODELS_REQUIRED);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Core-i5-2500", JSON_HOST);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Core-i5-2540M", JSON_MODELS);
@@ -1242,6 +1178,7 @@ mymain(void)
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Hygon-C86-7185-32-core", JSON_HOST);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "EPYC-7601-32-Core", JSON_HOST);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "EPYC-7601-32-Core-ibpb", JSON_MODELS_REQUIRED);
+    DO_TEST_CPUID(VIR_ARCH_X86_64, "EPYC-7502-32-Core", JSON_MODELS);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "FX-8150", JSON_NONE);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Opteron-1352", JSON_NONE);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Opteron-2350", JSON_HOST);
@@ -1275,6 +1212,32 @@ mymain(void)
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Ice-Lake-Server", JSON_MODELS);
     DO_TEST_CPUID(VIR_ARCH_X86_64, "Cooperlake", JSON_MODELS);
 
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Ryzen+Rome",
+                           "Ryzen-7-1800X-Eight-Core", "Ryzen-9-3900X-12-Core");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "EPYC+Rome",
+                           "EPYC-7601-32-Core", "EPYC-7502-32-Core");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Haswell-noTSX-IBRS+Skylake",
+                           "Xeon-E5-2609-v3", "Xeon-Gold-6148");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Haswell-noTSX-IBRS+Skylake-IBRS",
+                           "Xeon-E5-2609-v3", "Xeon-Gold-6130");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Broadwell-IBRS+Cascadelake",
+                           "Xeon-E5-2623-v4", "Xeon-Platinum-8268");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Cascadelake+Skylake-IBRS",
+                           "Xeon-Platinum-8268", "Xeon-Gold-6130");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Cascadelake+Skylake",
+                           "Xeon-Platinum-9242", "Xeon-Gold-6148");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Cascadelake+Icelake",
+                           "Xeon-Platinum-9242", "Ice-Lake-Server");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Cooperlake+Icelake",
+                           "Cooperlake", "Ice-Lake-Server");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Cooperlake+Cascadelake",
+                           "Cooperlake", "Xeon-Platinum-9242");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Skylake-Client+Server",
+                           "Core-i5-6600", "Xeon-Gold-6148");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Haswell-noTSX-IBRS+Broadwell",
+                           "Xeon-E5-2609-v3", "Xeon-E5-2650-v4");
+    DO_TEST_CPUID_BASELINE(VIR_ARCH_X86_64, "Haswell+Skylake",
+                           "Xeon-E7-8890-v3", "Xeon-Gold-5115");
  cleanup:
 #if WITH_QEMU
     qemuTestDriverFree(&driver);

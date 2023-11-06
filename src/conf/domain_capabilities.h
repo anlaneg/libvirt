@@ -27,24 +27,25 @@
 typedef const char * (*virDomainCapsValToStr)(int value);
 
 typedef struct _virDomainCaps virDomainCaps;
-typedef virDomainCaps *virDomainCapsPtr;
 
 typedef struct _virDomainCapsEnum virDomainCapsEnum;
-typedef virDomainCapsEnum *virDomainCapsEnumPtr;
 struct _virDomainCapsEnum {
     bool report; /* Whether the format the enum at all */
     unsigned int values; /* Bitmask of values supported in the corresponding enum */
 };
 
+#define STATIC_ASSERT_ENUM(last) \
+    G_STATIC_ASSERT(last <= sizeof(unsigned int) * CHAR_BIT)
+
 typedef struct _virDomainCapsStringValues virDomainCapsStringValues;
-typedef virDomainCapsStringValues *virDomainCapsStringValuesPtr;
 struct _virDomainCapsStringValues {
     char **values;  /* raw string values */
     size_t nvalues; /* number of strings */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_LOADER_TYPE_LAST);
+STATIC_ASSERT_ENUM(VIR_TRISTATE_BOOL_LAST);
 typedef struct _virDomainCapsLoader virDomainCapsLoader;
-typedef virDomainCapsLoader *virDomainCapsLoaderPtr;
 struct _virDomainCapsLoader {
     virTristateBool supported;
     virDomainCapsStringValues values;   /* Info about values for the element */
@@ -53,16 +54,25 @@ struct _virDomainCapsLoader {
     virDomainCapsEnum secure;   /* Info about secure:virTristateBool */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_OS_DEF_FIRMWARE_LAST);
 typedef struct _virDomainCapsOS virDomainCapsOS;
-typedef virDomainCapsOS *virDomainCapsOSPtr;
 struct _virDomainCapsOS {
     virTristateBool supported;
     virDomainCapsEnum firmware;     /* Info about virDomainOsDefFirmware */
     virDomainCapsLoader loader;     /* Info about virDomainLoaderDef */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_MEMORY_SOURCE_LAST);
+typedef struct _virDomainCapsMemoryBacking virDomainCapsMemoryBacking;
+struct _virDomainCapsMemoryBacking {
+    virTristateBool supported;
+    virDomainCapsEnum sourceType; /* virDomainMemorySource */
+};
+
+STATIC_ASSERT_ENUM(VIR_DOMAIN_DISK_DEVICE_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_DISK_BUS_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_DISK_MODEL_LAST);
 typedef struct _virDomainCapsDeviceDisk virDomainCapsDeviceDisk;
-typedef virDomainCapsDeviceDisk *virDomainCapsDeviceDiskPtr;
 struct _virDomainCapsDeviceDisk {
     virTristateBool supported;
     virDomainCapsEnum diskDevice;   /* Info about virDomainDiskDevice enum values */
@@ -71,22 +81,26 @@ struct _virDomainCapsDeviceDisk {
     /* add new fields here */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_GRAPHICS_TYPE_LAST);
 typedef struct _virDomainCapsDeviceGraphics virDomainCapsDeviceGraphics;
-typedef virDomainCapsDeviceGraphics *virDomainCapsDeviceGraphicsPtr;
 struct _virDomainCapsDeviceGraphics {
     virTristateBool supported;
     virDomainCapsEnum type;   /* virDomainGraphicsType */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_VIDEO_TYPE_LAST);
 typedef struct _virDomainCapsDeviceVideo virDomainCapsDeviceVideo;
-typedef virDomainCapsDeviceVideo *virDomainCapsDeviceVideoPtr;
 struct _virDomainCapsDeviceVideo {
     virTristateBool supported;
     virDomainCapsEnum modelType;   /* virDomainVideoType */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_HOSTDEV_MODE_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_STARTUP_POLICY_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_HOSTDEV_CAPS_TYPE_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_HOSTDEV_PCI_BACKEND_TYPE_LAST);
 typedef struct _virDomainCapsDeviceHostdev virDomainCapsDeviceHostdev;
-typedef virDomainCapsDeviceHostdev *virDomainCapsDeviceHostdevPtr;
 struct _virDomainCapsDeviceHostdev {
     virTristateBool supported;
     virDomainCapsEnum mode;             /* Info about virDomainHostdevMode */
@@ -97,19 +111,58 @@ struct _virDomainCapsDeviceHostdev {
     /* add new fields here */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_RNG_MODEL_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_RNG_BACKEND_LAST);
 typedef struct _virDomainCapsDeviceRNG virDomainCapsDeviceRNG;
-typedef virDomainCapsDeviceRNG *virDomainCapsDeviceRNGPtr;
 struct _virDomainCapsDeviceRNG {
     virTristateBool supported;
     virDomainCapsEnum model;   /* virDomainRNGModel */
     virDomainCapsEnum backendModel;   /* virDomainRNGBackend */
 };
 
+STATIC_ASSERT_ENUM(VIR_DOMAIN_TPM_MODEL_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_TPM_TYPE_LAST);
+typedef struct _virDomainCapsDeviceTPM virDomainCapsDeviceTPM;
+struct _virDomainCapsDeviceTPM {
+    virTristateBool supported;
+    virDomainCapsEnum model;   /* virDomainTPMModel */
+    virDomainCapsEnum backendModel;   /* virDomainTPMBackendType */
+    virDomainCapsEnum backendVersion; /* virDomainTPMVersion */
+};
+
+STATIC_ASSERT_ENUM(VIR_DOMAIN_REDIRDEV_BUS_LAST);
+typedef struct _virDomainCapsDeviceRedirdev virDomainCapsDeviceRedirdev;
+struct _virDomainCapsDeviceRedirdev {
+    virTristateBool supported;
+    virDomainCapsEnum bus;   /* virDomainRedirdevBus */
+};
+
+STATIC_ASSERT_ENUM(VIR_DOMAIN_CHR_TYPE_LAST);
+typedef struct _virDomainCapsDeviceChannel virDomainCapsDeviceChannel;
+struct _virDomainCapsDeviceChannel {
+    virTristateBool supported;
+    virDomainCapsEnum type;   /* virDomainChrType */
+};
+
+STATIC_ASSERT_ENUM(VIR_DOMAIN_FS_DRIVER_TYPE_LAST);
+typedef struct _virDomainCapsDeviceFilesystem virDomainCapsDeviceFilesystem;
+struct _virDomainCapsDeviceFilesystem {
+    virTristateBool supported;
+    virDomainCapsEnum driverType; /* virDomainFSDriverType */
+};
+
+STATIC_ASSERT_ENUM(VIR_GIC_VERSION_LAST);
 typedef struct _virDomainCapsFeatureGIC virDomainCapsFeatureGIC;
-typedef virDomainCapsFeatureGIC *virDomainCapsFeatureGICPtr;
 struct _virDomainCapsFeatureGIC {
     virTristateBool supported;
     virDomainCapsEnum version; /* Info about virGICVersion */
+};
+
+STATIC_ASSERT_ENUM(VIR_DOMAIN_HYPERV_LAST);
+typedef struct _virDomainCapsFeatureHyperv virDomainCapsFeatureHyperv;
+struct _virDomainCapsFeatureHyperv {
+    virTristateBool supported;
+    virDomainCapsEnum features; /* Info about supported virDomainHyperv features */
 };
 
 typedef enum {
@@ -122,41 +175,71 @@ typedef enum {
 VIR_ENUM_DECL(virDomainCapsCPUUsable);
 
 typedef struct _virDomainCapsCPUModel virDomainCapsCPUModel;
-typedef virDomainCapsCPUModel *virDomainCapsCPUModelPtr;
 struct _virDomainCapsCPUModel {
     char *name;
     virDomainCapsCPUUsable usable;
     char **blockers; /* NULL-terminated list of usability blockers */
+    bool deprecated;
+    char *vendor;
 };
 
 typedef struct _virDomainCapsCPUModels virDomainCapsCPUModels;
-typedef virDomainCapsCPUModels *virDomainCapsCPUModelsPtr;
 struct _virDomainCapsCPUModels {
     virObject parent;
 
     size_t nmodels_max;
     size_t nmodels;
-    virDomainCapsCPUModelPtr models;
+    virDomainCapsCPUModel *models;
 };
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainCapsCPUModels, virObjectUnref);
 
 typedef struct _virDomainCapsCPU virDomainCapsCPU;
-typedef virDomainCapsCPU *virDomainCapsCPUPtr;
 struct _virDomainCapsCPU {
     bool hostPassthrough;
     virDomainCapsEnum hostPassthroughMigratable;
-    virCPUDefPtr hostModel;
-    virDomainCapsCPUModelsPtr custom;
+    bool maximum;
+    virDomainCapsEnum maximumMigratable;
+    virCPUDef *hostModel;
+    virDomainCapsCPUModels *custom;
 };
 
 typedef struct _virSEVCapability virSEVCapability;
-typedef virSEVCapability *virSEVCapabilityPtr;
 struct _virSEVCapability {
     char *pdh;
     char *cert_chain;
+    char *cpu0_id;
     unsigned int cbitpos;
     unsigned int reduced_phys_bits;
+    unsigned int max_guests;
+    unsigned int max_es_guests;
+};
+
+typedef struct _virSGXSection virSGXSection;
+struct _virSGXSection {
+    unsigned long long size;
+    unsigned int node;
+};
+
+typedef struct _virSGXCapability virSGXCapability;
+struct _virSGXCapability {
+    bool flc;
+    bool sgx1;
+    bool sgx2;
+    unsigned long long section_size;
+    size_t nSgxSections;
+    virSGXSection *sgxSections;
+};
+
+STATIC_ASSERT_ENUM(VIR_DOMAIN_CRYPTO_MODEL_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_CRYPTO_TYPE_LAST);
+STATIC_ASSERT_ENUM(VIR_DOMAIN_CRYPTO_BACKEND_LAST);
+typedef struct _virDomainCapsDeviceCrypto virDomainCapsDeviceCrypto;
+struct _virDomainCapsDeviceCrypto {
+    virTristateBool supported;
+    virDomainCapsEnum model;   /* virDomainCryptoModel */
+    virDomainCapsEnum type;   /* virDomainCryptoType */
+    virDomainCapsEnum backendModel;   /* virDomainCryptoBackend */
 };
 
 typedef enum {
@@ -165,6 +248,8 @@ typedef enum {
     VIR_DOMAIN_CAPS_FEATURE_GENID,
     VIR_DOMAIN_CAPS_FEATURE_BACKING_STORE_INPUT,
     VIR_DOMAIN_CAPS_FEATURE_BACKUP,
+    VIR_DOMAIN_CAPS_FEATURE_ASYNC_TEARDOWN,
+    VIR_DOMAIN_CAPS_FEATURE_S390_PV,
 
     VIR_DOMAIN_CAPS_FEATURE_LAST
 } virDomainCapsFeature;
@@ -182,15 +267,23 @@ struct _virDomainCaps {
 
     virDomainCapsOS os;
     virDomainCapsCPU cpu;
+    virDomainCapsMemoryBacking memoryBacking;
     virDomainCapsDeviceDisk disk;
     virDomainCapsDeviceGraphics graphics;
     virDomainCapsDeviceVideo video;
     virDomainCapsDeviceHostdev hostdev;
     virDomainCapsDeviceRNG rng;
+    virDomainCapsDeviceFilesystem filesystem;
+    virDomainCapsDeviceTPM tpm;
+    virDomainCapsDeviceRedirdev redirdev;
+    virDomainCapsDeviceChannel channel;
+    virDomainCapsDeviceCrypto crypto;
     /* add new domain devices here */
 
     virDomainCapsFeatureGIC gic;
-    virSEVCapabilityPtr sev;
+    virSEVCapability *sev;
+    virSGXCapability *sgx;
+    virDomainCapsFeatureHyperv *hyperv;
     /* add new domain features here */
 
     virTristateBool features[VIR_DOMAIN_CAPS_FEATURE_LAST];
@@ -199,21 +292,26 @@ struct _virDomainCaps {
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainCaps, virObjectUnref);
 
 
-virDomainCapsPtr virDomainCapsNew(const char *path,
+virDomainCaps *virDomainCapsNew(const char *path,
                                   const char *machine,
                                   virArch arch,
                                   virDomainVirtType virttype);
 
-virDomainCapsCPUModelsPtr virDomainCapsCPUModelsNew(size_t nmodels);
-virDomainCapsCPUModelsPtr virDomainCapsCPUModelsCopy(virDomainCapsCPUModelsPtr old);
-int virDomainCapsCPUModelsAdd(virDomainCapsCPUModelsPtr cpuModels,
-                              const char *name,
-                              virDomainCapsCPUUsable usable,
-                              char **blockers);
-virDomainCapsCPUModelPtr
-virDomainCapsCPUModelsGet(virDomainCapsCPUModelsPtr cpuModels,
+virDomainCapsCPUModels *virDomainCapsCPUModelsNew(size_t nmodels);
+virDomainCapsCPUModels *virDomainCapsCPUModelsCopy(virDomainCapsCPUModels *old);
+void
+virDomainCapsCPUModelsAdd(virDomainCapsCPUModels *cpuModels,
+                          const char *name,
+                          virDomainCapsCPUUsable usable,
+                          char **blockers,
+                          bool deprecated,
+                          const char *vendor);
+virDomainCapsCPUModel *
+virDomainCapsCPUModelsGet(virDomainCapsCPUModels *cpuModels,
                           const char *name);
 
+#define VIR_DOMAIN_CAPS_ENUM_IS_SET(capsEnum, value) \
+    ((capsEnum).values & (1U << value))
 
 #define VIR_DOMAIN_CAPS_ENUM_SET(capsEnum, ...) \
     do { \
@@ -224,19 +322,20 @@ virDomainCapsCPUModelsGet(virDomainCapsCPUModelsPtr cpuModels,
     } while (0)
 
 
-int virDomainCapsEnumSet(virDomainCapsEnumPtr capsEnum,
+int virDomainCapsEnumSet(virDomainCapsEnum *capsEnum,
                          const char *capsEnumName,
                          size_t nvalues,
                          unsigned int *values);
-void virDomainCapsEnumClear(virDomainCapsEnumPtr capsEnum);
+void virDomainCapsEnumClear(virDomainCapsEnum *capsEnum);
 
 char * virDomainCapsFormat(const virDomainCaps *caps);
-
-int virDomainCapsDeviceDefValidate(const virDomainCaps *caps,
-                                   const virDomainDeviceDef *dev,
-                                   const virDomainDef *def);
 
 void
 virSEVCapabilitiesFree(virSEVCapability *capabilities);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSEVCapability, virSEVCapabilitiesFree);
+
+void
+virSGXCapabilitiesFree(virSGXCapability *capabilities);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSGXCapability, virSGXCapabilitiesFree);

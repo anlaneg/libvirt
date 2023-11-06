@@ -26,9 +26,7 @@
 
 #include "viruuid.h"
 #include "viralloc.h"
-#include "storage_conf.h"
 #include "esx_private.h"
-#include "esx_storage_driver.h"
 #include "esx_storage_backend_vmfs.h"
 #include "esx_storage_backend_iscsi.h"
 
@@ -46,7 +44,7 @@ enum {
     LAST_BACKEND
 };
 
-static virStorageDriverPtr backends[] = {
+static virStorageDriver *backends[] = {
     &esxStorageBackendVMFS,
     &esxStorageBackendISCSI
 };
@@ -156,7 +154,7 @@ esxStoragePoolLookupByName(virConnectPtr conn, const char *name)
     }
 
     virReportError(VIR_ERR_NO_STORAGE_POOL,
-                   _("Could not find storage pool with name '%s'"), name);
+                   _("Could not find storage pool with name '%1$s'"), name);
 
     return NULL;
 }
@@ -184,7 +182,7 @@ esxStoragePoolLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
 
     virUUIDFormat(uuid, uuid_string);
     virReportError(VIR_ERR_NO_STORAGE_POOL,
-                   _("Could not find storage pool with uuid '%s'"),
+                   _("Could not find storage pool with uuid '%1$s'"),
                    uuid_string);
 
     return NULL;
@@ -204,7 +202,7 @@ static int
 esxStoragePoolRefresh(virStoragePoolPtr pool, unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -220,7 +218,7 @@ static int
 esxStoragePoolGetInfo(virStoragePoolPtr pool, virStoragePoolInfoPtr info)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -238,7 +236,7 @@ static char *
 esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -284,7 +282,7 @@ static int
 esxStoragePoolNumOfVolumes(virStoragePoolPtr pool)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -301,7 +299,7 @@ esxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names,
                           int maxnames)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -317,7 +315,7 @@ static virStorageVolPtr
 esxStorageVolLookupByName(virStoragePoolPtr pool, const char *name)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -351,7 +349,7 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
         return backends[ISCSI]->storageVolLookupByPath(conn, path);
     } else {
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("Unexpected volume path format: %s"), path);
+                       _("Unexpected volume path format: %1$s"), path);
 
         return NULL;
     }
@@ -377,7 +375,7 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
     }
 
     virReportError(VIR_ERR_NO_STORAGE_VOL,
-                   _("Could not find storage volume with key '%s'"),
+                   _("Could not find storage volume with key '%1$s'"),
                    key);
 
     return NULL;
@@ -390,7 +388,7 @@ esxStorageVolCreateXML(virStoragePoolPtr pool, const char *xmldesc,
                        unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -407,7 +405,7 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool, const char *xmldesc,
                            virStorageVolPtr sourceVolume, unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -423,7 +421,7 @@ static int
 esxStorageVolDelete(virStorageVolPtr volume, unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, -1);
 
@@ -439,7 +437,7 @@ static int
 esxStorageVolWipe(virStorageVolPtr volume, unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, -1);
 
@@ -455,7 +453,7 @@ static int
 esxStorageVolGetInfo(virStorageVolPtr volume, virStorageVolInfoPtr info)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, -1);
 
@@ -471,7 +469,7 @@ static char *
 esxStorageVolGetXMLDesc(virStorageVolPtr volume, unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, NULL);
 
@@ -487,7 +485,7 @@ static char *
 esxStorageVolGetPath(virStorageVolPtr volume)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, NULL);
 

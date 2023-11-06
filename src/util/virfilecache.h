@@ -27,7 +27,6 @@
 #include "virhash.h"
 
 typedef struct _virFileCache virFileCache;
-typedef virFileCache *virFileCachePtr;
 
 /**
  * virFileCacheIsValidPtr:
@@ -49,7 +48,7 @@ typedef bool
  * @priv: private data created together with cache
  *
  * Creates a new data based on the @name.  The returned data must be
- * an instance of virObject.
+ * an instance of GObject.
  *
  * Returns data object or NULL on error.
  */
@@ -103,7 +102,6 @@ typedef void
 (*virFileCachePrivFreePtr)(void *priv);
 
 typedef struct _virFileCacheHandlers virFileCacheHandlers;
-typedef virFileCacheHandlers *virFileCacheHandlersPtr;
 struct _virFileCacheHandlers {
     virFileCacheIsValidPtr isValid;
     virFileCacheNewDataPtr newData;
@@ -112,28 +110,32 @@ struct _virFileCacheHandlers {
     virFileCachePrivFreePtr privFree;
 };
 
-virFileCachePtr
+virFileCache *
 virFileCacheNew(const char *dir,
                 const char *suffix,
                 virFileCacheHandlers *handlers);
 
 void *
-virFileCacheLookup(virFileCachePtr cache,
+virFileCacheLookup(virFileCache *cache,
                    const char *name);
 
 void *
-virFileCacheLookupByFunc(virFileCachePtr cache,
+virFileCacheLookupByFunc(virFileCache *cache,
                          virHashSearcher iter,
                          const void *iterData);
 
 void *
-virFileCacheGetPriv(virFileCachePtr cache);
+virFileCacheGetPriv(virFileCache *cache);
 
 void
-virFileCacheSetPriv(virFileCachePtr cache,
+virFileCacheSetPriv(virFileCache *cache,
                     void *priv);
 
 int
-virFileCacheInsertData(virFileCachePtr cache,
+virFileCacheInsertData(virFileCache *cache,
                        const char *name,
                        void *data);
+
+/* for testing usage */
+void
+virFileCacheClear(virFileCache *cache);

@@ -21,16 +21,13 @@
 #pragma once
 
 #include "virlockspace.h"
-#include "virthread.h"
 
 typedef struct _virLockDaemon virLockDaemon;
-typedef virLockDaemon *virLockDaemonPtr;
 
 typedef struct _virLockDaemonClient virLockDaemonClient;
-typedef virLockDaemonClient *virLockDaemonClientPtr;
 
 struct _virLockDaemonClient {
-    virMutex lock;
+    GMutex lock;
     bool restricted;
 
     pid_t ownerPid;
@@ -41,11 +38,11 @@ struct _virLockDaemonClient {
     pid_t clientPid;
 };
 
-extern virLockDaemonPtr lockDaemon;
+extern virLockDaemon *lockDaemon;
 
-int virLockDaemonAddLockSpace(virLockDaemonPtr lockd,
+int virLockDaemonAddLockSpace(virLockDaemon *lockd,
                               const char *path,
-                              virLockSpacePtr lockspace);
+                              virLockSpace *lockspace);
 
-virLockSpacePtr virLockDaemonFindLockSpace(virLockDaemonPtr lockd,
+virLockSpace *virLockDaemonFindLockSpace(virLockDaemon *lockd,
                                            const char *path);

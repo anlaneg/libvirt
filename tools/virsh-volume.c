@@ -25,9 +25,7 @@
 #include <fcntl.h>
 
 #include <libxml/parser.h>
-#include <libxml/tree.h>
 #include <libxml/xpath.h>
-#include <libxml/xmlsave.h>
 
 #include "internal.h"
 #include "virbuffer.h"
@@ -56,13 +54,27 @@
      .completer_flags = VIR_CONNECT_LIST_STORAGE_POOLS_ACTIVE, \
     }
 
-#define VIRSH_COMMON_OPT_VOLUME_VOL \
+#define VIRSH_COMMON_OPT_VOL_NAME(_helpstr) \
     {.name = "vol", \
      .type = VSH_OT_DATA, \
      .flags = VSH_OFLAG_REQ, \
-     .help = N_("vol name, key or path"), \
+     .help = _helpstr, \
      .completer = virshStorageVolNameCompleter, \
     }
+
+#define VIRSH_COMMON_OPT_VOL_KEY(_helpstr) \
+    {.name = "vol", \
+     .type = VSH_OT_DATA, \
+     .flags = VSH_OFLAG_REQ, \
+     .help = _helpstr, \
+     .completer = virshStorageVolKeyCompleter, \
+    }
+
+#define VIRSH_COMMON_OPT_VOL_FULL \
+    VIRSH_COMMON_OPT_VOL_NAME(N_("vol name, key or path"))
+
+#define VIRSH_COMMON_OPT_VOL_BY_KEY \
+    VIRSH_COMMON_OPT_VOL_KEY(N_("volume key or path"))
 
 virStorageVolPtr
 virshCommandOptVolBy(vshControl *ctl, const vshCmd *cmd,
@@ -71,9 +83,9 @@ virshCommandOptVolBy(vshControl *ctl, const vshCmd *cmd,
                      const char **name, unsigned int flags)
 {
     virStorageVolPtr vol = NULL;
-    virStoragePoolPtr pool = NULL;
+    g_autoptr(virshStoragePool) pool = NULL;
     const char *n = NULL, *p = NULL;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     virCheckFlags(VIRSH_BYUUID | VIRSH_BYNAME, NULL);
 
@@ -89,8 +101,7 @@ virshCommandOptVolBy(vshControl *ctl, const vshCmd *cmd,
             return NULL;
 
         if (virStoragePoolIsActive(pool) != 1) {
-            vshError(ctl, _("pool '%s' is not active"), p);
-            virStoragePoolFree(pool);
+            vshError(ctl, _("pool '%1$s' is not active"), p);
             return NULL;
         }
     }
@@ -122,10 +133,10 @@ virshCommandOptVolBy(vshControl *ctl, const vshCmd *cmd,
 
     if (!vol) {
         if (pool || !pooloptname)
-            vshError(ctl, _("failed to get vol '%s'"), n);
+            vshError(ctl, _("failed to get vol '%1$s'"), n);
         else
-            vshError(ctl, _("failed to get vol '%s', specifying --%s "
-                            "might help"), n, pooloptname);
+            vshError(ctl, _("failed to get vol '%1$s', specifying --%2$s might help"),
+                     n, pooloptname);
     } else {
         vshResetLibvirtError();
     }
@@ -133,24 +144,19 @@ virshCommandOptVolBy(vshControl *ctl, const vshCmd *cmd,
     /* If the pool was specified, then make sure that the returned
      * volume is from the given pool */
     if (pool && vol) {
-        virStoragePoolPtr volpool = NULL;
+        g_autoptr(virshStoragePool) volpool = NULL;
 
         if ((volpool = virStoragePoolLookupByVolume(vol))) {
             if (STRNEQ(virStoragePoolGetName(volpool),
                        virStoragePoolGetName(pool))) {
                 vshResetLibvirtError();
                 vshError(ctl,
-                         _("Requested volume '%s' is not in pool '%s'"),
+                         _("Requested volume '%1$s' is not in pool '%2$s'"),
                          n, virStoragePoolGetName(pool));
-                virStorageVolFree(vol);
-                vol = NULL;
+                g_clear_pointer(&vol, virshStorageVolFree);
             }
-            virStoragePoolFree(volpool);
         }
     }
-
-    if (pool)
-        virStoragePoolFree(pool);
 
     return vol;
 }
@@ -173,15 +179,18 @@ static const vshCmdOptDef opts_vol_create_as[] = {
     {.name = "name",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshCompleteEmpty,
      .help = N_("name of the volume")
     },
     {.name = "capacity",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshCompleteEmpty,
      .help = N_("size of the vol, as scaled integer (default bytes)")
     },
     {.name = "allocation",
      .type = VSH_OT_STRING,
+     .completer = virshCompleteEmpty,
      .help = N_("initial allocation size, as scaled integer (default bytes)")
     },
     {.name = "format",
@@ -219,17 +228,16 @@ virshVolSize(const char *data, unsigned long long *val)
 static bool
 cmdVolCreateAs(vshControl *ctl, const vshCmd *cmd)
 {
-    virStoragePoolPtr pool;
-    virStorageVolPtr vol = NULL;
-    char *xml = NULL;
+    g_autoptr(virshStoragePool) pool = NULL;
+    g_autoptr(virshStorageVol) vol = NULL;
+    g_autofree char *xml = NULL;
     bool printXML = vshCommandOptBool(cmd, "print-xml");
     const char *name, *capacityStr = NULL, *allocationStr = NULL, *format = NULL;
     const char *snapshotStrVol = NULL, *snapshotStrFormat = NULL;
     unsigned long long capacity, allocation = 0;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    unsigned long flags = 0;
-    virshControlPtr priv = ctl->privData;
-    bool ret = false;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    unsigned int flags = 0;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptBool(cmd, "prealloc-metadata"))
         flags |= VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA;
@@ -238,27 +246,27 @@ cmdVolCreateAs(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (vshCommandOptStringReq(ctl, cmd, "name", &name) < 0)
-        goto cleanup;
+        return false;
 
     if (vshCommandOptStringReq(ctl, cmd, "capacity", &capacityStr) < 0)
-        goto cleanup;
+        return false;
 
     if (virshVolSize(capacityStr, &capacity) < 0) {
-        vshError(ctl, _("Malformed size %s"), capacityStr);
-        goto cleanup;
+        vshError(ctl, _("Malformed size %1$s"), capacityStr);
+        return false;
     }
 
     if (vshCommandOptStringQuiet(ctl, cmd, "allocation", &allocationStr) > 0 &&
         virshVolSize(allocationStr, &allocation) < 0) {
-        vshError(ctl, _("Malformed size %s"), allocationStr);
-        goto cleanup;
+        vshError(ctl, _("Malformed size %1$s"), allocationStr);
+        return false;
     }
 
     if (vshCommandOptStringReq(ctl, cmd, "format", &format) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "backing-vol", &snapshotStrVol) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "backing-vol-format",
                                &snapshotStrFormat) < 0)
-        goto cleanup;
+        return false;
 
     virBufferAddLit(&buf, "<volume>\n");
     virBufferAdjustIndent(&buf, 2);
@@ -277,12 +285,14 @@ cmdVolCreateAs(vshControl *ctl, const vshCmd *cmd)
 
     /* Convert the snapshot parameters into backingStore XML */
     if (snapshotStrVol) {
+        g_autoptr(virshStorageVol) snapVol = NULL;
+        g_autofree char *snapshotStrVolPath = NULL;
         /* Lookup snapshot backing volume.  Try the backing-vol
          *  parameter as a name */
         vshDebug(ctl, VSH_ERR_DEBUG,
                  "%s: Look up backing store volume '%s' as name\n",
                  cmd->def->name, snapshotStrVol);
-        virStorageVolPtr snapVol = virStorageVolLookupByName(pool, snapshotStrVol);
+        snapVol = virStorageVolLookupByName(pool, snapshotStrVol);
         if (snapVol)
                 vshDebug(ctl, VSH_ERR_DEBUG,
                          "%s: Backing store volume found using '%s' as name\n",
@@ -313,14 +323,12 @@ cmdVolCreateAs(vshControl *ctl, const vshCmd *cmd)
                          cmd->def->name, snapshotStrVol);
         }
         if (snapVol == NULL) {
-            vshError(ctl, _("failed to get vol '%s'"), snapshotStrVol);
-            goto cleanup;
+            vshError(ctl, _("failed to get vol '%1$s'"), snapshotStrVol);
+            return false;
         }
 
-        char *snapshotStrVolPath;
         if ((snapshotStrVolPath = virStorageVolGetPath(snapVol)) == NULL) {
-            virStorageVolFree(snapVol);
-            goto cleanup;
+            return false;
         }
 
         /* Create XML for the backing store */
@@ -332,10 +340,6 @@ cmdVolCreateAs(vshControl *ctl, const vshCmd *cmd)
                               snapshotStrFormat);
         virBufferAdjustIndent(&buf, -2);
         virBufferAddLit(&buf, "</backingStore>\n");
-
-        /* Cleanup snapshot allocations */
-        VIR_FREE(snapshotStrVolPath);
-        virStorageVolFree(snapVol);
     }
 
     virBufferAdjustIndent(&buf, -2);
@@ -347,21 +351,13 @@ cmdVolCreateAs(vshControl *ctl, const vshCmd *cmd)
         vshPrint(ctl, "%s", xml);
     } else {
         if (!(vol = virStorageVolCreateXML(pool, xml, flags))) {
-            vshError(ctl, _("Failed to create vol %s"), name);
-            goto cleanup;
+            vshError(ctl, _("Failed to create vol %1$s"), name);
+            return false;
         }
-        vshPrintExtra(ctl, _("Vol %s created\n"), name);
+        vshPrintExtra(ctl, _("Vol %1$s created\n"), name);
     }
 
-    ret = true;
-
- cleanup:
-    virBufferFreeAndReset(&buf);
-    if (vol)
-        virStorageVolFree(vol);
-    virStoragePoolFree(pool);
-    VIR_FREE(xml);
-    return ret;
+    return true;
 }
 
 /*
@@ -384,46 +380,47 @@ static const vshCmdOptDef opts_vol_create[] = {
      .type = VSH_OT_BOOL,
      .help = N_("preallocate metadata (for qcow2 instead of full allocation)")
     },
+    {.name = "validate",
+     .type = VSH_OT_BOOL,
+     .help = N_("validate the XML against the schema")
+    },
     {.name = NULL}
 };
 
 static bool
 cmdVolCreate(vshControl *ctl, const vshCmd *cmd)
 {
-    virStoragePoolPtr pool;
-    virStorageVolPtr vol;
+    g_autoptr(virshStoragePool) pool = NULL;
+    g_autoptr(virshStorageVol) vol = NULL;
     const char *from = NULL;
-    bool ret = false;
     unsigned int flags = 0;
-    char *buffer = NULL;
+    g_autofree char *buffer = NULL;
 
     if (vshCommandOptBool(cmd, "prealloc-metadata"))
         flags |= VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA;
+
+    if (vshCommandOptBool(cmd, "validate"))
+        flags |= VIR_STORAGE_VOL_CREATE_VALIDATE;
 
     if (!(pool = virshCommandOptPool(ctl, cmd, "pool", NULL)))
         return false;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
-        goto cleanup;
+        return false;
 
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0) {
         vshSaveLibvirtError();
-        goto cleanup;
+        return false;
     }
 
-    if ((vol = virStorageVolCreateXML(pool, buffer, flags))) {
-        vshPrintExtra(ctl, _("Vol %s created from %s\n"),
-                      virStorageVolGetName(vol), from);
-        virStorageVolFree(vol);
-        ret = true;
-    } else {
-        vshError(ctl, _("Failed to create vol from %s"), from);
+    if (!(vol = virStorageVolCreateXML(pool, buffer, flags))) {
+        vshError(ctl, _("Failed to create vol from %1$s"), from);
+        return false;
     }
 
- cleanup:
-    VIR_FREE(buffer);
-    virStoragePoolFree(pool);
-    return ret;
+    vshPrintExtra(ctl, _("Vol %1$s created from %2$s\n"),
+                  virStorageVolGetName(vol), from);
+    return true;
 }
 
 /*
@@ -442,9 +439,10 @@ static const vshCmdInfo info_vol_create_from[] = {
 static const vshCmdOptDef opts_vol_create_from[] = {
     VIRSH_COMMON_OPT_POOL_FULL,
     VIRSH_COMMON_OPT_FILE(N_("file containing an XML vol description")),
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     {.name = "inputpool",
      .type = VSH_OT_STRING,
+     .completer = virshStoragePoolNameCompleter,
      .help = N_("pool name or uuid of the input volume's pool")
     },
     {.name = "prealloc-metadata",
@@ -455,21 +453,25 @@ static const vshCmdOptDef opts_vol_create_from[] = {
      .type = VSH_OT_BOOL,
      .help = N_("use btrfs COW lightweight copy")
     },
+    {.name = "validate",
+     .type = VSH_OT_BOOL,
+     .help = N_("validate the XML against the schema")
+    },
     {.name = NULL}
 };
 
 static bool
 cmdVolCreateFrom(vshControl *ctl, const vshCmd *cmd)
 {
-    virStoragePoolPtr pool = NULL;
-    virStorageVolPtr newvol = NULL, inputvol = NULL;
+    g_autoptr(virshStoragePool) pool = NULL;
+    g_autoptr(virshStorageVol) newvol = NULL;
+    g_autoptr(virshStorageVol) inputvol = NULL;
     const char *from = NULL;
-    bool ret = false;
-    char *buffer = NULL;
+    g_autofree char *buffer = NULL;
     unsigned int flags = 0;
 
     if (!(pool = virshCommandOptPool(ctl, cmd, "pool", NULL)))
-        goto cleanup;
+        return false;
 
     if (vshCommandOptBool(cmd, "prealloc-metadata"))
         flags |= VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA;
@@ -477,65 +479,48 @@ cmdVolCreateFrom(vshControl *ctl, const vshCmd *cmd)
     if (vshCommandOptBool(cmd, "reflink"))
         flags |= VIR_STORAGE_VOL_CREATE_REFLINK;
 
+    if (vshCommandOptBool(cmd, "validate"))
+        flags |= VIR_STORAGE_VOL_CREATE_VALIDATE;
+
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
-        goto cleanup;
+        return false;
 
     if (!(inputvol = virshCommandOptVol(ctl, cmd, "vol", "inputpool", NULL)))
-        goto cleanup;
+        return false;
 
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0) {
         vshReportError(ctl);
-        goto cleanup;
+        return false;
     }
 
     newvol = virStorageVolCreateXMLFrom(pool, buffer, inputvol, flags);
 
-    if (newvol != NULL) {
-        vshPrintExtra(ctl, _("Vol %s created from input vol %s\n"),
-                      virStorageVolGetName(newvol), virStorageVolGetName(inputvol));
-    } else {
-        vshError(ctl, _("Failed to create vol from %s"), from);
-        goto cleanup;
+    if (!newvol) {
+        vshError(ctl, _("Failed to create vol from %1$s"), from);
+        return false;
     }
 
-    ret = true;
- cleanup:
-    VIR_FREE(buffer);
-    if (pool)
-        virStoragePoolFree(pool);
-    if (inputvol)
-        virStorageVolFree(inputvol);
-    if (newvol)
-        virStorageVolFree(newvol);
-    return ret;
+    vshPrintExtra(ctl, _("Vol %1$s created from input vol %2$s\n"),
+                  virStorageVolGetName(newvol), virStorageVolGetName(inputvol));
+    return true;
 }
 
-static xmlChar *
+static char *
 virshMakeCloneXML(const char *origxml, const char *newname)
 {
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    xmlXPathObjectPtr obj = NULL;
-    xmlChar *newxml = NULL;
-    int size;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    xmlNodePtr node;
 
-    doc = virXMLParseStringCtxt(origxml, _("(volume_definition)"), &ctxt);
-    if (!doc)
-        goto cleanup;
+    if (!(doc = virXMLParseStringCtxt(origxml, _("(volume_definition)"), &ctxt)))
+        return NULL;
 
-    obj = xmlXPathEval(BAD_CAST "/volume/name", ctxt);
-    if (obj == NULL || obj->nodesetval == NULL ||
-        obj->nodesetval->nodeTab == NULL)
-        goto cleanup;
+    if (!(node = virXPathNode("/volume/name", ctxt)))
+        return NULL;
 
-    xmlNodeSetContent(obj->nodesetval->nodeTab[0], (const xmlChar *)newname);
-    xmlDocDumpMemory(doc, &newxml, &size);
+    xmlNodeSetContent(node, (const xmlChar *)newname);
 
- cleanup:
-    xmlXPathFreeObject(obj);
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
-    return newxml;
+    return virXMLNodeToString(doc, doc->children);
 }
 
 /*
@@ -552,10 +537,11 @@ static const vshCmdInfo info_vol_clone[] = {
 };
 
 static const vshCmdOptDef opts_vol_clone[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     {.name = "newname",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshCompleteEmpty,
      .help = N_("clone name")
     },
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
@@ -567,22 +553,26 @@ static const vshCmdOptDef opts_vol_clone[] = {
      .type = VSH_OT_BOOL,
      .help = N_("use btrfs COW lightweight copy")
     },
+    {.name = "print-xml",
+     .type = VSH_OT_BOOL,
+     .help = N_("print XML document rather than clone the volume")
+    },
     {.name = NULL}
 };
 
 static bool
 cmdVolClone(vshControl *ctl, const vshCmd *cmd)
 {
-    virStoragePoolPtr origpool = NULL;
-    virStorageVolPtr origvol = NULL, newvol = NULL;
+    g_autoptr(virshStoragePool) origpool = NULL;
+    g_autoptr(virshStorageVol) origvol = NULL;
+    g_autoptr(virshStorageVol) newvol = NULL;
     const char *name = NULL;
-    char *origxml = NULL;
-    xmlChar *newxml = NULL;
-    bool ret = false;
+    g_autofree char *origxml = NULL;
+    g_autofree char *newxml = NULL;
     unsigned int flags = 0;
 
     if (!(origvol = virshCommandOptVol(ctl, cmd, "vol", "pool", NULL)))
-        goto cleanup;
+        return false;
 
     if (vshCommandOptBool(cmd, "prealloc-metadata"))
         flags |= VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA;
@@ -593,45 +583,34 @@ cmdVolClone(vshControl *ctl, const vshCmd *cmd)
     origpool = virStoragePoolLookupByVolume(origvol);
     if (!origpool) {
         vshError(ctl, "%s", _("failed to get parent pool"));
-        goto cleanup;
+        return false;
     }
 
     if (vshCommandOptStringReq(ctl, cmd, "newname", &name) < 0)
-        goto cleanup;
+        return false;
 
-    origxml = virStorageVolGetXMLDesc(origvol, 0);
-    if (!origxml)
-        goto cleanup;
+    if (!(origxml = virStorageVolGetXMLDesc(origvol, 0)))
+        return false;
 
-    newxml = virshMakeCloneXML(origxml, name);
-    if (!newxml) {
+    if (!(newxml = virshMakeCloneXML(origxml, name))) {
         vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-        goto cleanup;
+        return false;
     }
 
-    newvol = virStorageVolCreateXMLFrom(origpool, (char *) newxml, origvol, flags);
+    if (vshCommandOptBool(cmd, "print-xml")) {
+        vshPrint(ctl, "%s", newxml);
+        return true;
+    }
 
-    if (newvol != NULL) {
-        vshPrintExtra(ctl, _("Vol %s cloned from %s\n"),
-                      virStorageVolGetName(newvol), virStorageVolGetName(origvol));
-    } else {
-        vshError(ctl, _("Failed to clone vol from %s"),
+    if (!(newvol = virStorageVolCreateXMLFrom(origpool, newxml, origvol, flags))) {
+        vshError(ctl, _("Failed to clone vol from %1$s"),
                  virStorageVolGetName(origvol));
-        goto cleanup;
+        return false;
     }
 
-    ret = true;
-
- cleanup:
-    VIR_FREE(origxml);
-    xmlFree(newxml);
-    if (origvol)
-        virStorageVolFree(origvol);
-    if (newvol)
-        virStorageVolFree(newvol);
-    if (origpool)
-        virStoragePoolFree(origpool);
-    return ret;
+    vshPrintExtra(ctl, _("Vol %1$s cloned from %2$s\n"),
+                  virStorageVolGetName(newvol), virStorageVolGetName(origvol));
+    return true;
 }
 
 /*
@@ -648,7 +627,7 @@ static const vshCmdInfo info_vol_upload[] = {
 };
 
 static const vshCmdOptDef opts_vol_upload[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     VIRSH_COMMON_OPT_FILE(N_("file")),
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = "offset",
@@ -670,15 +649,15 @@ static bool
 cmdVolUpload(vshControl *ctl, const vshCmd *cmd)
 {
     const char *file = NULL;
-    virStorageVolPtr vol = NULL;
-    bool ret = false;
-    int fd = -1;
-    virStreamPtr st = NULL;
+    g_autoptr(virshStorageVol) vol = NULL;
+    VIR_AUTOCLOSE fd = -1;
+    g_autoptr(virshStream) st = NULL;
     const char *name = NULL;
     unsigned long long offset = 0, length = 0;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
     unsigned int flags = 0;
     virshStreamCallbackData cbData;
+    struct stat sb;
 
     if (vshCommandOptULongLong(ctl, cmd, "offset", &offset) < 0)
         return false;
@@ -690,63 +669,61 @@ cmdVolUpload(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &file) < 0)
-        goto cleanup;
+        return false;
 
     if ((fd = open(file, O_RDONLY)) < 0) {
-        vshError(ctl, _("cannot read %s"), file);
-        goto cleanup;
+        vshError(ctl, _("cannot read %1$s"), file);
+        return false;
+    }
+
+    if (fstat(fd, &sb) < 0) {
+        vshError(ctl, _("unable to stat %1$s"), file);
+        return false;
     }
 
     cbData.ctl = ctl;
     cbData.fd = fd;
+    cbData.isBlock = !!S_ISBLK(sb.st_mode);
 
     if (vshCommandOptBool(cmd, "sparse"))
         flags |= VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM;
 
     if (!(st = virStreamNew(priv->conn, 0))) {
         vshError(ctl, _("cannot create a new stream"));
-        goto cleanup;
+        return false;
     }
 
     if (virStorageVolUpload(vol, st, offset, length, flags) < 0) {
-        vshError(ctl, _("cannot upload to volume %s"), name);
-        goto cleanup;
+        vshError(ctl, _("cannot upload to volume %1$s"), name);
+        return false;
     }
 
     if (flags & VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM) {
         if (virStreamSparseSendAll(st, virshStreamSource,
                                    virshStreamInData,
                                    virshStreamSourceSkip, &cbData) < 0) {
-            vshError(ctl, _("cannot send data to volume %s"), name);
-            goto cleanup;
+            vshError(ctl, _("cannot send data to volume %1$s"), name);
+            return false;
         }
     } else {
         if (virStreamSendAll(st, virshStreamSource, &cbData) < 0) {
-            vshError(ctl, _("cannot send data to volume %s"), name);
-            goto cleanup;
+            vshError(ctl, _("cannot send data to volume %1$s"), name);
+            return false;
         }
     }
 
     if (VIR_CLOSE(fd) < 0) {
-        vshError(ctl, _("cannot close file %s"), file);
+        vshError(ctl, _("cannot close file %1$s"), file);
         virStreamAbort(st);
-        goto cleanup;
+        return false;
     }
 
     if (virStreamFinish(st) < 0) {
-        vshError(ctl, _("cannot close volume %s"), name);
-        goto cleanup;
+        vshError(ctl, _("cannot close volume %1$s"), name);
+        return false;
     }
 
-    ret = true;
-
- cleanup:
-    if (vol)
-        virStorageVolFree(vol);
-    if (st)
-        virStreamFree(st);
-    VIR_FORCE_CLOSE(fd);
-    return ret;
+    return true;
 }
 
 /*
@@ -763,7 +740,7 @@ static const vshCmdInfo info_vol_download[] = {
 };
 
 static const vshCmdOptDef opts_vol_download[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     VIRSH_COMMON_OPT_FILE(N_("file")),
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = "offset",
@@ -785,15 +762,17 @@ static bool
 cmdVolDownload(vshControl *ctl, const vshCmd *cmd)
 {
     const char *file = NULL;
-    virStorageVolPtr vol = NULL;
+    g_autoptr(virshStorageVol) vol = NULL;
     bool ret = false;
-    int fd = -1;
-    virStreamPtr st = NULL;
+    VIR_AUTOCLOSE fd = -1;
+    g_autoptr(virshStream) st = NULL;
     const char *name = NULL;
     unsigned long long offset = 0, length = 0;
     bool created = false;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
+    virshStreamCallbackData cbData;
     unsigned int flags = 0;
+    struct stat sb;
 
     if (vshCommandOptULongLong(ctl, cmd, "offset", &offset) < 0)
         return false;
@@ -813,12 +792,21 @@ cmdVolDownload(vshControl *ctl, const vshCmd *cmd)
     if ((fd = open(file, O_WRONLY|O_CREAT|O_EXCL, 0666)) < 0) {
         if (errno != EEXIST ||
             (fd = open(file, O_WRONLY|O_TRUNC, 0666)) < 0) {
-            vshError(ctl, _("cannot create %s"), file);
+            vshError(ctl, _("cannot create %1$s"), file);
             goto cleanup;
         }
     } else {
         created = true;
     }
+
+    if (fstat(fd, &sb) < 0) {
+        vshError(ctl, _("unable to stat %1$s"), file);
+        goto cleanup;
+    }
+
+    cbData.ctl = ctl;
+    cbData.fd = fd;
+    cbData.isBlock = !!S_ISBLK(sb.st_mode);
 
     if (!(st = virStreamNew(priv->conn, 0))) {
         vshError(ctl, _("cannot create a new stream"));
@@ -826,36 +814,31 @@ cmdVolDownload(vshControl *ctl, const vshCmd *cmd)
     }
 
     if (virStorageVolDownload(vol, st, offset, length, flags) < 0) {
-        vshError(ctl, _("cannot download from volume %s"), name);
+        vshError(ctl, _("cannot download from volume %1$s"), name);
         goto cleanup;
     }
 
-    if (virStreamSparseRecvAll(st, virshStreamSink, virshStreamSkip, &fd) < 0) {
-        vshError(ctl, _("cannot receive data from volume %s"), name);
+    if (virStreamSparseRecvAll(st, virshStreamSink, virshStreamSkip, &cbData) < 0) {
+        vshError(ctl, _("cannot receive data from volume %1$s"), name);
         goto cleanup;
     }
 
     if (VIR_CLOSE(fd) < 0) {
-        vshError(ctl, _("cannot close file %s"), file);
+        vshError(ctl, _("cannot close file %1$s"), file);
         virStreamAbort(st);
         goto cleanup;
     }
 
     if (virStreamFinish(st) < 0) {
-        vshError(ctl, _("cannot close volume %s"), name);
+        vshError(ctl, _("cannot close volume %1$s"), name);
         goto cleanup;
     }
 
     ret = true;
 
  cleanup:
-    VIR_FORCE_CLOSE(fd);
     if (!ret && created)
         unlink(file);
-    if (vol)
-        virStorageVolFree(vol);
-    if (st)
-        virStreamFree(st);
     return ret;
 }
 
@@ -873,7 +856,7 @@ static const vshCmdInfo info_vol_delete[] = {
 };
 
 static const vshCmdOptDef opts_vol_delete[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = "delete-snapshots",
      .type = VSH_OT_BOOL,
@@ -886,7 +869,7 @@ static const vshCmdOptDef opts_vol_delete[] = {
 static bool
 cmdVolDelete(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
+    g_autoptr(virshStorageVol) vol = NULL;
     bool ret = true;
     const char *name;
     bool delete_snapshots = vshCommandOptBool(cmd, "delete-snapshots");
@@ -899,13 +882,12 @@ cmdVolDelete(vshControl *ctl, const vshCmd *cmd)
         flags |= VIR_STORAGE_VOL_DELETE_WITH_SNAPSHOTS;
 
     if (virStorageVolDelete(vol, flags) == 0) {
-        vshPrintExtra(ctl, _("Vol %s deleted\n"), name);
+        vshPrintExtra(ctl, _("Vol %1$s deleted\n"), name);
     } else {
-        vshError(ctl, _("Failed to delete vol %s"), name);
+        vshError(ctl, _("Failed to delete vol %1$s"), name);
         ret = false;
     }
 
-    virStorageVolFree(vol);
     return ret;
 }
 
@@ -923,17 +905,17 @@ static const vshCmdInfo info_vol_wipe[] = {
 };
 
 static const vshCmdOptDef opts_vol_wipe[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = "algorithm",
      .type = VSH_OT_STRING,
+     .completer = virshStorageVolWipeAlgorithmCompleter,
      .help = N_("perform selected wiping algorithm")
     },
     {.name = NULL}
 };
 
-VIR_ENUM_DECL(virStorageVolWipeAlgorithm);
-VIR_ENUM_IMPL(virStorageVolWipeAlgorithm,
+VIR_ENUM_IMPL(virshStorageVolWipeAlgorithm,
               VIR_STORAGE_VOL_WIPE_ALG_LAST,
               "zero", "nnsa", "dod", "bsi", "gutmann", "schneier",
               "pfitzner7", "pfitzner33", "random", "trim");
@@ -941,8 +923,7 @@ VIR_ENUM_IMPL(virStorageVolWipeAlgorithm,
 static bool
 cmdVolWipe(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
-    bool ret = false;
+    g_autoptr(virshStorageVol) vol = NULL;
     const char *name;
     const char *algorithm_str = NULL;
     int algorithm = VIR_STORAGE_VOL_WIPE_ALG_ZERO;
@@ -952,12 +933,12 @@ cmdVolWipe(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (vshCommandOptStringReq(ctl, cmd, "algorithm", &algorithm_str) < 0)
-        goto out;
+        return false;
 
     if (algorithm_str &&
-        (algorithm = virStorageVolWipeAlgorithmTypeFromString(algorithm_str)) < 0) {
-        vshError(ctl, _("Unsupported algorithm '%s'"), algorithm_str);
-        goto out;
+        (algorithm = virshStorageVolWipeAlgorithmTypeFromString(algorithm_str)) < 0) {
+        vshError(ctl, _("Unsupported algorithm '%1$s'"), algorithm_str);
+        return false;
     }
 
     if ((funcRet = virStorageVolWipePattern(vol, algorithm, 0)) < 0) {
@@ -967,15 +948,12 @@ cmdVolWipe(vshControl *ctl, const vshCmd *cmd)
     }
 
     if (funcRet < 0) {
-        vshError(ctl, _("Failed to wipe vol %s"), name);
-        goto out;
+        vshError(ctl, _("Failed to wipe vol %1$s"), name);
+        return false;
     }
 
-    vshPrintExtra(ctl, _("Vol %s wiped\n"), name);
-    ret = true;
- out:
-    virStorageVolFree(vol);
-    return ret;
+    vshPrintExtra(ctl, _("Vol %1$s wiped\n"), name);
+    return true;
 }
 
 
@@ -1011,7 +989,7 @@ static const vshCmdInfo info_vol_info[] = {
 };
 
 static const vshCmdOptDef opts_vol_info[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = "bytes",
      .type = VSH_OT_BOOL,
@@ -1028,10 +1006,9 @@ static bool
 cmdVolInfo(vshControl *ctl, const vshCmd *cmd)
 {
     virStorageVolInfo info;
-    virStorageVolPtr vol;
+    g_autoptr(virshStorageVol) vol = NULL;
     bool bytes = vshCommandOptBool(cmd, "bytes");
     bool physical = vshCommandOptBool(cmd, "physical");
-    bool ret = true;
     int rc;
     unsigned int flags = 0;
 
@@ -1048,41 +1025,34 @@ cmdVolInfo(vshControl *ctl, const vshCmd *cmd)
     else
         rc = virStorageVolGetInfo(vol, &info);
 
-    if (rc == 0) {
-        double val;
-        const char *unit;
-
-        vshPrint(ctl, "%-15s %s\n", _("Type:"),
-                 virshVolumeTypeToString(info.type));
-
-        if (bytes) {
-            vshPrint(ctl, "%-15s %llu %s\n", _("Capacity:"),
-                     info.capacity, _("bytes"));
-        } else {
-            val = vshPrettyCapacity(info.capacity, &unit);
-            vshPrint(ctl, "%-15s %2.2lf %s\n", _("Capacity:"), val, unit);
-        }
-
-        if (bytes) {
-            if (physical)
-                vshPrint(ctl, "%-15s %llu %s\n", _("Physical:"),
-                         info.allocation, _("bytes"));
-            else
-                vshPrint(ctl, "%-15s %llu %s\n", _("Allocation:"),
-                         info.allocation, _("bytes"));
-         } else {
-            val = vshPrettyCapacity(info.allocation, &unit);
-            if (physical)
-                vshPrint(ctl, "%-15s %2.2lf %s\n", _("Physical:"), val, unit);
-            else
-                vshPrint(ctl, "%-15s %2.2lf %s\n", _("Allocation:"), val, unit);
-         }
-    } else {
-        ret = false;
+    if (rc < 0) {
+        return false;
     }
 
-    virStorageVolFree(vol);
-    return ret;
+    vshPrint(ctl, "%-15s %s\n", _("Type:"),
+             virshVolumeTypeToString(info.type));
+
+    if (bytes) {
+        vshPrint(ctl, "%-15s %llu %s\n", _("Capacity:"), info.capacity, _("bytes"));
+
+        if (physical)
+            vshPrint(ctl, "%-15s %llu %s\n", _("Physical:"), info.allocation, _("bytes"));
+        else
+            vshPrint(ctl, "%-15s %llu %s\n", _("Allocation:"), info.allocation, _("bytes"));
+    } else {
+        const char *unit;
+        double val = vshPrettyCapacity(info.capacity, &unit);
+
+        vshPrint(ctl, "%-15s %2.2lf %s\n", _("Capacity:"), val, unit);
+        val = vshPrettyCapacity(info.allocation, &unit);
+
+        if (physical)
+            vshPrint(ctl, "%-15s %2.2lf %s\n", _("Physical:"), val, unit);
+        else
+            vshPrint(ctl, "%-15s %2.2lf %s\n", _("Allocation:"), val, unit);
+    }
+
+    return true;
 }
 
 /*
@@ -1101,10 +1071,11 @@ static const vshCmdInfo info_vol_resize[] = {
 };
 
 static const vshCmdOptDef opts_vol_resize[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     {.name = "capacity",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshCompleteEmpty,
      .help = N_("new capacity for the vol, as scaled integer (default bytes)")
     },
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
@@ -1126,11 +1097,10 @@ static const vshCmdOptDef opts_vol_resize[] = {
 static bool
 cmdVolResize(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
+    g_autoptr(virshStorageVol) vol = NULL;
     const char *capacityStr = NULL;
     unsigned long long capacity = 0;
     unsigned int flags = 0;
-    bool ret = false;
     bool delta = vshCommandOptBool(cmd, "delta");
 
     if (vshCommandOptBool(cmd, "allocate"))
@@ -1142,7 +1112,7 @@ cmdVolResize(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (vshCommandOptStringReq(ctl, cmd, "capacity", &capacityStr) < 0)
-        goto cleanup;
+        return false;
     virSkipSpaces(&capacityStr);
     if (*capacityStr == '-') {
         /* The API always requires a positive value; but we allow a
@@ -1153,7 +1123,7 @@ cmdVolResize(vshControl *ctl, const vshCmd *cmd)
         } else {
             vshError(ctl, "%s",
                      _("negative size requires --shrink"));
-            goto cleanup;
+            return false;
         }
     }
 
@@ -1161,27 +1131,23 @@ cmdVolResize(vshControl *ctl, const vshCmd *cmd)
         flags |= VIR_STORAGE_VOL_RESIZE_DELTA;
 
     if (virshVolSize(capacityStr, &capacity) < 0) {
-        vshError(ctl, _("Malformed size %s"), capacityStr);
-        goto cleanup;
+        vshError(ctl, _("Malformed size %1$s"), capacityStr);
+        return false;
     }
 
-    if (virStorageVolResize(vol, capacity, flags) == 0) {
-        vshPrintExtra(ctl,
-                      delta ? _("Size of volume '%s' successfully changed by %s\n")
-                      : _("Size of volume '%s' successfully changed to %s\n"),
-                      virStorageVolGetName(vol), capacityStr);
-        ret = true;
-    } else {
+    if (virStorageVolResize(vol, capacity, flags) < 0) {
         vshError(ctl,
-                 delta ? _("Failed to change size of volume '%s' by %s")
-                 : _("Failed to change size of volume '%s' to %s"),
+                 delta ? _("Failed to change size of volume '%1$s' by %2$s")
+                 : _("Failed to change size of volume '%1$s' to %2$s"),
                  virStorageVolGetName(vol), capacityStr);
-        ret = false;
+        return false;
     }
 
- cleanup:
-    virStorageVolFree(vol);
-    return ret;
+    vshPrintExtra(ctl,
+                  delta ? _("Size of volume '%1$s' successfully changed by %2$s\n")
+                  : _("Size of volume '%1$s' successfully changed to %2$s\n"),
+                  virStorageVolGetName(vol), capacityStr);
+    return true;
 }
 
 /*
@@ -1198,31 +1164,39 @@ static const vshCmdInfo info_vol_dumpxml[] = {
 };
 
 static const vshCmdOptDef opts_vol_dumpxml[] = {
-    VIRSH_COMMON_OPT_VOLUME_VOL,
+    VIRSH_COMMON_OPT_VOL_FULL,
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
+    {.name = "xpath",
+     .type = VSH_OT_STRING,
+     .flags = VSH_OFLAG_REQ_OPT,
+     .completer = virshCompleteEmpty,
+     .help = N_("xpath expression to filter the XML document")
+    },
+    {.name = "wrap",
+     .type = VSH_OT_BOOL,
+     .help = N_("wrap xpath results in an common root element"),
+    },
     {.name = NULL}
 };
 
 static bool
 cmdVolDumpXML(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
-    bool ret = true;
-    char *dump;
+    g_autoptr(virshStorageVol) vol = NULL;
+    bool wrap = vshCommandOptBool(cmd, "wrap");
+    const char *xpath = NULL;
+    g_autofree char *xml = NULL;
 
     if (!(vol = virshCommandOptVol(ctl, cmd, "vol", "pool", NULL)))
         return false;
 
-    dump = virStorageVolGetXMLDesc(vol, 0);
-    if (dump != NULL) {
-        vshPrint(ctl, "%s", dump);
-        VIR_FREE(dump);
-    } else {
-        ret = false;
-    }
+    if (vshCommandOptStringQuiet(ctl, cmd, "xpath", &xpath) < 0)
+        return false;
 
-    virStorageVolFree(vol);
-    return ret;
+    if (!(xml = virStorageVolGetXMLDesc(vol, 0)))
+        return false;
+
+    return virshDumpXML(ctl, xml, "volume", xpath, wrap);
 }
 
 static int
@@ -1245,29 +1219,27 @@ struct virshStorageVolList {
     virStorageVolPtr *vols;
     size_t nvols;
 };
-typedef struct virshStorageVolList *virshStorageVolListPtr;
 
 static void
-virshStorageVolListFree(virshStorageVolListPtr list)
+virshStorageVolListFree(struct virshStorageVolList *list)
 {
     size_t i;
 
     if (list && list->vols) {
         for (i = 0; i < list->nvols; i++) {
-            if (list->vols[i])
-                virStorageVolFree(list->vols[i]);
+            virshStorageVolFree(list->vols[i]);
         }
-        VIR_FREE(list->vols);
+        g_free(list->vols);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
-static virshStorageVolListPtr
+static struct virshStorageVolList *
 virshStorageVolListCollect(vshControl *ctl,
                            virStoragePoolPtr pool,
                            unsigned int flags)
 {
-    virshStorageVolListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshStorageVolList *list = g_new0(struct virshStorageVolList, 1);
     size_t i;
     char **names = NULL;
     virStorageVolPtr vol = NULL;
@@ -1306,13 +1278,13 @@ virshStorageVolListCollect(vshControl *ctl,
         return list;
 
     /* Retrieve the list of volume names in the pool */
-    names = vshCalloc(ctl, nvols, sizeof(*names));
+    names = g_new0(char *, nvols);
     if ((nvols = virStoragePoolListVolumes(pool, names, nvols)) < 0) {
         vshError(ctl, "%s", _("Failed to list storage volumes"));
         goto cleanup;
     }
 
-    list->vols = vshMalloc(ctl, sizeof(virStorageVolPtr) * (nvols));
+    list->vols = g_new0(virStorageVolPtr, nvols);
     list->nvols = 0;
 
     /* get the vols */
@@ -1342,8 +1314,7 @@ virshStorageVolListCollect(vshControl *ctl,
     VIR_FREE(names);
 
     if (!success) {
-        virshStorageVolListFree(list);
-        list = NULL;
+        g_clear_pointer(&list, virshStorageVolListFree);
     }
 
     return list;
@@ -1375,7 +1346,7 @@ static bool
 cmdVolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     virStorageVolInfo volumeInfo;
-    virStoragePoolPtr pool;
+    g_autoptr(virshStoragePool) pool = NULL;
     const char *unit;
     double val;
     bool details = vshCommandOptBool(cmd, "details");
@@ -1388,8 +1359,8 @@ cmdVolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
         char *type;
     };
     struct volInfoText *volInfoTexts = NULL;
-    virshStorageVolListPtr list = NULL;
-    vshTablePtr table = NULL;
+    struct virshStorageVolList *list = NULL;
+    g_autoptr(vshTable) table = NULL;
 
     /* Look up the pool information given to us by the user */
     if (!(pool = virshCommandOptPool(ctl, cmd, "pool", NULL)))
@@ -1399,7 +1370,7 @@ cmdVolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
         goto cleanup;
 
     if (list->nvols > 0)
-        volInfoTexts = vshCalloc(ctl, list->nvols, sizeof(*volInfoTexts));
+        volInfoTexts = g_new0(struct volInfoText, list->nvols);
 
     /* Collect the rest of the volume information for display */
     for (i = 0; i < list->nvols; i++) {
@@ -1487,7 +1458,6 @@ cmdVolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
     ret = true;
 
  cleanup:
-    vshTableFree(table);
 
     /* Safely free the memory allocated in this function */
     if (list && list->nvols) {
@@ -1502,7 +1472,6 @@ cmdVolList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 
     /* Cleanup remaining memory */
     VIR_FREE(volInfoTexts);
-    virStoragePoolFree(pool);
     virshStorageVolListFree(list);
 
     /* Return the desired value */
@@ -1523,25 +1492,20 @@ static const vshCmdInfo info_vol_name[] = {
 };
 
 static const vshCmdOptDef opts_vol_name[] = {
-    {.name = "vol",
-     .type = VSH_OT_DATA,
-     .flags = VSH_OFLAG_REQ,
-     .help = N_("volume key or path")
-    },
+    VIRSH_COMMON_OPT_VOL_BY_KEY,
     {.name = NULL}
 };
 
 static bool
 cmdVolName(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
+    g_autoptr(virshStorageVol) vol = NULL;
 
     if (!(vol = virshCommandOptVolBy(ctl, cmd, "vol", NULL, NULL,
                                      VIRSH_BYUUID)))
         return false;
 
     vshPrint(ctl, "%s\n", virStorageVolGetName(vol));
-    virStorageVolFree(vol);
     return true;
 }
 
@@ -1559,11 +1523,7 @@ static const vshCmdInfo info_vol_pool[] = {
 };
 
 static const vshCmdOptDef opts_vol_pool[] = {
-    {.name = "vol",
-     .type = VSH_OT_DATA,
-     .flags = VSH_OFLAG_REQ,
-     .help = N_("volume key or path")
-    },
+    VIRSH_COMMON_OPT_VOL_BY_KEY,
     {.name = "uuid",
      .type = VSH_OT_BOOL,
      .help = N_("return the pool uuid rather than pool name")
@@ -1574,8 +1534,8 @@ static const vshCmdOptDef opts_vol_pool[] = {
 static bool
 cmdVolPool(vshControl *ctl, const vshCmd *cmd)
 {
-    virStoragePoolPtr pool;
-    virStorageVolPtr vol;
+    g_autoptr(virshStoragePool) pool = NULL;
+    g_autoptr(virshStorageVol) vol = NULL;
     char uuid[VIR_UUID_STRING_BUFLEN];
 
     /* Use the supplied string to locate the volume */
@@ -1588,7 +1548,6 @@ cmdVolPool(vshControl *ctl, const vshCmd *cmd)
     pool = virStoragePoolLookupByVolume(vol);
     if (pool == NULL) {
         vshError(ctl, "%s", _("failed to get parent pool"));
-        virStorageVolFree(vol);
         return false;
     }
 
@@ -1602,9 +1561,6 @@ cmdVolPool(vshControl *ctl, const vshCmd *cmd)
         vshPrint(ctl, "%s\n", virStoragePoolGetName(pool));
     }
 
-    /* Cleanup */
-    virStorageVolFree(vol);
-    virStoragePoolFree(pool);
     return true;
 }
 
@@ -1622,11 +1578,7 @@ static const vshCmdInfo info_vol_key[] = {
 };
 
 static const vshCmdOptDef opts_vol_key[] = {
-    {.name = "vol",
-     .type = VSH_OT_DATA,
-     .flags = VSH_OFLAG_REQ,
-     .help = N_("volume name or path")
-    },
+    VIRSH_COMMON_OPT_VOL_NAME(N_("volume name or path")),
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = NULL}
 };
@@ -1634,13 +1586,12 @@ static const vshCmdOptDef opts_vol_key[] = {
 static bool
 cmdVolKey(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
+    g_autoptr(virshStorageVol) vol = NULL;
 
     if (!(vol = virshCommandOptVol(ctl, cmd, "vol", "pool", NULL)))
         return false;
 
     vshPrint(ctl, "%s\n", virStorageVolGetKey(vol));
-    virStorageVolFree(vol);
     return true;
 }
 
@@ -1658,11 +1609,7 @@ static const vshCmdInfo info_vol_path[] = {
 };
 
 static const vshCmdOptDef opts_vol_path[] = {
-    {.name = "vol",
-     .type = VSH_OT_DATA,
-     .flags = VSH_OFLAG_REQ,
-     .help = N_("volume name or key")
-    },
+    VIRSH_COMMON_OPT_VOL_NAME(N_("volume name or key")),
     VIRSH_COMMON_OPT_POOL_OPTIONAL,
     {.name = NULL}
 };
@@ -1670,20 +1617,17 @@ static const vshCmdOptDef opts_vol_path[] = {
 static bool
 cmdVolPath(vshControl *ctl, const vshCmd *cmd)
 {
-    virStorageVolPtr vol;
-    char * StorageVolPath;
+    g_autoptr(virshStorageVol) vol = NULL;
+    g_autofree char *StorageVolPath = NULL;
 
     if (!(vol = virshCommandOptVol(ctl, cmd, "vol", "pool", NULL)))
         return false;
 
     if ((StorageVolPath = virStorageVolGetPath(vol)) == NULL) {
-        virStorageVolFree(vol);
         return false;
     }
 
     vshPrint(ctl, "%s\n", StorageVolPath);
-    VIR_FREE(StorageVolPath);
-    virStorageVolFree(vol);
     return true;
 }
 

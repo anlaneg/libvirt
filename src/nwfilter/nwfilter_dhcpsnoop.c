@@ -36,7 +36,7 @@
  */
 #include <config.h>
 
-#ifdef HAVE_LIBPCAP
+#ifdef WITH_LIBPCAP
 # include <pcap.h>
 #endif
 
@@ -45,11 +45,9 @@
 
 #include <net/if.h>
 
-#include "viralloc.h"
 #include "virlog.h"
 #include "datatypes.h"
 #include "virerror.h"
-#include "conf/domain_conf.h"
 #include "nwfilter_gentech_driver.h"
 #include "nwfilter_dhcpsnoop.h"
 #include "nwfilter_ipaddrmap.h"
@@ -65,7 +63,7 @@
 
 VIR_LOG_INIT("nwfilter.nwfilter_dhcpsnoop");
 
-#ifdef HAVE_LIBPCAP
+#ifdef WITH_LIBPCAP
 
 # define LEASEFILE_DIR RUNSTATEDIR "/libvirt/network/"
 # define LEASEFILE LEASEFILE_DIR "nwfilter.leases"
@@ -78,37 +76,18 @@ struct virNWFilterSnoopState {
     int                  wLeases; /* number of written leases */
     int                  nThreads; /* number of running threads */
     /* thread management */
-    virHashTablePtr      snoopReqs;
-    virHashTablePtr      ifnameToKey;
+    GHashTable *     snoopReqs;
+    GHashTable *     ifnameToKey;
     virMutex             snoopLock;  /* protects SnoopReqs and IfNameToKey */
-    virHashTablePtr      active;
+    GHashTable *     active;
     virMutex             activeLock; /* protects Active */
 };
-
-# define virNWFilterSnoopLock() \
-    do { \
-        virMutexLock(&virNWFilterSnoopState.snoopLock); \
-    } while (0)
-# define virNWFilterSnoopUnlock() \
-    do { \
-        virMutexUnlock(&virNWFilterSnoopState.snoopLock); \
-    } while (0)
-# define virNWFilterSnoopActiveLock() \
-    do { \
-        virMutexLock(&virNWFilterSnoopState.activeLock); \
-    } while (0)
-# define virNWFilterSnoopActiveUnlock() \
-    do { \
-        virMutexUnlock(&virNWFilterSnoopState.activeLock); \
-    } while (0)
 
 # define VIR_IFKEY_LEN   ((VIR_UUID_STRING_BUFLEN) + (VIR_MAC_STRING_BUFLEN))
 
 typedef struct _virNWFilterSnoopReq virNWFilterSnoopReq;
-typedef virNWFilterSnoopReq *virNWFilterSnoopReqPtr;
 
 typedef struct _virNWFilterSnoopIPLease virNWFilterSnoopIPLease;
-typedef virNWFilterSnoopIPLease *virNWFilterSnoopIPLeasePtr;
 
 typedef enum {
     THREAD_STATUS_NONE,
@@ -124,14 +103,14 @@ struct _virNWFilterSnoopReq {
      */
     int                                  refctr;
 
-    virNWFilterTechDriverPtr             techdriver;
-    virNWFilterBindingDefPtr             binding;
+    virNWFilterTechDriver *            techdriver;
+    virNWFilterBindingDef *            binding;
     int                                  ifindex;
     char                                 ifkey[VIR_IFKEY_LEN];
-    virNWFilterDriverStatePtr            driver;
+    virNWFilterDriverState *           driver;
     /* start and end of lease list, ordered by lease time */
-    virNWFilterSnoopIPLeasePtr           start;
-    virNWFilterSnoopIPLeasePtr           end;
+    virNWFilterSnoopIPLease *          start;
+    virNWFilterSnoopIPLease *          end;
     char                                *threadkey;
     virErrorPtr                          threadError;
 
@@ -157,8 +136,8 @@ struct _virNWFilterSnoopReq {
 
 /*
  * Note about lock-order:
- * 1st: virNWFilterSnoopLock()
- * 2nd: virNWFilterSnoopReqLock(req)
+ * 1st: virNWFilterSnoopState.snoopLock
+ * 2nd: &req->lock
  *
  * Rationale: Former protects the SnoopReqs hash, latter its contents
  */
@@ -166,16 +145,14 @@ struct _virNWFilterSnoopReq {
 struct _virNWFilterSnoopIPLease {
     virSocketAddr              ipAddress;
     virSocketAddr              ipServer;
-    virNWFilterSnoopReqPtr     snoopReq;
-    unsigned int               timeout;
+    virNWFilterSnoopReq *    snoopReq;
+    time_t                     timeout;
     /* timer list */
-    virNWFilterSnoopIPLeasePtr prev;
-    virNWFilterSnoopIPLeasePtr next;
+    virNWFilterSnoopIPLease *prev;
+    virNWFilterSnoopIPLease *next;
 };
 
 typedef struct _virNWFilterSnoopEthHdr virNWFilterSnoopEthHdr;
-typedef virNWFilterSnoopEthHdr *virNWFilterSnoopEthHdrPtr;
-
 struct _virNWFilterSnoopEthHdr {
     virMacAddr eh_dst;
     virMacAddr eh_src;
@@ -185,8 +162,6 @@ struct _virNWFilterSnoopEthHdr {
 G_STATIC_ASSERT(sizeof(struct _virNWFilterSnoopEthHdr) == 14);
 
 typedef struct _virNWFilterSnoopDHCPHdr virNWFilterSnoopDHCPHdr;
-typedef virNWFilterSnoopDHCPHdr *virNWFilterSnoopDHCPHdrPtr;
-
 struct _virNWFilterSnoopDHCPHdr {
     uint8_t   d_op;
     uint8_t   d_htype;
@@ -228,8 +203,6 @@ G_STATIC_ASSERT(sizeof(struct _virNWFilterSnoopDHCPHdr) == 236);
 # define PCAP_FLOOD_TIMEOUT_MS      10 /* ms */
 
 typedef struct _virNWFilterDHCPDecodeJob virNWFilterDHCPDecodeJob;
-typedef virNWFilterDHCPDecodeJob *virNWFilterDHCPDecodeJobPtr;
-
 struct _virNWFilterDHCPDecodeJob {
     unsigned char packet[PCAP_PBUFSIZE];
     int caplen;
@@ -244,8 +217,6 @@ struct _virNWFilterDHCPDecodeJob {
 # define MAX_QUEUED_JOBS        (DHCP_PKT_BURST + 2 * DHCP_PKT_RATE)
 
 typedef struct _virNWFilterSnoopRateLimitConf virNWFilterSnoopRateLimitConf;
-typedef virNWFilterSnoopRateLimitConf *virNWFilterSnoopRateLimitConfPtr;
-
 struct _virNWFilterSnoopRateLimitConf {
     time_t prev;
     unsigned int pkt_ctr;
@@ -257,8 +228,6 @@ struct _virNWFilterSnoopRateLimitConf {
 # define SNOOP_POLL_MAX_TIMEOUT_MS  (10 * 1000) /* milliseconds */
 
 typedef struct _virNWFilterSnoopPcapConf virNWFilterSnoopPcapConf;
-typedef virNWFilterSnoopPcapConf *virNWFilterSnoopPcapConfPtr;
-
 struct _virNWFilterSnoopPcapConf {
     pcap_t *handle;
     const pcap_direction_t dir;
@@ -270,16 +239,13 @@ struct _virNWFilterSnoopPcapConf {
 };
 
 /* local function prototypes */
-static int virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReqPtr req,
-                                       virSocketAddrPtr ipaddr,
+static int virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReq *req,
+                                       virSocketAddr *ipaddr,
                                        bool update_leasefile,
                                        bool instantiate);
 
-static void virNWFilterSnoopReqLock(virNWFilterSnoopReqPtr req);
-static void virNWFilterSnoopReqUnlock(virNWFilterSnoopReqPtr req);
-
 static void virNWFilterSnoopLeaseFileLoad(void);
-static void virNWFilterSnoopLeaseFileSave(virNWFilterSnoopIPLeasePtr ipl);
+static void virNWFilterSnoopLeaseFileSave(virNWFilterSnoopIPLease *ipl);
 
 /* local variables */
 static struct virNWFilterSnoopState virNWFilterSnoopState = {
@@ -290,62 +256,49 @@ static const unsigned char dhcp_magic[4] = { 99, 130, 83, 99 };
 
 
 static char *
-virNWFilterSnoopActivate(virNWFilterSnoopReqPtr req)
+virNWFilterSnoopActivate(virNWFilterSnoopReq *req)
 {
-    char *key;
-
-    key = g_strdup_printf("%p-%d", req, req->ifindex);
-
-    virNWFilterSnoopActiveLock();
+    g_autofree char *key = g_strdup_printf("%p-%d", req, req->ifindex);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.activeLock);
 
     if (virHashAddEntry(virNWFilterSnoopState.active, key, (void *)0x1) < 0)
-        VIR_FREE(key);
+        return NULL;
 
-    virNWFilterSnoopActiveUnlock();
-
-    return key;
+    return g_steal_pointer(&key);
 }
 
 static void
 virNWFilterSnoopCancel(char **threadKey)
 {
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.activeLock);
+
     if (*threadKey == NULL)
         return;
 
-    virNWFilterSnoopActiveLock();
-
     ignore_value(virHashRemoveEntry(virNWFilterSnoopState.active, *threadKey));
-    VIR_FREE(*threadKey);
-
-    virNWFilterSnoopActiveUnlock();
+    g_clear_pointer(threadKey, g_free);
 }
 
 static bool
 virNWFilterSnoopIsActive(char *threadKey)
 {
-    void *entry;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.activeLock);
 
     if (threadKey == NULL)
         return false;
 
-    virNWFilterSnoopActiveLock();
-
-    entry = virHashLookup(virNWFilterSnoopState.active, threadKey);
-
-    virNWFilterSnoopActiveUnlock();
-
-    return entry != NULL;
+    return virHashLookup(virNWFilterSnoopState.active, threadKey) != NULL;
 }
 
 /*
  * virNWFilterSnoopListAdd - add an IP lease to a list
  */
 static void
-virNWFilterSnoopListAdd(virNWFilterSnoopIPLeasePtr plnew,
-                        virNWFilterSnoopIPLeasePtr *start,
-                        virNWFilterSnoopIPLeasePtr *end)
+virNWFilterSnoopListAdd(virNWFilterSnoopIPLease *plnew,
+                        virNWFilterSnoopIPLease **start,
+                        virNWFilterSnoopIPLease **end)
 {
-    virNWFilterSnoopIPLeasePtr pl;
+    virNWFilterSnoopIPLease *pl;
 
     plnew->next = plnew->prev = NULL;
 
@@ -378,9 +331,9 @@ virNWFilterSnoopListAdd(virNWFilterSnoopIPLeasePtr plnew,
  * virNWFilterSnoopListDel - remove an IP lease from a list
  */
 static void
-virNWFilterSnoopListDel(virNWFilterSnoopIPLeasePtr ipl,
-                        virNWFilterSnoopIPLeasePtr *start,
-                        virNWFilterSnoopIPLeasePtr *end)
+virNWFilterSnoopListDel(virNWFilterSnoopIPLease *ipl,
+                        virNWFilterSnoopIPLease **start,
+                        virNWFilterSnoopIPLease **end)
 {
     if (ipl->prev)
         ipl->prev->next = ipl->next;
@@ -399,33 +352,28 @@ virNWFilterSnoopListDel(virNWFilterSnoopIPLeasePtr ipl,
  * virNWFilterSnoopLeaseTimerAdd - add an IP lease to the timer list
  */
 static void
-virNWFilterSnoopIPLeaseTimerAdd(virNWFilterSnoopIPLeasePtr plnew)
+virNWFilterSnoopIPLeaseTimerAdd(virNWFilterSnoopIPLease *plnew)
 {
-    virNWFilterSnoopReqPtr req = plnew->snoopReq;
+    virNWFilterSnoopReq *req = plnew->snoopReq;
 
     /* protect req->start / req->end */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     virNWFilterSnoopListAdd(plnew, &req->start, &req->end);
-
-    virNWFilterSnoopReqUnlock(req);
 }
 
 /*
  * virNWFilterSnoopLeaseTimerDel - remove an IP lease from the timer list
  */
 static void
-virNWFilterSnoopIPLeaseTimerDel(virNWFilterSnoopIPLeasePtr ipl)
+virNWFilterSnoopIPLeaseTimerDel(virNWFilterSnoopIPLease *ipl)
 {
-    virNWFilterSnoopReqPtr req = ipl->snoopReq;
+    virNWFilterSnoopReq *req = ipl->snoopReq;
 
     /* protect req->start / req->end */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     virNWFilterSnoopListDel(ipl, &req->start, &req->end);
-
-    virNWFilterSnoopReqUnlock(req);
-
     ipl->timeout = 0;
 }
 
@@ -439,51 +387,35 @@ virNWFilterSnoopIPLeaseTimerDel(virNWFilterSnoopIPLeasePtr ipl)
  *               efficient.
  */
 static int
-virNWFilterSnoopIPLeaseInstallRule(virNWFilterSnoopIPLeasePtr ipl,
+virNWFilterSnoopIPLeaseInstallRule(virNWFilterSnoopIPLease *ipl,
                                    bool instantiate)
 {
-    char *ipaddr;
-    int rc = -1;
-    virNWFilterSnoopReqPtr req;
+    g_autofree char *ipaddr = virSocketAddrFormat(&ipl->ipAddress);
+    virNWFilterSnoopReq *req = ipl->snoopReq;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
-    ipaddr = virSocketAddrFormat(&ipl->ipAddress);
     if (!ipaddr)
         return -1;
 
-    req = ipl->snoopReq;
-
-    /* protect req->binding->portdevname */
-    virNWFilterSnoopReqLock(req);
-
     if (virNWFilterIPAddrMapAddIPAddr(req->binding->portdevname, ipaddr) < 0)
-        goto exit_snooprequnlock;
+        return -1;
 
-    if (!instantiate) {
-        rc = 0;
-        goto exit_snooprequnlock;
-    }
+    if (!instantiate)
+        return 0;
 
     /* instantiate the filters */
 
-    if (req->binding->portdevname) {
-        rc = virNWFilterInstantiateFilterLate(req->driver,
-                                              req->binding,
-                                              req->ifindex);
-    }
+    if (!req->binding->portdevname)
+        return -1;
 
- exit_snooprequnlock:
-    virNWFilterSnoopReqUnlock(req);
-
-    VIR_FREE(ipaddr);
-
-    return rc;
+    return virNWFilterInstantiateFilterLate(req->driver, req->binding, req->ifindex);
 }
 
 /*
  * virNWFilterSnoopIPLeaseUpdate - update the timeout on an IP lease
  */
 static void
-virNWFilterSnoopIPLeaseUpdate(virNWFilterSnoopIPLeasePtr ipl, time_t timeout)
+virNWFilterSnoopIPLeaseUpdate(virNWFilterSnoopIPLease *ipl, time_t timeout)
 {
     if (timeout < ipl->timeout)
         return;  /* no take-backs */
@@ -496,11 +428,11 @@ virNWFilterSnoopIPLeaseUpdate(virNWFilterSnoopIPLeasePtr ipl, time_t timeout)
 /*
  * virNWFilterSnoopGetByIP - lookup IP lease by IP address
  */
-static virNWFilterSnoopIPLeasePtr
-virNWFilterSnoopIPLeaseGetByIP(virNWFilterSnoopIPLeasePtr start,
-                               virSocketAddrPtr ipaddr)
+static virNWFilterSnoopIPLease *
+virNWFilterSnoopIPLeaseGetByIP(virNWFilterSnoopIPLease *start,
+                               virSocketAddr *ipaddr)
 {
-    virNWFilterSnoopIPLeasePtr pl;
+    virNWFilterSnoopIPLease *pl;
 
     for (pl = start;
          pl && !virSocketAddrEqual(&pl->ipAddress, ipaddr);
@@ -513,13 +445,13 @@ virNWFilterSnoopIPLeaseGetByIP(virNWFilterSnoopIPLeasePtr start,
  * virNWFilterSnoopReqLeaseTimerRun - run the IP lease timeout list
  */
 static unsigned int
-virNWFilterSnoopReqLeaseTimerRun(virNWFilterSnoopReqPtr req)
+virNWFilterSnoopReqLeaseTimerRun(virNWFilterSnoopReq *req)
 {
     time_t now = time(0);
     bool is_last = false;
 
     /* protect req->start */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     while (req->start && req->start->timeout <= now) {
         if (req->start->next == NULL ||
@@ -529,8 +461,6 @@ virNWFilterSnoopReqLeaseTimerRun(virNWFilterSnoopReqPtr req)
                                     is_last);
     }
 
-    virNWFilterSnoopReqUnlock(req);
-
     return 0;
 }
 
@@ -538,7 +468,7 @@ virNWFilterSnoopReqLeaseTimerRun(virNWFilterSnoopReqPtr req)
  * Get a reference to the given Snoop request
  */
 static void
-virNWFilterSnoopReqGet(virNWFilterSnoopReqPtr req)
+virNWFilterSnoopReqGet(virNWFilterSnoopReq *req)
 {
     g_atomic_int_add(&req->refctr, 1);
 }
@@ -548,43 +478,33 @@ virNWFilterSnoopReqGet(virNWFilterSnoopReqPtr req)
  * interface key. The caller must release the request with a call
  * to virNWFilerSnoopReqPut(req).
  */
-static virNWFilterSnoopReqPtr
+static virNWFilterSnoopReq *
 virNWFilterSnoopReqNew(const char *ifkey)
 {
-    virNWFilterSnoopReqPtr req;
+    g_autofree virNWFilterSnoopReq *req = g_new0(virNWFilterSnoopReq, 1);
 
     if (ifkey == NULL || strlen(ifkey) != VIR_IFKEY_LEN - 1) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("virNWFilterSnoopReqNew called with invalid "
-                         "key \"%s\" (%zu)"),
+                       _("virNWFilterSnoopReqNew called with invalid key \"%1$s\" (%2$zu)"),
                        NULLSTR_EMPTY(ifkey),
                        ifkey ? strlen(ifkey) : 0);
         return NULL;
     }
 
-    if (VIR_ALLOC(req) < 0)
-        return NULL;
-
     req->threadStatus = THREAD_STATUS_NONE;
 
-    if (virStrcpyStatic(req->ifkey, ifkey) < 0||
-        virMutexInitRecursive(&req->lock) < 0)
-        goto err_free_req;
+    if (virStrcpyStatic(req->ifkey, ifkey) < 0 ||
+        virMutexInitRecursive(&req->lock) < 0) {
+        return NULL;
+    }
 
-    if (virCondInit(&req->threadStatusCond) < 0)
-        goto err_destroy_mutex;
+    if (virCondInit(&req->threadStatusCond) < 0) {
+        virMutexDestroy(&req->lock);
+        return NULL;
+    }
 
     virNWFilterSnoopReqGet(req);
-
-    return req;
-
- err_destroy_mutex:
-    virMutexDestroy(&req->lock);
-
- err_free_req:
-    VIR_FREE(req);
-
-    return NULL;
+    return g_steal_pointer(&req);
 }
 
 /*
@@ -593,9 +513,9 @@ virNWFilterSnoopReqNew(const char *ifkey)
  * The lease file is NOT rewritten.
  */
 static void
-virNWFilterSnoopReqFree(virNWFilterSnoopReqPtr req)
+virNWFilterSnoopReqFree(virNWFilterSnoopReq *req)
 {
-    virNWFilterSnoopIPLeasePtr ipl;
+    virNWFilterSnoopIPLease *ipl;
 
     if (!req)
         return;
@@ -614,25 +534,7 @@ virNWFilterSnoopReqFree(virNWFilterSnoopReqPtr req)
     virCondDestroy(&req->threadStatusCond);
     virFreeError(req->threadError);
 
-    VIR_FREE(req);
-}
-
-/*
- * Lock a Snoop request 'req'
- */
-static void
-virNWFilterSnoopReqLock(virNWFilterSnoopReqPtr req)
-{
-    virMutexLock(&req->lock);
-}
-
-/*
- * Unlock a Snoop request 'req'
- */
-static void
-virNWFilterSnoopReqUnlock(virNWFilterSnoopReqPtr req)
-{
-    virMutexUnlock(&req->lock);
+    g_free(req);
 }
 
 /*
@@ -641,18 +543,16 @@ virNWFilterSnoopReqUnlock(virNWFilterSnoopReqPtr req)
 static void
 virNWFilterSnoopReqRelease(void *req0)
 {
-    virNWFilterSnoopReqPtr req = req0;
+    virNWFilterSnoopReq *req = req0;
 
     if (!req)
         return;
 
     /* protect req->threadkey */
-    virNWFilterSnoopReqLock(req);
-
-    if (req->threadkey)
-        virNWFilterSnoopCancel(&req->threadkey);
-
-    virNWFilterSnoopReqUnlock(req);
+    VIR_WITH_MUTEX_LOCK_GUARD(&req->lock) {
+        if (req->threadkey)
+            virNWFilterSnoopCancel(&req->threadkey);
+    }
 
     virNWFilterSnoopReqFree(req);
 }
@@ -663,18 +563,15 @@ virNWFilterSnoopReqRelease(void *req0)
  * Get a Snoop request given an interface key; caller must release
  * the Snoop request with a call to virNWFilterSnoopReqPut()
  */
-static virNWFilterSnoopReqPtr
+static virNWFilterSnoopReq *
 virNWFilterSnoopReqGetByIFKey(const char *ifkey)
 {
-    virNWFilterSnoopReqPtr req;
-
-    virNWFilterSnoopLock();
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.snoopLock);
+    virNWFilterSnoopReq *req;
 
     req = virHashLookup(virNWFilterSnoopState.snoopReqs, ifkey);
     if (req)
         virNWFilterSnoopReqGet(req);
-
-    virNWFilterSnoopUnlock();
 
     return req;
 }
@@ -684,12 +581,12 @@ virNWFilterSnoopReqGetByIFKey(const char *ifkey)
  * after this call.
  */
 static void
-virNWFilterSnoopReqPut(virNWFilterSnoopReqPtr req)
+virNWFilterSnoopReqPut(virNWFilterSnoopReq *req)
 {
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.snoopLock);
+
     if (!req)
         return;
-
-    virNWFilterSnoopLock();
 
     if (!!g_atomic_int_dec_and_test(&req->refctr)) {
         /*
@@ -706,58 +603,43 @@ virNWFilterSnoopReqPut(virNWFilterSnoopReqPtr req)
                                             req->ifkey));
         }
     }
-
-    virNWFilterSnoopUnlock();
 }
 
 /*
  * virNWFilterSnoopReqLeaseAdd - create or update an IP lease
  */
 static int
-virNWFilterSnoopReqLeaseAdd(virNWFilterSnoopReqPtr req,
-                            virNWFilterSnoopIPLeasePtr plnew,
+virNWFilterSnoopReqLeaseAdd(virNWFilterSnoopReq *req,
+                            virNWFilterSnoopIPLease *plnew,
                             bool update_leasefile)
 {
-    virNWFilterSnoopIPLeasePtr pl;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
+    virNWFilterSnoopIPLease *pl;
 
     plnew->snoopReq = req;
-
-    /* protect req->start and the lease */
-    virNWFilterSnoopReqLock(req);
 
     pl = virNWFilterSnoopIPLeaseGetByIP(req->start, &plnew->ipAddress);
 
     if (pl) {
         virNWFilterSnoopIPLeaseUpdate(pl, plnew->timeout);
+        virLockGuardUnlock(&lock);
+    } else {
+        pl = g_new0(virNWFilterSnoopIPLease, 1);
+        *pl = *plnew;
 
-        virNWFilterSnoopReqUnlock(req);
+        if (req->threadkey && virNWFilterSnoopIPLeaseInstallRule(pl, true) < 0) {
+            g_free(pl);
+            return -1;
+        }
 
-        goto exit;
+        virLockGuardUnlock(&lock);
+
+        /* put the lease on the req's list */
+        virNWFilterSnoopIPLeaseTimerAdd(pl);
+
+        g_atomic_int_add(&virNWFilterSnoopState.nLeases, 1);
     }
 
-    virNWFilterSnoopReqUnlock(req);
-
-    if (VIR_ALLOC(pl) < 0)
-        return -1;
-    *pl = *plnew;
-
-    /* protect req->threadkey */
-    virNWFilterSnoopReqLock(req);
-
-    if (req->threadkey && virNWFilterSnoopIPLeaseInstallRule(pl, true) < 0) {
-        virNWFilterSnoopReqUnlock(req);
-        VIR_FREE(pl);
-        return -1;
-    }
-
-    virNWFilterSnoopReqUnlock(req);
-
-    /* put the lease on the req's list */
-    virNWFilterSnoopIPLeaseTimerAdd(pl);
-
-    g_atomic_int_add(&virNWFilterSnoopState.nLeases, 1);
-
- exit:
     if (update_leasefile)
         virNWFilterSnoopLeaseFileSave(pl);
 
@@ -769,26 +651,21 @@ virNWFilterSnoopReqLeaseAdd(virNWFilterSnoopReqPtr req,
  * and re-build the filtering rules with them
  */
 static int
-virNWFilterSnoopReqRestore(virNWFilterSnoopReqPtr req)
+virNWFilterSnoopReqRestore(virNWFilterSnoopReq *req)
 {
-    int ret = 0;
-    virNWFilterSnoopIPLeasePtr ipl;
+    virNWFilterSnoopIPLease *ipl;
 
     /* protect req->start */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     for (ipl = req->start; ipl; ipl = ipl->next) {
         /* instantiate the rules at the last lease */
         bool is_last = (ipl->next == NULL);
-        if (virNWFilterSnoopIPLeaseInstallRule(ipl, is_last) < 0) {
-            ret = -1;
-            break;
-        }
+        if (virNWFilterSnoopIPLeaseInstallRule(ipl, is_last) < 0)
+            return -1;
     }
 
-    virNWFilterSnoopReqUnlock(req);
-
-    return ret;
+    return 0;
 }
 
 /*
@@ -811,25 +688,24 @@ virNWFilterSnoopReqRestore(virNWFilterSnoopReqPtr req)
  * Returns 0 on success, -1 if the instantiation of the rules failed
  */
 static int
-virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReqPtr req,
-                            virSocketAddrPtr ipaddr, bool update_leasefile,
+virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReq *req,
+                            virSocketAddr *ipaddr, bool update_leasefile,
                             bool instantiate)
 {
     int ret = 0;
-    virNWFilterSnoopIPLeasePtr ipl;
-    char *ipstr = NULL;
+    virNWFilterSnoopIPLease *ipl;
+    g_autofree char *ipstr = NULL;
 
     /* protect req->start, req->ifname and the lease */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     ipl = virNWFilterSnoopIPLeaseGetByIP(req->start, ipaddr);
     if (ipl == NULL)
-        goto lease_not_found;
+        return 0;
 
     ipstr = virSocketAddrFormat(&ipl->ipAddress);
     if (!ipstr) {
-        ret = -1;
-        goto lease_not_found;
+        return -1;
     }
 
     virNWFilterSnoopIPLeaseTimerDel(ipl);
@@ -849,7 +725,7 @@ virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReqPtr req,
                                                req->binding,
                                                req->ifindex);
     } else {
-        virNWFilterVarValuePtr dhcpsrvrs =
+        virNWFilterVarValue *dhcpsrvrs =
             virHashLookup(req->binding->filterparams,
                           NWFILTER_VARNAME_DHCPSERVER);
 
@@ -865,20 +741,14 @@ virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReqPtr req,
     }
 
  skip_instantiate:
-    VIR_FREE(ipl);
+    g_free(ipl);
 
     ignore_value(!!g_atomic_int_dec_and_test(&virNWFilterSnoopState.nLeases));
-
- lease_not_found:
-    VIR_FREE(ipstr);
-
-    virNWFilterSnoopReqUnlock(req);
-
     return ret;
 }
 
 static int
-virNWFilterSnoopDHCPGetOpt(virNWFilterSnoopDHCPHdrPtr pd, int len,
+virNWFilterSnoopDHCPGetOpt(virNWFilterSnoopDHCPHdr *pd, int len,
                            uint8_t *pmtype, uint32_t *pleasetime)
 {
     int oind, olen;
@@ -902,7 +772,7 @@ virNWFilterSnoopDHCPGetOpt(virNWFilterSnoopDHCPHdrPtr pd, int len,
         switch (pd->d_opts[oind]) {
         case DHCPO_LEASE:
             if (olen - oind < 6)
-                goto malformed;
+                goto error;
             if (*pleasetime)
                 return -1;  /* duplicate lease time */
             memcpy(&nwint, (char *)pd->d_opts + oind + 2, sizeof(nwint));
@@ -910,7 +780,7 @@ virNWFilterSnoopDHCPGetOpt(virNWFilterSnoopDHCPHdrPtr pd, int len,
             break;
         case DHCPO_MTYPE:
             if (olen - oind < 3)
-                goto malformed;
+                goto error;
             if (*pmtype)
                 return -1;  /* duplicate message type */
             *pmtype = pd->d_opts[oind + 2];
@@ -922,12 +792,12 @@ virNWFilterSnoopDHCPGetOpt(virNWFilterSnoopDHCPHdrPtr pd, int len,
             return 0;
         default:
             if (olen - oind < 2)
-                goto malformed;
+                goto error;
         }
         oind += pd->d_opts[oind + 1] + 2;
     }
     return 0;
- malformed:
+ error:
     VIR_WARN("got lost in the options!");
     return -1;
 }
@@ -940,14 +810,14 @@ virNWFilterSnoopDHCPGetOpt(virNWFilterSnoopDHCPHdrPtr pd, int len,
  * Returns -1 in case of error with the installation of rules
  */
 static int
-virNWFilterSnoopDHCPDecode(virNWFilterSnoopReqPtr req,
-                           virNWFilterSnoopEthHdrPtr pep,
+virNWFilterSnoopDHCPDecode(virNWFilterSnoopReq *req,
+                           virNWFilterSnoopEthHdr *pep,
                            int len, bool fromVM)
 {
     struct iphdr *pip;
     struct udphdr *pup;
-    virNWFilterSnoopDHCPHdrPtr pd;
-    virNWFilterSnoopIPLease ipl;
+    virNWFilterSnoopDHCPHdr *pd;
+    virNWFilterSnoopIPLease ipl = { 0 };
     uint8_t mtype;
     uint32_t leasetime;
     uint32_t nwint;
@@ -974,7 +844,7 @@ virNWFilterSnoopDHCPDecode(virNWFilterSnoopReqPtr req,
     if (len < 0)
         return -2;
 
-    pd = (virNWFilterSnoopDHCPHdrPtr) ((char *)pup + sizeof(*pup));
+    pd = (virNWFilterSnoopDHCPHdr *) ((char *)pup + sizeof(*pup));
     len -= sizeof(*pup);
     if (len < 0)
         return -2;                 /* invalid packet length */
@@ -992,8 +862,6 @@ virNWFilterSnoopDHCPDecode(virNWFilterSnoopReqPtr req,
 
     if (virNWFilterSnoopDHCPGetOpt(pd, len, &mtype, &leasetime) < 0)
         return -2;
-
-    memset(&ipl, 0, sizeof(ipl));
 
     memcpy(&nwint, &pd->d_yiaddr, sizeof(nwint));
     virSocketAddrSetIPv4AddrNetOrder(&ipl.ipAddress, nwint);
@@ -1047,7 +915,7 @@ virNWFilterSnoopDHCPOpen(const char *ifname, virMacAddr *mac,
     pcap_t *handle = NULL;
     struct bpf_program fp;
     char pcap_errbuf[PCAP_ERRBUF_SIZE];
-    char *ext_filter = NULL;
+    g_autofree char *ext_filter = NULL;
     char macaddr[VIR_MAC_STRING_BUFLEN];
 
     virMacAddrFormat(mac, macaddr);
@@ -1077,49 +945,44 @@ virNWFilterSnoopDHCPOpen(const char *ifname, virMacAddr *mac,
     if (handle == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("pcap_create failed"));
-        goto cleanup_nohandle;
+        return NULL;
     }
 
     if (pcap_set_snaplen(handle, PCAP_PBUFSIZE) < 0 ||
         pcap_set_immediate_mode(handle, 1) < 0 ||
         pcap_activate(handle) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("setup of pcap handle failed: %s"),
+                       _("setup of pcap handle failed: %1$s"),
                        pcap_geterr(handle));
         goto cleanup;
     }
 
     if (pcap_compile(handle, &fp, ext_filter, 1, PCAP_NETMASK_UNKNOWN) != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("pcap_compile: %s"), pcap_geterr(handle));
+                       _("pcap_compile: %1$s"), pcap_geterr(handle));
         goto cleanup;
     }
 
     if (pcap_setfilter(handle, &fp) != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("pcap_setfilter: %s"), pcap_geterr(handle));
+                       _("pcap_setfilter: %1$s"), pcap_geterr(handle));
         goto cleanup_freecode;
     }
 
     if (pcap_setdirection(handle, dir) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("pcap_setdirection: %s"),
+                       _("pcap_setdirection: %1$s"),
                        pcap_geterr(handle));
         goto cleanup_freecode;
     }
 
     pcap_freecode(&fp);
-    VIR_FREE(ext_filter);
-
     return handle;
 
  cleanup_freecode:
     pcap_freecode(&fp);
  cleanup:
     pcap_close(handle);
- cleanup_nohandle:
-    VIR_FREE(ext_filter);
-
     return NULL;
 }
 
@@ -1129,39 +992,37 @@ virNWFilterSnoopDHCPOpen(const char *ifname, virMacAddr *mac,
  */
 static void virNWFilterDHCPDecodeWorker(void *jobdata, void *opaque)
 {
-    virNWFilterSnoopReqPtr req = opaque;
-    virNWFilterDHCPDecodeJobPtr job = jobdata;
-    virNWFilterSnoopEthHdrPtr packet = (virNWFilterSnoopEthHdrPtr)job->packet;
+    virNWFilterSnoopReq *req = opaque;
+    g_autofree virNWFilterDHCPDecodeJob *job = jobdata;
+    virNWFilterSnoopEthHdr *packet = (virNWFilterSnoopEthHdr *)job->packet;
 
     if (virNWFilterSnoopDHCPDecode(req, packet,
                                    job->caplen, job->fromVM) == -1) {
         req->jobCompletionStatus = -1;
 
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Instantiation of rules failed on "
-                         "interface '%s'"), req->binding->portdevname);
+                       _("Instantiation of rules failed on interface '%1$s'"),
+                       req->binding->portdevname);
     }
     ignore_value(!!g_atomic_int_dec_and_test(job->qCtr));
-    VIR_FREE(job);
 }
 
 /*
  * Submit a job to the worker thread doing the time-consuming work...
  */
 static int
-virNWFilterSnoopDHCPDecodeJobSubmit(virThreadPoolPtr pool,
-                                    virNWFilterSnoopEthHdrPtr pep,
+virNWFilterSnoopDHCPDecodeJobSubmit(virThreadPool *pool,
+                                    virNWFilterSnoopEthHdr *pep,
                                     int len, pcap_direction_t dir,
                                     int *qCtr)
 {
-    virNWFilterDHCPDecodeJobPtr job;
+    virNWFilterDHCPDecodeJob *job;
     int ret;
 
     if (len <= MIN_VALID_DHCP_PKT_SIZE || len > sizeof(job->packet))
         return 0;
 
-    if (VIR_ALLOC(job) < 0)
-        return -1;
+    job = g_new0(virNWFilterDHCPDecodeJob, 1);
 
     memcpy(job->packet, pep, len);
     job->caplen = len;
@@ -1173,7 +1034,7 @@ virNWFilterSnoopDHCPDecodeJobSubmit(virThreadPoolPtr pool,
     if (ret == 0)
         g_atomic_int_add(qCtr, 1);
     else
-        VIR_FREE(job);
+        g_free(job);
 
     return ret;
 }
@@ -1192,7 +1053,7 @@ virNWFilterSnoopDHCPDecodeJobSubmit(virThreadPoolPtr pool,
  * return 1. If the number of packets is below the rate, it returns 0.
  */
 static unsigned int
-virNWFilterSnoopRateLimit(virNWFilterSnoopRateLimitConfPtr rl)
+virNWFilterSnoopRateLimit(virNWFilterSnoopRateLimitConf *rl)
 {
     time_t now = time(0);
     int diff;
@@ -1236,7 +1097,7 @@ virNWFilterSnoopRateLimit(virNWFilterSnoopRateLimitConfPtr rl)
  * sending too many packets.
  */
 static void
-virNWFilterSnoopRatePenalty(virNWFilterSnoopPcapConfPtr pc,
+virNWFilterSnoopRatePenalty(virNWFilterSnoopPcapConf *pc,
                             unsigned int diff, unsigned int limit)
 {
     if (diff > limit) {
@@ -1253,7 +1114,7 @@ virNWFilterSnoopRatePenalty(virNWFilterSnoopPcapConfPtr pc,
 }
 
 static int
-virNWFilterSnoopAdjustPoll(virNWFilterSnoopPcapConfPtr pc,
+virNWFilterSnoopAdjustPoll(virNWFilterSnoopPcapConf *pc,
                            size_t nPc, struct pollfd *pfd,
                            int *pollTo)
 {
@@ -1303,15 +1164,15 @@ virNWFilterSnoopAdjustPoll(virNWFilterSnoopPcapConfPtr pc,
 static void
 virNWFilterDHCPSnoopThread(void *req0)
 {
-    virNWFilterSnoopReqPtr req = req0;
+    virNWFilterSnoopReq *req = req0;
     struct pcap_pkthdr *hdr;
-    virNWFilterSnoopEthHdrPtr packet;
+    virNWFilterSnoopEthHdr *packet;
     int ifindex = 0;
     int errcount = 0;
     int tmp = -1, rv, n, pollTo;
     size_t i;
-    char *threadkey = NULL;
-    virThreadPoolPtr worker = NULL;
+    g_autofree char *threadkey = NULL;
+    virThreadPool *worker = NULL;
     time_t last_displayed = 0, last_displayed_queue = 0;
     virNWFilterSnoopPcapConf pcapConf[] = {
         {
@@ -1349,44 +1210,39 @@ virNWFilterDHCPSnoopThread(void *req0)
     /* whoever started us increased the reference counter for the req for us */
 
     /* protect req->binding->portdevname & req->threadkey */
-    virNWFilterSnoopReqLock(req);
-
-    if (req->binding->portdevname && req->threadkey) {
-        for (i = 0; i < G_N_ELEMENTS(pcapConf); i++) {
-            pcapConf[i].handle =
-                virNWFilterSnoopDHCPOpen(req->binding->portdevname,
-                                         &req->binding->mac,
-                                         pcapConf[i].filter,
-                                         pcapConf[i].dir);
-            if (!pcapConf[i].handle) {
-                error = true;
-                break;
+    VIR_WITH_MUTEX_LOCK_GUARD(&req->lock) {
+        if (req->binding->portdevname && req->threadkey) {
+            for (i = 0; i < G_N_ELEMENTS(pcapConf); i++) {
+                pcapConf[i].handle =
+                    virNWFilterSnoopDHCPOpen(req->binding->portdevname,
+                                             &req->binding->mac,
+                                             pcapConf[i].filter,
+                                             pcapConf[i].dir);
+                if (!pcapConf[i].handle) {
+                    error = true;
+                    break;
+                }
+                fds[i].fd = pcap_fileno(pcapConf[i].handle);
             }
-            fds[i].fd = pcap_fileno(pcapConf[i].handle);
+            tmp = virNetDevGetIndex(req->binding->portdevname, &ifindex);
+            threadkey = g_strdup(req->threadkey);
+            worker = virThreadPoolNewFull(1, 1, 0, virNWFilterDHCPDecodeWorker,
+                                          "dhcp-decode", NULL, req);
         }
-        tmp = virNetDevGetIndex(req->binding->portdevname, &ifindex);
-        threadkey = g_strdup(req->threadkey);
-        worker = virThreadPoolNewFull(1, 1, 0,
-                                      virNWFilterDHCPDecodeWorker,
-                                      "dhcp-decode",
-                                      req);
+
+        /* let creator know how well we initialized */
+        if (error || !threadkey || tmp < 0 || !worker || ifindex != req->ifindex) {
+            virErrorPreserveLast(&req->threadError);
+            req->threadStatus = THREAD_STATUS_FAIL;
+        } else {
+            req->threadStatus = THREAD_STATUS_OK;
+        }
+
+        virCondSignal(&req->threadStatusCond);
     }
-
-    /* let creator know how well we initialized */
-    if (error || !threadkey || tmp < 0 || !worker ||
-        ifindex != req->ifindex) {
-        virErrorPreserveLast(&req->threadError);
-        req->threadStatus = THREAD_STATUS_FAIL;
-    } else {
-        req->threadStatus = THREAD_STATUS_OK;
-    }
-
-    virCondSignal(&req->threadStatusCond);
-
-    virNWFilterSnoopReqUnlock(req);
 
     if (req->threadStatus != THREAD_STATUS_OK)
-        goto exit;
+        goto cleanup;
 
     while (!error) {
         if (virNWFilterSnoopAdjustPoll(pcapConf,
@@ -1414,7 +1270,7 @@ virNWFilterDHCPSnoopThread(void *req0)
          */
         if (!virNWFilterSnoopIsActive(threadkey) ||
             req->jobCompletionStatus != 0)
-            goto exit;
+            goto cleanup;
 
         for (i = 0; n > 0 && i < G_N_ELEMENTS(fds); i++) {
             if (!fds[i].revents)
@@ -1431,12 +1287,10 @@ virNWFilterDHCPSnoopThread(void *req0)
                 tmp = -1;
 
                 /* protect req->binding->portdevname */
-                virNWFilterSnoopReqLock(req);
-
-                if (req->binding->portdevname)
-                    tmp = virNetDevValidateConfig(req->binding->portdevname, NULL, ifindex);
-
-                virNWFilterSnoopReqUnlock(req);
+                VIR_WITH_MUTEX_LOCK_GUARD(&req->lock) {
+                    if (req->binding->portdevname)
+                        tmp = virNetDevValidateConfig(req->binding->portdevname, NULL, ifindex);
+                }
 
                 if (tmp <= 0) {
                     error = true;
@@ -1444,24 +1298,20 @@ virNWFilterDHCPSnoopThread(void *req0)
                 }
 
                 if (++errcount > PCAP_READ_MAXERRS) {
-                    pcap_close(pcapConf[i].handle);
-                    pcapConf[i].handle = NULL;
+                    g_clear_pointer(&pcapConf[i].handle, pcap_close);
 
                     /* protect req->binding->portdevname */
-                    virNWFilterSnoopReqLock(req);
-
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("interface '%s' failing; "
-                                     "reopening"),
-                                   req->binding->portdevname);
-                    if (req->binding->portdevname)
-                        pcapConf[i].handle =
-                            virNWFilterSnoopDHCPOpen(req->binding->portdevname,
-                                                     &req->binding->mac,
-                                                     pcapConf[i].filter,
-                                                     pcapConf[i].dir);
-
-                    virNWFilterSnoopReqUnlock(req);
+                    VIR_WITH_MUTEX_LOCK_GUARD(&req->lock) {
+                        virReportError(VIR_ERR_INTERNAL_ERROR,
+                                       _("interface '%1$s' failing; reopening"),
+                                       req->binding->portdevname);
+                        if (req->binding->portdevname)
+                            pcapConf[i].handle =
+                                virNWFilterSnoopDHCPOpen(req->binding->portdevname,
+                                                         &req->binding->mac,
+                                                         pcapConf[i].filter,
+                                                         pcapConf[i].dir);
+                    }
 
                     if (!pcapConf[i].handle) {
                         error = true;
@@ -1506,8 +1356,8 @@ virNWFilterDHCPSnoopThread(void *req0)
                                                       pcapConf[i].dir,
                                                       &pcapConf[i].qCtr) < 0) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("Job submission failed on "
-                                     "interface '%s'"), req->binding->portdevname);
+                                   _("Job submission failed on interface '%1$s'"),
+                                   req->binding->portdevname);
                     error = true;
                     break;
                 }
@@ -1516,27 +1366,22 @@ virNWFilterDHCPSnoopThread(void *req0)
     } /* while (!error) */
 
     /* protect IfNameToKey */
-    virNWFilterSnoopLock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&virNWFilterSnoopState.snoopLock) {
+        /* protect req->binding->portdevname & req->threadkey */
+        VIR_WITH_MUTEX_LOCK_GUARD(&req->lock) {
+            virNWFilterSnoopCancel(&req->threadkey);
 
-    /* protect req->binding->portdevname & req->threadkey */
-    virNWFilterSnoopReqLock(req);
+            ignore_value(virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey,
+                                            req->binding->portdevname));
 
-    virNWFilterSnoopCancel(&req->threadkey);
+            g_clear_pointer(&req->binding->portdevname, g_free);
+        }
+    }
 
-    ignore_value(virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey,
-                                    req->binding->portdevname));
-
-    VIR_FREE(req->binding->portdevname);
-
-    virNWFilterSnoopReqUnlock(req);
-    virNWFilterSnoopUnlock();
-
- exit:
+ cleanup:
     virThreadPoolFree(worker);
 
     virNWFilterSnoopReqPut(req);
-
-    VIR_FREE(threadkey);
 
     for (i = 0; i < G_N_ELEMENTS(pcapConf); i++) {
         if (pcapConf[i].handle)
@@ -1558,16 +1403,16 @@ virNWFilterSnoopIFKeyFMT(char *ifkey, const unsigned char *vmuuid,
 }
 
 int
-virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
-                        virNWFilterBindingDefPtr binding,
-                        virNWFilterDriverStatePtr driver)
+virNWFilterDHCPSnoopReq(virNWFilterTechDriver *techdriver,
+                        virNWFilterBindingDef *binding,
+                        virNWFilterDriverState *driver)
 {
-    virNWFilterSnoopReqPtr req;
+    virNWFilterSnoopReq *req;
     bool isnewreq;
     char ifkey[VIR_IFKEY_LEN];
     int tmp;
     virThread thread;
-    virNWFilterVarValuePtr dhcpsrvrs;
+    virNWFilterVarValue *dhcpsrvrs;
     bool threadPuts = false;
 
     virNWFilterSnoopIFKeyFMT(ifkey, binding->owneruuid, &binding->mac);
@@ -1579,8 +1424,7 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
             virNWFilterSnoopReqPut(req);
             return 0;
         }
-        virNWFilterBindingDefFree(req->binding);
-        req->binding = NULL;
+        g_clear_pointer(&req->binding, virNWFilterBindingDefFree);
     } else {
         req = virNWFilterSnoopReqNew(ifkey);
         if (!req)
@@ -1597,9 +1441,7 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
     /* check that all tools are available for applying the filters (late) */
     if (!techdriver->canApplyBasicRules()) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("IP parameter must be provided since "
-                         "snooping the IP address does not work "
-                         "possibly due to missing tools"));
+                       _("IP parameter must be provided since snooping the IP address does not work possibly due to missing tools"));
         goto exit_snoopreqput;
     }
 
@@ -1610,19 +1452,18 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
                                        &req->binding->mac,
                                        dhcpsrvrs, false) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("applyDHCPOnlyRules "
-                         "failed - spoofing not protected!"));
+                       _("applyDHCPOnlyRules failed - spoofing not protected!"));
         goto exit_snoopreqput;
     }
 
-    virNWFilterSnoopLock();
+    virMutexLock(&virNWFilterSnoopState.snoopLock);
 
     if (virHashAddEntry(virNWFilterSnoopState.ifnameToKey,
                         req->binding->portdevname,
                         req->ifkey) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("virNWFilterDHCPSnoopReq ifname map failed"
-                         " on interface \"%s\" key \"%s\""), binding->portdevname,
+                       _("virNWFilterDHCPSnoopReq ifname map failed on interface \"%1$s\" key \"%2$s\""),
+                       binding->portdevname,
                        ifkey);
         goto exit_snoopunlock;
     }
@@ -1630,20 +1471,20 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
     if (isnewreq &&
         virHashAddEntry(virNWFilterSnoopState.snoopReqs, ifkey, req) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("virNWFilterDHCPSnoopReq req add failed on"
-                         " interface \"%s\" ifkey \"%s\""), binding->portdevname,
+                       _("virNWFilterDHCPSnoopReq req add failed on interface \"%1$s\" ifkey \"%2$s\""),
+                       binding->portdevname,
                        ifkey);
         goto exit_rem_ifnametokey;
     }
 
     /* prevent thread from holding req */
-    virNWFilterSnoopReqLock(req);
+    virMutexLock(&req->lock);
 
     if (virThreadCreateFull(&thread, false, virNWFilterDHCPSnoopThread,
                             "dhcp-snoop", false, req) != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("virNWFilterDHCPSnoopReq virThreadCreate "
-                         "failed on interface '%s'"), binding->portdevname);
+                       _("virNWFilterDHCPSnoopReq virThreadCreate failed on interface '%1$s'"),
+                       binding->portdevname);
         goto exit_snoopreq_unlock;
     }
 
@@ -1654,15 +1495,15 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
     req->threadkey = virNWFilterSnoopActivate(req);
     if (!req->threadkey) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Activation of snoop request failed on "
-                         "interface '%s'"), req->binding->portdevname);
+                       _("Activation of snoop request failed on interface '%1$s'"),
+                       req->binding->portdevname);
         goto exit_snoopreq_unlock;
     }
 
     if (virNWFilterSnoopReqRestore(req) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Restoring of leases failed on "
-                         "interface '%s'"), req->binding->portdevname);
+                       _("Restoring of leases failed on interface '%1$s'"),
+                       req->binding->portdevname);
         goto exit_snoop_cancel;
     }
 
@@ -1678,9 +1519,9 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
         goto exit_snoop_cancel;
     }
 
-    virNWFilterSnoopReqUnlock(req);
+    virMutexUnlock(&req->lock);
 
-    virNWFilterSnoopUnlock();
+    virMutexUnlock(&virNWFilterSnoopState.snoopLock);
 
     /* do not 'put' the req -- the thread will do this */
 
@@ -1689,11 +1530,11 @@ virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver,
  exit_snoop_cancel:
     virNWFilterSnoopCancel(&req->threadkey);
  exit_snoopreq_unlock:
-    virNWFilterSnoopReqUnlock(req);
+    virMutexUnlock(&req->lock);
  exit_rem_ifnametokey:
     virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey, binding->portdevname);
  exit_snoopunlock:
-    virNWFilterSnoopUnlock();
+    virMutexUnlock(&virNWFilterSnoopState.snoopLock);
  exit_snoopreqput:
     if (!threadPuts)
         virNWFilterSnoopReqPut(req);
@@ -1722,39 +1563,29 @@ virNWFilterSnoopLeaseFileOpen(void)
  */
 static int
 virNWFilterSnoopLeaseFileWrite(int lfd, const char *ifkey,
-                               virNWFilterSnoopIPLeasePtr ipl)
+                               virNWFilterSnoopIPLease *ipl)
 {
-    char *lbuf = NULL;
-    char *ipstr, *dhcpstr;
+    g_autofree char *lbuf = NULL;
+    g_autofree char *ipstr = virSocketAddrFormat(&ipl->ipAddress);
+    g_autofree char *dhcpstr = virSocketAddrFormat(&ipl->ipServer);
     int len;
-    int ret = 0;
 
-    ipstr = virSocketAddrFormat(&ipl->ipAddress);
-    dhcpstr = virSocketAddrFormat(&ipl->ipServer);
-
-    if (!dhcpstr || !ipstr) {
-        ret = -1;
-        goto cleanup;
-    }
+    if (!dhcpstr || !ipstr)
+        return -1;
 
     /* time intf ip dhcpserver */
-    lbuf = g_strdup_printf("%u %s %s %s\n", ipl->timeout, ifkey, ipstr, dhcpstr);
+    lbuf = g_strdup_printf("%llu %s %s %s\n",
+                           (unsigned long long) ipl->timeout,
+                           ifkey, ipstr, dhcpstr);
     len = strlen(lbuf);
 
     if (safewrite(lfd, lbuf, len) != len) {
         virReportSystemError(errno, "%s", _("lease file write failed"));
-        ret = -1;
-        goto cleanup;
+        return -1;
     }
 
     ignore_value(g_fsync(lfd));
-
- cleanup:
-    VIR_FREE(lbuf);
-    VIR_FREE(dhcpstr);
-    VIR_FREE(ipstr);
-
-    return ret;
+    return 0;
 }
 
 /*
@@ -1764,25 +1595,21 @@ virNWFilterSnoopLeaseFileWrite(int lfd, const char *ifkey,
  * exceeds a threshold.
  */
 static void
-virNWFilterSnoopLeaseFileSave(virNWFilterSnoopIPLeasePtr ipl)
+virNWFilterSnoopLeaseFileSave(virNWFilterSnoopIPLease *ipl)
 {
-    virNWFilterSnoopReqPtr req = ipl->snoopReq;
-
-    virNWFilterSnoopLock();
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.snoopLock);
+    virNWFilterSnoopReq *req = ipl->snoopReq;
 
     if (virNWFilterSnoopState.leaseFD < 0)
         virNWFilterSnoopLeaseFileOpen();
     if (virNWFilterSnoopLeaseFileWrite(virNWFilterSnoopState.leaseFD,
                                        req->ifkey, ipl) < 0)
-        goto err_exit;
+        return;
 
     /* keep dead leases at < ~95% of file size */
     if (g_atomic_int_add(&virNWFilterSnoopState.wLeases, 1) >=
         g_atomic_int_get(&virNWFilterSnoopState.nLeases) * 20)
         virNWFilterSnoopLeaseFileLoad();   /* load & refresh lease file */
-
- err_exit:
-    virNWFilterSnoopUnlock();
 }
 
 /*
@@ -1792,16 +1619,15 @@ virNWFilterSnoopLeaseFileSave(virNWFilterSnoopIPLeasePtr ipl)
  */
 static int
 virNWFilterSnoopPruneIter(const void *payload,
-                          const void *name G_GNUC_UNUSED,
+                          const char *name G_GNUC_UNUSED,
                           const void *data G_GNUC_UNUSED)
 {
-    virNWFilterSnoopReqPtr req = (virNWFilterSnoopReqPtr)payload;
-    bool del_req;
+    virNWFilterSnoopReq *req = (virNWFilterSnoopReq *)payload;
 
     /* clean up orphaned, expired leases */
 
     /* protect req->threadkey */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     if (!req->threadkey)
         virNWFilterSnoopReqLeaseTimerRun(req);
@@ -1809,11 +1635,7 @@ virNWFilterSnoopPruneIter(const void *payload,
     /*
      * have the entry removed if it has no leases and no one holds a ref
      */
-    del_req = ((req->start == NULL) && (g_atomic_int_get(&req->refctr) == 0));
-
-    virNWFilterSnoopReqUnlock(req);
-
-    return del_req;
+    return ((req->start == NULL) && (g_atomic_int_get(&req->refctr) == 0));
 }
 
 /*
@@ -1822,20 +1644,19 @@ virNWFilterSnoopPruneIter(const void *payload,
  */
 static int
 virNWFilterSnoopSaveIter(void *payload,
-                         const void *name G_GNUC_UNUSED,
+                         const char *name G_GNUC_UNUSED,
                          void *data)
 {
-    virNWFilterSnoopReqPtr req = payload;
+    virNWFilterSnoopReq *req = payload;
     int tfd = *(int *)data;
-    virNWFilterSnoopIPLeasePtr ipl;
+    virNWFilterSnoopIPLease *ipl;
 
     /* protect req->start */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     for (ipl = req->start; ipl; ipl = ipl->next)
         ignore_value(virNWFilterSnoopLeaseFileWrite(tfd, req->ifkey, ipl));
 
-    virNWFilterSnoopReqUnlock(req);
     return 0;
 }
 
@@ -1849,18 +1670,18 @@ virNWFilterSnoopLeaseFileRefresh(void)
 {
     int tfd;
 
-    if (virFileMakePathWithMode(LEASEFILE_DIR, 0700) < 0) {
-        virReportError(errno, _("mkdir(\"%s\")"), LEASEFILE_DIR);
+    if (g_mkdir_with_parents(LEASEFILE_DIR, 0700) < 0) {
+        virReportError(errno, _("mkdir(\"%1$s\")"), LEASEFILE_DIR);
         return;
     }
 
     if (unlink(TMPLEASEFILE) < 0 && errno != ENOENT)
-        virReportSystemError(errno, _("unlink(\"%s\")"), TMPLEASEFILE);
+        virReportSystemError(errno, _("unlink(\"%1$s\")"), TMPLEASEFILE);
 
     /* lease file loaded, delete old one */
     tfd = open(TMPLEASEFILE, O_CREAT|O_RDWR|O_TRUNC|O_EXCL, 0644);
     if (tfd < 0) {
-        virReportSystemError(errno, _("open(\"%s\")"), TMPLEASEFILE);
+        virReportSystemError(errno, _("open(\"%1$s\")"), TMPLEASEFILE);
         return;
     }
 
@@ -1874,19 +1695,19 @@ virNWFilterSnoopLeaseFileRefresh(void)
     }
 
     if (VIR_CLOSE(tfd) < 0) {
-        virReportSystemError(errno, _("unable to close %s"), TMPLEASEFILE);
+        virReportSystemError(errno, _("unable to close %1$s"), TMPLEASEFILE);
         /* assuming the old lease file is still better, skip the renaming */
-        goto skip_rename;
+        goto cleanup;
     }
 
     if (rename(TMPLEASEFILE, LEASEFILE) < 0) {
-        virReportSystemError(errno, _("rename(\"%s\", \"%s\")"),
+        virReportSystemError(errno, _("rename(\"%1$s\", \"%2$s\")"),
                              TMPLEASEFILE, LEASEFILE);
         unlink(TMPLEASEFILE);
     }
     g_atomic_int_set(&virNWFilterSnoopState.wLeases, 0);
 
- skip_rename:
+ cleanup:
     virNWFilterSnoopLeaseFileOpen();
 }
 
@@ -1897,32 +1718,33 @@ virNWFilterSnoopLeaseFileLoad(void)
     char line[256], ifkey[VIR_IFKEY_LEN];
     char ipstr[INET_ADDRSTRLEN], srvstr[INET_ADDRSTRLEN];
     virNWFilterSnoopIPLease ipl;
-    virNWFilterSnoopReqPtr req;
+    virNWFilterSnoopReq *req;
     time_t now;
     FILE *fp;
     int ln = 0, tmp;
-
-    /* protect the lease file */
-    virNWFilterSnoopLock();
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.snoopLock);
 
     fp = fopen(LEASEFILE, "r");
     time(&now);
     while (fp && fgets(line, sizeof(line), fp)) {
+        unsigned long long timeout;
+
         if (line[strlen(line)-1] != '\n') {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("virNWFilterSnoopLeaseFileLoad lease file "
-                             "line %d corrupt"), ln);
+                           _("virNWFilterSnoopLeaseFileLoad lease file line %1$d corrupt"),
+                           ln);
             break;
         }
         ln++;
         /* key len 54 = "VMUUID"+'-'+"MAC" */
-        if (sscanf(line, "%u %54s %15s %15s", &ipl.timeout,
-                   ifkey, ipstr, srvstr) < 4) {
+        if (sscanf(line, "%llu %54s %15s %15s",
+                   &timeout, ifkey, ipstr, srvstr) < 4) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("virNWFilterSnoopLeaseFileLoad lease file "
-                             "line %d corrupt"), ln);
+                           _("virNWFilterSnoopLeaseFileLoad lease file line %1$d corrupt"),
+                           ln);
             break;
         }
+        ipl.timeout = timeout;
         if (ipl.timeout && ipl.timeout < now)
             continue;
         req = virNWFilterSnoopReqGetByIFKey(ifkey);
@@ -1936,15 +1758,15 @@ virNWFilterSnoopLeaseFileLoad(void)
             if (tmp < 0) {
                 virNWFilterSnoopReqPut(req);
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("virNWFilterSnoopLeaseFileLoad req add"
-                                 " failed on interface \"%s\""), ifkey);
+                               _("virNWFilterSnoopLeaseFileLoad req add failed on interface \"%1$s\""),
+                               ifkey);
                 continue;
             }
         }
 
         if (virSocketAddrParseIPv4(&ipl.ipAddress, ipstr) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("line %d corrupt ipaddr \"%s\""),
+                           _("line %1$d corrupt ipaddr \"%2$s\""),
                            ln, ipstr);
             virNWFilterSnoopReqPut(req);
             continue;
@@ -1963,8 +1785,6 @@ virNWFilterSnoopLeaseFileLoad(void)
     VIR_FORCE_FCLOSE(fp);
 
     virNWFilterSnoopLeaseFileRefresh();
-
-    virNWFilterSnoopUnlock();
 }
 
 /*
@@ -1989,13 +1809,13 @@ virNWFilterSnoopJoinThreads(void)
  */
 static int
 virNWFilterSnoopRemAllReqIter(const void *payload,
-                              const void *name G_GNUC_UNUSED,
+                              const char *name G_GNUC_UNUSED,
                               const void *data G_GNUC_UNUSED)
 {
-    virNWFilterSnoopReqPtr req = (virNWFilterSnoopReqPtr)payload;
+    virNWFilterSnoopReq *req = (virNWFilterSnoopReq *)payload;
 
     /* protect req->binding->portdevname */
-    virNWFilterSnoopReqLock(req);
+    VIR_LOCK_GUARD lock = virLockGuardLock(&req->lock);
 
     if (req->binding && req->binding->portdevname) {
         ignore_value(virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey,
@@ -2008,10 +1828,8 @@ virNWFilterSnoopRemAllReqIter(const void *payload,
          */
         virNWFilterIPAddrMapDelIPAddr(req->binding->portdevname, NULL);
 
-        VIR_FREE(req->binding->portdevname);
+        g_clear_pointer(&req->binding->portdevname, g_free);
     }
-
-    virNWFilterSnoopReqUnlock(req);
 
     /* removal will call virNWFilterSnoopCancel() */
     return 1;
@@ -2024,11 +1842,11 @@ virNWFilterSnoopRemAllReqIter(const void *payload,
 static void
 virNWFilterSnoopEndThreads(void)
 {
-    virNWFilterSnoopLock();
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.snoopLock);
+
     virHashRemoveSet(virNWFilterSnoopState.snoopReqs,
                      virNWFilterSnoopRemAllReqIter,
                      NULL);
-    virNWFilterSnoopUnlock();
 }
 
 int
@@ -2039,36 +1857,23 @@ virNWFilterDHCPSnoopInit(void)
 
     VIR_DEBUG("Initializing DHCP snooping");
 
-    if (virMutexInitRecursive(&virNWFilterSnoopState.snoopLock) < 0 ||
-        virMutexInit(&virNWFilterSnoopState.activeLock) < 0)
+    if (virMutexInitRecursive(&virNWFilterSnoopState.snoopLock) < 0)
         return -1;
 
-    virNWFilterSnoopState.ifnameToKey = virHashCreate(0, NULL);
-    virNWFilterSnoopState.active = virHashCreate(0, NULL);
-    virNWFilterSnoopState.snoopReqs =
-        virHashCreate(0, virNWFilterSnoopReqRelease);
+    if (virMutexInit(&virNWFilterSnoopState.activeLock) < 0) {
+        virMutexDestroy(&virNWFilterSnoopState.snoopLock);
+        return -1;
+    }
 
-    if (!virNWFilterSnoopState.ifnameToKey ||
-        !virNWFilterSnoopState.snoopReqs ||
-        !virNWFilterSnoopState.active)
-        goto err_exit;
+    virNWFilterSnoopState.ifnameToKey = virHashNew(NULL);
+    virNWFilterSnoopState.active = virHashNew(NULL);
+    virNWFilterSnoopState.snoopReqs =
+        virHashNew(virNWFilterSnoopReqRelease);
 
     virNWFilterSnoopLeaseFileLoad();
     virNWFilterSnoopLeaseFileOpen();
 
     return 0;
-
- err_exit:
-    virHashFree(virNWFilterSnoopState.ifnameToKey);
-    virNWFilterSnoopState.ifnameToKey = NULL;
-
-    virHashFree(virNWFilterSnoopState.snoopReqs);
-    virNWFilterSnoopState.snoopReqs = NULL;
-
-    virHashFree(virNWFilterSnoopState.active);
-    virNWFilterSnoopState.active = NULL;
-
-    return -1;
 }
 
 /**
@@ -2084,42 +1889,39 @@ virNWFilterDHCPSnoopInit(void)
 void
 virNWFilterDHCPSnoopEnd(const char *ifname)
 {
+    VIR_LOCK_GUARD lock = virLockGuardLock(&virNWFilterSnoopState.snoopLock);
     char *ifkey = NULL;
 
-    virNWFilterSnoopLock();
-
     if (!virNWFilterSnoopState.snoopReqs)
-        goto cleanup;
+        return;
 
     if (ifname) {
         ifkey = (char *)virHashLookup(virNWFilterSnoopState.ifnameToKey,
                                       ifname);
         if (!ifkey)
-            goto cleanup;
+            return;
 
         ignore_value(virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey,
                                         ifname));
     }
 
     if (ifkey) {
-        virNWFilterSnoopReqPtr req;
+        virNWFilterSnoopReq *req;
 
         req = virNWFilterSnoopReqGetByIFKey(ifkey);
         if (!req) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("ifkey \"%s\" has no req"), ifkey);
-            goto cleanup;
+                           _("ifkey \"%1$s\" has no req"), ifkey);
+            return;
         }
 
         /* protect req->binding->portdevname & req->threadkey */
-        virNWFilterSnoopReqLock(req);
+        VIR_WITH_MUTEX_LOCK_GUARD(&req->lock) {
+            /* keep valid lease req; drop interface association */
+            virNWFilterSnoopCancel(&req->threadkey);
 
-        /* keep valid lease req; drop interface association */
-        virNWFilterSnoopCancel(&req->threadkey);
-
-        VIR_FREE(req->binding->portdevname);
-
-        virNWFilterSnoopReqUnlock(req);
+            g_clear_pointer(&req->binding->portdevname, g_free);
+        }
 
         virNWFilterSnoopReqPut(req);
     } else {                      /* free all of them */
@@ -2132,31 +1934,33 @@ virNWFilterDHCPSnoopEnd(const char *ifname)
 
         virNWFilterSnoopLeaseFileLoad();
     }
-
- cleanup:
-    virNWFilterSnoopUnlock();
 }
 
 void
 virNWFilterDHCPSnoopShutdown(void)
 {
+    if (!virNWFilterSnoopState.snoopReqs)
+        return;
+
     virNWFilterSnoopEndThreads();
     virNWFilterSnoopJoinThreads();
 
-    virNWFilterSnoopLock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&virNWFilterSnoopState.snoopLock) {
+        virNWFilterSnoopLeaseFileClose();
+        g_clear_pointer(&virNWFilterSnoopState.ifnameToKey, g_hash_table_unref);
+        g_clear_pointer(&virNWFilterSnoopState.snoopReqs, g_hash_table_unref);
+    }
 
-    virNWFilterSnoopLeaseFileClose();
-    virHashFree(virNWFilterSnoopState.ifnameToKey);
-    virHashFree(virNWFilterSnoopState.snoopReqs);
+    virMutexDestroy(&virNWFilterSnoopState.snoopLock);
 
-    virNWFilterSnoopUnlock();
+    VIR_WITH_MUTEX_LOCK_GUARD(&virNWFilterSnoopState.activeLock) {
+        g_clear_pointer(&virNWFilterSnoopState.active, g_hash_table_unref);
+    }
 
-    virNWFilterSnoopActiveLock();
-    virHashFree(virNWFilterSnoopState.active);
-    virNWFilterSnoopActiveUnlock();
+    virMutexDestroy(&virNWFilterSnoopState.activeLock);
 }
 
-#else /* HAVE_LIBPCAP */
+#else /* WITH_LIBPCAP */
 
 int
 virNWFilterDHCPSnoopInit(void)
@@ -2178,14 +1982,13 @@ virNWFilterDHCPSnoopShutdown(void)
 }
 
 int
-virNWFilterDHCPSnoopReq(virNWFilterTechDriverPtr techdriver G_GNUC_UNUSED,
-                        virNWFilterBindingDefPtr binding G_GNUC_UNUSED,
-                        virNWFilterDriverStatePtr driver G_GNUC_UNUSED)
+virNWFilterDHCPSnoopReq(virNWFilterTechDriver *techdriver G_GNUC_UNUSED,
+                        virNWFilterBindingDef *binding G_GNUC_UNUSED,
+                        virNWFilterDriverState *driver G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR,
-                   _("libvirt was not compiled with libpcap and \""
-                     NWFILTER_VARNAME_CTRL_IP_LEARNING
-                     "='dhcp'\" requires it."));
+                   _("libvirt was not compiled with libpcap and \"%1$s\" requires it"),
+                     NWFILTER_VARNAME_CTRL_IP_LEARNING "='dhcp'");
     return -1;
 }
-#endif /* HAVE_LIBPCAP */
+#endif /* WITH_LIBPCAP */

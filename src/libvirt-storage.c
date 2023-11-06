@@ -37,6 +37,8 @@ VIR_LOG_INIT("libvirt.storage");
  * call.
  *
  * Returns the virConnectPtr or NULL in case of failure.
+ *
+ * Since: 0.4.1
  */
 virConnectPtr
 virStoragePoolGetConnect(virStoragePoolPtr pool)
@@ -104,6 +106,8 @@ virStoragePoolGetConnect(virStoragePoolPtr pool)
  * in the return count, to make iteration easier.  The caller is responsible
  * for calling virStoragePoolFree() on each array element, then calling
  * free() on @pools.
+ *
+ * Since: 0.10.2
  */
 int
 virConnectListAllStoragePools(virConnectPtr conn,
@@ -143,6 +147,8 @@ virConnectListAllStoragePools(virConnectPtr conn,
  * Provides the number of active storage pools
  *
  * Returns the number of pools found, or -1 on error
+ *
+ * Since: 0.4.1
  */
 int
 virConnectNumOfStoragePools(virConnectPtr conn)
@@ -179,13 +185,16 @@ virConnectNumOfStoragePools(virConnectPtr conn)
  * If there are more than maxnames, the remaining names will be silently
  * ignored.
  *
- * For more control over the results, see virConnectListAllStoragePools().
+ * The use of this function is discouraged. Instead, use
+ * virConnectListAllStoragePools().
  *
  * Returns the number of pools found or -1 in case of error.  Note that
  * this command is inherently racy; a pool can be started between a call to
  * virConnectNumOfStoragePools() and this call; you are only guaranteed
  * that all currently active pools were listed if the return is less than
  * @maxnames. The client must call free() on each returned name.
+ *
+ * Since: 0.4.1
  */
 int
 virConnectListStoragePools(virConnectPtr conn,
@@ -223,6 +232,8 @@ virConnectListStoragePools(virConnectPtr conn,
  * Provides the number of inactive storage pools
  *
  * Returns the number of pools found, or -1 on error
+ *
+ * Since: 0.4.1
  */
 int
 virConnectNumOfDefinedStoragePools(virConnectPtr conn)
@@ -259,13 +270,16 @@ virConnectNumOfDefinedStoragePools(virConnectPtr conn)
  * If there are more than maxnames, the remaining names will be silently
  * ignored.
  *
- * For more control over the results, see virConnectListAllStoragePools().
+ * The use of this function is discouraged. Instead, use
+ * virConnectListAllStoragePools().
  *
  * Returns the number of names provided in the array or -1 in case of error.
  * Note that this command is inherently racy; a pool can be defined between
  * a call to virConnectNumOfDefinedStoragePools() and this call; you are only
  * guaranteed that all currently defined pools were listed if the return
  * is less than @maxnames.  The client must call free() on each returned name.
+ *
+ * Since: 0.4.1
  */
 int
 virConnectListDefinedStoragePools(virConnectPtr conn,
@@ -316,6 +330,8 @@ virConnectListDefinedStoragePools(virConnectPtr conn,
  * Returns an xml document consisting of a SourceList element
  * containing a source document appropriate to the given pool
  * type for each discovered source.
+ *
+ * Since: 0.4.5
  */
 char *
 virConnectFindStoragePoolSources(virConnectPtr conn,
@@ -359,6 +375,8 @@ virConnectFindStoragePoolSources(virConnectPtr conn,
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if no matching pool is found
+ *
+ * Since: 0.4.1
  */
 virStoragePoolPtr
 virStoragePoolLookupByName(virConnectPtr conn,
@@ -398,6 +416,8 @@ virStoragePoolLookupByName(virConnectPtr conn,
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if no matching pool is found
+ *
+ * Since: 0.4.1
  */
 virStoragePoolPtr
 virStoragePoolLookupByUUID(virConnectPtr conn,
@@ -437,6 +457,8 @@ virStoragePoolLookupByUUID(virConnectPtr conn,
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if no matching pool is found
+ *
+ * Since: 0.4.1
  */
 virStoragePoolPtr
 virStoragePoolLookupByUUIDString(virConnectPtr conn,
@@ -452,7 +474,7 @@ virStoragePoolLookupByUUIDString(virConnectPtr conn,
 
     if (virUUIDParse(uuidstr, uuid) < 0) {
         virReportInvalidArg(uuidstr,
-                            _("uuidstr in %s must be a valid UUID"),
+                            _("uuidstr in %1$s must be a valid UUID"),
                             __FUNCTION__);
         goto error;
     }
@@ -475,6 +497,8 @@ virStoragePoolLookupByUUIDString(virConnectPtr conn,
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if no matching pool is found
+ *
+ * Since: 0.4.1
  */
 virStoragePoolPtr
 virStoragePoolLookupByVolume(virStorageVolPtr vol)
@@ -514,6 +538,8 @@ virStoragePoolLookupByVolume(virStorageVolPtr vol)
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if no matching pool is found
+ *
+ * Since: 4.1.0
  */
 virStoragePoolPtr
 virStoragePoolLookupByTargetPath(virConnectPtr conn,
@@ -555,6 +581,8 @@ virStoragePoolLookupByTargetPath(virConnectPtr conn,
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if creation failed
+ *
+ * Since: 0.4.1
  */
 virStoragePoolPtr
 virStoragePoolCreateXML(virConnectPtr conn,
@@ -589,7 +617,7 @@ virStoragePoolCreateXML(virConnectPtr conn,
  * virStoragePoolDefineXML:
  * @conn: pointer to hypervisor connection
  * @xml: XML description for new pool
- * @flags: extra flags; not used yet, so callers should always pass 0
+ * @flags: bitwise-OR of virStoragePoolDefineFlags
  *
  * Define an inactive persistent storage pool or modify an existing persistent
  * one from the XML description.
@@ -598,6 +626,8 @@ virStoragePoolCreateXML(virConnectPtr conn,
  * storage pool object is no longer needed.
  *
  * Returns a virStoragePoolPtr object, or NULL if creation failed
+ *
+ * Since: 0.4.1
  */
 virStoragePoolPtr
 virStoragePoolDefineXML(virConnectPtr conn,
@@ -639,6 +669,8 @@ virStoragePoolDefineXML(virConnectPtr conn,
  * Build the underlying storage pool
  *
  * Returns 0 on success, or -1 upon failure
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolBuild(virStoragePoolPtr pool,
@@ -677,6 +709,8 @@ virStoragePoolBuild(virStoragePoolPtr pool,
  * Undefine an inactive storage pool
  *
  * Returns 0 on success, -1 on failure
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolUndefine(virStoragePoolPtr pool)
@@ -715,6 +749,8 @@ virStoragePoolUndefine(virStoragePoolPtr pool)
  * Starts an inactive storage pool
  *
  * Returns 0 on success, or -1 if it could not be started
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolCreate(virStoragePoolPtr pool,
@@ -757,6 +793,8 @@ virStoragePoolCreate(virStoragePoolPtr pool,
  * the associated virStoragePoolPtr object.
  *
  * Returns 0 on success, or -1 if it could not be destroyed
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolDestroy(virStoragePoolPtr pool)
@@ -797,6 +835,8 @@ virStoragePoolDestroy(virStoragePoolPtr pool)
  * itself is not free'd.
  *
  * Returns 0 on success, or -1 if it could not be obliterate
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolDelete(virStoragePoolPtr pool,
@@ -836,6 +876,8 @@ virStoragePoolDelete(virStoragePoolPtr pool,
  * it. Does not change the state of the pool on the host.
  *
  * Returns 0 on success, or -1 if it could not be free'd.
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolFree(virStoragePoolPtr pool)
@@ -868,6 +910,8 @@ virStoragePoolFree(virStoragePoolPtr pool)
  * the reference count.
  *
  * Returns 0 in case of success, -1 in case of failure.
+ *
+ * Since: 0.6.0
  */
 int
 virStoragePoolRef(virStoragePoolPtr pool)
@@ -893,6 +937,8 @@ virStoragePoolRef(virStoragePoolPtr pool)
  * new devices at the OS layer
  *
  * Returns 0 if the volume list was refreshed, -1 on failure
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolRefresh(virStoragePoolPtr pool,
@@ -931,6 +977,8 @@ virStoragePoolRefresh(virStoragePoolPtr pool,
  * Fetch the locally unique name of the storage pool
  *
  * Returns the name of the pool, or NULL on error
+ *
+ * Since: 0.4.1
  */
 const char*
 virStoragePoolGetName(virStoragePoolPtr pool)
@@ -953,6 +1001,8 @@ virStoragePoolGetName(virStoragePoolPtr pool)
  * Fetch the globally unique ID of the storage pool
  *
  * Returns 0 on success, or -1 on error;
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolGetUUID(virStoragePoolPtr pool,
@@ -983,6 +1033,8 @@ virStoragePoolGetUUID(virStoragePoolPtr pool,
  * Fetch the globally unique ID of the storage pool as a string
  *
  * Returns 0 on success, or -1 on error;
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolGetUUIDString(virStoragePoolPtr pool,
@@ -1013,6 +1065,8 @@ virStoragePoolGetUUIDString(virStoragePoolPtr pool,
  * such as free space / usage summary
  *
  * Returns 0 on success, or -1 on failure.
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolGetInfo(virStoragePoolPtr pool,
@@ -1057,6 +1111,8 @@ virStoragePoolGetInfo(virStoragePoolPtr pool,
  * into the virStoragePoolCreateXML method.
  *
  * Returns a XML document (caller frees), or NULL on error
+ *
+ * Since: 0.4.1
  */
 char *
 virStoragePoolGetXMLDesc(virStoragePoolPtr pool,
@@ -1095,6 +1151,8 @@ virStoragePoolGetXMLDesc(virStoragePoolPtr pool,
  * whether the pool is automatically started at boot time
  *
  * Returns 0 on success, -1 on failure
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolGetAutostart(virStoragePoolPtr pool,
@@ -1135,6 +1193,8 @@ virStoragePoolGetAutostart(virStoragePoolPtr pool,
  * when the host machine boots.
  *
  * Returns 0 on success, -1 on failure
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolSetAutostart(virStoragePoolPtr pool,
@@ -1183,6 +1243,8 @@ virStoragePoolSetAutostart(virStoragePoolPtr pool,
  * in the return count, to make iteration easier.  The caller is responsible
  * for calling virStorageVolFree() on each array element, then calling
  * free() on @vols.
+ *
+ * Since: 0.10.2
  */
 int
 virStoragePoolListAllVolumes(virStoragePoolPtr pool,
@@ -1219,6 +1281,8 @@ virStoragePoolListAllVolumes(virStoragePoolPtr pool,
  * Fetch the number of storage volumes within a pool
  *
  * Returns the number of storage pools, or -1 on failure
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolNumOfVolumes(virStoragePoolPtr pool)
@@ -1254,9 +1318,12 @@ virStoragePoolNumOfVolumes(virStoragePoolPtr pool)
  * Fetch list of storage volume names, limiting to
  * at most maxnames.
  *
- * To list the volume objects directly, see virStoragePoolListAllVolumes().
+ * The use of this function is discouraged. Instead, use
+ * virStoragePoolListAllVolumes().
  *
  * Returns the number of names fetched, or -1 on error
+ *
+ * Since: 0.4.1
  */
 int
 virStoragePoolListVolumes(virStoragePoolPtr pool,
@@ -1296,6 +1363,8 @@ virStoragePoolListVolumes(virStoragePoolPtr pool,
  * call.
  *
  * Returns the virConnectPtr or NULL in case of failure.
+ *
+ * Since: 0.4.1
  */
 virConnectPtr
 virStorageVolGetConnect(virStorageVolPtr vol)
@@ -1322,6 +1391,8 @@ virStorageVolGetConnect(virStorageVolPtr vol)
  * storage volume object is no longer needed.
  *
  * Returns a storage volume, or NULL if not found / error
+ *
+ * Since: 0.4.1
  */
 virStorageVolPtr
 virStorageVolLookupByName(virStoragePoolPtr pool,
@@ -1362,6 +1433,8 @@ virStorageVolLookupByName(virStoragePoolPtr pool,
  * storage volume object is no longer needed.
  *
  * Returns a storage volume, or NULL if not found / error
+ *
+ * Since: 0.4.1
  */
 virStorageVolPtr
 virStorageVolLookupByKey(virConnectPtr conn,
@@ -1402,6 +1475,8 @@ virStorageVolLookupByKey(virConnectPtr conn,
  * storage volume object is no longer needed.
  *
  * Returns a storage volume, or NULL if not found / error
+ *
+ * Since: 0.4.1
  */
 virStorageVolPtr
 virStorageVolLookupByPath(virConnectPtr conn,
@@ -1438,6 +1513,8 @@ virStorageVolLookupByPath(virConnectPtr conn,
  * within the scope of a pool
  *
  * Returns the volume name, or NULL on error
+ *
+ * Since: 0.4.1
  */
 const char*
 virStorageVolGetName(virStorageVolPtr vol)
@@ -1461,6 +1538,8 @@ virStorageVolGetName(virStorageVolPtr vol)
  * key no matter what host it is accessed from
  *
  * Returns the volume key, or NULL on error
+ *
+ * Since: 0.4.1
  */
 const char*
 virStorageVolGetKey(virStorageVolPtr vol)
@@ -1494,6 +1573,8 @@ virStorageVolGetKey(virStorageVolPtr vol)
  * storage volume object is no longer needed.
  *
  * Returns the storage volume, or NULL on error
+ *
+ * Since: 0.4.1
  */
 virStorageVolPtr
 virStorageVolCreateXML(virStoragePoolPtr pool,
@@ -1545,6 +1626,8 @@ virStorageVolCreateXML(virStoragePoolPtr pool,
  * storage volume object is no longer needed.
  *
  * Returns the storage volume, or NULL on error
+ *
+ * Since: 0.6.4
  */
 virStorageVolPtr
 virStorageVolCreateXMLFrom(virStoragePoolPtr pool,
@@ -1590,7 +1673,10 @@ virStorageVolCreateXMLFrom(virStoragePoolPtr pool,
  *
  * Download the content of the volume as a stream. If @length
  * is zero, then the remaining contents of the volume after
- * @offset will be downloaded.
+ * @offset will be downloaded. Please note that the stream
+ * transports the volume itself as is, so the downloaded data may
+ * not correspond to guest OS visible state in cases when a
+ * complex storage format such as qcow2 or vmdk is used.
  *
  * If VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM is set in @flags
  * effective transmission of holes is enabled. This assumes using
@@ -1606,6 +1692,8 @@ virStorageVolCreateXMLFrom(virStoragePoolPtr pool,
  * another active stream is writing to the storage volume.
  *
  * Returns 0, or -1 upon error.
+ *
+ * Since: 0.9.0
  */
 int
 virStorageVolDownload(virStorageVolPtr vol,
@@ -1625,7 +1713,7 @@ virStorageVolDownload(virStorageVolPtr vol,
 
     if (vol->conn != stream->conn) {
         virReportInvalidArg(stream,
-                            _("stream in %s must match connection of volume '%s'"),
+                            _("stream in %1$s must match connection of volume '%2$s'"),
                             __FUNCTION__, vol->name);
         goto error;
     }
@@ -1663,7 +1751,10 @@ virStorageVolDownload(virStorageVolPtr vol,
  * will fail if @offset + @length exceeds the size of the
  * volume. Otherwise, if @length is non-zero, an error
  * will be raised if an attempt is made to upload greater
- * than @length bytes of data.
+ * than @length bytes of data. Please note that the stream
+ * transports the volume itself as is, so the downloaded data may
+ * not correspond to guest OS visible state in cases when a
+ * complex storage format such as qcow2 or vmdk is used.
  *
  * If VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM is set in @flags
  * effective transmission of holes is enabled. This assumes using
@@ -1686,6 +1777,8 @@ virStorageVolDownload(virStorageVolPtr vol,
  * capacity, and allocation.
  *
  * Returns 0, or -1 upon error.
+ *
+ * Since: 0.9.0
  */
 int
 virStorageVolUpload(virStorageVolPtr vol,
@@ -1705,7 +1798,7 @@ virStorageVolUpload(virStorageVolPtr vol,
 
     if (vol->conn != stream->conn) {
         virReportInvalidArg(stream,
-                            _("stream in %s must match connection of volume '%s'"),
+                            _("stream in %1$s must match connection of volume '%2$s'"),
                             __FUNCTION__, vol->name);
         goto error;
     }
@@ -1739,6 +1832,8 @@ virStorageVolUpload(virStorageVolPtr vol,
  * Delete the storage volume from the pool
  *
  * Returns 0 on success, or -1 on error
+ *
+ * Since: 0.4.1
  */
 int
 virStorageVolDelete(virStorageVolPtr vol,
@@ -1788,6 +1883,8 @@ virStorageVolDelete(virStorageVolPtr vol,
  * network file systems are known to be problematic.
  *
  * Returns 0 on success, or -1 on error
+ *
+ * Since: 0.8.0
  */
 int
 virStorageVolWipe(virStorageVolPtr vol,
@@ -1834,6 +1931,8 @@ virStorageVolWipe(virStorageVolPtr vol,
  * problematic.
  *
  * Returns 0 on success, or -1 on error.
+ *
+ * Since: 0.9.10
  */
 int
 virStorageVolWipePattern(virStorageVolPtr vol,
@@ -1874,6 +1973,8 @@ virStorageVolWipePattern(virStorageVolPtr vol,
  * storage volume continues to exist.
  *
  * Returns 0 on success, or -1 on error
+ *
+ * Since: 0.4.1
  */
 int
 virStorageVolFree(virStorageVolPtr vol)
@@ -1905,6 +2006,8 @@ virStorageVolFree(virStorageVolPtr vol)
  * the reference count.
  *
  * Returns 0 in case of success, -1 in case of failure.
+ *
+ * Since: 0.6.0
  */
 int
 virStorageVolRef(virStorageVolPtr vol)
@@ -1929,6 +2032,8 @@ virStorageVolRef(virStorageVolPtr vol)
  * volume such as its current allocation
  *
  * Returns 0 on success, or -1 on failure
+ *
+ * Since: 0.4.1
  */
 int
 virStorageVolGetInfo(virStorageVolPtr vol,
@@ -1979,6 +2084,8 @@ virStorageVolGetInfo(virStorageVolPtr vol,
  * as is the case with qcow2 files.
  *
  * Returns 0 on success, or -1 on failure
+ *
+ * Since: 3.0.0
  */
 int
 virStorageVolGetInfoFlags(virStorageVolPtr vol,
@@ -2023,6 +2130,8 @@ virStorageVolGetInfoFlags(virStorageVolPtr vol,
  * the storage volume
  *
  * Returns the XML document, or NULL on error
+ *
+ * Since: 0.4.1
  */
 char *
 virStorageVolGetXMLDesc(virStorageVolPtr vol,
@@ -2064,6 +2173,8 @@ virStorageVolGetXMLDesc(virStorageVolPtr vol,
  *
  * Returns the storage volume path, or NULL on error. The
  * caller must free() the returned path after use.
+ *
+ * Since: 0.4.1
  */
 char *
 virStorageVolGetPath(virStorageVolPtr vol)
@@ -2125,6 +2236,8 @@ virStorageVolGetPath(virStorageVolPtr vol)
  * than the current size.
  *
  * Returns 0 on success, or -1 on error.
+ *
+ * Since: 0.9.10
  */
 int
 virStorageVolResize(virStorageVolPtr vol,
@@ -2145,8 +2258,7 @@ virStorageVolResize(virStorageVolPtr vol,
     if (capacity == 0 && !((flags & VIR_STORAGE_VOL_RESIZE_DELTA) ||
                            (flags & VIR_STORAGE_VOL_RESIZE_SHRINK))) {
         virReportInvalidArg(capacity,
-                            _("capacity in %s cannot be zero without 'delta' "
-                              "or 'shrink' flags set"),
+                            _("capacity in %1$s cannot be zero without 'delta' or 'shrink' flags set"),
                             __FUNCTION__);
         goto error;
     }
@@ -2174,6 +2286,8 @@ virStorageVolResize(virStorageVolPtr vol,
  * Determine if the storage pool is currently running
  *
  * Returns 1 if running, 0 if inactive, -1 on error
+ *
+ * Since: 0.7.3
  */
 int
 virStoragePoolIsActive(virStoragePoolPtr pool)
@@ -2207,6 +2321,8 @@ virStoragePoolIsActive(virStoragePoolPtr pool)
  * which means it will still exist after shutting down
  *
  * Returns 1 if persistent, 0 if transient, -1 on error
+ *
+ * Since: 0.7.3
  */
 int
 virStoragePoolIsPersistent(virStoragePoolPtr pool)
@@ -2265,6 +2381,8 @@ virStoragePoolIsPersistent(virStoragePoolPtr pool)
  * be passed to the virConnectStoragePoolEventDeregisterAny() method.
  *
  * Returns a callback identifier on success, -1 on failure.
+ *
+ * Since: 2.0.0
  */
 int
 virConnectStoragePoolEventRegisterAny(virConnectPtr conn,
@@ -2284,7 +2402,7 @@ virConnectStoragePoolEventRegisterAny(virConnectPtr conn,
         virCheckStoragePoolGoto(pool, error);
         if (pool->conn != conn) {
             virReportInvalidArg(pool,
-                                _("storage pool '%s' in %s must match connection"),
+                                _("storage pool '%1$s' in %2$s must match connection"),
                                 pool->name, __FUNCTION__);
             goto error;
         }
@@ -2294,7 +2412,7 @@ virConnectStoragePoolEventRegisterAny(virConnectPtr conn,
 
     if (eventID >= VIR_STORAGE_POOL_EVENT_ID_LAST) {
         virReportInvalidArg(eventID,
-                            _("eventID in %s must be less than %d"),
+                            _("eventID in %1$s must be less than %2$d"),
                             __FUNCTION__, VIR_STORAGE_POOL_EVENT_ID_LAST);
         goto error;
     }
@@ -2328,6 +2446,8 @@ virConnectStoragePoolEventRegisterAny(virConnectPtr conn,
  * value obtained from a previous virConnectStoragePoolEventRegisterAny() method.
  *
  * Returns 0 on success, -1 on failure
+ *
+ * Since: 2.0.0
  */
 int
 virConnectStoragePoolEventDeregisterAny(virConnectPtr conn,
@@ -2367,6 +2487,8 @@ virConnectStoragePoolEventDeregisterAny(virConnectPtr conn,
  * are supported along with the file/disk formats for each pool.
  *
  * Returns NULL in case of error or an XML string defining the capabilities.
+ *
+ * Since: 5.2.0
  */
 char *
 virConnectGetStoragePoolCapabilities(virConnectPtr conn,

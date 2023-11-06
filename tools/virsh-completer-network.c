@@ -21,22 +21,22 @@
 #include <config.h>
 
 #include "virsh-completer-network.h"
+#include "virsh-util.h"
 #include "viralloc.h"
 #include "virsh-network.h"
 #include "virsh.h"
-#include "virstring.h"
 
 char **
 virshNetworkNameCompleter(vshControl *ctl,
                           const vshCmd *cmd G_GNUC_UNUSED,
                           unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
     virNetworkPtr *nets = NULL;
     int nnets = 0;
     size_t i = 0;
     char **ret = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(VIR_CONNECT_LIST_NETWORKS_INACTIVE |
                   VIR_CONNECT_LIST_NETWORKS_ACTIVE |
@@ -49,8 +49,7 @@ virshNetworkNameCompleter(vshControl *ctl,
     if ((nnets = virConnectListAllNetworks(priv->conn, &nets, flags)) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, nnets + 1) < 0)
-        goto cleanup;
+    tmp = g_new0(char *, nnets + 1);
 
     for (i = 0; i < nnets; i++) {
         const char *name = virNetworkGetName(nets[i]);
@@ -60,10 +59,9 @@ virshNetworkNameCompleter(vshControl *ctl,
 
     ret = g_steal_pointer(&tmp);
 
- cleanup:
     for (i = 0; i < nnets; i++)
-        virNetworkFree(nets[i]);
-    VIR_FREE(nets);
+        virshNetworkFree(nets[i]);
+    g_free(nets);
     return ret;
 }
 
@@ -74,12 +72,11 @@ virshNetworkEventNameCompleter(vshControl *ctl G_GNUC_UNUSED,
                                unsigned int flags)
 {
     size_t i = 0;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
-    if (VIR_ALLOC_N(tmp, VIR_NETWORK_EVENT_ID_LAST + 1) < 0)
-        return NULL;
+    tmp = g_new0(char *, VIR_NETWORK_EVENT_ID_LAST + 1);
 
     for (i = 0; i < VIR_NETWORK_EVENT_ID_LAST; i++)
         tmp[i] = g_strdup(virshNetworkEventCallbacks[i].name);
@@ -93,7 +90,7 @@ virshNetworkPortUUIDCompleter(vshControl *ctl,
                               const vshCmd *cmd G_GNUC_UNUSED,
                               unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
     virNetworkPtr net = NULL;
     virNetworkPortPtr *ports = NULL;
     int nports = 0;
@@ -106,13 +103,12 @@ virshNetworkPortUUIDCompleter(vshControl *ctl,
         return NULL;
 
     if (!(net = virshCommandOptNetwork(ctl, cmd, NULL)))
-        return false;
+        return NULL;
 
     if ((nports = virNetworkListAllPorts(net, &ports, flags)) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(ret, nports + 1) < 0)
-        goto error;
+    ret = g_new0(char *, nports + 1);
 
     for (i = 0; i < nports; i++) {
         char uuid[VIR_UUID_STRING_BUFLEN];
@@ -124,16 +120,143 @@ virshNetworkPortUUIDCompleter(vshControl *ctl,
 
         virNetworkPortFree(ports[i]);
     }
-    VIR_FREE(ports);
+    g_free(ports);
 
     return ret;
 
  error:
     for (; i < nports; i++)
         virNetworkPortFree(ports[i]);
-    VIR_FREE(ports);
+    g_free(ports);
     for (i = 0; i < nports; i++)
-        VIR_FREE(ret[i]);
-    VIR_FREE(ret);
+        g_free(ret[i]);
+    g_free(ret);
     return NULL;
+}
+
+
+char **
+virshNetworkUUIDCompleter(vshControl *ctl,
+                          const vshCmd *cmd G_GNUC_UNUSED,
+                          unsigned int flags)
+{
+    virshControl *priv = ctl->privData;
+    virNetworkPtr *nets = NULL;
+    int nnets = 0;
+    size_t i = 0;
+    char **ret = NULL;
+    g_auto(GStrv) tmp = NULL;
+
+    virCheckFlags(0, NULL);
+
+    if (!priv->conn || virConnectIsAlive(priv->conn) <= 0)
+        return NULL;
+
+    if ((nnets = virConnectListAllNetworks(priv->conn, &nets, flags)) < 0)
+        return NULL;
+
+    tmp = g_new0(char *, nnets + 1);
+
+    for (i = 0; i < nnets; i++) {
+        char uuid[VIR_UUID_STRING_BUFLEN];
+
+        if (virNetworkGetUUIDString(nets[i], uuid) < 0)
+            goto cleanup;
+
+        tmp[i] = g_strdup(uuid);
+    }
+
+    ret = g_steal_pointer(&tmp);
+
+ cleanup:
+    for (i = 0; i < nnets; i++)
+        virshNetworkFree(nets[i]);
+    g_free(nets);
+    return ret;
+}
+
+
+char **
+virshNetworkDhcpMacCompleter(vshControl *ctl,
+                             const vshCmd *cmd,
+                             unsigned int flags)
+{
+    virshControl *priv = ctl->privData;
+    virNetworkDHCPLeasePtr *leases = NULL;
+    g_autoptr(virshNetwork) network = NULL;
+    int nleases;
+    size_t i = 0;
+    char **ret = NULL;
+    g_auto(GStrv) tmp = NULL;
+
+    virCheckFlags(0, NULL);
+
+    if (!priv->conn || virConnectIsAlive(priv->conn) <= 0)
+        return NULL;
+
+    if (!(network = virshCommandOptNetwork(ctl, cmd, NULL)))
+        return NULL;
+
+    if ((nleases = virNetworkGetDHCPLeases(network, NULL, &leases, flags)) < 0)
+        goto cleanup;
+
+    tmp = g_new0(char *, nleases + 1);
+
+    for (i = 0; i < nleases; i++) {
+        virNetworkDHCPLeasePtr lease = leases[i];
+        tmp[i] = g_strdup(lease->mac);
+    }
+
+    ret = g_steal_pointer(&tmp);
+
+ cleanup:
+    if (leases) {
+        for (i = 0; i < nleases; i++)
+            virNetworkDHCPLeaseFree(leases[i]);
+        VIR_FREE(leases);
+    }
+    return ret;
+}
+
+
+char **
+virshNetworkUpdateCommandCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                   const vshCmd *cmd G_GNUC_UNUSED,
+                                   unsigned int flags)
+{
+    char **ret = NULL;
+    size_t i;
+
+    virCheckFlags(0, NULL);
+
+    ret = g_new0(char *, VIR_NETWORK_UPDATE_COMMAND_LAST + 1);
+
+    /* The first item in the enum is not accepted by virsh, But there's "add"
+     * which is accepted an is just an alias to "add-last". */
+    ret[0] = g_strdup("add");
+
+    for (i = 1; i < VIR_NETWORK_UPDATE_COMMAND_LAST; i++)
+        ret[i] = g_strdup(virshNetworkUpdateCommandTypeToString(i));
+
+    return ret;
+}
+
+
+char **
+virshNetworkUpdateSectionCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                   const vshCmd *cmd G_GNUC_UNUSED,
+                                   unsigned int flags)
+{
+    char **ret = NULL;
+    size_t i;
+
+    virCheckFlags(0, NULL);
+
+    ret = g_new0(char *, VIR_NETWORK_SECTION_LAST);
+
+    /* The first item in the enum is not accepted by virsh. */
+    for (i = 1; i < VIR_NETWORK_SECTION_LAST; i++)
+        ret[i - 1] = g_strdup(virshNetworkSectionTypeToString(i));
+
+    return ret;
 }

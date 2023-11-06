@@ -24,18 +24,6 @@
 #include "internal.h"
 
 typedef struct _virSystemdActivation virSystemdActivation;
-typedef virSystemdActivation *virSystemdActivationPtr;
-
-/*
- * Back compat for systemd < v227 which lacks LISTEN_FDNAMES.
- * Delete when min systemd is increased ie RHEL7 dropped
- */
-typedef struct _virSystemdActivationMap {
-    const char *name;
-    int family;
-    int port; /* if family == AF_INET/AF_INET6 */
-    const char *path; /* if family == AF_UNIX */
-} virSystemdActivationMap;
 
 char *virSystemdMakeScopeName(const char *name,
                               const char *drivername,
@@ -57,6 +45,8 @@ int virSystemdTerminateMachine(const char *name);
 
 void virSystemdNotifyStartup(void);
 
+int virSystemdHasMachined(void);
+
 int virSystemdHasLogind(void);
 
 int virSystemdCanSuspend(bool *result);
@@ -67,20 +57,20 @@ int virSystemdCanHybridSleep(bool *result);
 
 char *virSystemdGetMachineNameByPID(pid_t pid);
 
-int virSystemdGetActivation(virSystemdActivationMap *map,
-                            size_t nmap,
-                            virSystemdActivationPtr *act);
+char *virSystemdGetMachineUnitByPID(pid_t pid);
 
-bool virSystemdActivationHasName(virSystemdActivationPtr act,
+int virSystemdGetActivation(virSystemdActivation **act);
+
+bool virSystemdActivationHasName(virSystemdActivation *act,
                                  const char *name);
 
-int virSystemdActivationComplete(virSystemdActivationPtr act);
+int virSystemdActivationComplete(virSystemdActivation *act);
 
-void virSystemdActivationClaimFDs(virSystemdActivationPtr act,
+void virSystemdActivationClaimFDs(virSystemdActivation *act,
                                   const char *name,
                                   int **fds,
                                   size_t *nfds);
 
-void virSystemdActivationFree(virSystemdActivationPtr act);
+void virSystemdActivationFree(virSystemdActivation *act);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSystemdActivation, virSystemdActivationFree);

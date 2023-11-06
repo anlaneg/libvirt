@@ -39,11 +39,11 @@
 VIR_LOG_INIT("qemu.virtiofs");
 
 
-char *
-qemuVirtioFSCreatePidFilename(virDomainObjPtr vm,
-                              const char *alias)
+static char *
+qemuVirtioFSCreatePidFilenameOld(virDomainObj *vm,
+                                 const char *alias)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
+    qemuDomainObjPrivate *priv = vm->privateData;
     g_autofree char *name = NULL;
 
     name = g_strdup_printf("%s-fs", alias);
@@ -53,17 +53,30 @@ qemuVirtioFSCreatePidFilename(virDomainObjPtr vm,
 
 
 char *
-qemuVirtioFSCreateSocketFilename(virDomainObjPtr vm,
+qemuVirtioFSCreatePidFilename(virDomainObj *vm,
+                              const char *alias)
+{
+    qemuDomainObjPrivate *priv = vm->privateData;
+    g_autofree char *domname = virDomainDefGetShortName(vm->def);
+    g_autofree char *name = g_strdup_printf("%s-%s-fs", domname, alias);
+    g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(priv->driver);
+
+    return virPidFileBuildPath(cfg->stateDir, name);
+}
+
+
+char *
+qemuVirtioFSCreateSocketFilename(virDomainObj *vm,
                                  const char *alias)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
+    qemuDomainObjPrivate *priv = vm->privateData;
 
     return virFileBuildPath(priv->libDir, alias, "-fs.sock");
 }
 
 
 static char *
-qemuVirtioFSCreateLogFilename(virQEMUDriverConfigPtr cfg,
+qemuVirtioFSCreateLogFilename(virQEMUDriverConfig *cfg,
                               const virDomainDef *def,
                               const char *alias)
 {
@@ -76,11 +89,11 @@ qemuVirtioFSCreateLogFilename(virQEMUDriverConfigPtr cfg,
 
 
 static int
-qemuVirtioFSOpenChardev(virQEMUDriverPtr driver,
-                        virDomainObjPtr vm,
+qemuVirtioFSOpenChardev(virQEMUDriver *driver,
+                        virDomainObj *vm,
                         const char *socket_path)
 {
-    virDomainChrSourceDefPtr chrdev = virDomainChrSourceDefNew(NULL);
+    virDomainChrSourceDef *chrdev = virDomainChrSourceDefNew(NULL);
     virDomainChrDef chr = { .source = chrdev };
     VIR_AUTOCLOSE fd = -1;
     int ret = -1;
@@ -111,16 +124,15 @@ qemuVirtioFSOpenChardev(virQEMUDriverPtr driver,
 }
 
 
-static virCommandPtr
-qemuVirtioFSBuildCommandLine(virQEMUDriverConfigPtr cfg,
-                             virDomainFSDefPtr fs,
+static virCommand *
+qemuVirtioFSBuildCommandLine(virQEMUDriverConfig *cfg,
+                             virDomainFSDef *fs,
                              int *fd)
 {
     g_autoptr(virCommand) cmd = NULL;
     g_auto(virBuffer) opts = VIR_BUFFER_INITIALIZER;
 
-    if (!(cmd = virCommandNew(fs->binary)))
-        return NULL;
+    cmd = virCommandNew(fs->binary);
 
     virCommandAddArgFormat(cmd, "--fd=%d", *fd);
     virCommandPassFD(cmd, *fd, VIR_COMMAND_PASS_FD_CLOSE_PARENT);
@@ -131,6 +143,8 @@ qemuVirtioFSBuildCommandLine(virQEMUDriverConfigPtr cfg,
     virQEMUBuildBufferEscapeComma(&opts, fs->src->path);
     if (fs->cache)
         virBufferAsprintf(&opts, ",cache=%s", virDomainFSCacheModeTypeToString(fs->cache));
+    if (fs->sandbox)
+        virBufferAsprintf(&opts, ",sandbox=%s", virDomainFSSandboxModeTypeToString(fs->sandbox));
 
     if (fs->xattr == VIR_TRISTATE_SWITCH_ON)
         virBufferAddLit(&opts, ",xattr");
@@ -148,6 +162,10 @@ qemuVirtioFSBuildCommandLine(virQEMUDriverConfigPtr cfg,
         virBufferAddLit(&opts, ",no_posix_lock");
 
     virCommandAddArgBuffer(cmd, &opts);
+
+    if (fs->thread_pool_size >= 0)
+        virCommandAddArgFormat(cmd, "--thread-pool-size=%i", fs->thread_pool_size);
+
     if (cfg->virtiofsdDebug)
         virCommandAddArg(cmd, "-d");
 
@@ -155,12 +173,12 @@ qemuVirtioFSBuildCommandLine(virQEMUDriverConfigPtr cfg,
 }
 
 int
-qemuVirtioFSStart(virLogManagerPtr logManager,
-                  virQEMUDriverPtr driver,
-                  virDomainObjPtr vm,
-                  virDomainFSDefPtr fs)
+qemuVirtioFSStart(virQEMUDriver *driver,
+                  virDomainObj *vm,
+                  virDomainFSDef *fs)
 {
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
+    qemuDomainObjPrivate *priv = vm->privateData;
     g_autoptr(virCommand) cmd = NULL;
     g_autofree char *socket_path = NULL;
     g_autofree char *pidfile = NULL;
@@ -168,28 +186,38 @@ qemuVirtioFSStart(virLogManagerPtr logManager,
     pid_t pid = (pid_t) -1;
     VIR_AUTOCLOSE fd = -1;
     VIR_AUTOCLOSE logfd = -1;
-    int ret = -1;
     int rc;
+
+    if (!virFileIsExecutable(fs->binary)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("virtiofsd binary '%1$s' is not executable"),
+                       fs->binary);
+        return -1;
+    }
 
     if (!virFileExists(fs->src->path)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("the virtiofs export directory '%s' does not exist"),
+                       _("the virtiofs export directory '%1$s' does not exist"),
                        fs->src->path);
         return -1;
     }
 
     if (!(pidfile = qemuVirtioFSCreatePidFilename(vm, fs->info.alias)))
-        goto cleanup;
+        goto error;
 
-    if (!(socket_path = qemuVirtioFSCreateSocketFilename(vm, fs->info.alias)))
-        goto cleanup;
+    socket_path = qemuDomainGetVHostUserFSSocketPath(vm->privateData, fs);
 
     if ((fd = qemuVirtioFSOpenChardev(driver, vm, socket_path)) < 0)
-        goto cleanup;
+        goto error;
 
     logpath = qemuVirtioFSCreateLogFilename(cfg, vm->def, fs->info.alias);
 
     if (cfg->stdioLogD) {
+        g_autoptr(virLogManager) logManager = virLogManagerNew(driver->privileged);
+
+        if (!logManager)
+            goto error;
+
         if ((logfd = virLogManagerDomainOpenLogFile(logManager,
                                                     "qemu",
                                                     vm->def->uuid,
@@ -197,22 +225,22 @@ qemuVirtioFSStart(virLogManagerPtr logManager,
                                                     logpath,
                                                     0,
                                                     NULL, NULL)) < 0)
-            goto cleanup;
+            goto error;
     } else {
         if ((logfd = open(logpath, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR)) < 0) {
-            virReportSystemError(errno, _("failed to create logfile %s"),
+            virReportSystemError(errno, _("failed to create logfile %1$s"),
                                  logpath);
-            goto cleanup;
+            goto error;
         }
         if (virSetCloseExec(logfd) < 0) {
-            virReportSystemError(errno, _("failed to set close-on-exec flag on %s"),
+            virReportSystemError(errno, _("failed to set close-on-exec flag on %1$s"),
                                  logpath);
             goto error;
         }
     }
 
     if (!(cmd = qemuVirtioFSBuildCommandLine(cfg, fs, &fd)))
-        goto cleanup;
+        goto error;
 
     /* so far only running as root is supported */
     virCommandSetUID(cmd, 0);
@@ -224,8 +252,18 @@ qemuVirtioFSStart(virLogManagerPtr logManager,
     virCommandNonblockingFDs(cmd);
     virCommandDaemonize(cmd);
 
+    if (cfg->schedCore == QEMU_SCHED_CORE_FULL) {
+        pid_t cookie_pid = vm->pid;
+
+        if (cookie_pid <= 0)
+            cookie_pid = priv->schedCoreChildPID;
+
+        virCommandSetRunAmong(cmd, cookie_pid);
+    }
+
+
     if (qemuExtDeviceLogCommand(driver, vm, cmd, "virtiofsd") < 0)
-        goto cleanup;
+        goto error;
 
     rc = virCommandRun(cmd, NULL);
 
@@ -238,7 +276,7 @@ qemuVirtioFSStart(virLogManagerPtr logManager,
     rc = virPidFileReadPath(pidfile, &pid);
     if (rc < 0) {
         virReportSystemError(-rc,
-                             _("Unable to read virtiofsd pidfile '%s'"),
+                             _("Unable to read virtiofsd pidfile '%1$s'"),
                              pidfile);
         goto error;
     }
@@ -249,27 +287,23 @@ qemuVirtioFSStart(virLogManagerPtr logManager,
         goto error;
     }
 
-    QEMU_DOMAIN_FS_PRIVATE(fs)->vhostuser_fs_sock = g_steal_pointer(&socket_path);
-    ret = 0;
-
- cleanup:
-    if (socket_path)
-        unlink(socket_path);
-    return ret;
+    return 0;
 
  error:
     if (pid != -1)
         virProcessKillPainfully(pid, true);
     if (pidfile)
         unlink(pidfile);
-    goto cleanup;
+    if (socket_path)
+        unlink(socket_path);
+    return -1;
 }
 
 
 void
-qemuVirtioFSStop(virQEMUDriverPtr driver G_GNUC_UNUSED,
-                    virDomainObjPtr vm,
-                    virDomainFSDefPtr fs)
+qemuVirtioFSStop(virQEMUDriver *driver G_GNUC_UNUSED,
+                    virDomainObj *vm,
+                    virDomainFSDef *fs)
 {
     g_autofree char *pidfile = NULL;
     virErrorPtr orig_err;
@@ -279,11 +313,19 @@ qemuVirtioFSStop(virQEMUDriverPtr driver G_GNUC_UNUSED,
     if (!(pidfile = qemuVirtioFSCreatePidFilename(vm, fs->info.alias)))
         goto cleanup;
 
-    if (virPidFileForceCleanupPath(pidfile) < 0) {
+    if (!virFileExists(pidfile)) {
+        g_free(pidfile);
+        if (!(pidfile = qemuVirtioFSCreatePidFilenameOld(vm, fs->info.alias)))
+            goto cleanup;
+    }
+
+    if (virPidFileForceCleanupPathFull(pidfile, true) < 0) {
         VIR_WARN("Unable to kill virtiofsd process");
     } else {
-        if (QEMU_DOMAIN_FS_PRIVATE(fs)->vhostuser_fs_sock)
-            unlink(QEMU_DOMAIN_FS_PRIVATE(fs)->vhostuser_fs_sock);
+        g_autofree char *socket_path = NULL;
+
+        socket_path = qemuDomainGetVHostUserFSSocketPath(vm->privateData, fs);
+        unlink(socket_path);
     }
 
  cleanup:
@@ -292,9 +334,9 @@ qemuVirtioFSStop(virQEMUDriverPtr driver G_GNUC_UNUSED,
 
 
 int
-qemuVirtioFSSetupCgroup(virDomainObjPtr vm,
-                        virDomainFSDefPtr fs,
-                        virCgroupPtr cgroup)
+qemuVirtioFSSetupCgroup(virDomainObj *vm,
+                        virDomainFSDef *fs,
+                        virCgroup *cgroup)
 {
     g_autofree char *pidfile = NULL;
     pid_t pid = -1;
@@ -317,10 +359,10 @@ qemuVirtioFSSetupCgroup(virDomainObjPtr vm,
 }
 
 int
-qemuVirtioFSPrepareDomain(virQEMUDriverPtr driver,
-                          virDomainFSDefPtr fs)
+qemuVirtioFSPrepareDomain(virQEMUDriver *driver,
+                          virDomainFSDef *fs)
 {
-    if (fs->binary)
+    if (fs->binary || fs->sock)
         return 0;
 
     return qemuVhostUserFillDomainFS(driver, fs);

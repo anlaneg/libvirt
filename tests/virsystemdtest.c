@@ -20,9 +20,8 @@
 
 #include "testutils.h"
 
-#if defined(WITH_DBUS) && defined(__linux__)
+#if defined(__linux__)
 
-# include <dbus/dbus.h>
 # include <fcntl.h>
 # include <unistd.h>
 
@@ -30,7 +29,7 @@
 # include "virsystemdpriv.h"
 
 # include "virsystemd.h"
-# include "virdbus.h"
+# include "virgdbus.h"
 # include "virlog.h"
 # include "virmock.h"
 # include "rpc/virnetsocket.h"
@@ -39,125 +38,90 @@
 
 VIR_LOG_INIT("tests.systemdtest");
 
-VIR_MOCK_WRAP_RET_ARGS(dbus_connection_send_with_reply_and_block,
-                       DBusMessage *,
-                       DBusConnection *, connection,
-                       DBusMessage *, message,
-                       int, timeout_milliseconds,
-                       DBusError *, error)
+VIR_MOCK_WRAP_RET_ARGS(g_dbus_connection_call_sync,
+                       GVariant *,
+                       GDBusConnection *, connection,
+                       const gchar *, bus_name,
+                       const gchar *, object_path,
+                       const gchar *, interface_name,
+                       const gchar *, method_name,
+                       GVariant *, parameters,
+                       const GVariantType *, reply_type,
+                       GDBusCallFlags, flags,
+                       gint, timeout_msec,
+                       GCancellable *, cancellable,
+                       GError **, error)
 {
-    DBusMessage *reply = NULL;
-    const char *service = dbus_message_get_destination(message);
-    const char *member = dbus_message_get_member(message);
+    GVariant *reply = NULL;
+    g_autoptr(GVariant) params = parameters;
 
-    VIR_MOCK_REAL_INIT(dbus_connection_send_with_reply_and_block);
+    if (params)
+        g_variant_ref_sink(params);
 
-    if (STREQ(service, "org.freedesktop.machine1")) {
+    VIR_MOCK_REAL_INIT(g_dbus_connection_call_sync);
+
+    if (STREQ(bus_name, "org.freedesktop.machine1")) {
         if (getenv("FAIL_BAD_SERVICE")) {
-            dbus_set_error_const(error,
-                                 "org.freedesktop.systemd.badthing",
-                                 "Something went wrong creating the machine");
+            *error = g_dbus_error_new_for_dbus_error(
+                    "org.freedesktop.systemd.badthing",
+                     "Something went wrong creating the machine");
         } else {
-            reply = dbus_message_new(DBUS_MESSAGE_TYPE_METHOD_RETURN);
+            if (STREQ(method_name, "GetMachineByPID")) {
+                reply = g_variant_new("(o)",
+                                      "/org/freedesktop/machine1/machine/qemu_2ddemo");
+            } else if (STREQ(method_name, "Get")) {
+                const char *prop;
+                g_variant_get(params, "(@s&s)", NULL, &prop);
 
-            if (STREQ(member, "GetMachineByPID")) {
-                const char *object_path = "/org/freedesktop/machine1/machine/qemu_2ddemo";
-                DBusMessageIter iter;
-
-                dbus_message_iter_init_append(reply, &iter);
-                if (!dbus_message_iter_append_basic(&iter,
-                                                    DBUS_TYPE_OBJECT_PATH,
-                                                    &object_path))
-                    goto error;
-            } else if (STREQ(member, "Get")) {
-                const char *name = "qemu-demo";
-                DBusMessageIter iter;
-                DBusMessageIter sub;
-
-                dbus_message_iter_init_append(reply, &iter);
-                dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT,
-                                                 "s", &sub);
-
-                if (!dbus_message_iter_append_basic(&sub,
-                                                    DBUS_TYPE_STRING,
-                                                    &name))
-                    goto error;
-                dbus_message_iter_close_container(&iter, &sub);
+                if (STREQ(prop, "Name")) {
+                    reply = g_variant_new("(v)", g_variant_new_string("qemu-demo"));
+                } else if (STREQ(prop, "Unit")) {
+                    reply = g_variant_new("(v)",
+                                          g_variant_new_string("machine-qemu-demo.scope"));
+                } else {
+                    *error = g_dbus_error_new_for_dbus_error(
+                            "org.freedesktop.systemd.badthing",
+                            "Unknown machine property");
+                }
+            } else {
+                reply = g_variant_new("()");
             }
         }
-    } else if (STREQ(service, "org.freedesktop.login1")) {
-        char *supported = getenv("RESULT_SUPPORT");
-        DBusMessageIter iter;
-        reply = dbus_message_new(DBUS_MESSAGE_TYPE_METHOD_RETURN);
-        dbus_message_iter_init_append(reply, &iter);
+    } else if (STREQ(bus_name, "org.freedesktop.login1")) {
+        reply = g_variant_new("(s)", getenv("RESULT_SUPPORT"));
+    } else if (STREQ(bus_name, "org.freedesktop.DBus") &&
+               STREQ(method_name, "ListActivatableNames")) {
+        GVariantBuilder builder;
 
-        if (!dbus_message_iter_append_basic(&iter,
-                                            DBUS_TYPE_STRING,
-                                            &supported))
-            goto error;
-    } else if (STREQ(service, "org.freedesktop.DBus") &&
-               STREQ(member, "ListActivatableNames")) {
-        const char *svc1 = "org.foo.bar.wizz";
-        const char *svc2 = "org.freedesktop.machine1";
-        const char *svc3 = "org.freedesktop.login1";
-        DBusMessageIter iter;
-        DBusMessageIter sub;
-        reply = dbus_message_new(DBUS_MESSAGE_TYPE_METHOD_RETURN);
-        dbus_message_iter_init_append(reply, &iter);
-        dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
-                                         "s", &sub);
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
 
-        if (!dbus_message_iter_append_basic(&sub,
-                                            DBUS_TYPE_STRING,
-                                            &svc1))
-            goto error;
-        if (!getenv("FAIL_NO_SERVICE") &&
-            !dbus_message_iter_append_basic(&sub,
-                                            DBUS_TYPE_STRING,
-                                            &svc2))
-            goto error;
-        if (!getenv("FAIL_NO_SERVICE") &&
-            !dbus_message_iter_append_basic(&sub,
-                                            DBUS_TYPE_STRING,
-                                            &svc3))
-            goto error;
-        dbus_message_iter_close_container(&iter, &sub);
-    } else if (STREQ(service, "org.freedesktop.DBus") &&
-               STREQ(member, "ListNames")) {
-        const char *svc1 = "org.foo.bar.wizz";
-        const char *svc2 = "org.freedesktop.systemd1";
-        const char *svc3 = "org.freedesktop.login1";
-        DBusMessageIter iter;
-        DBusMessageIter sub;
-        reply = dbus_message_new(DBUS_MESSAGE_TYPE_METHOD_RETURN);
-        dbus_message_iter_init_append(reply, &iter);
-        dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
-                                         "s", &sub);
+        g_variant_builder_add(&builder, "s", "org.foo.bar.wizz");
 
-        if (!dbus_message_iter_append_basic(&sub,
-                                            DBUS_TYPE_STRING,
-                                            &svc1))
-            goto error;
-        if ((!getenv("FAIL_NO_SERVICE") && !getenv("FAIL_NOT_REGISTERED")) &&
-            !dbus_message_iter_append_basic(&sub,
-                                            DBUS_TYPE_STRING,
-                                            &svc2))
-            goto error;
-        if ((!getenv("FAIL_NO_SERVICE") && !getenv("FAIL_NOT_REGISTERED")) &&
-            !dbus_message_iter_append_basic(&sub,
-                                            DBUS_TYPE_STRING,
-                                            &svc3))
-            goto error;
-        dbus_message_iter_close_container(&iter, &sub);
+        if (!getenv("FAIL_NO_SERVICE")) {
+            g_variant_builder_add(&builder, "s", "org.freedesktop.machine1");
+            g_variant_builder_add(&builder, "s", "org.freedesktop.login1");
+        }
+
+        reply = g_variant_new("(@as)", g_variant_builder_end(&builder));
+    } else if (STREQ(bus_name, "org.freedesktop.DBus") &&
+               STREQ(method_name, "ListNames")) {
+        GVariantBuilder builder;
+
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
+
+        g_variant_builder_add(&builder, "s", "org.foo.bar.wizz");
+
+        if (!getenv("FAIL_NO_SERVICE") && !getenv("FAIL_NOT_REGISTERED")) {
+            g_variant_builder_add(&builder, "s", "org.freedesktop.systemd1");
+            g_variant_builder_add(&builder, "s", "org.freedesktop.login1");
+        }
+
+        reply = g_variant_new("(@as)", g_variant_builder_end(&builder));
     } else {
-        reply = dbus_message_new(DBUS_MESSAGE_TYPE_METHOD_RETURN);
+        reply = g_variant_new("()");
     }
 
     return reply;
-
- error:
-    virDBusMessageUnref(reply);
-    return NULL;
 }
 
 
@@ -349,7 +313,7 @@ static int testCreateNetwork(const void *opaque G_GNUC_UNUSED)
                                 123,
                                 true,
                                 nnicindexes, nicindexes,
-                                "highpriority.slice", 0) < 0) {
+                                "highpriority.slice", 2) < 0) {
         fprintf(stderr, "%s", "Failed to create LXC machine\n");
         return -1;
     }
@@ -361,7 +325,7 @@ static int testCreateNetwork(const void *opaque G_GNUC_UNUSED)
 static int
 testGetMachineName(const void *opaque G_GNUC_UNUSED)
 {
-    char *tmp = virSystemdGetMachineNameByPID(1234);
+    g_autofree char *tmp = virSystemdGetMachineNameByPID(1234);
     int ret = -1;
 
     if (!tmp) {
@@ -372,8 +336,24 @@ testGetMachineName(const void *opaque G_GNUC_UNUSED)
     if (STREQ(tmp, "qemu-demo"))
         ret = 0;
 
-    VIR_FREE(tmp);
     return ret;
+}
+
+
+static int
+testGetMachineUnit(const void *opaque G_GNUC_UNUSED)
+{
+    g_autofree char *tmp = virSystemdGetMachineUnitByPID(1234);
+
+    if (!tmp) {
+        fprintf(stderr, "%s", "Failed to create get machine unit\n");
+        return -1;
+    }
+
+    if (STREQ(tmp, "machine-qemu-demo.scope"))
+        return 0;
+
+    return -1;
 }
 
 
@@ -389,47 +369,37 @@ static int
 testScopeName(const void *opaque)
 {
     const struct testNameData *data = opaque;
-    int ret = -1;
-    char *actual = NULL;
+    g_autofree char *actual = NULL;
 
     if (!(actual = virSystemdMakeScopeName(data->name, "lxc", data->legacy)))
-        goto cleanup;
+        return -1;
 
     if (STRNEQ(actual, data->expected)) {
         fprintf(stderr, "Expected '%s' but got '%s'\n",
                 data->expected, actual);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 static int
 testMachineName(const void *opaque)
 {
     const struct testNameData *data = opaque;
-    int ret = -1;
-    char *actual = NULL;
+    g_autofree char *actual = NULL;
 
     if (!(actual = virDomainDriverGenerateMachineName("qemu", data->root,
                                                       data->id, data->name, true)))
-        goto cleanup;
+        return -1;
 
     if (STRNEQ(actual, data->expected)) {
         fprintf(stderr, "Expected '%s' but got '%s'\n",
                 data->expected, actual);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 typedef int (*virSystemdCanHelper)(bool * result);
@@ -514,8 +484,8 @@ static int testPMSupportSystemdNotRunning(const void *opaque)
 
 
 static int
-testActivationCreateFDs(virNetSocketPtr *sockUNIX,
-                        virNetSocketPtr **sockIP,
+testActivationCreateFDs(virNetSocket **sockUNIX,
+                        virNetSocket ***sockIP,
                         size_t *nsockIP)
 {
     *sockUNIX = NULL;
@@ -543,28 +513,24 @@ testActivationCreateFDs(virNetSocketPtr *sockUNIX,
 
 
 static int
-testActivation(bool useNames)
+testActivationFDNames(const void *opaque G_GNUC_UNUSED)
 {
-    virNetSocketPtr sockUNIX;
-    virNetSocketPtr *sockIP;
+    virNetSocket *sockUNIX;
+    virNetSocket **sockIP;
     size_t nsockIP;
     int ret = -1;
     size_t i;
     char nfdstr[VIR_INT64_STR_BUFLEN];
     char pidstr[VIR_INT64_STR_BUFLEN];
-    virSystemdActivationMap map[2];
     int *fds = NULL;
     size_t nfds = 0;
     g_autoptr(virSystemdActivation) act = NULL;
     g_auto(virBuffer) names = VIR_BUFFER_INITIALIZER;
-    g_autofree char *demo_socket_path = NULL;
 
     virBufferAddLit(&names, "demo-unix.socket");
 
     if (testActivationCreateFDs(&sockUNIX, &sockIP, &nsockIP) < 0)
         return -1;
-
-    demo_socket_path = virNetSocketGetPath(sockUNIX);
 
     for (i = 0; i < nsockIP; i++)
         virBufferAddLit(&names, ":demo-ip.socket");
@@ -574,21 +540,9 @@ testActivation(bool useNames)
 
     g_setenv("LISTEN_FDS", nfdstr, TRUE);
     g_setenv("LISTEN_PID", pidstr, TRUE);
+    g_setenv("LISTEN_FDNAMES", virBufferCurrentContent(&names), TRUE);
 
-    if (useNames)
-        g_setenv("LISTEN_FDNAMES", virBufferCurrentContent(&names), TRUE);
-    else
-        g_unsetenv("LISTEN_FDNAMES");
-
-    map[0].name = "demo-unix.socket";
-    map[0].family = AF_UNIX;
-    map[0].path = demo_socket_path;
-
-    map[1].name = "demo-ip.socket";
-    map[1].family = AF_INET;
-    map[1].port = virNetSocketGetPort(sockIP[0]);
-
-    if (virSystemdGetActivation(map, G_N_ELEMENTS(map), &act) < 0)
+    if (virSystemdGetActivation(&act) < 0)
         goto cleanup;
 
     if (act == NULL) {
@@ -643,11 +597,11 @@ testActivation(bool useNames)
 static int
 testActivationEmpty(const void *opaque G_GNUC_UNUSED)
 {
-    virSystemdActivationPtr act;
+    virSystemdActivation *act;
 
     g_unsetenv("LISTEN_FDS");
 
-    if (virSystemdGetActivation(NULL, 0, &act) < 0)
+    if (virSystemdGetActivation(&act) < 0)
         return -1;
 
     if (act != NULL) {
@@ -658,21 +612,6 @@ testActivationEmpty(const void *opaque G_GNUC_UNUSED)
 
     return 0;
 }
-
-
-static int
-testActivationFDNames(const void *opaque G_GNUC_UNUSED)
-{
-    return testActivation(true);
-}
-
-
-static int
-testActivationFDAddrs(const void *opaque G_GNUC_UNUSED)
-{
-    return testActivation(false);
-}
-
 
 static int
 mymain(void)
@@ -703,6 +642,7 @@ mymain(void)
     DO_TEST("Test create bad systemd ", testCreateBadSystemd);
     DO_TEST("Test create with network ", testCreateNetwork);
     DO_TEST("Test getting machine name ", testGetMachineName);
+    DO_TEST("Test getting machine unit ", testGetMachineUnit);
 
 # define TEST_SCOPE(_name, unitname, _legacy) \
     do { \
@@ -754,6 +694,9 @@ mymain(void)
     TEST_MACHINE("demo.-.test.", NULL, 11, "qemu-11-demo.test");
     TEST_MACHINE("demo", "/tmp/root1", 1, "qemu-embed-0991f456-1-demo");
     TEST_MACHINE("demo", "/tmp/root2", 1, "qemu-embed-95d47ff5-1-demo");
+    TEST_MACHINE("|.-m", NULL, 1, "qemu-1-m");
+    TEST_MACHINE("Auto-esx7.0-rhel7.9-special-characters~!@#$%^&*_=+,?><:;|.\"[]()`\\-m",
+                 NULL, 1, "qemu-1-Auto-esx7.0-rhel7.9-special-characters.m");
 
 # define TESTS_PM_SUPPORT_HELPER(name, function) \
     do { \
@@ -785,8 +728,6 @@ mymain(void)
         fcntl(STDERR_FILENO + 3, F_GETFL) == -1 && errno == EBADF) {
         if (virTestRun("Test activation names", testActivationFDNames, NULL) < 0)
             ret = -1;
-        if (virTestRun("Test activation addrs", testActivationFDAddrs, NULL) < 0)
-            ret = -1;
     } else {
         VIR_INFO("Skipping activation tests as FD 3/4/5 is open");
     }
@@ -794,12 +735,12 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virdbus"))
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virgdbus"))
 
-#else /* ! (WITH_DBUS && __linux__) */
+#else /* ! __linux__ */
 int
 main(void)
 {
     return EXIT_AM_SKIP;
 }
-#endif /* ! WITH_DBUS */
+#endif /* ! __linux__ */

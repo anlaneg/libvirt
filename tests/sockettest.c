@@ -25,7 +25,6 @@
 #include "virsocketaddr.h"
 #include "testutils.h"
 #include "virlog.h"
-#include "viralloc.h"
 
 VIR_LOG_INIT("tests.sockettest");
 
@@ -43,18 +42,15 @@ static int testParse(virSocketAddr *addr, const char *addrstr, int family, bool 
 
 static int testFormat(virSocketAddr *addr, const char *addrstr, bool pass)
 {
-    char *newaddrstr;
+    g_autofree char *newaddrstr = NULL;
 
     newaddrstr = virSocketAddrFormat(addr);
     if (!newaddrstr)
         return pass ? -1 : 0;
 
-    if (STRNEQ(newaddrstr, addrstr)) {
-        virTestDifference(stderr, addrstr, newaddrstr);
-        VIR_FREE(newaddrstr);
+    if (virTestCompareToString(newaddrstr, addrstr) < 0) {
         return pass ? -1 : 0;
     } else {
-        VIR_FREE(newaddrstr);
         return pass ? 0 : -1;
     }
 }
@@ -90,6 +86,7 @@ testRange(const char *saddrstr, const char *eaddrstr,
     virSocketAddr saddr;
     virSocketAddr eaddr;
     virSocketAddr netaddr;
+    int gotsize;
 
     if (virSocketAddrParse(&saddr, saddrstr, AF_UNSPEC) < 0)
         return -1;
@@ -98,8 +95,8 @@ testRange(const char *saddrstr, const char *eaddrstr,
     if (netstr && virSocketAddrParse(&netaddr, netstr, AF_UNSPEC) < 0)
         return -1;
 
-    int gotsize = virSocketAddrGetRange(&saddr, &eaddr,
-                                        netstr ? &netaddr : NULL, prefix);
+    gotsize = virSocketAddrGetRange(&saddr, &eaddr,
+                                    netstr ? &netaddr : NULL, prefix);
     VIR_DEBUG("Size want %d vs got %d", size, gotsize);
     if (pass) {
         /* fail if virSocketAddrGetRange returns failure, or unexpected size */
@@ -136,6 +133,7 @@ static int testNetmask(const char *addr1str, const char *addr2str,
     virSocketAddr addr1;
     virSocketAddr addr2;
     virSocketAddr netmask;
+    int ret;
 
     if (virSocketAddrParse(&addr1, addr1str, AF_UNSPEC) < 0)
         return -1;
@@ -144,7 +142,7 @@ static int testNetmask(const char *addr1str, const char *addr2str,
     if (virSocketAddrParse(&netmask, netmaskstr, AF_UNSPEC) < 0)
         return -1;
 
-    int ret = virSocketAddrCheckNetmask(&addr1, &addr2, &netmask);
+    ret = virSocketAddrCheckNetmask(&addr1, &addr2, &netmask);
 
     if (ret <= 0) {
         return pass ? -1 : 0;
@@ -173,7 +171,7 @@ static int testMaskNetwork(const char *addrstr,
 {
     virSocketAddr addr;
     virSocketAddr network;
-    char *gotnet = NULL;
+    g_autofree char *gotnet = NULL;
 
     /* Intentionally fill with garbage */
     memset(&network, 1, sizeof(network));
@@ -188,11 +186,9 @@ static int testMaskNetwork(const char *addrstr,
         return -1;
 
     if (STRNEQ(networkstr, gotnet)) {
-        VIR_FREE(gotnet);
         fprintf(stderr, "Expected %s, got %s\n", networkstr, gotnet);
         return -1;
     }
-    VIR_FREE(gotnet);
     return 0;
 }
 
@@ -273,13 +269,12 @@ mymain(void)
 
 #define DO_TEST_PARSE_AND_FORMAT(addrstr, family, pass) \
     do { \
-        virSocketAddr addr; \
+        virSocketAddr addr = { 0 }; \
         struct testParseData data = { &addr, addrstr, family, pass }; \
-        memset(&addr, 0, sizeof(addr)); \
+        struct testFormatData data2 = { &addr, addrstr, pass }; \
         if (virTestRun("Test parse " addrstr " family " #family, \
                        testParseHelper, &data) < 0) \
             ret = -1; \
-        struct testFormatData data2 = { &addr, addrstr, pass }; \
         if (virTestRun("Test format " addrstr " family " #family, \
                        testFormatHelper, &data2) < 0) \
             ret = -1; \
@@ -287,13 +282,12 @@ mymain(void)
 
 #define DO_TEST_PARSE_AND_CHECK_FORMAT(addrstr, addrformated, family, pass) \
     do { \
-        virSocketAddr addr; \
+        virSocketAddr addr = { 0 }; \
         struct testParseData data = { &addr, addrstr, family, true}; \
-        memset(&addr, 0, sizeof(addr)); \
+        struct testFormatData data2 = { &addr, addrformated, pass }; \
         if (virTestRun("Test parse " addrstr " family " #family, \
                        testParseHelper, &data) < 0) \
             ret = -1; \
-        struct testFormatData data2 = { &addr, addrformated, pass }; \
         if (virTestRun("Test format " addrstr " family " #family, \
                        testFormatHelper, &data2) < 0) \
             ret = -1; \
@@ -373,12 +367,14 @@ mymain(void)
     DO_TEST_PARSE_AND_CHECK_FORMAT("127.2", "127.2.0.0", AF_INET, false);
     DO_TEST_PARSE_AND_CHECK_FORMAT("1.2.3", "1.2.0.3", AF_INET, true);
     DO_TEST_PARSE_AND_CHECK_FORMAT("1.2.3", "1.2.3.0", AF_INET, false);
+    DO_TEST_PARSE_AND_CHECK_FORMAT("::ffff:a01:203", "::ffff:10.1.2.3", AF_INET6, true);
 
     DO_TEST_PARSE_AND_FORMAT("::1", AF_UNSPEC, true);
     DO_TEST_PARSE_AND_FORMAT("::1", AF_INET, false);
     DO_TEST_PARSE_AND_FORMAT("::1", AF_INET6, true);
     DO_TEST_PARSE_AND_FORMAT("::1", AF_UNIX, false);
     DO_TEST_PARSE_AND_FORMAT("::fffe:0:0", AF_UNSPEC, true);
+    DO_TEST_PARSE_AND_FORMAT("::ffff:10.1.2.3", AF_UNSPEC, true);
 
     /* tests that specify a network that should contain the range */
     DO_TEST_RANGE("192.168.122.1", "192.168.122.1", "192.168.122.1", 24, 1, true);

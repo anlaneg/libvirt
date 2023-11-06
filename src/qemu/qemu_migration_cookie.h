@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "qemu_domain.h"
 #include "qemu_migration_params.h"
 #include "virenum.h"
 
@@ -33,6 +34,7 @@ typedef enum {
     QEMU_MIGRATION_COOKIE_FLAG_CPU,
     QEMU_MIGRATION_COOKIE_FLAG_ALLOW_REBOOT,
     QEMU_MIGRATION_COOKIE_FLAG_CAPS,
+    QEMU_MIGRATION_COOKIE_FLAG_BLOCK_DIRTY_BITMAPS,
 
     QEMU_MIGRATION_COOKIE_FLAG_LAST
 } qemuMigrationCookieFlags;
@@ -49,12 +51,11 @@ typedef enum {
     QEMU_MIGRATION_COOKIE_MEMORY_HOTPLUG = (1 << QEMU_MIGRATION_COOKIE_FLAG_MEMORY_HOTPLUG),
     QEMU_MIGRATION_COOKIE_CPU_HOTPLUG = (1 << QEMU_MIGRATION_COOKIE_FLAG_CPU_HOTPLUG),
     QEMU_MIGRATION_COOKIE_CPU = (1 << QEMU_MIGRATION_COOKIE_FLAG_CPU),
-    QEMU_MIGRATION_COOKIE_ALLOW_REBOOT = (1 << QEMU_MIGRATION_COOKIE_FLAG_ALLOW_REBOOT),
     QEMU_MIGRATION_COOKIE_CAPS = (1 << QEMU_MIGRATION_COOKIE_FLAG_CAPS),
+    QEMU_MIGRATION_COOKIE_BLOCK_DIRTY_BITMAPS = (1 << QEMU_MIGRATION_COOKIE_FLAG_BLOCK_DIRTY_BITMAPS),
 } qemuMigrationCookieFeatures;
 
 typedef struct _qemuMigrationCookieGraphics qemuMigrationCookieGraphics;
-typedef qemuMigrationCookieGraphics *qemuMigrationCookieGraphicsPtr;
 struct _qemuMigrationCookieGraphics {
     int type;
     int port;
@@ -64,7 +65,6 @@ struct _qemuMigrationCookieGraphics {
 };
 
 typedef struct _qemuMigrationCookieNetData qemuMigrationCookieNetData;
-typedef qemuMigrationCookieNetData *qemuMigrationCookieNetDataPtr;
 struct _qemuMigrationCookieNetData {
     int vporttype; /* enum virNetDevVPortProfile */
 
@@ -76,12 +76,11 @@ struct _qemuMigrationCookieNetData {
 };
 
 typedef struct _qemuMigrationCookieNetwork qemuMigrationCookieNetwork;
-typedef qemuMigrationCookieNetwork *qemuMigrationCookieNetworkPtr;
 struct _qemuMigrationCookieNetwork {
     /* How many virtual NICs are we saving data for? */
     int nnets;
 
-    qemuMigrationCookieNetDataPtr net;
+    qemuMigrationCookieNetData *net;
 };
 
 struct qemuMigrationCookieNBDDisk {
@@ -90,7 +89,6 @@ struct qemuMigrationCookieNBDDisk {
 };
 
 typedef struct _qemuMigrationCookieNBD qemuMigrationCookieNBD;
-typedef qemuMigrationCookieNBD *qemuMigrationCookieNBDPtr;
 struct _qemuMigrationCookieNBD {
     int port; /* on which port does NBD server listen for incoming data */
 
@@ -99,14 +97,39 @@ struct _qemuMigrationCookieNBD {
 };
 
 typedef struct _qemuMigrationCookieCaps qemuMigrationCookieCaps;
-typedef qemuMigrationCookieCaps *qemuMigrationCookieCapsPtr;
 struct _qemuMigrationCookieCaps {
-    virBitmapPtr supported;
-    virBitmapPtr automatic;
+    virBitmap *supported;
+    virBitmap *automatic;
 };
 
+typedef struct _qemuMigrationBlockDirtyBitmapsDiskBitmap qemuMigrationBlockDirtyBitmapsDiskBitmap;
+struct _qemuMigrationBlockDirtyBitmapsDiskBitmap {
+    /* config */
+    char *bitmapname;
+    char *alias;
+
+    /* runtime */
+    virTristateBool persistent; /* force persisting of the bitmap */
+    char *sourcebitmap; /* optional, actual bitmap to migrate in case we needed
+                           to create a temporary one by merging */
+    bool skip; /* omit this bitmap */
+};
+
+
+typedef struct _qemuMigrationBlockDirtyBitmapsDisk qemuMigrationBlockDirtyBitmapsDisk;
+struct _qemuMigrationBlockDirtyBitmapsDisk {
+    char *target;
+
+    GSList *bitmaps;
+
+    /* runtime data */
+    virDomainDiskDef *disk; /* disk object corresponding to 'target' */
+    const char *nodename; /* nodename of the top level source of 'disk' */
+    bool skip; /* omit this disk */
+};
+
+
 typedef struct _qemuMigrationCookie qemuMigrationCookie;
-typedef qemuMigrationCookie *qemuMigrationCookiePtr;
 struct _qemuMigrationCookie {
     unsigned int flags;
     unsigned int flagsMandatory;
@@ -126,55 +149,76 @@ struct _qemuMigrationCookie {
     char *lockDriver;
 
     /* If (flags & QEMU_MIGRATION_COOKIE_GRAPHICS) */
-    qemuMigrationCookieGraphicsPtr graphics;
+    qemuMigrationCookieGraphics *graphics;
 
     /* If (flags & QEMU_MIGRATION_COOKIE_PERSISTENT) */
-    virDomainDefPtr persistent;
+    virDomainDef *persistent;
 
     /* If (flags & QEMU_MIGRATION_COOKIE_NETWORK) */
-    qemuMigrationCookieNetworkPtr network;
+    qemuMigrationCookieNetwork *network;
 
     /* If (flags & QEMU_MIGRATION_COOKIE_NBD) */
-    qemuMigrationCookieNBDPtr nbd;
+    qemuMigrationCookieNBD *nbd;
 
     /* If (flags & QEMU_MIGRATION_COOKIE_STATS) */
-    qemuDomainJobInfoPtr jobInfo;
+    virDomainJobData *jobData;
 
     /* If flags & QEMU_MIGRATION_COOKIE_CPU */
-    virCPUDefPtr cpu;
-
-    /* If flags & QEMU_MIGRATION_COOKIE_ALLOW_REBOOT */
-    virTristateBool allowReboot;
+    virCPUDef *cpu;
 
     /* If flags & QEMU_MIGRATION_COOKIE_CAPS */
-    qemuMigrationCookieCapsPtr caps;
+    qemuMigrationCookieCaps *caps;
+
+    /* If flags & QEMU_MIGRATION_COOKIE_BLOCK_DIRTY_BITMAPS */
+    GSList *blockDirtyBitmaps;
 };
 
 
-int
-qemuMigrationBakeCookie(qemuMigrationCookiePtr mig,
-                        virQEMUDriverPtr driver,
-                        virDomainObjPtr dom,
-                        qemuMigrationParty party,
-                        char **cookieout,
-                        int *cookieoutlen,
-                        unsigned int flags);
+qemuMigrationCookie *
+qemuMigrationCookieNew(const virDomainDef *def,
+                       const char *origname);
 
-qemuMigrationCookiePtr
-qemuMigrationEatCookie(virQEMUDriverPtr driver,
-                       const virDomainDef *def,
-                       const char *origname,
-                       qemuDomainObjPrivatePtr priv,
-                       const char *cookiein,
-                       int cookieinlen,
-                       unsigned int flags);
+int
+qemuMigrationCookieFormat(qemuMigrationCookie *mig,
+                          virQEMUDriver *driver,
+                          virDomainObj *dom,
+                          qemuMigrationParty party,
+                          char **cookieout,
+                          int *cookieoutlen,
+                          unsigned int flags);
+
+qemuMigrationCookie *
+qemuMigrationCookieParse(virQEMUDriver *driver,
+                         virDomainObj *vm,
+                         const virDomainDef *def,
+                         const char *origname,
+                         virQEMUCaps *qemuCaps,
+                         const char *cookiein,
+                         int cookieinlen,
+                         unsigned int flags);
 
 void
-qemuMigrationCookieFree(qemuMigrationCookiePtr mig);
+qemuMigrationCookieFree(qemuMigrationCookie *mig);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuMigrationCookie, qemuMigrationCookieFree);
 
 int
-qemuMigrationCookieAddPersistent(qemuMigrationCookiePtr mig,
-                                 virDomainDefPtr *def);
+qemuMigrationCookieAddPersistent(qemuMigrationCookie *mig,
+                                 virDomainDef **def);
 
-virDomainDefPtr
-qemuMigrationCookieGetPersistent(qemuMigrationCookiePtr mig);
+virDomainDef *
+qemuMigrationCookieGetPersistent(qemuMigrationCookie *mig);
+
+/* qemuMigrationCookieXMLFormat is exported for test use only! */
+int
+qemuMigrationCookieXMLFormat(virQEMUDriver *driver,
+                             virQEMUCaps *qemuCaps,
+                             virBuffer *buf,
+                             qemuMigrationCookie *mig);
+
+int
+qemuMigrationCookieBlockDirtyBitmapsMatchDisks(virDomainDef *def,
+                                               GSList *disks);
+
+int
+qemuMigrationCookieBlockDirtyBitmapsToParams(GSList *disks,
+                                             virJSONValue **mapping);

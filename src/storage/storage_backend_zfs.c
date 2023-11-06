@@ -33,6 +33,9 @@
 
 VIR_LOG_INIT("storage.storage_backend_zfs");
 
+#define ZFS "zfs"
+#define ZPOOL "zpool"
+
 /*
  * Some common flags of zfs and zpool commands we use:
  * -H -- don't print headers and separate fields by tab
@@ -78,42 +81,54 @@ virStorageBackendZFSVolModeNeeded(void)
 }
 
 static int
-virStorageBackendZFSCheckPool(virStoragePoolObjPtr pool G_GNUC_UNUSED,
+virStorageBackendZFSCheckPool(virStoragePoolObj *pool G_GNUC_UNUSED,
                               bool *isActive)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    g_autofree char *devpath = NULL;
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
+    g_autoptr(virCommand) cmd = NULL;
+    int exit_code = -1;
 
-    devpath = g_strdup_printf("/dev/zvol/%s", def->source.name);
-    *isActive = virFileIsDir(devpath);
+    /* Check for an existing dataset of type 'filesystem' by the name of our
+     * pool->source.name.  */
+    cmd = virCommandNewArgList(ZFS,
+                               "list", "-H",
+                               "-t", "filesystem",
+                               "-o", "name",
+                               def->source.name,
+                               NULL);
+
+
+    if (virCommandRun(cmd, &exit_code) < 0)
+        return -1;
+
+    /* zfs list exits with 0 if the dataset exists, 1 if it doesn't */
+    *isActive = exit_code == 0;
 
     return 0;
 }
 
 static int
-virStorageBackendZFSParseVol(virStoragePoolObjPtr pool,
-                             virStorageVolDefPtr vol,
+virStorageBackendZFSParseVol(virStoragePoolObj *pool,
+                             virStorageVolDef *vol,
                              const char *volume_string)
 {
     int ret = -1;
-    size_t count;
     char *vol_name;
     bool is_new_vol = false;
-    virStorageVolDefPtr volume = NULL;
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    VIR_AUTOSTRINGLIST tokens = NULL;
-    VIR_AUTOSTRINGLIST name_tokens = NULL;
+    virStorageVolDef *volume = NULL;
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
+    g_auto(GStrv) tokens = NULL;
+    char *tmp;
 
-    if (!(tokens = virStringSplitCount(volume_string, "\t", 0, &count)))
+    if (!(tokens = g_strsplit(volume_string, "\t", 0)))
         return -1;
 
-    if (count != 3)
+    if (g_strv_length(tokens) != 3)
         goto cleanup;
 
-    if (!(name_tokens = virStringSplitCount(tokens[0], "/", 0, &count)))
-        goto cleanup;
-
-    vol_name = name_tokens[count-1];
+    vol_name = tokens[0];
+    if ((tmp = strrchr(vol_name, '/')))
+        vol_name = tmp + 1;
 
     if (vol == NULL)
         volume = virStorageVolDefFindByName(pool, vol_name);
@@ -121,8 +136,7 @@ virStorageBackendZFSParseVol(virStoragePoolObjPtr pool,
         volume = vol;
 
     if (volume == NULL) {
-        if (VIR_ALLOC(volume) < 0)
-            goto cleanup;
+        volume = g_new0(virStorageVolDef, 1);
 
         is_new_vol = true;
         volume->type = VIR_STORAGE_VOL_BLOCK;
@@ -165,12 +179,12 @@ virStorageBackendZFSParseVol(virStoragePoolObjPtr pool,
 }
 
 static int
-virStorageBackendZFSFindVols(virStoragePoolObjPtr pool,
-                             virStorageVolDefPtr vol)
+virStorageBackendZFSFindVols(virStoragePoolObj *pool,
+                             virStorageVolDef *vol)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     size_t i;
-    VIR_AUTOSTRINGLIST lines = NULL;
+    g_auto(GStrv) lines = NULL;
     g_autoptr(virCommand) cmd = NULL;
     g_autofree char *volumes_list = NULL;
 
@@ -196,7 +210,7 @@ virStorageBackendZFSFindVols(virStoragePoolObjPtr pool,
     if (virCommandRun(cmd, NULL) < 0)
         return -1;
 
-    if (!(lines = virStringSplit(volumes_list, "\n", 0)))
+    if (!(lines = g_strsplit(volumes_list, "\n", 0)))
         return -1;
 
     for (i = 0; lines[i]; i++) {
@@ -211,15 +225,15 @@ virStorageBackendZFSFindVols(virStoragePoolObjPtr pool,
 }
 
 static int
-virStorageBackendZFSRefreshPool(virStoragePoolObjPtr pool G_GNUC_UNUSED)
+virStorageBackendZFSRefreshPool(virStoragePoolObj *pool G_GNUC_UNUSED)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     char *zpool_props = NULL;
     size_t i;
     g_autoptr(virCommand) cmd = NULL;
-    VIR_AUTOSTRINGLIST lines = NULL;
-    VIR_AUTOSTRINGLIST tokens = NULL;
-    VIR_AUTOSTRINGLIST name_tokens = NULL;
+    g_auto(GStrv) lines = NULL;
+    g_autofree char *name = g_strdup(def->source.name);
+    char *tmp;
 
     /**
      * $ zpool get -Hp health,size,free,allocated test
@@ -231,33 +245,32 @@ virStorageBackendZFSRefreshPool(virStoragePoolObjPtr pool G_GNUC_UNUSED)
      *
      * Here we just provide a list of properties we want to see
      */
-    if (!(name_tokens = virStringSplit(def->source.name, "/", 0)))
-        goto cleanup;
+    if ((tmp = strchr(name, '/')))
+        *tmp = '\0';
 
     cmd = virCommandNewArgList(ZPOOL,
                                "get", "-Hp",
                                "health,size,free,allocated",
-                               name_tokens[0],
+                               name,
                                NULL);
     virCommandSetOutputBuffer(cmd, &zpool_props);
     if (virCommandRun(cmd, NULL) < 0)
         goto cleanup;
 
-    if (!(lines = virStringSplit(zpool_props, "\n", 0)))
+    if (!(lines = g_strsplit(zpool_props, "\n", 0)))
         goto cleanup;
 
     for (i = 0; lines[i]; i++) {
-        size_t count;
+        g_auto(GStrv) tokens = NULL;
         char *prop_name;
 
         if (STREQ(lines[i], ""))
             continue;
 
-        virStringListFree(tokens);
-        if (!(tokens = virStringSplitCount(lines[i], "\t", 0, &count)))
+        if (!(tokens = g_strsplit(lines[i], "\t", 0)))
             goto cleanup;
 
-        if (count != 4)
+        if (g_strv_length(tokens) != 4)
             continue;
 
         prop_name = tokens[1];
@@ -288,17 +301,16 @@ virStorageBackendZFSRefreshPool(virStoragePoolObjPtr pool G_GNUC_UNUSED)
 }
 
 static int
-virStorageBackendZFSCreateVol(virStoragePoolObjPtr pool,
-                              virStorageVolDefPtr vol)
+virStorageBackendZFSCreateVol(virStoragePoolObj *pool,
+                              virStorageVolDef *vol)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     int volmode_needed = -1;
     g_autoptr(virCommand) cmd = NULL;
 
     if (vol->target.encryption != NULL) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       "%s", _("storage pool does not support encrypted "
-                               "volumes"));
+                       "%s", _("storage pool does not support encrypted volumes"));
         return -1;
     }
 
@@ -351,11 +363,11 @@ virStorageBackendZFSCreateVol(virStoragePoolObjPtr pool,
 }
 
 static int
-virStorageBackendZFSDeleteVol(virStoragePoolObjPtr pool,
-                              virStorageVolDefPtr vol,
+virStorageBackendZFSDeleteVol(virStoragePoolObj *pool,
+                              virStorageVolDef *vol,
                               unsigned int flags)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     g_autoptr(virCommand) destroy_cmd = NULL;
 
     virCheckFlags(0, -1);
@@ -369,10 +381,10 @@ virStorageBackendZFSDeleteVol(virStoragePoolObjPtr pool,
 }
 
 static int
-virStorageBackendZFSBuildPool(virStoragePoolObjPtr pool,
+virStorageBackendZFSBuildPool(virStoragePoolObj *pool,
                               unsigned int flags)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     size_t i;
     g_autoptr(virCommand) cmd = NULL;
     int ret = -1;
@@ -406,10 +418,10 @@ virStorageBackendZFSBuildPool(virStoragePoolObjPtr pool,
 }
 
 static int
-virStorageBackendZFSDeletePool(virStoragePoolObjPtr pool,
+virStorageBackendZFSDeletePool(virStoragePoolObj *pool,
                                unsigned int flags)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     g_autoptr(virCommand) cmd = NULL;
     char *tmp;
 

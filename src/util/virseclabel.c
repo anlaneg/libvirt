@@ -22,46 +22,41 @@
 #include <config.h>
 
 #include "internal.h"
-#include "viralloc.h"
 #include "virseclabel.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 
 void
-virSecurityLabelDefFree(virSecurityLabelDefPtr def)
+virSecurityLabelDefFree(virSecurityLabelDef *def)
 {
     if (!def)
         return;
-    VIR_FREE(def->model);
-    VIR_FREE(def->label);
-    VIR_FREE(def->imagelabel);
-    VIR_FREE(def->baselabel);
-    VIR_FREE(def);
+    g_free(def->model);
+    g_free(def->label);
+    g_free(def->imagelabel);
+    g_free(def->baselabel);
+    g_free(def);
 }
 
 
 void
-virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDefPtr def)
+virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDef *def)
 {
     if (!def)
         return;
-    VIR_FREE(def->model);
-    VIR_FREE(def->label);
-    VIR_FREE(def);
+    g_free(def->model);
+    g_free(def->label);
+    g_free(def);
 }
 
 
-virSecurityLabelDefPtr
+virSecurityLabelDef *
 virSecurityLabelDefNew(const char *model)
 {
-    virSecurityLabelDefPtr seclabel = NULL;
+    virSecurityLabelDef *seclabel = NULL;
 
-    if (VIR_ALLOC(seclabel) < 0) {
-        virSecurityLabelDefFree(seclabel);
-        return NULL;
-    }
+    seclabel = g_new0(virSecurityLabelDef, 1);
 
     seclabel->model = g_strdup(model);
 
@@ -70,15 +65,12 @@ virSecurityLabelDefNew(const char *model)
     return seclabel;
 }
 
-virSecurityDeviceLabelDefPtr
+virSecurityDeviceLabelDef *
 virSecurityDeviceLabelDefNew(const char *model)
 {
-    virSecurityDeviceLabelDefPtr seclabel = NULL;
+    virSecurityDeviceLabelDef *seclabel = NULL;
 
-    if (VIR_ALLOC(seclabel) < 0) {
-        virSecurityDeviceLabelDefFree(seclabel);
-        return NULL;
-    }
+    seclabel = g_new0(virSecurityDeviceLabelDef, 1);
 
     seclabel->model = g_strdup(model);
 
@@ -86,13 +78,12 @@ virSecurityDeviceLabelDefNew(const char *model)
 }
 
 
-virSecurityDeviceLabelDefPtr
+virSecurityDeviceLabelDef *
 virSecurityDeviceLabelDefCopy(const virSecurityDeviceLabelDef *src)
 {
-    virSecurityDeviceLabelDefPtr ret;
+    virSecurityDeviceLabelDef *ret;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virSecurityDeviceLabelDef, 1);
 
     ret->relabel = src->relabel;
     ret->labelskip = src->labelskip;

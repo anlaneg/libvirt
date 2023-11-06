@@ -27,9 +27,6 @@
 # include "nwfilter/nwfilter_ebiptables_driver.h"
 # include "virbuffer.h"
 
-# define LIBVIRT_VIRFIREWALLPRIV_H_ALLOW
-# include "virfirewallpriv.h"
-
 # define LIBVIRT_VIRCOMMANDPRIV_H_ALLOW
 # include "vircommandpriv.h"
 
@@ -42,11 +39,10 @@
 # endif
 
 typedef struct _virNWFilterInst virNWFilterInst;
-typedef virNWFilterInst *virNWFilterInstPtr;
 struct _virNWFilterInst {
-    virNWFilterDefPtr *filters;
+    virNWFilterDef **filters;
     size_t nfilters;
-    virNWFilterRuleInstPtr *rules;
+    virNWFilterRuleInst **rules;
     size_t nrules;
 };
 
@@ -58,128 +54,122 @@ struct _virNWFilterInst {
 
 static const char *commonRules[] = {
     /* Dropping ebtables rules */
-    "ebtables -t nat -D PREROUTING -i vnet0 -j libvirt-J-vnet0\n"
-    "ebtables -t nat -D POSTROUTING -o vnet0 -j libvirt-P-vnet0\n"
-    "ebtables -t nat -L libvirt-J-vnet0\n"
-    "ebtables -t nat -L libvirt-P-vnet0\n"
-    "ebtables -t nat -F libvirt-J-vnet0\n"
-    "ebtables -t nat -X libvirt-J-vnet0\n"
-    "ebtables -t nat -F libvirt-P-vnet0\n"
-    "ebtables -t nat -X libvirt-P-vnet0\n",
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-D PREROUTING \\\n-i vnet0 \\\n-j libvirt-J-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-D POSTROUTING \\\n-o vnet0 \\\n-j libvirt-P-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-L libvirt-J-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-L libvirt-P-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-F libvirt-J-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-X libvirt-J-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-F libvirt-P-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-X libvirt-P-vnet0\n",
 
     /* Creating ebtables chains */
-    "ebtables -t nat -N libvirt-J-vnet0\n"
-    "ebtables -t nat -N libvirt-P-vnet0\n",
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-N libvirt-J-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-N libvirt-P-vnet0\n",
 
     /* Dropping iptables rules */
-    "iptables -D libvirt-out -m physdev --physdev-is-bridged --physdev-out vnet0 -g FP-vnet0\n"
-    "iptables -D libvirt-out -m physdev --physdev-out vnet0 -g FP-vnet0\n"
-    "iptables -D libvirt-in -m physdev --physdev-in vnet0 -g FJ-vnet0\n"
-    "iptables -D libvirt-host-in -m physdev --physdev-in vnet0 -g HJ-vnet0\n"
-    "iptables -F FP-vnet0\n"
-    "iptables -X FP-vnet0\n"
-    "iptables -F FJ-vnet0\n"
-    "iptables -X FJ-vnet0\n"
-    "iptables -F HJ-vnet0\n"
-    "iptables -X HJ-vnet0\n",
+    "iptables \\\n-w \\\n-D libvirt-out \\\n-m physdev \\\n--physdev-is-bridged \\\n--physdev-out vnet0 \\\n-g FP-vnet0\n"
+    "iptables \\\n-w \\\n-D libvirt-out \\\n-m physdev \\\n--physdev-out vnet0 \\\n-g FP-vnet0\n"
+    "iptables \\\n-w \\\n-D libvirt-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g FJ-vnet0\n"
+    "iptables \\\n-w \\\n-D libvirt-host-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g HJ-vnet0\n"
+    "iptables \\\n-w \\\n-F FP-vnet0\n"
+    "iptables \\\n-w \\\n-X FP-vnet0\n"
+    "iptables \\\n-w \\\n-F FJ-vnet0\n"
+    "iptables \\\n-w \\\n-X FJ-vnet0\n"
+    "iptables \\\n-w \\\n-F HJ-vnet0\n"
+    "iptables \\\n-w \\\n-X HJ-vnet0\n",
 
     /* Creating iptables chains */
-    "iptables -N libvirt-in\n"
-    "iptables -N libvirt-out\n"
-    "iptables -N libvirt-in-post\n"
-    "iptables -N libvirt-host-in\n"
-    "iptables -D FORWARD -j libvirt-in\n"
-    "iptables -D FORWARD -j libvirt-out\n"
-    "iptables -D FORWARD -j libvirt-in-post\n"
-    "iptables -D INPUT -j libvirt-host-in\n"
-    "iptables -I FORWARD 1 -j libvirt-in\n"
-    "iptables -I FORWARD 2 -j libvirt-out\n"
-    "iptables -I FORWARD 3 -j libvirt-in-post\n"
-    "iptables -I INPUT 1 -j libvirt-host-in\n"
-    "iptables -N FP-vnet0\n"
-    "iptables -N FJ-vnet0\n"
-    "iptables -N HJ-vnet0\n"
-    "iptables -A libvirt-out -m physdev --physdev-is-bridged --physdev-out vnet0 -g FP-vnet0\n"
-    "iptables -A libvirt-in -m physdev --physdev-in vnet0 -g FJ-vnet0\n"
-    "iptables -A libvirt-host-in -m physdev --physdev-in vnet0 -g HJ-vnet0\n"
-    "iptables -D libvirt-in-post -m physdev --physdev-in vnet0 -j ACCEPT\n"
-    "iptables -A libvirt-in-post -m physdev --physdev-in vnet0 -j ACCEPT\n",
+    "iptables \\\n-w \\\n-N libvirt-in\n"
+    "iptables \\\n-w \\\n-N libvirt-out\n"
+    "iptables \\\n-w \\\n-N libvirt-in-post\n"
+    "iptables \\\n-w \\\n-N libvirt-host-in\n"
+    "iptables \\\n-w \\\n-D FORWARD \\\n-j libvirt-in\n"
+    "iptables \\\n-w \\\n-D FORWARD \\\n-j libvirt-out\n"
+    "iptables \\\n-w \\\n-D FORWARD \\\n-j libvirt-in-post\n"
+    "iptables \\\n-w \\\n-D INPUT \\\n-j libvirt-host-in\n"
+    "iptables \\\n-w \\\n-I FORWARD 1 \\\n-j libvirt-in\n"
+    "iptables \\\n-w \\\n-I FORWARD 2 \\\n-j libvirt-out\n"
+    "iptables \\\n-w \\\n-I FORWARD 3 \\\n-j libvirt-in-post\n"
+    "iptables \\\n-w \\\n-I INPUT 1 \\\n-j libvirt-host-in\n"
+    "iptables \\\n-w \\\n-N FP-vnet0\n"
+    "iptables \\\n-w \\\n-N FJ-vnet0\n"
+    "iptables \\\n-w \\\n-N HJ-vnet0\n"
+    "iptables \\\n-w \\\n-A libvirt-out \\\n-m physdev \\\n--physdev-is-bridged \\\n--physdev-out vnet0 \\\n-g FP-vnet0\n"
+    "iptables \\\n-w \\\n-A libvirt-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g FJ-vnet0\n"
+    "iptables \\\n-w \\\n-A libvirt-host-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g HJ-vnet0\n"
+    "iptables \\\n-w \\\n-D libvirt-in-post \\\n-m physdev \\\n--physdev-in vnet0 \\\n-j ACCEPT\n"
+    "iptables \\\n-w \\\n-A libvirt-in-post \\\n-m physdev \\\n--physdev-in vnet0 \\\n-j ACCEPT\n",
 
     /* Dropping ip6tables rules */
-    "ip6tables -D libvirt-out -m physdev --physdev-is-bridged --physdev-out vnet0 -g FP-vnet0\n"
-    "ip6tables -D libvirt-out -m physdev --physdev-out vnet0 -g FP-vnet0\n"
-    "ip6tables -D libvirt-in -m physdev --physdev-in vnet0 -g FJ-vnet0\n"
-    "ip6tables -D libvirt-host-in -m physdev --physdev-in vnet0 -g HJ-vnet0\n"
-    "ip6tables -F FP-vnet0\n"
-    "ip6tables -X FP-vnet0\n"
-    "ip6tables -F FJ-vnet0\n"
-    "ip6tables -X FJ-vnet0\n"
-    "ip6tables -F HJ-vnet0\n"
-    "ip6tables -X HJ-vnet0\n",
+    "ip6tables \\\n-w \\\n-D libvirt-out \\\n-m physdev \\\n--physdev-is-bridged \\\n--physdev-out vnet0 \\\n-g FP-vnet0\n"
+    "ip6tables \\\n-w \\\n-D libvirt-out \\\n-m physdev \\\n--physdev-out vnet0 \\\n-g FP-vnet0\n"
+    "ip6tables \\\n-w \\\n-D libvirt-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g FJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-D libvirt-host-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g HJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-F FP-vnet0\n"
+    "ip6tables \\\n-w \\\n-X FP-vnet0\n"
+    "ip6tables \\\n-w \\\n-F FJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-X FJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-F HJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-X HJ-vnet0\n",
 
     /* Creating ip6tables chains */
-    "ip6tables -N libvirt-in\n"
-    "ip6tables -N libvirt-out\n"
-    "ip6tables -N libvirt-in-post\n"
-    "ip6tables -N libvirt-host-in\n"
-    "ip6tables -D FORWARD -j libvirt-in\n"
-    "ip6tables -D FORWARD -j libvirt-out\n"
-    "ip6tables -D FORWARD -j libvirt-in-post\n"
-    "ip6tables -D INPUT -j libvirt-host-in\n"
-    "ip6tables -I FORWARD 1 -j libvirt-in\n"
-    "ip6tables -I FORWARD 2 -j libvirt-out\n"
-    "ip6tables -I FORWARD 3 -j libvirt-in-post\n"
-    "ip6tables -I INPUT 1 -j libvirt-host-in\n"
-    "ip6tables -N FP-vnet0\n"
-    "ip6tables -N FJ-vnet0\n"
-    "ip6tables -N HJ-vnet0\n"
-    "ip6tables -A libvirt-out -m physdev --physdev-is-bridged --physdev-out vnet0 -g FP-vnet0\n"
-    "ip6tables -A libvirt-in -m physdev --physdev-in vnet0 -g FJ-vnet0\n"
-    "ip6tables -A libvirt-host-in -m physdev --physdev-in vnet0 -g HJ-vnet0\n"
-    "ip6tables -D libvirt-in-post -m physdev --physdev-in vnet0 -j ACCEPT\n"
-    "ip6tables -A libvirt-in-post -m physdev --physdev-in vnet0 -j ACCEPT\n",
+    "ip6tables \\\n-w \\\n-N libvirt-in\n"
+    "ip6tables \\\n-w \\\n-N libvirt-out\n"
+    "ip6tables \\\n-w \\\n-N libvirt-in-post\n"
+    "ip6tables \\\n-w \\\n-N libvirt-host-in\n"
+    "ip6tables \\\n-w \\\n-D FORWARD \\\n-j libvirt-in\n"
+    "ip6tables \\\n-w \\\n-D FORWARD \\\n-j libvirt-out\n"
+    "ip6tables \\\n-w \\\n-D FORWARD \\\n-j libvirt-in-post\n"
+    "ip6tables \\\n-w \\\n-D INPUT \\\n-j libvirt-host-in\n"
+    "ip6tables \\\n-w \\\n-I FORWARD 1 \\\n-j libvirt-in\n"
+    "ip6tables \\\n-w \\\n-I FORWARD 2 \\\n-j libvirt-out\n"
+    "ip6tables \\\n-w \\\n-I FORWARD 3 \\\n-j libvirt-in-post\n"
+    "ip6tables \\\n-w \\\n-I INPUT 1 \\\n-j libvirt-host-in\n"
+    "ip6tables \\\n-w \\\n-N FP-vnet0\n"
+    "ip6tables \\\n-w \\\n-N FJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-N HJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-A libvirt-out \\\n-m physdev \\\n--physdev-is-bridged \\\n--physdev-out vnet0 \\\n-g FP-vnet0\n"
+    "ip6tables \\\n-w \\\n-A libvirt-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g FJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-A libvirt-host-in \\\n-m physdev \\\n--physdev-in vnet0 \\\n-g HJ-vnet0\n"
+    "ip6tables \\\n-w \\\n-D libvirt-in-post \\\n-m physdev \\\n--physdev-in vnet0 \\\n-j ACCEPT\n"
+    "ip6tables \\\n-w \\\n-A libvirt-in-post \\\n-m physdev \\\n--physdev-in vnet0 \\\n-j ACCEPT\n",
 
     /* Inserting ebtables rules */
-    "ebtables -t nat -A PREROUTING -i vnet0 -j libvirt-J-vnet0\n"
-    "ebtables -t nat -A POSTROUTING -o vnet0 -j libvirt-P-vnet0\n",
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-A PREROUTING \\\n-i vnet0 \\\n-j libvirt-J-vnet0\n"
+    "ebtables \\\n--concurrent \\\n-t nat \\\n-A POSTROUTING \\\n-o vnet0 \\\n-j libvirt-P-vnet0\n",
 };
 
 
-static virHashTablePtr
-virNWFilterCreateVarsFrom(virHashTablePtr vars1,
-                          virHashTablePtr vars2)
+static GHashTable *
+virNWFilterCreateVarsFrom(GHashTable *vars1,
+                          GHashTable *vars2)
 {
-    virHashTablePtr res = virNWFilterHashTableCreate(0);
-    if (!res)
-        return NULL;
+    g_autoptr(GHashTable) res = virHashNew(virNWFilterVarValueHashFree);
 
     if (virNWFilterHashTablePutAll(vars1, res) < 0)
-        goto err_exit;
+        return NULL;
 
     if (virNWFilterHashTablePutAll(vars2, res) < 0)
-        goto err_exit;
+        return NULL;
 
-    return res;
-
- err_exit:
-    virHashFree(res);
-    return NULL;
+    return g_steal_pointer(&res);
 }
 
 
 static void
-virNWFilterRuleInstFree(virNWFilterRuleInstPtr inst)
+virNWFilterRuleInstFree(virNWFilterRuleInst *inst)
 {
     if (!inst)
         return;
 
-    virHashFree(inst->vars);
-    VIR_FREE(inst);
+    g_clear_pointer(&inst->vars, g_hash_table_unref);
+    g_free(inst);
 }
 
 
 static void
-virNWFilterInstReset(virNWFilterInstPtr inst)
+virNWFilterInstReset(virNWFilterInst *inst)
 {
     size_t i;
 
@@ -197,35 +187,30 @@ virNWFilterInstReset(virNWFilterInstPtr inst)
 
 static int
 virNWFilterDefToInst(const char *xml,
-                     virHashTablePtr vars,
-                     virNWFilterInstPtr inst);
+                     GHashTable *vars,
+                     virNWFilterInst *inst);
 
 static int
-virNWFilterRuleDefToRuleInst(virNWFilterDefPtr def,
-                             virNWFilterRuleDefPtr rule,
-                             virHashTablePtr vars,
-                             virNWFilterInstPtr inst)
+virNWFilterRuleDefToRuleInst(virNWFilterDef *def,
+                             virNWFilterRuleDef *rule,
+                             GHashTable *vars,
+                             virNWFilterInst *inst)
 {
-    virNWFilterRuleInstPtr ruleinst;
+    virNWFilterRuleInst *ruleinst;
     int ret = -1;
 
-    if (VIR_ALLOC(ruleinst) < 0)
-        goto cleanup;
+    ruleinst = g_new0(virNWFilterRuleInst, 1);
 
     ruleinst->chainSuffix = def->chainsuffix;
     ruleinst->chainPriority = def->chainPriority;
     ruleinst->def = rule;
     ruleinst->priority = rule->priority;
-    if (!(ruleinst->vars = virNWFilterHashTableCreate(0)))
-        goto cleanup;
+    ruleinst->vars = virHashNew(virNWFilterVarValueHashFree);
+
     if (virNWFilterHashTablePutAll(vars, ruleinst->vars) < 0)
         goto cleanup;
 
-    if (VIR_APPEND_ELEMENT(inst->rules,
-                           inst->nrules,
-                           ruleinst) < 0)
-        goto cleanup;
-    ruleinst = NULL;
+    VIR_APPEND_ELEMENT(inst->rules, inst->nrules, ruleinst);
 
     ret = 0;
  cleanup:
@@ -235,13 +220,13 @@ virNWFilterRuleDefToRuleInst(virNWFilterDefPtr def,
 
 
 static int
-virNWFilterIncludeDefToRuleInst(virNWFilterIncludeDefPtr inc,
-                                virHashTablePtr vars,
-                                virNWFilterInstPtr inst)
+virNWFilterIncludeDefToRuleInst(virNWFilterIncludeDef *inc,
+                                GHashTable *vars,
+                                virNWFilterInst *inst)
 {
-    virHashTablePtr tmpvars = NULL;
+    g_autoptr(GHashTable) tmpvars = NULL;
     int ret = -1;
-    char *xml;
+    g_autofree char *xml = NULL;
 
     xml = g_strdup_printf("%s/nwfilterxml2firewalldata/%s.xml", abs_srcdir,
                           inc->filterref);
@@ -260,29 +245,22 @@ virNWFilterIncludeDefToRuleInst(virNWFilterIncludeDefPtr inc,
  cleanup:
     if (ret < 0)
         virNWFilterInstReset(inst);
-    virHashFree(tmpvars);
-    VIR_FREE(xml);
     return ret;
 }
 
 static int
 virNWFilterDefToInst(const char *xml,
-                     virHashTablePtr vars,
-                     virNWFilterInstPtr inst)
+                     GHashTable *vars,
+                     virNWFilterInst *inst)
 {
     size_t i;
     int ret = -1;
-    virNWFilterDefPtr def = virNWFilterDefParseFile(xml);
+    virNWFilterDef *def = virNWFilterDefParse(NULL, xml, 0);
 
     if (!def)
         return -1;
 
-    if (VIR_APPEND_ELEMENT_COPY(inst->filters,
-                                inst->nfilters,
-                                def) < 0) {
-        virNWFilterDefFree(def);
-        goto cleanup;
-    }
+    VIR_APPEND_ELEMENT_COPY(inst->filters, inst->nfilters, def);
 
     for (i = 0; i < def->nentries; i++) {
         if (def->filterEntries[i]->rule) {
@@ -323,11 +301,11 @@ static void testRemoveCommonRules(char *rules)
 }
 
 
-static int testSetOneParameter(virHashTablePtr vars,
+static int testSetOneParameter(GHashTable *vars,
                                const char *name,
                                const char *value)
 {
-    virNWFilterVarValuePtr val;
+    virNWFilterVarValue *val;
 
     if ((val = virHashLookup(vars, name)) == NULL) {
         val = virNWFilterVarValueCreateSimpleCopyValue(value);
@@ -345,7 +323,7 @@ static int testSetOneParameter(virHashTablePtr vars,
     return 0;
 }
 
-static int testSetDefaultParameters(virHashTablePtr vars)
+static int testSetDefaultParameters(GHashTable *vars)
 {
     if (testSetOneParameter(vars, "IPSETNAME", "tck_test") < 0 ||
         testSetOneParameter(vars, "A", "1.1.1.1") ||
@@ -367,18 +345,14 @@ static int testSetDefaultParameters(virHashTablePtr vars)
 static int testCompareXMLToArgvFiles(const char *xml,
                                      const char *cmdline)
 {
-    char *actualargv = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    virHashTablePtr vars = virNWFilterHashTableCreate(0);
-    virNWFilterInst inst;
+    g_autofree char *actualargv = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autoptr(GHashTable) vars = virHashNew(virNWFilterVarValueHashFree);
+    virNWFilterInst inst = { 0 };
     int ret = -1;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
 
-    memset(&inst, 0, sizeof(inst));
-
-    virCommandSetDryRun(&buf, NULL, NULL);
-
-    if (!vars)
-        goto cleanup;
+    virCommandSetDryRun(dryRunToken, &buf, true, true, NULL, NULL);
 
     if (testSetDefaultParameters(vars) < 0)
         goto cleanup;
@@ -392,21 +366,16 @@ static int testCompareXMLToArgvFiles(const char *xml,
         goto cleanup;
 
     actualargv = virBufferContentAndReset(&buf);
-    virTestClearCommandPath(actualargv);
-    virCommandSetDryRun(NULL, NULL, NULL);
 
     testRemoveCommonRules(actualargv);
 
-    if (virTestCompareToFile(actualargv, cmdline) < 0)
+    if (virTestCompareToFileFull(actualargv, cmdline, false) < 0)
         goto cleanup;
 
     ret = 0;
 
  cleanup:
-    virBufferFreeAndReset(&buf);
-    VIR_FREE(actualargv);
     virNWFilterInstReset(&inst);
-    virHashFree(vars);
     return ret;
 }
 
@@ -420,8 +389,8 @@ testCompareXMLToIPTablesHelper(const void *data)
 {
     int result = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *args = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *args = NULL;
 
     xml = g_strdup_printf("%s/nwfilterxml2firewalldata/%s.xml",
                           abs_srcdir, info->name);
@@ -430,17 +399,7 @@ testCompareXMLToIPTablesHelper(const void *data)
 
     result = testCompareXMLToArgvFiles(xml, args);
 
-    VIR_FREE(xml);
-    VIR_FREE(args);
     return result;
-}
-
-static bool
-hasNetfilterTools(void)
-{
-    return virFileIsExecutable(IPTABLES_PATH) &&
-        virFileIsExecutable(IP6TABLES_PATH) &&
-        virFileIsExecutable(EBTABLES_PATH);
 }
 
 
@@ -458,16 +417,6 @@ mymain(void)
                        testCompareXMLToIPTablesHelper, &info) < 0) \
             ret = -1; \
     } while (0)
-
-    virFirewallSetLockOverride(true);
-
-    if (virFirewallSetBackend(VIR_FIREWALL_BACKEND_DIRECT) < 0) {
-        if (!hasNetfilterTools()) {
-            fprintf(stderr, "iptables/ip6tables/ebtables tools not present");
-            return EXIT_AM_SKIP;
-        }
-        return EXIT_FAILURE;
-    }
 
     DO_TEST("ah");
     DO_TEST("ah-ipv6");
@@ -512,7 +461,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN(mymain)
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virfirewall"))
 
 #else /* ! defined (__linux__) */
 

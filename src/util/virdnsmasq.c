@@ -31,10 +31,7 @@
 #include <signal.h>
 
 #include "internal.h"
-#include "datatypes.h"
-#include "virbitmap.h"
 #include "virdnsmasq.h"
-#include "virutil.h"
 #include "vircommand.h"
 #include "viralloc.h"
 #include "virerror.h"
@@ -46,24 +43,28 @@
 
 VIR_LOG_INIT("util.dnsmasq");
 
+#define DNSMASQ "dnsmasq"
 #define DNSMASQ_HOSTSFILE_SUFFIX "hostsfile"
 #define DNSMASQ_ADDNHOSTSFILE_SUFFIX "addnhosts"
 
+#define DNSMASQ_MIN_MAJOR 2
+#define DNSMASQ_MIN_MINOR 67
+
 static void
-dhcphostFree(dnsmasqDhcpHost *host)
+dhcphostFreeContent(dnsmasqDhcpHost *host)
 {
-    VIR_FREE(host->host);
+    g_free(host->host);
 }
 
 static void
-addnhostFree(dnsmasqAddnHost *host)
+addnhostFreeContent(dnsmasqAddnHost *host)
 {
     size_t i;
 
     for (i = 0; i < host->nhostnames; i++)
-        VIR_FREE(host->hostnames[i]);
-    VIR_FREE(host->hostnames);
-    VIR_FREE(host->ip);
+        g_free(host->hostnames[i]);
+    g_free(host->hostnames);
+    g_free(host->ip);
 }
 
 static void
@@ -73,16 +74,16 @@ addnhostsFree(dnsmasqAddnHostsfile *addnhostsfile)
 
     if (addnhostsfile->hosts) {
         for (i = 0; i < addnhostsfile->nhosts; i++)
-            addnhostFree(&addnhostsfile->hosts[i]);
+            addnhostFreeContent(&addnhostsfile->hosts[i]);
 
-        VIR_FREE(addnhostsfile->hosts);
+        g_free(addnhostsfile->hosts);
 
         addnhostsfile->nhosts = 0;
     }
 
-    VIR_FREE(addnhostsfile->path);
+    g_free(addnhostsfile->path);
 
-    VIR_FREE(addnhostsfile);
+    g_free(addnhostsfile);
 }
 
 static int
@@ -105,12 +106,10 @@ addnhostsAdd(dnsmasqAddnHostsfile *addnhostsfile,
     }
 
     if (idx < 0) {
-        if (VIR_REALLOC_N(addnhostsfile->hosts, addnhostsfile->nhosts + 1) < 0)
-            goto error;
+        VIR_REALLOC_N(addnhostsfile->hosts, addnhostsfile->nhosts + 1);
 
         idx = addnhostsfile->nhosts;
-        if (VIR_ALLOC(addnhostsfile->hosts[idx].hostnames) < 0)
-            goto error;
+        addnhostsfile->hosts[idx].hostnames = g_new0(char *, 1);
 
         addnhostsfile->hosts[idx].ip = g_strdup(ipstr);
 
@@ -118,8 +117,7 @@ addnhostsAdd(dnsmasqAddnHostsfile *addnhostsfile,
         addnhostsfile->nhosts++;
     }
 
-    if (VIR_REALLOC_N(addnhostsfile->hosts[idx].hostnames, addnhostsfile->hosts[idx].nhostnames + 1) < 0)
-        goto error;
+    VIR_REALLOC_N(addnhostsfile->hosts[idx].hostnames, addnhostsfile->hosts[idx].nhostnames + 1);
 
     addnhostsfile->hosts[idx].hostnames[addnhostsfile->hosts[idx].nhostnames] = g_strdup(name);
 
@@ -128,10 +126,6 @@ addnhostsAdd(dnsmasqAddnHostsfile *addnhostsfile,
     addnhostsfile->hosts[idx].nhostnames++;
 
     return 0;
-
- error:
-    VIR_FREE(ipstr);
-    return -1;
 }
 
 static dnsmasqAddnHostsfile *
@@ -139,10 +133,9 @@ addnhostsNew(const char *name,
              const char *config_dir)
 {
     dnsmasqAddnHostsfile *addnhostsfile;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
-    if (VIR_ALLOC(addnhostsfile) < 0)
-        return NULL;
+    addnhostsfile = g_new0(dnsmasqAddnHostsfile, 1);
 
     addnhostsfile->hosts = NULL;
     addnhostsfile->nhosts = 0;
@@ -157,7 +150,6 @@ addnhostsNew(const char *name,
     return addnhostsfile;
 
  error:
-    virBufferFreeAndReset(&buf);
     addnhostsFree(addnhostsfile);
     return NULL;
 }
@@ -167,7 +159,7 @@ addnhostsWrite(const char *path,
                dnsmasqAddnHost *hosts,
                unsigned int nhosts)
 {
-    char *tmp;
+    g_autofree char *tmp = NULL;
     FILE *f;
     bool istmp = true;
     size_t i, j;
@@ -181,10 +173,8 @@ addnhostsWrite(const char *path,
 
     if (!(f = fopen(tmp, "w"))) {
         istmp = false;
-        if (!(f = fopen(path, "w"))) {
-            rc = -errno;
-            goto cleanup;
-        }
+        if (!(f = fopen(path, "w")))
+            return -errno;
     }
 
     for (i = 0; i < nhosts; i++) {
@@ -195,7 +185,7 @@ addnhostsWrite(const char *path,
             if (istmp)
                 unlink(tmp);
 
-            goto cleanup;
+            return rc;
         }
 
         for (j = 0; j < hosts[i].nhostnames; j++) {
@@ -206,7 +196,7 @@ addnhostsWrite(const char *path,
                 if (istmp)
                     unlink(tmp);
 
-                goto cleanup;
+                return rc;
             }
         }
 
@@ -217,25 +207,20 @@ addnhostsWrite(const char *path,
             if (istmp)
                 unlink(tmp);
 
-            goto cleanup;
+            return rc;
         }
     }
 
-    if (VIR_FCLOSE(f) == EOF) {
-        rc = -errno;
-        goto cleanup;
-    }
+    if (VIR_FCLOSE(f) == EOF)
+        return -errno;
 
     if (istmp && rename(tmp, path) < 0) {
         rc = -errno;
         unlink(tmp);
-        goto cleanup;
+        return rc;
     }
 
- cleanup:
-    VIR_FREE(tmp);
-
-    return rc;
+    return 0;
 }
 
 static int
@@ -245,7 +230,7 @@ addnhostsSave(dnsmasqAddnHostsfile *addnhostsfile)
                              addnhostsfile->nhosts);
 
     if (err < 0) {
-        virReportSystemError(-err, _("cannot write config file '%s'"),
+        virReportSystemError(-err, _("cannot write config file '%1$s'"),
                              addnhostsfile->path);
         return -1;
     }
@@ -260,7 +245,7 @@ genericFileDelete(char *path)
         return 0;
 
     if (unlink(path) < 0) {
-        virReportSystemError(errno, _("cannot remove config file '%s'"),
+        virReportSystemError(errno, _("cannot remove config file '%1$s'"),
                              path);
         return -1;
     }
@@ -275,16 +260,16 @@ hostsfileFree(dnsmasqHostsfile *hostsfile)
 
     if (hostsfile->hosts) {
         for (i = 0; i < hostsfile->nhosts; i++)
-            dhcphostFree(&hostsfile->hosts[i]);
+            dhcphostFreeContent(&hostsfile->hosts[i]);
 
-        VIR_FREE(hostsfile->hosts);
+        g_free(hostsfile->hosts);
 
         hostsfile->nhosts = 0;
     }
 
-    VIR_FREE(hostsfile->path);
+    g_free(hostsfile->path);
 
-    VIR_FREE(hostsfile);
+    g_free(hostsfile);
 }
 
 /* Note:  There are many additional dhcp-host specifications
@@ -302,8 +287,7 @@ hostsfileAdd(dnsmasqHostsfile *hostsfile,
     g_autofree char *ipstr = NULL;
     g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
-    if (VIR_REALLOC_N(hostsfile->hosts, hostsfile->nhosts + 1) < 0)
-        return -1;
+    VIR_REALLOC_N(hostsfile->hosts, hostsfile->nhosts + 1);
 
     if (!(ipstr = virSocketAddrFormat(ip)))
         return -1;
@@ -342,10 +326,9 @@ hostsfileNew(const char *name,
              const char *config_dir)
 {
     dnsmasqHostsfile *hostsfile;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
-    if (VIR_ALLOC(hostsfile) < 0)
-        return NULL;
+    hostsfile = g_new0(dnsmasqHostsfile, 1);
 
     hostsfile->hosts = NULL;
     hostsfile->nhosts = 0;
@@ -359,7 +342,6 @@ hostsfileNew(const char *name,
     return hostsfile;
 
  error:
-    virBufferFreeAndReset(&buf);
     hostsfileFree(hostsfile);
     return NULL;
 }
@@ -369,7 +351,7 @@ hostsfileWrite(const char *path,
                dnsmasqDhcpHost *hosts,
                unsigned int nhosts)
 {
-    char *tmp;
+    g_autofree char *tmp = NULL;
     FILE *f;
     bool istmp = true;
     size_t i;
@@ -383,10 +365,8 @@ hostsfileWrite(const char *path,
 
     if (!(f = fopen(tmp, "w"))) {
         istmp = false;
-        if (!(f = fopen(path, "w"))) {
-            rc = -errno;
-            goto cleanup;
-        }
+        if (!(f = fopen(path, "w")))
+            return -errno;
     }
 
     for (i = 0; i < nhosts; i++) {
@@ -397,25 +377,20 @@ hostsfileWrite(const char *path,
             if (istmp)
                 unlink(tmp);
 
-            goto cleanup;
+            return rc;
         }
     }
 
-    if (VIR_FCLOSE(f) == EOF) {
-        rc = -errno;
-        goto cleanup;
-    }
+    if (VIR_FCLOSE(f) == EOF)
+        return -errno;
 
     if (istmp && rename(tmp, path) < 0) {
         rc = -errno;
         unlink(tmp);
-        goto cleanup;
+        return rc;
     }
 
- cleanup:
-    VIR_FREE(tmp);
-
-    return rc;
+    return 0;
 }
 
 static int
@@ -425,7 +400,7 @@ hostsfileSave(dnsmasqHostsfile *hostsfile)
                              hostsfile->nhosts);
 
     if (err < 0) {
-        virReportSystemError(-err, _("cannot write config file '%s'"),
+        virReportSystemError(-err, _("cannot write config file '%1$s'"),
                              hostsfile->path);
         return -1;
     }
@@ -446,8 +421,7 @@ dnsmasqContextNew(const char *network_name,
 {
     dnsmasqContext *ctx;
 
-    if (VIR_ALLOC(ctx) < 0)
-        return NULL;
+    ctx = g_new0(dnsmasqContext, 1);
 
     ctx->config_dir = g_strdup(config_dir);
 
@@ -475,14 +449,14 @@ dnsmasqContextFree(dnsmasqContext *ctx)
     if (!ctx)
         return;
 
-    VIR_FREE(ctx->config_dir);
+    g_free(ctx->config_dir);
 
     if (ctx->hostsfile)
         hostsfileFree(ctx->hostsfile);
     if (ctx->addnhostsfile)
         addnhostsFree(ctx->addnhostsfile);
 
-    VIR_FREE(ctx);
+    g_free(ctx);
 }
 
 /**
@@ -534,8 +508,8 @@ dnsmasqSave(const dnsmasqContext *ctx)
 {
     int ret = 0;
 
-    if (virFileMakePath(ctx->config_dir) < 0) {
-        virReportSystemError(errno, _("cannot create config directory '%s'"),
+    if (g_mkdir_with_parents(ctx->config_dir, 0777) < 0) {
+        virReportSystemError(errno, _("cannot create config directory '%1$s'"),
                              ctx->config_dir);
         return -1;
     }
@@ -582,8 +556,7 @@ dnsmasqReload(pid_t pid G_GNUC_UNUSED)
 #ifndef WIN32
     if (kill(pid, SIGHUP) != 0) {
         virReportSystemError(errno,
-                             _("Failed to make dnsmasq (PID: %d)"
-                               " reload config files."),
+                             _("Failed to make dnsmasq (PID: %1$d) reload config files."),
                              pid);
         return -1;
     }
@@ -600,21 +573,16 @@ dnsmasqReload(pid_t pid G_GNUC_UNUSED)
 struct _dnsmasqCaps {
     virObject parent;
     char *binaryPath;
-    bool noRefresh;
-    time_t mtime;
-    virBitmapPtr flags;
-    unsigned long version;
 };
 
-static virClassPtr dnsmasqCapsClass;
+static virClass *dnsmasqCapsClass;
 
 static void
 dnsmasqCapsDispose(void *obj)
 {
-    dnsmasqCapsPtr caps = obj;
+    dnsmasqCaps *caps = obj;
 
-    virBitmapFree(caps->flags);
-    VIR_FREE(caps->binaryPath);
+    g_free(caps->binaryPath);
 }
 
 static int dnsmasqCapsOnceInit(void)
@@ -627,248 +595,102 @@ static int dnsmasqCapsOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(dnsmasqCaps);
 
-static void
-dnsmasqCapsSet(dnsmasqCapsPtr caps,
-               dnsmasqCapsFlags flag)
-{
-    ignore_value(virBitmapSetBit(caps->flags, flag));
-}
-
 
 #define DNSMASQ_VERSION_STR "Dnsmasq version "
 
 static int
-dnsmasqCapsSetFromBuffer(dnsmasqCapsPtr caps, const char *buf)
+dnsmasqCapsSetFromBuffer(dnsmasqCaps *caps, const char *buf)
 {
     int len;
     const char *p;
-
-    caps->noRefresh = true;
+    unsigned long long version;
 
     p = STRSKIP(buf, DNSMASQ_VERSION_STR);
     if (!p)
-       goto fail;
-    virSkipSpaces(&p);
-    if (virParseVersionString(p, &caps->version, true) < 0)
-        goto fail;
+       goto error;
 
-    if (strstr(buf, "--bind-dynamic"))
-        dnsmasqCapsSet(caps, DNSMASQ_CAPS_BIND_DYNAMIC);
+    virSkipToDigit(&p);
 
-    /* if this string is a part of the --version output, dnsmasq
-     * has been patched to use SO_BINDTODEVICE when listening,
-     * so that it will only accept requests that arrived on the
-     * listening interface(s)
-     */
-    if (strstr(buf, "--bind-interfaces with SO_BINDTODEVICE"))
-        dnsmasqCapsSet(caps, DNSMASQ_CAPS_BINDTODEVICE);
+    if (virStringParseVersion(&version, p, true) < 0)
+        goto error;
 
-    if (strstr(buf, "--ra-param"))
-        dnsmasqCapsSet(caps, DNSMASQ_CAPS_RA_PARAM);
+    if (version < DNSMASQ_MIN_MAJOR * 1000000 + DNSMASQ_MIN_MINOR * 1000) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("dnsmasq version >= %1$u.%2$u required but %3$llu.%4$llu found"),
+                       DNSMASQ_MIN_MAJOR, DNSMASQ_MIN_MINOR,
+                       version / 1000000,
+                       version % 1000000 / 1000);
+        goto error;
+    }
 
-    VIR_INFO("dnsmasq version is %d.%d, --bind-dynamic is %spresent, "
-             "SO_BINDTODEVICE is %sin use, --ra-param is %spresent",
-             (int)caps->version / 1000000,
-             (int)(caps->version % 1000000) / 1000,
-             dnsmasqCapsGet(caps, DNSMASQ_CAPS_BIND_DYNAMIC) ? "" : "NOT ",
-             dnsmasqCapsGet(caps, DNSMASQ_CAPS_BINDTODEVICE) ? "" : "NOT ",
-             dnsmasqCapsGet(caps, DNSMASQ_CAPS_RA_PARAM) ? "" : "NOT ");
+    VIR_INFO("dnsmasq version is %d.%d",
+             (int)version / 1000000,
+             (int)(version % 1000000) / 1000);
     return 0;
 
- fail:
+ error:
     p = strchr(buf, '\n');
     if (!p)
         len = strlen(buf);
     else
         len = p - buf;
     virReportError(VIR_ERR_INTERNAL_ERROR,
-                   _("cannot parse %s version number in '%.*s'"),
+                   _("cannot parse %1$s version number in '%3$.*2$s'"),
                    caps->binaryPath, len, buf);
     return -1;
 
 }
 
 static int
-dnsmasqCapsSetFromFile(dnsmasqCapsPtr caps, const char *path)
+dnsmasqCapsRefreshInternal(dnsmasqCaps *caps)
 {
-    int ret = -1;
-    char *buf = NULL;
+    g_autoptr(virCommand) vercmd = NULL;
+    g_autofree char *version = NULL;
 
-    if (virFileReadAll(path, 1024 * 1024, &buf) < 0)
-        goto cleanup;
-
-    ret = dnsmasqCapsSetFromBuffer(caps, buf);
-
- cleanup:
-    VIR_FREE(buf);
-    return ret;
-}
-
-static int
-dnsmasqCapsRefreshInternal(dnsmasqCapsPtr caps, bool force)
-{
-    int ret = -1;
-    struct stat sb;
-    virCommandPtr cmd = NULL;
-    char *help = NULL, *version = NULL, *complete = NULL;
-
-    if (!caps || caps->noRefresh)
-        return 0;
-
-    if (stat(caps->binaryPath, &sb) < 0) {
-        virReportSystemError(errno, _("Cannot check dnsmasq binary %s"),
-                             caps->binaryPath);
+    vercmd = virCommandNewArgList(caps->binaryPath, "--version", NULL);
+    virCommandSetOutputBuffer(vercmd, &version);
+    virCommandAddEnvPassCommon(vercmd);
+    virCommandClearCaps(vercmd);
+    if (virCommandRun(vercmd, NULL) < 0)
         return -1;
-    }
-    if (!force && caps->mtime == sb.st_mtime)
-        return 0;
-    caps->mtime = sb.st_mtime;
 
-    /* Make sure the binary we are about to try exec'ing exists.
-     * Technically we could catch the exec() failure, but that's
-     * in a sub-process so it's hard to feed back a useful error.
-     */
-    if (!virFileIsExecutable(caps->binaryPath)) {
-        virReportSystemError(errno, _("dnsmasq binary %s is not executable"),
-                             caps->binaryPath);
-        goto cleanup;
-    }
-
-    cmd = virCommandNewArgList(caps->binaryPath, "--version", NULL);
-    virCommandSetOutputBuffer(cmd, &version);
-    virCommandAddEnvPassCommon(cmd);
-    virCommandClearCaps(cmd);
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
-    virCommandFree(cmd);
-
-    cmd = virCommandNewArgList(caps->binaryPath, "--help", NULL);
-    virCommandSetOutputBuffer(cmd, &help);
-    virCommandAddEnvPassCommon(cmd);
-    virCommandClearCaps(cmd);
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
-
-    complete = g_strdup_printf("%s\n%s", version, help);
-
-    ret = dnsmasqCapsSetFromBuffer(caps, complete);
-
- cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(help);
-    VIR_FREE(version);
-    VIR_FREE(complete);
-    return ret;
+    return dnsmasqCapsSetFromBuffer(caps, version);
 }
 
-static dnsmasqCapsPtr
-dnsmasqCapsNewEmpty(const char *binaryPath)
+dnsmasqCaps *
+dnsmasqCapsNewFromBinary(void)
 {
-    dnsmasqCapsPtr caps;
+    g_autoptr(dnsmasqCaps) caps = NULL;
 
     if (dnsmasqCapsInitialize() < 0)
         return NULL;
+
     if (!(caps = virObjectNew(dnsmasqCapsClass)))
         return NULL;
-    if (!(caps->flags = virBitmapNew(DNSMASQ_CAPS_LAST)))
-        goto error;
-    caps->binaryPath = g_strdup(binaryPath ? binaryPath : DNSMASQ);
-    return caps;
 
- error:
-    virObjectUnref(caps);
-    return NULL;
-}
-
-dnsmasqCapsPtr
-dnsmasqCapsNewFromBuffer(const char *buf, const char *binaryPath)
-{
-    dnsmasqCapsPtr caps = dnsmasqCapsNewEmpty(binaryPath);
-
-    if (!caps)
-        return NULL;
-
-    if (dnsmasqCapsSetFromBuffer(caps, buf) < 0) {
-        virObjectUnref(caps);
+    if (!(caps->binaryPath = virFindFileInPath(DNSMASQ))) {
+        virReportSystemError(ENOENT, "%s",
+                             _("Unable to find 'dnsmasq' binary in $PATH"));
         return NULL;
     }
-    return caps;
-}
 
-dnsmasqCapsPtr
-dnsmasqCapsNewFromFile(const char *dataPath, const char *binaryPath)
-{
-    dnsmasqCapsPtr caps = dnsmasqCapsNewEmpty(binaryPath);
-
-    if (!caps)
+    if (dnsmasqCapsRefreshInternal(caps) < 0)
         return NULL;
 
-    if (dnsmasqCapsSetFromFile(caps, dataPath) < 0) {
-        virObjectUnref(caps);
-        return NULL;
-    }
-    return caps;
-}
-
-dnsmasqCapsPtr
-dnsmasqCapsNewFromBinary(const char *binaryPath)
-{
-    dnsmasqCapsPtr caps = dnsmasqCapsNewEmpty(binaryPath);
-
-    if (!caps)
-        return NULL;
-
-    if (dnsmasqCapsRefreshInternal(caps, true) < 0) {
-        virObjectUnref(caps);
-        return NULL;
-    }
-    return caps;
-}
-
-/** dnsmasqCapsRefresh:
- *
- *   Refresh an existing caps object if the binary has changed. If
- *   there isn't yet a caps object (if it's NULL), create a new one.
- *
- *   Returns 0 on success, -1 on failure
- */
-int
-dnsmasqCapsRefresh(dnsmasqCapsPtr *caps, const char *binaryPath)
-{
-    if (!*caps) {
-        *caps = dnsmasqCapsNewFromBinary(binaryPath);
-        return *caps ? 0 : -1;
-    }
-    return dnsmasqCapsRefreshInternal(*caps, false);
+    return g_steal_pointer(&caps);
 }
 
 const char *
-dnsmasqCapsGetBinaryPath(dnsmasqCapsPtr caps)
+dnsmasqCapsGetBinaryPath(dnsmasqCaps *caps)
 {
-    return caps ? caps->binaryPath : DNSMASQ;
+    return caps->binaryPath;
 }
-
-unsigned long
-dnsmasqCapsGetVersion(dnsmasqCapsPtr caps)
-{
-    if (caps)
-        return caps->version;
-    else
-        return 0;
-}
-
-bool
-dnsmasqCapsGet(dnsmasqCapsPtr caps, dnsmasqCapsFlags flag)
-{
-    return caps && virBitmapIsBitSet(caps->flags, flag);
-}
-
 
 /** dnsmasqDhcpHostsToString:
  *
  *   Turns a vector of dnsmasqDhcpHost into the string that is ought to be
  *   stored in the hostsfile, this functionality is split to make hostsfiles
- *   testable. Returs NULL if nhosts is 0.
+ *   testable. Returns NULL if nhosts is 0.
  */
 char *
 dnsmasqDhcpHostsToString(dnsmasqDhcpHost *hosts,

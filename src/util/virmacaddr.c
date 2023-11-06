@@ -23,7 +23,6 @@
 
 #include "virmacaddr.h"
 #include "virrandom.h"
-#include "viralloc.h"
 
 static const unsigned char virMacAddrBroadcastAddrRaw[VIR_MAC_BUFLEN] =
     { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
@@ -98,7 +97,7 @@ virMacAddrCmpRaw(const virMacAddr *mac1,
  * Copy src to dst
  */
 void
-virMacAddrSet(virMacAddrPtr dst, const virMacAddr *src)
+virMacAddrSet(virMacAddr *dst, const virMacAddr *src)
 {
     memcpy(dst, src, sizeof(*src));
 }
@@ -111,7 +110,7 @@ virMacAddrSet(virMacAddrPtr dst, const virMacAddr *src)
  * Set the MAC address to the given value
  */
 void
-virMacAddrSetRaw(virMacAddrPtr dst, const unsigned char src[VIR_MAC_BUFLEN])
+virMacAddrSetRaw(virMacAddr *dst, const unsigned char src[VIR_MAC_BUFLEN])
 {
     memcpy(dst->addr, src, VIR_MAC_BUFLEN);
 }
@@ -139,7 +138,7 @@ virMacAddrGetRaw(const virMacAddr *src, unsigned char dst[VIR_MAC_BUFLEN])
  * Return 0 upon success, or -1 in case of error.
  */
 int
-virMacAddrParse(const char* str, virMacAddrPtr addr)
+virMacAddrParse(const char* str, virMacAddr *addr)
 {
     size_t i;
 
@@ -203,7 +202,7 @@ virMacAddrFormat(const virMacAddr *addr,
  * Return 0 upon success, or -1 in case of error.
  */
 int
-virMacAddrParseHex(const char *str, virMacAddrPtr addr)
+virMacAddrParseHex(const char *str, virMacAddr *addr)
 {
     size_t i;
 
@@ -218,7 +217,7 @@ virMacAddrParseHex(const char *str, virMacAddrPtr addr)
 }
 
 void virMacAddrGenerate(const unsigned char prefix[VIR_MAC_PREFIX_BUFLEN],
-                        virMacAddrPtr addr)
+                        virMacAddr *addr)
 {
     addr->addr[0] = prefix[0];
     addr->addr[1] = prefix[1];
@@ -247,8 +246,13 @@ virMacAddrIsBroadcastRaw(const unsigned char s[VIR_MAC_BUFLEN])
     return memcmp(virMacAddrBroadcastAddrRaw, s, sizeof(*s)) == 0;
 }
 
-void
-virMacAddrFree(virMacAddrPtr addr)
+bool virMacAddrIsAllClear(const virMacAddr *addr)
 {
-    VIR_FREE(addr);
+    return !virMacAddrCmpRaw(addr, (const unsigned char[VIR_MAC_BUFLEN]){0});
+}
+
+void
+virMacAddrFree(virMacAddr *addr)
+{
+    g_free(addr);
 }

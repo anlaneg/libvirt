@@ -1,9 +1,6 @@
 .. image:: https://gitlab.com/libvirt/libvirt/badges/master/pipeline.svg
      :target: https://gitlab.com/libvirt/libvirt/pipelines
      :alt: GitLab CI Build Status
-.. image:: https://travis-ci.org/libvirt/libvirt.svg
-     :target: https://travis-ci.org/libvirt/libvirt
-     :alt: Travis CI Build Status
 .. image:: https://bestpractices.coreinfrastructure.org/projects/355/badge
      :target: https://bestpractices.coreinfrastructure.org/projects/355
      :alt: CII Best Practices
@@ -67,8 +64,8 @@ Contact
 
 The libvirt project has two primary mailing lists:
 
-* libvirt-users@redhat.com (**for user discussions**)
-* libvir-list@redhat.com (**for development only**)
+* users@lists.libvirt.org (**for user discussions**)
+* devel@lists.libvirt.org (**for development only**)
 
 Further details on contacting the project are available on the website:
 

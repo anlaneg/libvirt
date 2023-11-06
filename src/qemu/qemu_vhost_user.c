@@ -24,7 +24,6 @@
 #include "qemu_interop_config.h"
 #include "virjson.h"
 #include "virlog.h"
-#include "virstring.h"
 #include "viralloc.h"
 #include "virenum.h"
 #include "virutil.h"
@@ -92,7 +91,6 @@ VIR_ENUM_IMPL(qemuVhostUserGPUFeature,
 );
 
 typedef struct _qemuVhostUserGPU qemuVhostUserGPU;
-typedef qemuVhostUserGPU *qemuVhostUserGPUPtr;
 struct _qemuVhostUserGPU {
     size_t nfeatures;
     qemuVhostUserGPUFeature *features;
@@ -113,7 +111,7 @@ struct _qemuVhostUser {
 static void
 qemuVhostUserGPUFeatureFree(qemuVhostUserGPUFeature *features)
 {
-    VIR_FREE(features);
+    g_free(features);
 }
 
 
@@ -121,17 +119,17 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuVhostUserGPUFeature, qemuVhostUserGPUFeatureFr
 
 
 void
-qemuVhostUserFree(qemuVhostUserPtr vu)
+qemuVhostUserFree(qemuVhostUser *vu)
 {
     if (!vu)
         return;
 
     if (vu->type == QEMU_VHOST_USER_TYPE_GPU)
-        VIR_FREE(vu->capabilities.gpu.features);
+        g_free(vu->capabilities.gpu.features);
 
-    VIR_FREE(vu->binary);
+    g_free(vu->binary);
 
-    VIR_FREE(vu);
+    g_free(vu);
 }
 
 
@@ -141,8 +139,8 @@ qemuVhostUserFree(qemuVhostUserPtr vu)
 
 static int
 qemuVhostUserTypeParse(const char *path,
-                       virJSONValuePtr doc,
-                       qemuVhostUserPtr vu)
+                       virJSONValue *doc,
+                       qemuVhostUser *vu)
 {
     const char *type = virJSONValueObjectGetString(doc, "type");
     int tmp;
@@ -152,7 +150,7 @@ qemuVhostUserTypeParse(const char *path,
 
     if ((tmp = qemuVhostUserTypeTypeFromString(type)) <= 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unknown vhost-user type: '%s'"),
+                       _("unknown vhost-user type: '%1$s'"),
                        type);
         return -1;
     }
@@ -165,8 +163,8 @@ qemuVhostUserTypeParse(const char *path,
 
 static int
 qemuVhostUserBinaryParse(const char *path,
-                         virJSONValuePtr doc,
-                         qemuVhostUserPtr vu)
+                         virJSONValue *doc,
+                         qemuVhostUser *vu)
 {
     const char *binary = virJSONValueObjectGetString(doc, "binary");
 
@@ -179,7 +177,7 @@ qemuVhostUserBinaryParse(const char *path,
 }
 
 
-qemuVhostUserPtr
+qemuVhostUser *
 qemuVhostUserParse(const char *path)
 {
     g_autofree char *cont = NULL;
@@ -191,13 +189,12 @@ qemuVhostUserParse(const char *path)
 
     if (!(doc = virJSONValueFromString(cont))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unable to parse json file '%s'"),
+                       _("unable to parse json file '%1$s'"),
                        path);
         return NULL;
     }
 
-    if (VIR_ALLOC(vu) < 0)
-        return NULL;
+    vu = g_new0(qemuVhostUser, 1);
 
     if (qemuVhostUserTypeParse(path, doc, vu) < 0)
         return NULL;
@@ -210,7 +207,7 @@ qemuVhostUserParse(const char *path)
 
 
 char *
-qemuVhostUserFormat(qemuVhostUserPtr vu)
+qemuVhostUserFormat(qemuVhostUser *vu)
 {
     g_autoptr(virJSONValue) doc = NULL;
 
@@ -240,21 +237,22 @@ qemuVhostUserFetchConfigs(char ***configs,
 
 static ssize_t
 qemuVhostUserFetchParsedConfigs(bool privileged,
-                                qemuVhostUserPtr **vhostuserRet,
+                                qemuVhostUser ***vhostuserRet,
                                 char ***pathsRet)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
     size_t npaths;
-    qemuVhostUserPtr *vus = NULL;
+    qemuVhostUser **vus = NULL;
     size_t i;
 
     if (qemuVhostUserFetchConfigs(&paths, privileged) < 0)
         return -1;
 
-    npaths = virStringListLength((const char **)paths);
+    if (!paths)
+        return 0;
 
-    if (VIR_ALLOC_N(vus, npaths) < 0)
-        return -1;
+    npaths = g_strv_length(paths);
+    vus = g_new0(qemuVhostUser *, npaths);
 
     for (i = 0; i < npaths; i++) {
         if (!(vus[i] = qemuVhostUserParse(paths[i])))
@@ -275,50 +273,49 @@ qemuVhostUserFetchParsedConfigs(bool privileged,
 
 
 static int
-qemuVhostUserGPUFillCapabilities(qemuVhostUserPtr vu,
-                                 virJSONValuePtr doc)
+qemuVhostUserGPUFillCapabilities(qemuVhostUser *vu,
+                                 virJSONValue *doc)
 {
-    qemuVhostUserGPUPtr gpu = &vu->capabilities.gpu;
-    virJSONValuePtr featuresJSON;
+    qemuVhostUserGPU *gpu = &vu->capabilities.gpu;
+    virJSONValue *featuresJSON;
     size_t nfeatures;
+    size_t nparsed = 0;
     size_t i;
     g_autoptr(qemuVhostUserGPUFeature) features = NULL;
 
     if (!(featuresJSON = virJSONValueObjectGetArray(doc, "features"))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("failed to get features from '%s'"),
+                       _("failed to get features from '%1$s'"),
                        vu->binary);
         return -1;
     }
 
     nfeatures = virJSONValueArraySize(featuresJSON);
-    if (VIR_ALLOC_N(features, nfeatures) < 0)
-        return -1;
+    features = g_new0(qemuVhostUserGPUFeature, nfeatures);
 
     for (i = 0; i < nfeatures; i++) {
-        virJSONValuePtr item = virJSONValueArrayGet(featuresJSON, i);
+        virJSONValue *item = virJSONValueArrayGet(featuresJSON, i);
         const char *tmpStr = virJSONValueGetString(item);
         int tmp;
 
         if ((tmp = qemuVhostUserGPUFeatureTypeFromString(tmpStr)) <= 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unknown feature %s"),
-                           tmpStr);
+            VIR_DEBUG("ignoring unknown QEMU vhost-user feature '%s'", tmpStr);
             continue;
         }
 
-        features[i] = tmp;
+        features[nparsed] = tmp;
+        nparsed++;
     }
 
     gpu->features = g_steal_pointer(&features);
-    gpu->nfeatures = nfeatures;
+    gpu->nfeatures = nparsed;
 
     return 0;
 }
 
 
 static bool
-qemuVhostUserGPUHasFeature(qemuVhostUserGPUPtr gpu,
+qemuVhostUserGPUHasFeature(qemuVhostUserGPU *gpu,
                            qemuVhostUserGPUFeature feature)
 {
     size_t i;
@@ -333,11 +330,11 @@ qemuVhostUserGPUHasFeature(qemuVhostUserGPUPtr gpu,
 
 
 int
-qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
-                           virDomainVideoDefPtr video)
+qemuVhostUserFillDomainGPU(virQEMUDriver *driver,
+                           virDomainVideoDef *video)
 {
-    qemuVhostUserPtr *vus = NULL;
-    qemuVhostUserPtr vu = NULL;
+    qemuVhostUser **vus = NULL;
+    qemuVhostUser *vu = NULL;
     ssize_t nvus = 0;
     ssize_t i;
     int ret = -1;
@@ -362,7 +359,7 @@ qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
 
         if (!(doc = virJSONValueFromString(output))) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unable to parse json capabilities '%s'"),
+                           _("unable to parse json capabilities '%1$s'"),
                            vu->binary);
             continue;
         }
@@ -382,8 +379,8 @@ qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
                 continue;
         }
 
-        if (!video->driver && VIR_ALLOC(video->driver) < 0)
-            goto end;
+        if (!video->driver)
+            video->driver = g_new0(virDomainVideoDriverDef, 1);
 
         VIR_FREE(video->driver->vhost_user_binary);
         video->driver->vhost_user_binary = g_strdup(vu->binary);
@@ -397,8 +394,8 @@ qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
         goto end;
     }
 
-    if (!video->accel && VIR_ALLOC(video->accel) < 0)
-        goto end;
+    if (!video->accel)
+        video->accel = g_new0(virDomainVideoAccelDef, 1);
 
     if (!video->accel->rendernode &&
         qemuVhostUserGPUHasFeature(&vu->capabilities.gpu,
@@ -419,10 +416,10 @@ qemuVhostUserFillDomainGPU(virQEMUDriverPtr driver,
 
 
 int
-qemuVhostUserFillDomainFS(virQEMUDriverPtr driver,
-                          virDomainFSDefPtr fs)
+qemuVhostUserFillDomainFS(virQEMUDriver *driver,
+                          virDomainFSDef *fs)
 {
-    qemuVhostUserPtr *vus = NULL;
+    qemuVhostUser **vus = NULL;
     ssize_t nvus = 0;
     ssize_t i;
     int ret = -1;
@@ -432,7 +429,7 @@ qemuVhostUserFillDomainFS(virQEMUDriverPtr driver,
         goto end;
 
     for (i = 0; i < nvus; i++) {
-        qemuVhostUserPtr vu = vus[i];
+        qemuVhostUser *vu = vus[i];
 
         if (vu->type != QEMU_VHOST_USER_TYPE_FS)
             continue;

@@ -24,8 +24,6 @@
 #include "internal.h"
 
 typedef struct _virLogDaemonConfig virLogDaemonConfig;
-typedef virLogDaemonConfig *virLogDaemonConfigPtr;
-
 struct _virLogDaemonConfig {
     unsigned int log_level;
     char *log_filters;
@@ -35,12 +33,15 @@ struct _virLogDaemonConfig {
 
     size_t max_backups;
     size_t max_size;
+
+    char *log_root;
+    size_t max_age_days;
 };
 
 
 int virLogDaemonConfigFilePath(bool privileged, char **configfile);
-virLogDaemonConfigPtr virLogDaemonConfigNew(bool privileged);
-void virLogDaemonConfigFree(virLogDaemonConfigPtr data);
-int virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
+virLogDaemonConfig *virLogDaemonConfigNew(bool privileged);
+void virLogDaemonConfigFree(virLogDaemonConfig *data);
+int virLogDaemonConfigLoadFile(virLogDaemonConfig *data,
                                const char *filename,
                                bool allow_missing);

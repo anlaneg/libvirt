@@ -1,4 +1,5 @@
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udplite \
 -m mac \
@@ -6,19 +7,25 @@ iptables \
 --destination 10.1.2.3/32 \
 -m dscp \
 --dscp 2 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udplite \
 --source 10.1.2.3/32 \
 -m dscp \
 --dscp 2 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udplite \
 -m mac \
@@ -26,19 +33,25 @@ iptables \
 --destination 10.1.2.3/32 \
 -m dscp \
 --dscp 2 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udplite \
 --destination 10.1.2.3/22 \
 -m dscp \
 --dscp 33 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udplite \
 -m mac \
@@ -46,28 +59,37 @@ iptables \
 --source 10.1.2.3/22 \
 -m dscp \
 --dscp 33 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udplite \
 --destination 10.1.2.3/22 \
 -m dscp \
 --dscp 33 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j RETURN
 iptables \
+-w \
 -A FJ-vnet0 \
 -p udplite \
 --destination 10.1.2.3/22 \
 -m dscp \
 --dscp 33 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p udplite \
 -m mac \
@@ -75,15 +97,20 @@ iptables \
 --source 10.1.2.3/22 \
 -m dscp \
 --dscp 33 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
+-m conntrack \
+--ctdir Original \
 -j ACCEPT
 iptables \
+-w \
 -A HJ-vnet0 \
 -p udplite \
 --destination 10.1.2.3/22 \
 -m dscp \
 --dscp 33 \
--m state \
---state ESTABLISHED \
+-m conntrack \
+--ctstate ESTABLISHED \
+-m conntrack \
+--ctdir Reply \
 -j RETURN

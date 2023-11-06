@@ -25,41 +25,23 @@
 #include "internal.h"
 #include "virbuffer.h"
 #include "virjson.h"
-#include "virstorageencryption.h"
 
 typedef int (*virQEMUBuildCommandLineJSONArrayFormatFunc)(const char *key,
-                                                          virJSONValuePtr array,
-                                                          virBufferPtr buf,
-                                                          const char *skipKey,
-                                                          bool onOff);
+                                                          virJSONValue *array,
+                                                          virBuffer *buf);
+int virQEMUBuildCommandLineJSONArrayObjectsStr(const char *key,
+                                               virJSONValue *array,
+                                               virBuffer *buf);
 int virQEMUBuildCommandLineJSONArrayBitmap(const char *key,
-                                           virJSONValuePtr array,
-                                           virBufferPtr buf,
-                                           const char *skipKey,
-                                           bool onOff);
+                                           virJSONValue *array,
+                                           virBuffer *buf);
 int virQEMUBuildCommandLineJSONArrayNumbered(const char *key,
-                                             virJSONValuePtr array,
-                                             virBufferPtr buf,
-                                             const char *skipKey,
-                                             bool onOff);
+                                             virJSONValue *array,
+                                             virBuffer *buf);
 
-int virQEMUBuildCommandLineJSON(virJSONValuePtr value,
-                                virBufferPtr buf,
+int virQEMUBuildCommandLineJSON(virJSONValue *value,
+                                virBuffer *buf,
                                 const char *skipKey,
-                                bool onOff,
                                 virQEMUBuildCommandLineJSONArrayFormatFunc array);
 
-char *
-virQEMUBuildNetdevCommandlineFromJSON(virJSONValuePtr props,
-                                      bool rawjson);
-
-int virQEMUBuildObjectCommandlineFromJSON(virBufferPtr buf,
-                                          virJSONValuePtr objprops);
-
-char *virQEMUBuildDriveCommandlineFromJSON(virJSONValuePtr src);
-
-void virQEMUBuildBufferEscapeComma(virBufferPtr buf, const char *str);
-void virQEMUBuildQemuImgKeySecretOpts(virBufferPtr buf,
-                                      virStorageEncryptionInfoDefPtr enc,
-                                      const char *alias)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+void virQEMUBuildBufferEscapeComma(virBuffer *buf, const char *str);

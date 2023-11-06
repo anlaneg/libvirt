@@ -23,9 +23,7 @@
  * detected. */
 
 #include "virmock.h"
-#if HAVE_LINUX_MAGIC_H
-# include <linux/magic.h>
-#endif
+#include <linux/magic.h>
 #include <selinux/selinux.h>
 #include <selinux/label.h>
 #include <sys/vfs.h>
@@ -39,7 +37,6 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 #include "viralloc.h"
-#include "virstring.h"
 
 static int (*real_statfs)(const char *path, struct statfs *buf);
 static int (*real_security_get_boolean_active)(const char *name);
@@ -48,17 +45,14 @@ static int (*real_is_selinux_enabled)(void);
 static const char *(*real_selinux_virtual_domain_context_path)(void);
 static const char *(*real_selinux_virtual_image_context_path)(void);
 
-#ifdef HAVE_SELINUX_LXC_CONTEXTS_PATH
 static const char *(*real_selinux_lxc_contexts_path)(void);
-#endif
 
 static struct selabel_handle *(*real_selabel_open)(unsigned int backend,
-                                                  VIR_SELINUX_OPEN_CONST
-                                                  struct selinux_opt *opts,
+                                                  const struct selinux_opt *opts,
                                                   unsigned nopts);
 static void (*real_selabel_close)(struct selabel_handle *handle);
 static int (*real_selabel_lookup_raw)(struct selabel_handle *handle,
-                                     security_context_t *con,
+                                     char **con,
                                      const char *key,
                                      int type);
 
@@ -74,9 +68,7 @@ static void init_syms(void)
     VIR_MOCK_REAL_INIT(selinux_virtual_domain_context_path);
     VIR_MOCK_REAL_INIT(selinux_virtual_image_context_path);
 
-#ifdef HAVE_SELINUX_LXC_CONTEXTS_PATH
     VIR_MOCK_REAL_INIT(selinux_lxc_contexts_path);
-#endif
 
     VIR_MOCK_REAL_INIT(selabel_open);
     VIR_MOCK_REAL_INIT(selabel_close);
@@ -94,7 +86,7 @@ static void init_syms(void)
  * the virt_use_nfs bool is set.
  */
 
-int getcon_raw(security_context_t *context)
+int getcon_raw(char **context)
 {
     if (!is_selinux_enabled()) {
         errno = EINVAL;
@@ -109,12 +101,12 @@ int getcon_raw(security_context_t *context)
     return 0;
 }
 
-int getcon(security_context_t *context)
+int getcon(char **context)
 {
     return getcon_raw(context);
 }
 
-int getpidcon_raw(pid_t pid, security_context_t *context)
+int getpidcon_raw(pid_t pid, char **context)
 {
     if (!is_selinux_enabled()) {
         errno = EINVAL;
@@ -134,7 +126,7 @@ int getpidcon_raw(pid_t pid, security_context_t *context)
     return 0;
 }
 
-int getpidcon(pid_t pid, security_context_t *context)
+int getpidcon(pid_t pid, char **context)
 {
     return getpidcon_raw(pid, context);
 }
@@ -145,7 +137,7 @@ int setcon_raw(const char *context)
         errno = EINVAL;
         return -1;
     }
-    return g_setenv("FAKE_SELINUX_CONTEXT", context, TRUE);
+    return g_setenv("FAKE_SELINUX_CONTEXT", context, TRUE) == TRUE ? 0 : -1;
 }
 
 int setcon(const char *context)
@@ -170,7 +162,7 @@ int setfilecon(const char *path, const char *con)
     return setfilecon_raw(path, con);
 }
 
-int getfilecon_raw(const char *path, security_context_t *con)
+int getfilecon_raw(const char *path, char **con)
 {
     char *constr = NULL;
     ssize_t len = getxattr(path, "user.libvirt.selinux",
@@ -194,7 +186,7 @@ int getfilecon_raw(const char *path, security_context_t *con)
 }
 
 
-int getfilecon(const char *path, security_context_t *con)
+int getfilecon(const char *path, char **con)
 {
     return getfilecon_raw(path, con);
 }
@@ -224,7 +216,7 @@ int security_disable(void)
         return -1;
     }
 
-    return g_setenv("FAKE_SELINUX_DISABLED", "1", TRUE);
+    return g_setenv("FAKE_SELINUX_DISABLED", "1", TRUE) == TRUE ? 0 : -1;
 }
 
 int security_getenforce(void)
@@ -274,7 +266,6 @@ const char *selinux_virtual_image_context_path(void)
     return abs_srcdir "/securityselinuxhelperdata/virtual_image_context";
 }
 
-#ifdef HAVE_SELINUX_LXC_CONTEXTS_PATH
 const char *selinux_lxc_contexts_path(void)
 {
     init_syms();
@@ -284,11 +275,10 @@ const char *selinux_lxc_contexts_path(void)
 
     return abs_srcdir "/securityselinuxhelperdata/lxc_contexts";
 }
-#endif
 
 struct selabel_handle *
 selabel_open(unsigned int backend,
-             VIR_SELINUX_OPEN_CONST struct selinux_opt *opts,
+             const struct selinux_opt *opts,
              unsigned nopts)
 {
     char *fake_handle;
@@ -299,8 +289,7 @@ selabel_open(unsigned int backend,
         return real_selabel_open(backend, opts, nopts);
 
     /* struct selabel_handle is opaque; fake it */
-    if (VIR_ALLOC(fake_handle) < 0)
-        return NULL;
+    fake_handle = g_new0(char, 1);
     return (struct selabel_handle *)fake_handle;
 }
 
@@ -315,7 +304,7 @@ void selabel_close(struct selabel_handle *handle)
 }
 
 int selabel_lookup_raw(struct selabel_handle *handle,
-                       security_context_t *con,
+                       char **con,
                        const char *key,
                        int type)
 {

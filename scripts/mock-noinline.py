@@ -43,7 +43,7 @@ def scan_annotations(filename):
             elif line.isspace():
                 func = None
 
-            if "G_GNUC_NO_INLINE" in line:
+            if "G_NO_INLINE" in line:
                 if func is not None:
                     noninlined[func] = True
 
@@ -59,11 +59,11 @@ def scan_overrides(filename):
                 m = re.search(r'''^\w+\s*(?:\*\s*)?(\w+)\(''', line)
             if m is not None:
                 name = m.group(1)
-                if name.startswith("vir"):
+                if name.startswith("vir") or name.startswith("qemu") or name.startswith("libxl"):
                     mocked[name] = "%s:%d" % (filename, lineno)
 
 
-for filename in sys.argv[1:]:
+for filename in sys.stdin.readlines():
     if filename.endswith(".h"):
         scan_annotations(filename)
     elif filename.endswith("mock.c"):
@@ -73,7 +73,7 @@ warned = False
 for func in mocked.keys():
     if func not in noninlined:
         warned = True
-        print("%s is mocked at %s but missing noinline annotation" %
+        print("%s is mocked at %s but missing 'G_NO_INLINE' annotation" %
               (func, mocked[func]), file=sys.stderr)
 
 if warned:

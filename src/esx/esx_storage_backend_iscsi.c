@@ -28,14 +28,12 @@
 #include "viralloc.h"
 #include "viruuid.h"
 #include "storage_conf.h"
-#include "virstoragefile.h"
+#include "storage_source_conf.h"
 #include "esx_storage_backend_iscsi.h"
 #include "esx_private.h"
 #include "esx_vi.h"
 #include "esx_vi_methods.h"
-#include "esx_util.h"
 #include "vircrypto.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_ESX
 
@@ -304,11 +302,9 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
     esxPrivate *priv = pool->conn->privateData;
     esxVI_HostInternetScsiHba *hostInternetScsiHba = NULL;
     esxVI_HostInternetScsiHbaStaticTarget *target;
-    virStoragePoolDef def;
+    virStoragePoolDef def = { 0 };
 
     virCheckFlags(0, NULL);
-
-    memset(&def, 0, sizeof(def));
 
     if (esxVI_LookupHostInternetScsiHba(priv->primary, &hostInternetScsiHba))
         goto cleanup;
@@ -321,8 +317,8 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 
     if (!target) {
         /* pool not found */
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not find storage pool with name '%s'"),
+        virReportError(VIR_ERR_NO_STORAGE_POOL,
+                       _("Could not find storage pool with name '%1$s'"),
                        pool->name);
         goto cleanup;
     }
@@ -337,8 +333,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 
     def.source.nhost = 1;
 
-    if (VIR_ALLOC_N(def.source.hosts, def.source.nhost) < 0)
-        goto cleanup;
+    def.source.hosts = g_new0(virStoragePoolSourceHost, def.source.nhost);
 
     def.source.hosts[0].name = target->address;
 
@@ -349,7 +344,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
     xml = virStoragePoolDefFormat(&def);
 
  cleanup:
-    VIR_FREE(def.source.hosts);
+    g_free(def.source.hosts);
     esxVI_HostInternetScsiHba_Free(&hostInternetScsiHba);
 
     return xml;
@@ -495,7 +490,6 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
     esxVI_ScsiLun *scsiLunList = NULL;
     esxVI_ScsiLun *scsiLun;
     esxVI_HostScsiDisk *hostScsiDisk = NULL;
-    char *poolName = NULL;
     /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
     unsigned char md5[VIR_CRYPTO_HASH_SIZE_MD5];
     char uuid_string[VIR_UUID_STRING_BUFLEN] = "";
@@ -504,11 +498,12 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
         goto cleanup;
 
     for (scsiLun = scsiLunList; scsiLun; scsiLun = scsiLun->_next) {
+        g_autofree char *poolName = NULL;
+
         hostScsiDisk = esxVI_HostScsiDisk_DynamicCast(scsiLun);
 
         if (hostScsiDisk && STREQ(hostScsiDisk->devicePath, path)) {
             /* Found matching device */
-            VIR_FREE(poolName);
 
             if (esxVI_LookupStoragePoolNameByScsiLunKey(priv->primary,
                                                         hostScsiDisk->key,
@@ -528,8 +523,6 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
 
  cleanup:
     esxVI_ScsiLun_Free(&scsiLunList);
-    VIR_FREE(poolName);
-
     return volume;
 }
 
@@ -540,7 +533,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 {
     virStorageVolPtr volume = NULL;
     esxPrivate *priv = conn->privateData;
-    char *poolName = NULL;
     esxVI_ScsiLun *scsiLunList = NULL;
     esxVI_ScsiLun *scsiLun;
     /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
@@ -556,6 +548,8 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
     for (scsiLun = scsiLunList; scsiLun;
          scsiLun = scsiLun->_next) {
+        g_autofree char *poolName = NULL;
+
         memset(uuid_string, '\0', sizeof(uuid_string));
         memset(md5, '\0', sizeof(md5));
 
@@ -565,7 +559,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
         if (STREQ(key, uuid_string)) {
             /* Found matching UUID */
-            VIR_FREE(poolName);
 
             if (esxVI_LookupStoragePoolNameByScsiLunKey(priv->primary,
                                                         scsiLun->key,
@@ -582,8 +575,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
  cleanup:
     esxVI_ScsiLun_Free(&scsiLunList);
-    VIR_FREE(poolName);
-
     return volume;
 }
 
@@ -645,7 +636,7 @@ esxStorageVolGetInfo(virStorageVolPtr volume,
 
     if (!hostScsiDisk) {
         virReportError(VIR_ERR_NO_STORAGE_VOL,
-                       _("Could not find volume with name: %s"),
+                       _("Could not find volume with name: %1$s"),
                        volume->name);
         goto cleanup;
     }
@@ -671,19 +662,16 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
 {
     char *xml = NULL;
     esxPrivate *priv = volume->conn->privateData;
-    virStoragePoolDef pool;
+    virStoragePoolDef pool = { 0 };
     esxVI_ScsiLun *scsiLunList = NULL;
     esxVI_ScsiLun *scsiLun;
     esxVI_HostScsiDisk *hostScsiDisk = NULL;
-    virStorageVolDef def;
+    virStorageVolDef def = { 0 };
     /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
     unsigned char md5[VIR_CRYPTO_HASH_SIZE_MD5];
     char uuid_string[VIR_UUID_STRING_BUFLEN] = "";
 
     virCheckFlags(0, NULL);
-
-    memset(&pool, 0, sizeof(pool));
-    memset(&def, 0, sizeof(def));
 
     if (esxVI_LookupScsiLunList(priv->primary, &scsiLunList) < 0)
         goto cleanup;
@@ -699,8 +687,8 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
     }
 
     if (!scsiLun) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could find volume with name: %s"), volume->name);
+        virReportError(VIR_ERR_NO_STORAGE_VOL,
+                       _("Could find volume with name: %1$s"), volume->name);
         goto cleanup;
     }
 
@@ -732,7 +720,7 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
 
  cleanup:
     esxVI_ScsiLun_Free(&scsiLunList);
-    VIR_FREE(def.key);
+    g_free(def.key);
 
     return xml;
 }
@@ -771,10 +759,7 @@ esxStorageVolWipe(virStorageVolPtr volume G_GNUC_UNUSED,
 static char *
 esxStorageVolGetPath(virStorageVolPtr volume)
 {
-    char *path;
-
-    path = g_strdup(volume->name);
-    return path;
+    return g_strdup(volume->name);
 }
 
 

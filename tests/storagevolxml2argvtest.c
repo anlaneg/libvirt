@@ -2,10 +2,7 @@
 
 #include "internal.h"
 #include "testutils.h"
-#include "datatypes.h"
 #include "storage/storage_util.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -13,8 +10,8 @@ const char create_tool[] = "qemu-img";
 
 /* createVol sets this on volume creation */
 static void
-testSetVolumeType(virStorageVolDefPtr vol,
-                  virStoragePoolDefPtr pool)
+testSetVolumeType(virStorageVolDef *vol,
+                  virStoragePoolDef *pool)
 {
     if (!vol || !pool)
         return;
@@ -44,15 +41,14 @@ testCompareXMLToArgvFiles(bool shouldFail,
 {
     virStorageVolEncryptConvertStep convertStep = VIR_STORAGE_VOL_ENCRYPT_NONE;
     int ret = -1;
-    virStoragePoolDefPtr def = NULL;
-    virStoragePoolObjPtr obj = NULL;
+    virStoragePoolDef *def = NULL;
+    virStoragePoolObj *obj = NULL;
     g_autofree char *actualCmdline = NULL;
     g_autoptr(virStorageVolDef) vol = NULL;
     g_autoptr(virStorageVolDef) inputvol = NULL;
     g_autoptr(virStoragePoolDef) inputpool = NULL;
-    g_autoptr(virCommand) cmd = NULL;
 
-    if (!(def = virStoragePoolDefParseFile(poolxml)))
+    if (!(def = virStoragePoolDefParse(NULL, poolxml, 0)))
         goto cleanup;
 
     if (!(obj = virStoragePoolObjNew())) {
@@ -62,18 +58,18 @@ testCompareXMLToArgvFiles(bool shouldFail,
     virStoragePoolObjSetDef(obj, def);
 
     if (inputpoolxml) {
-        if (!(inputpool = virStoragePoolDefParseFile(inputpoolxml)))
+        if (!(inputpool = virStoragePoolDefParse(NULL, inputpoolxml, 0)))
             goto cleanup;
     }
 
     if (inputvolxml)
         parse_flags |= VIR_VOL_XML_PARSE_NO_CAPACITY;
 
-    if (!(vol = virStorageVolDefParseFile(def, volxml, parse_flags)))
+    if (!(vol = virStorageVolDefParse(def, NULL, volxml, parse_flags)))
         goto cleanup;
 
     if (inputvolxml &&
-        !(inputvol = virStorageVolDefParseFile(inputpool, inputvolxml, 0)))
+        !(inputvol = virStorageVolDefParse(inputpool, NULL, inputvolxml, 0)))
         goto cleanup;
 
     testSetVolumeType(vol, def);
@@ -88,7 +84,8 @@ testCompareXMLToArgvFiles(bool shouldFail,
         convertStep = VIR_STORAGE_VOL_ENCRYPT_CREATE;
 
     do {
-        virCommandFree(cmd);
+        g_autoptr(virCommand) cmd = NULL;
+
         cmd = virStorageBackendCreateQemuImgCmdFromVol(obj, vol,
                                                        inputvol, flags,
                                                        create_tool,
@@ -104,13 +101,13 @@ testCompareXMLToArgvFiles(bool shouldFail,
         }
 
         if (convertStep != VIR_STORAGE_VOL_ENCRYPT_CONVERT) {
-            if (!(actualCmdline = virCommandToString(cmd, false)))
+            if (!(actualCmdline = virCommandToString(cmd, true)))
                 goto cleanup;
         } else {
             char *createCmdline = actualCmdline;
             g_autofree char *cvtCmdline = NULL;
 
-            if (!(cvtCmdline = virCommandToString(cmd, false)))
+            if (!(cvtCmdline = virCommandToString(cmd, true)))
                 goto cleanup;
 
             actualCmdline = g_strdup_printf("%s\n%s", createCmdline, cvtCmdline);
@@ -127,7 +124,7 @@ testCompareXMLToArgvFiles(bool shouldFail,
 
     } while (convertStep != VIR_STORAGE_VOL_ENCRYPT_DONE);
 
-    if (virTestCompareToFile(actualCmdline, cmdline) < 0)
+    if (virTestCompareToFileFull(actualCmdline, cmdline, false) < 0)
         goto cleanup;
 
     ret = 0;
@@ -238,6 +235,10 @@ mymain(void)
                  "pool-dir", "vol-qcow2-nocapacity-backing", NULL, NULL,
                  "qcow2-nocapacity", 0);
 
+    DO_TEST("pool-dir", "vol-qcow2-clusterSize",
+            NULL, NULL,
+            "qcow2-clusterSize", 0);
+
     DO_TEST("pool-dir", "vol-file-iso",
             NULL, NULL,
             "iso", 0);
@@ -255,6 +256,9 @@ mymain(void)
     DO_TEST("pool-dir", "vol-luks-cipher",
             NULL, NULL,
             "luks-cipher", 0);
+    DO_TEST("pool-dir", "vol-qcow2-luks",
+            NULL, NULL,
+            "qcow2-luks", 0);
 
     DO_TEST("pool-dir", "vol-luks-convert",
             "pool-dir", "vol-file",
@@ -264,17 +268,29 @@ mymain(void)
             "pool-dir", "vol-file-qcow2",
             "luks-convert-qcow2", 0);
 
-    DO_TEST("pool-dir", "vol-encrypt2",
-            "pool-dir", "vol-encrypt1",
+    DO_TEST("pool-dir", "vol-luks",
+            "pool-dir", "vol-luks-convert",
             "luks-convert-encrypt", 0);
 
     DO_TEST("pool-dir", "vol-file",
-            "pool-dir", "vol-encrypt2",
+            "pool-dir", "vol-luks-convert",
             "luks-convert-encrypt2fileraw", 0);
 
     DO_TEST("pool-dir", "vol-file-qcow2",
-            "pool-dir", "vol-encrypt2",
+            "pool-dir", "vol-luks-convert",
             "luks-convert-encrypt2fileqcow2", 0);
+
+    DO_TEST("pool-dir", "vol-qcow2-luks",
+            "pool-dir", "vol-qcow2-luks-convert",
+            "qcow2-luks-convert-encrypt", 0);
+
+    DO_TEST("pool-dir", "vol-file",
+            "pool-dir", "vol-qcow2-luks-convert",
+            "qcow2-luks-convert-encrypt2fileraw", 0);
+
+    DO_TEST("pool-dir", "vol-file-qcow2",
+            "pool-dir", "vol-qcow2-luks-convert",
+            "qcow2-luks-convert-encrypt2fileqcow2", 0);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -22,20 +22,17 @@
 #include <config.h>
 
 #include "internal.h"
-#include "datatypes.h"
 #include "viralloc.h"
 #include "virlog.h"
-#include "viruuid.h"
 #include "hyperv_private.h"
 #include "hyperv_util.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
 VIR_LOG_INIT("hyperv.hyperv_util");
 
 int
-hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
+hypervParseUri(hypervParsedUri **parsedUri, virURI *uri)
 {
     int result = -1;
     size_t i;
@@ -45,11 +42,10 @@ hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
         return -1;
     }
 
-    if (VIR_ALLOC(*parsedUri) < 0)
-        return -1;
+    *parsedUri = g_new0(hypervParsedUri, 1);
 
     for (i = 0; i < uri->paramsCount; i++) {
-        virURIParamPtr queryParam = &uri->params[i];
+        virURIParam *queryParam = &uri->params[i];
 
         if (STRCASEEQ(queryParam->name, "transport")) {
             VIR_FREE((*parsedUri)->transport);
@@ -59,8 +55,7 @@ hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
             if (STRNEQ((*parsedUri)->transport, "http") &&
                 STRNEQ((*parsedUri)->transport, "https")) {
                 virReportError(VIR_ERR_INVALID_ARG,
-                               _("Query parameter 'transport' has unexpected value "
-                                 "'%s' (should be http|https)"),
+                               _("Query parameter 'transport' has unexpected value '%1$s' (should be http|https)"),
                                (*parsedUri)->transport);
                 goto cleanup;
             }
@@ -81,7 +76,6 @@ hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
 
     return result;
 }
-
 
 
 void

@@ -197,7 +197,7 @@ virArch virArchFromHost(void)
     case PROCESSOR_ARCHITECTURE_ARM64:
         return VIR_ARCH_AARCH64;
     default:
-        VIR_WARN("Unknown host arch '%d', report to libvir-list@redhat.com",
+        VIR_WARN("Unknown host arch '%d', report to devel@lists.libvirt.org",
                  info.wProcessorArchitecture);
         return VIR_ARCH_NONE;
     }
@@ -220,10 +220,12 @@ virArch virArchFromHost(void)
         arch = VIR_ARCH_I686;
     } else if (STREQ(ut.machine, "amd64")) {
         arch = VIR_ARCH_X86_64;
+    } else if (STREQ(ut.machine, "arm64")) {
+        arch = VIR_ARCH_AARCH64;
     } else {
         /* Otherwise assume the canonical name */
         if ((arch = virArchFromString(ut.machine)) == VIR_ARCH_NONE) {
-            VIR_WARN("Unknown host arch %s, report to libvir-list@redhat.com",
+            VIR_WARN("Unknown host arch %s, report to devel@lists.libvirt.org",
                      ut.machine);
         }
     }

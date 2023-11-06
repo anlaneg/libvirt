@@ -32,7 +32,6 @@
 #include "virfile.h"
 #include "virlog.h"
 #include "virpidfile.h"
-#include "virprocess.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
@@ -43,14 +42,12 @@
 #include "viruuid.h"
 #include "remote_driver.h"
 #include "viralloc.h"
-#include "virconf.h"
 #include "virnetlink.h"
 #include "virnetdaemon.h"
 #include "remote_daemon_dispatch.h"
 #include "virhook.h"
 #include "viraudit.h"
 #include "virstring.h"
-#include "locking/lock_manager.h"
 #include "viraccessmanager.h"
 #include "virutil.h"
 #include "virgettext.h"
@@ -63,7 +60,7 @@
 
 #include "configmake.h"
 
-#include "virdbus.h"
+#include "virgdbus.h"
 
 VIR_LOG_INIT("daemon." DAEMON_NAME);
 
@@ -72,12 +69,12 @@ VIR_LOG_INIT("daemon." DAEMON_NAME);
 #endif
 
 #if WITH_SASL
-virNetSASLContextPtr saslCtxt = NULL;
+virNetSASLContext *saslCtxt = NULL;
 #endif
-virNetServerProgramPtr remoteProgram = NULL;
-virNetServerProgramPtr qemuProgram = NULL;
+virNetServerProgram *remoteProgram = NULL;
+virNetServerProgram *qemuProgram = NULL;
 
-volatile bool driversInitialized = false;
+volatile gint driversInitialized = 0;
 
 static void daemonErrorHandler(void *opaque G_GNUC_UNUSED,
                                virErrorPtr err G_GNUC_UNUSED)
@@ -100,6 +97,7 @@ static int daemonErrorLogFilter(virErrorPtr err, int priority)
     case VIR_ERR_NO_STORAGE_VOL:
     case VIR_ERR_NO_NODE_DEVICE:
     case VIR_ERR_NO_INTERFACE:
+    case VIR_ERR_MULTIPLE_INTERFACES:
     case VIR_ERR_NO_NWFILTER:
     case VIR_ERR_NO_NWFILTER_BINDING:
     case VIR_ERR_NO_SECRET:
@@ -170,6 +168,10 @@ static int daemonInitialize(void)
     if (virDriverLoadModule("qemu", "qemuRegister", false) < 0)
         return -1;
 # endif
+# ifdef WITH_CH
+    if (virDriverLoadModule("ch", "chRegister", false) < 0)
+        return -1;
+# endif
 # ifdef WITH_LXC
     if (virDriverLoadModule("lxc", "lxcRegister", false) < 0)
         return -1;
@@ -192,8 +194,8 @@ static int daemonInitialize(void)
 
 
 static int ATTRIBUTE_NONNULL(3)
-daemonSetupNetworking(virNetServerPtr srv,
-                      virNetServerPtr srvAdm,
+daemonSetupNetworking(virNetServer *srv,
+                      virNetServer *srvAdm,
                       struct daemonConfig *config,
 #ifdef WITH_IP
                       bool ipsock,
@@ -207,33 +209,18 @@ daemonSetupNetworking(virNetServerPtr srv,
     int unix_sock_ro_mask = 0;
     int unix_sock_rw_mask = 0;
     int unix_sock_adm_mask = 0;
+#if WITH_SASL
+    unsigned int tcp_min_ssf = 0;
+#endif /* !WITH_SASL */
     g_autoptr(virSystemdActivation) act = NULL;
-    virSystemdActivationMap actmap[] = {
-        { .name = DAEMON_NAME ".socket", .family = AF_UNIX, .path = sock_path },
-        { .name = DAEMON_NAME "-ro.socket", .family = AF_UNIX, .path = sock_path_ro },
-        { .name = DAEMON_NAME "-admin.socket", .family = AF_UNIX, .path = sock_path_adm },
-#ifdef WITH_IP
-        { .name = DAEMON_NAME "-tcp.socket", .family = AF_INET },
-        { .name = DAEMON_NAME "-tls.socket", .family = AF_INET },
-#endif /* ! WITH_IP */
-    };
 
-#ifdef WITH_IP
-    if ((actmap[3].port = virSocketAddrResolveService(config->tcp_port)) < 0)
-        return -1;
-
-    if ((actmap[4].port = virSocketAddrResolveService(config->tls_port)) < 0)
-        return -1;
-#endif /* ! WITH_IP */
-
-    if (virSystemdGetActivation(actmap, G_N_ELEMENTS(actmap), &act) < 0)
+    if (virSystemdGetActivation(&act) < 0)
         return -1;
 
 #ifdef WITH_IP
 # ifdef LIBVIRTD
     if (act && ipsock) {
-        VIR_ERROR(_("--listen parameter not permitted with systemd activation "
-                    "sockets, see 'man libvirtd' for further guidance"));
+        VIR_ERROR(_("--listen parameter not permitted with systemd activation sockets, see 'man libvirtd' for further guidance"));
         return -1;
     }
 # else /* ! LIBVIRTD */
@@ -264,17 +251,17 @@ daemonSetupNetworking(virNetServerPtr srv,
     }
 
     if (virStrToLong_i(config->unix_sock_ro_perms, NULL, 8, &unix_sock_ro_mask) != 0) {
-        VIR_ERROR(_("Failed to parse mode '%s'"), config->unix_sock_ro_perms);
+        VIR_ERROR(_("Failed to parse mode '%1$s'"), config->unix_sock_ro_perms);
         return -1;
     }
 
     if (virStrToLong_i(config->unix_sock_admin_perms, NULL, 8, &unix_sock_adm_mask) != 0) {
-        VIR_ERROR(_("Failed to parse mode '%s'"), config->unix_sock_admin_perms);
+        VIR_ERROR(_("Failed to parse mode '%1$s'"), config->unix_sock_admin_perms);
         return -1;
     }
 
     if (virStrToLong_i(config->unix_sock_rw_perms, NULL, 8, &unix_sock_rw_mask) != 0) {
-        VIR_ERROR(_("Failed to parse mode '%s'"), config->unix_sock_rw_perms);
+        VIR_ERROR(_("Failed to parse mode '%1$s'"), config->unix_sock_rw_perms);
         return -1;
     }
 
@@ -335,7 +322,7 @@ daemonSetupNetworking(virNetServerPtr srv,
         return -1;
 
     if (((ipsock && config->listen_tls) || (act && virSystemdActivationHasName(act, DAEMON_NAME "-tls.socket")))) {
-        virNetTLSContextPtr ctxt = NULL;
+        virNetTLSContext *ctxt = NULL;
 
         if (config->ca_file ||
             config->cert_file ||
@@ -401,9 +388,13 @@ daemonSetupNetworking(virNetServerPtr srv,
         return -1;
 
 #if WITH_SASL
+# if WITH_IP
+    tcp_min_ssf = config->tcp_min_ssf;
+# endif
     if (virNetServerNeedsAuth(srv, REMOTE_AUTH_SASL) &&
         !(saslCtxt = virNetSASLContextNewServer(
-              (const char *const*)config->sasl_allowed_username_list)))
+              (const char *const*)config->sasl_allowed_username_list,
+              tcp_min_ssf)))
         return -1;
 #endif
 
@@ -424,7 +415,7 @@ daemonSetupNetDevOpenvswitch(struct daemonConfig *config)
 static int
 daemonSetupAccessManager(struct daemonConfig *config)
 {
-    virAccessManagerPtr mgr;
+    virAccessManager *mgr;
     const char *none[] = { "none", NULL };
     const char **drv = (const char **)config->access_drivers;
 
@@ -449,29 +440,34 @@ daemonVersion(const char *argv0)
 }
 
 
-static void daemonShutdownHandler(virNetDaemonPtr dmn,
+static void daemonShutdownHandler(virNetDaemon *dmn,
                                   siginfo_t *sig G_GNUC_UNUSED,
                                   void *opaque G_GNUC_UNUSED)
 {
     virNetDaemonQuit(dmn);
 }
 
-static void daemonReloadHandlerThread(void *opague G_GNUC_UNUSED)
+static void daemonReloadHandlerThread(void *opaque G_GNUC_UNUSED)
 {
     VIR_INFO("Reloading configuration on SIGHUP");
     virHookCall(VIR_HOOK_DRIVER_DAEMON, "-",
                 VIR_HOOK_DAEMON_OP_RELOAD, SIGHUP, "SIGHUP", NULL, NULL);
-    if (virStateReload() < 0)
+
+    if (virStateReload() < 0) {
         VIR_WARN("Error while reloading drivers");
+    }
+
+    /* Drivers are initialized again. */
+    g_atomic_int_set(&driversInitialized, 1);
 }
 
-static void daemonReloadHandler(virNetDaemonPtr dmn G_GNUC_UNUSED,
+static void daemonReloadHandler(virNetDaemon *dmn G_GNUC_UNUSED,
                                 siginfo_t *sig G_GNUC_UNUSED,
                                 void *opaque G_GNUC_UNUSED)
 {
     virThread thr;
 
-    if (!driversInitialized) {
+    if (!g_atomic_int_compare_and_exchange(&driversInitialized, 1, 0)) {
         VIR_WARN("Drivers are not initialized, reload ignored");
         return;
     }
@@ -482,10 +478,14 @@ static void daemonReloadHandler(virNetDaemonPtr dmn G_GNUC_UNUSED,
          * Not much we can do on error here except log it.
          */
         VIR_ERROR(_("Failed to create thread to handle daemon restart"));
+
+        /* Drivers were initialized at the beginning, otherwise we wouldn't
+         * even get here. */
+        g_atomic_int_set(&driversInitialized, 1);
     }
 }
 
-static int daemonSetupSignals(virNetDaemonPtr dmn)
+static int daemonSetupSignals(virNetDaemon *dmn)
 {
     if (virNetDaemonAddSignalHandler(dmn, SIGINT, daemonShutdownHandler, NULL) < 0)
         return -1;
@@ -501,7 +501,7 @@ static int daemonSetupSignals(virNetDaemonPtr dmn)
 
 static void daemonInhibitCallback(bool inhibit, void *opaque)
 {
-    virNetDaemonPtr dmn = opaque;
+    virNetDaemon *dmn = opaque;
 
     if (inhibit)
         virNetDaemonAddShutdownInhibition(dmn);
@@ -510,13 +510,12 @@ static void daemonInhibitCallback(bool inhibit, void *opaque)
 }
 
 
-#ifdef WITH_DBUS
-static DBusConnection *sessionBus;
-static DBusConnection *systemBus;
+static GDBusConnection *sessionBus;
+static GDBusConnection *systemBus;
 
 static void daemonStopWorker(void *opaque)
 {
-    virNetDaemonPtr dmn = opaque;
+    virNetDaemon *dmn = opaque;
 
     VIR_DEBUG("Begin stop dmn=%p", dmn);
 
@@ -530,62 +529,75 @@ static void daemonStopWorker(void *opaque)
 
 
 /* We do this in a thread to not block the main loop */
-static void daemonStop(virNetDaemonPtr dmn)
+static void daemonStop(virNetDaemon *dmn)
 {
-    virThread thr;
+    virThread *thr;
     virObjectRef(dmn);
-    if (virThreadCreateFull(&thr, false, daemonStopWorker,
-                            "daemon-stop", false, dmn) < 0)
+
+    thr = g_new0(virThread, 1);
+
+    if (virThreadCreateFull(thr, true,
+                            daemonStopWorker,
+                            "daemon-stop", false, dmn) < 0) {
         virObjectUnref(dmn);
+        g_free(thr);
+        return;
+    }
+
+    virNetDaemonSetStateStopWorkerThread(dmn, &thr);
 }
 
 
-static DBusHandlerResult
-handleSessionMessageFunc(DBusConnection *connection G_GNUC_UNUSED,
-                         DBusMessage *message,
-                         void *opaque)
+static GDBusMessage *
+handleSessionMessageFunc(GDBusConnection *connection G_GNUC_UNUSED,
+                         GDBusMessage *message,
+                         gboolean incoming G_GNUC_UNUSED,
+                         gpointer opaque)
 {
-    virNetDaemonPtr dmn = opaque;
+    virNetDaemon *dmn = opaque;
 
     VIR_DEBUG("dmn=%p", dmn);
 
-    if (dbus_message_is_signal(message,
-                               DBUS_INTERFACE_LOCAL,
-                               "Disconnected"))
+    if (virGDBusMessageIsSignal(message,
+                                "org.freedesktop.DBus.Local",
+                                "Disconnected"))
         daemonStop(dmn);
 
-    return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+    return message;
 }
 
 
-static DBusHandlerResult
-handleSystemMessageFunc(DBusConnection *connection G_GNUC_UNUSED,
-                        DBusMessage *message,
-                        void *opaque)
+static void
+handleSystemMessageFunc(GDBusConnection *connection G_GNUC_UNUSED,
+                        const char *senderName G_GNUC_UNUSED,
+                        const char *objectPath G_GNUC_UNUSED,
+                        const char *interfaceName G_GNUC_UNUSED,
+                        const char *signalName G_GNUC_UNUSED,
+                        GVariant *parameters G_GNUC_UNUSED,
+                        gpointer opaque)
 {
-    virNetDaemonPtr dmn = opaque;
+    virNetDaemon *dmn = opaque;
 
     VIR_DEBUG("dmn=%p", dmn);
 
-    if (dbus_message_is_signal(message,
-                               "org.freedesktop.login1.Manager",
-                               "PrepareForShutdown"))
-        daemonStop(dmn);
-
-    return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+    daemonStop(dmn);
 }
-#endif
 
 
 static void daemonRunStateInit(void *opaque)
 {
-    virNetDaemonPtr dmn = opaque;
+    virNetDaemon *dmn = opaque;
     g_autoptr(virIdentity) sysident = virIdentityGetSystem();
 #ifdef MODULE_NAME
     bool mandatory = true;
 #else /* ! MODULE_NAME */
     bool mandatory = false;
 #endif /* ! MODULE_NAME */
+#ifdef LIBVIRTD
+    bool monolithic = true;
+#else /* ! LIBVIRTD */
+    bool monolithic = false;
+#endif /* ! LIBVIRTD */
 
     virIdentitySetCurrent(sysident);
 
@@ -601,6 +613,7 @@ static void daemonRunStateInit(void *opaque)
     if (virStateInitialize(virNetDaemonIsPrivileged(dmn),
                            mandatory,
                            NULL,
+                           monolithic,
                            daemonInhibitCallback,
                            dmn) < 0) {
         VIR_ERROR(_("Driver state initialization failed"));
@@ -609,27 +622,34 @@ static void daemonRunStateInit(void *opaque)
         goto cleanup;
     }
 
-    driversInitialized = true;
+    g_atomic_int_set(&driversInitialized, 1);
 
-#ifdef WITH_DBUS
+    virNetDaemonSetShutdownCallbacks(dmn,
+                                     virStateShutdownPrepare,
+                                     virStateShutdownWait);
+
     /* Tie the non-privileged daemons to the session/shutdown lifecycle */
     if (!virNetDaemonIsPrivileged(dmn)) {
 
-        sessionBus = virDBusGetSessionBus();
+        sessionBus = virGDBusGetSessionBus();
         if (sessionBus != NULL)
-            dbus_connection_add_filter(sessionBus,
-                                       handleSessionMessageFunc, dmn, NULL);
+            g_dbus_connection_add_filter(sessionBus,
+                                         handleSessionMessageFunc, dmn, NULL);
 
-        systemBus = virDBusGetSystemBus();
-        if (systemBus != NULL) {
-            dbus_connection_add_filter(systemBus,
-                                       handleSystemMessageFunc, dmn, NULL);
-            dbus_bus_add_match(systemBus,
-                               "type='signal',sender='org.freedesktop.login1', interface='org.freedesktop.login1.Manager'",
-                               NULL);
-        }
+        systemBus = virGDBusGetSystemBus();
+        if (systemBus != NULL)
+            g_dbus_connection_signal_subscribe(systemBus,
+                                               "org.freedesktop.login1",
+                                               "org.freedesktop.login1.Manager",
+                                               "PrepareForShutdown",
+                                               NULL,
+                                               NULL,
+                                               G_DBUS_SIGNAL_FLAGS_NONE,
+                                               handleSystemMessageFunc,
+                                               dmn,
+                                               NULL);
     }
-#endif
+
     /* Only now accept clients from network */
     virNetDaemonUpdateServices(dmn, true);
  cleanup:
@@ -638,7 +658,7 @@ static void daemonRunStateInit(void *opaque)
     virIdentitySetCurrent(NULL);
 }
 
-static int daemonStateInit(virNetDaemonPtr dmn)
+static int daemonStateInit(virNetDaemon *dmn)
 {
     virThread thr;
     virObjectRef(dmn);
@@ -666,18 +686,18 @@ daemonSetupHostUUID(const struct daemonConfig *config)
         return 0;
     } else if (STREQ(config->host_uuid_source, "machine-id")) {
         if (virFileReadBufQuiet(machine_id, buf, sizeof(buf)) < 0) {
-            VIR_ERROR(_("Can't read %s"), machine_id);
+            VIR_ERROR(_("Can't read %1$s"), machine_id);
             return -1;
         }
 
         uuid = buf;
     } else {
-        VIR_ERROR(_("invalid UUID source: %s"), config->host_uuid_source);
+        VIR_ERROR(_("invalid UUID source: %1$s"), config->host_uuid_source);
         return -1;
     }
 
     if (virSetHostUUIDStr(uuid)) {
-        VIR_ERROR(_("invalid host UUID: %s"), uuid);
+        VIR_ERROR(_("invalid host UUID: %1$s"), uuid);
         return -1;
     }
 
@@ -762,11 +782,11 @@ daemonUsage(const char *argv0, bool privileged)
 
 /*libvirtd程序入口*/
 int main(int argc, char **argv) {
-    virNetDaemonPtr dmn = NULL;
-    virNetServerPtr srv = NULL;
-    virNetServerPtr srvAdm = NULL;
-    virNetServerProgramPtr adminProgram = NULL;
-    virNetServerProgramPtr lxcProgram = NULL;
+    virNetDaemon *dmn = NULL;
+    virNetServer *srv = NULL;
+    virNetServer *srvAdm = NULL;
+    virNetServerProgram *adminProgram = NULL;
+    virNetServerProgram *lxcProgram = NULL;
     char *remote_config_file = NULL;
     int statuswrite = -1;
     int ret = 1;
@@ -792,24 +812,22 @@ int main(int argc, char **argv) {
     mode_t old_umask;
 
     struct option opts[] = {
-        { "verbose", no_argument, &verbose, 'v'},
-        { "daemon", no_argument, &godaemon, 'd'},
+        { "verbose", no_argument, &verbose, 'v' },
+        { "daemon", no_argument, &godaemon, 'd' },
 #if defined(WITH_IP) && defined(LIBVIRTD)
-        { "listen", no_argument, &ipsock, 'l'},
+        { "listen", no_argument, &ipsock, 'l' },
 #endif /* !(WITH_IP && LIBVIRTD) */
-        { "config", required_argument, NULL, 'f'},
-        { "timeout", required_argument, NULL, 't'},
-        { "pid-file", required_argument, NULL, 'p'},
+        { "config", required_argument, NULL, 'f' },
+        { "timeout", required_argument, NULL, 't' },
+        { "pid-file", required_argument, NULL, 'p' },
         { "version", no_argument, NULL, 'V' },
         { "help", no_argument, NULL, 'h' },
-        {0, 0, 0, 0}
+        { 0, 0, 0, 0 },
     };
 
     if (virGettextInitialize() < 0 ||
-        virInitialize() < 0) {
-        fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
+        virInitialize() < 0)
         exit(EXIT_FAILURE);
-    }
 
     virUpdateSelfLastChanged(argv[0]);
 
@@ -897,18 +915,14 @@ int main(int argc, char **argv) {
     /* No explicit config, so try and find a default one */
     if (remote_config_file == NULL) {
         implicit_conf = true;
-        if (daemonConfigFilePath(privileged,
-                                 &remote_config_file) < 0) {
-            VIR_ERROR(_("Can't determine config path"));
-            exit(EXIT_FAILURE);
-        }
+        daemonConfigFilePath(privileged, &remote_config_file);
     }
 
     /* Read the config file if it exists */
     /*读取配置文件*/
     if (remote_config_file &&
         daemonConfigLoadFile(config, remote_config_file, implicit_conf) < 0) {
-        VIR_ERROR(_("Can't load config file: %s: %s"),
+        VIR_ERROR(_("Can't load config file: %1$s: %2$s"),
                   virGetLastErrorMessage(), remote_config_file);
         exit(EXIT_FAILURE);
     }
@@ -918,13 +932,16 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    virDaemonSetupLogging(DAEMON_NAME,
-                          config->log_level,
-                          config->log_filters,
-                          config->log_outputs,
-                          privileged,
-                          verbose,
-                          godaemon);
+    if (virDaemonSetupLogging(DAEMON_NAME,
+                              config->log_level,
+                              config->log_filters,
+                              config->log_outputs,
+                              privileged,
+                              verbose,
+                              godaemon) < 0) {
+        virDispatchError(NULL);
+        exit(EXIT_FAILURE);
+    }
 
     /* Let's try to initialize global variable that holds the host's boot time. */
     if (virHostBootTimeInit() < 0) {
@@ -967,20 +984,20 @@ int main(int argc, char **argv) {
 
     if (godaemon) {
         if (chdir("/") < 0) {
-            VIR_ERROR(_("cannot change to root directory: %s"),
+            VIR_ERROR(_("cannot change to root directory: %1$s"),
                       g_strerror(errno));
             goto cleanup;
         }
 
         if ((statuswrite = virDaemonForkIntoBackground(argv[0])) < 0) {
-            VIR_ERROR(_("Failed to fork as daemon: %s"),
+            VIR_ERROR(_("Failed to fork as daemon: %1$s"),
                       g_strerror(errno));
             goto cleanup;
         }
     }
 
     /* Try to claim the pidfile, exiting if we can't */
-    if ((pid_file_fd = virPidFileAcquirePath(pid_file, false, getpid())) < 0) {
+    if ((pid_file_fd = virPidFileAcquirePath(pid_file, getpid())) < 0) {
         ret = VIR_DAEMON_ERR_PIDFILE;
         goto cleanup;
     }
@@ -998,8 +1015,8 @@ int main(int argc, char **argv) {
 
     /*创建run_dir*/
     VIR_DEBUG("Ensuring run dir '%s' exists", run_dir);
-    if (virFileMakePath(run_dir) < 0) {
-        VIR_ERROR(_("unable to create rundir %s: %s"), run_dir,
+    if (g_mkdir_with_parents(run_dir, 0777) < 0) {
+        VIR_ERROR(_("unable to create rundir %1$s: %2$s"), run_dir,
                   g_strerror(errno));
         ret = VIR_DAEMON_ERR_RUNDIR;
         goto cleanup;
@@ -1119,8 +1136,8 @@ int main(int argc, char **argv) {
     }
 
     if (timeout > 0) {
-        VIR_DEBUG("Registering shutdown timeout %d", timeout);
-        virNetDaemonAutoShutdown(dmn, timeout);
+        if (virNetDaemonAutoShutdown(dmn, timeout) < 0)
+            goto cleanup;
     }
 
     if ((daemonSetupSignals(dmn)) < 0) {
@@ -1212,15 +1229,11 @@ int main(int argc, char **argv) {
                 0, "shutdown", NULL, NULL);
 
  cleanup:
-    /* Keep cleanup order in inverse order of startup */
-    virNetDaemonClose(dmn);
-
     virNetlinkEventServiceStopAll();
 
-    if (driversInitialized) {
+    if (g_atomic_int_compare_and_exchange(&driversInitialized, 1, 0)) {
         /* NB: Possible issue with timing window between driversInitialized
          * setting if virNetlinkEventServerStart fails */
-        driversInitialized = false;
         virStateCleanup();
     }
 

@@ -21,14 +21,11 @@
 #pragma once
 
 #include <stdarg.h>
-#include <unistd.h>
-#include <sys/stat.h>
 #ifndef WIN32
 # include <termios.h>
 #endif
 
 #include "internal.h"
-#include "virerror.h"
 #include "virthread.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -156,6 +153,8 @@ struct _vshCmdOptDef {
 struct _vshCmdOpt {
     const vshCmdOptDef *def;    /* non-NULL pointer to option definition */
     char *data;                 /* allocated data, or NULL for bool option */
+    bool completeThis;          /* true if this is the option user's wishing to
+                                   autocomplete */
     vshCmdOpt *next;
 };
 
@@ -165,6 +164,7 @@ struct _vshCmdOpt {
 enum {
     VSH_CMD_FLAG_NOCONNECT = (1 << 0),  /* no prior connection needed */
     VSH_CMD_FLAG_ALIAS     = (1 << 1),  /* command is an alias */
+    VSH_CMD_FLAG_HIDDEN    = (1 << 2),  /* command is hidden/internal */
 };
 
 /*
@@ -276,7 +276,6 @@ void vshCloseLogFile(vshControl *ctl);
 
 const char *vshCmddefGetInfo(const vshCmdDef *cmd, const char *info);
 const vshCmdDef *vshCmddefSearch(const char *cmdname);
-bool vshCmddefHelp(vshControl *ctl, const vshCmdDef *def);
 const vshCmdGrp *vshCmdGrpSearch(const char *grpname);
 bool vshCmdGrpHelp(vshControl *ctl, const vshCmdGrp *grp);
 
@@ -321,13 +320,18 @@ int vshBlockJobOptionBandwidth(vshControl *ctl,
                                unsigned long *bandwidth);
 bool vshCommandOptBool(const vshCmd *cmd, const char *name);
 bool vshCommandRun(vshControl *ctl, const vshCmd *cmd);
-bool vshCommandStringParse(vshControl *ctl, char *cmdstr, vshCmd **partial);
+bool vshCommandStringParse(vshControl *ctl, char *cmdstr,
+                           vshCmd **partial, size_t point);
 
 const vshCmdOpt *vshCommandOptArgv(vshControl *ctl, const vshCmd *cmd,
                                    const vshCmdOpt *opt);
 bool vshCommandArgvParse(vshControl *ctl, int nargs, char **argv);
 int vshCommandOptTimeoutToMs(vshControl *ctl, const vshCmd *cmd, int *timeout);
 
+void vshPrintVa(vshControl *ctl,
+                const char *format,
+                va_list ap)
+    G_GNUC_PRINTF(2, 0);
 void vshPrint(vshControl *ctl, const char *format, ...)
     G_GNUC_PRINTF(2, 3);
 void vshPrintExtra(vshControl *ctl, const char *format, ...)
@@ -366,6 +370,9 @@ void vshSaveLibvirtError(void);
 void vshSaveLibvirtHelperError(void);
 
 /* file handling */
+void vshEditUnlinkTempfile(char *file);
+typedef char vshTempFile;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(vshTempFile, vshEditUnlinkTempfile);
 char *vshEditWriteToTempFile(vshControl *ctl, const char *doc);
 int vshEditFile(vshControl *ctl, const char *filename);
 char *vshEditReadBackFile(vshControl *ctl, const char *filename);
@@ -400,6 +407,7 @@ extern const vshCmdOptDef opts_echo[];
 extern const vshCmdInfo info_echo[];
 extern const vshCmdInfo info_pwd[];
 extern const vshCmdInfo info_quit[];
+extern const vshCmdOptDef opts_selftest[];
 extern const vshCmdInfo info_selftest[];
 extern const vshCmdOptDef opts_complete[];
 extern const vshCmdInfo info_complete[];
@@ -470,10 +478,9 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
     { \
         .name = "self-test", \
         .handler = cmdSelfTest, \
-        .opts = NULL, \
+        .opts = opts_selftest, \
         .info = info_selftest, \
-        .flags = VSH_CMD_FLAG_NOCONNECT | VSH_CMD_FLAG_ALIAS, \
-        .alias = "self-test" \
+        .flags = VSH_CMD_FLAG_NOCONNECT | VSH_CMD_FLAG_HIDDEN, \
     }
 
 #define VSH_CMD_COMPLETE \
@@ -482,8 +489,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .handler = cmdComplete, \
         .opts = opts_complete, \
         .info = info_complete, \
-        .flags = VSH_CMD_FLAG_NOCONNECT | VSH_CMD_FLAG_ALIAS, \
-        .alias = "complete" \
+        .flags = VSH_CMD_FLAG_NOCONNECT | VSH_CMD_FLAG_HIDDEN, \
     }
 
 
@@ -491,11 +497,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
 /* readline */
 char * vshReadline(vshControl *ctl, const char *prompt);
 
-/* allocation wrappers */
-void *_vshMalloc(vshControl *ctl, size_t sz, const char *filename, int line);
-#define vshMalloc(_ctl, _sz)    _vshMalloc(_ctl, _sz, __FILE__, __LINE__)
-
-void *vshCalloc(vshControl *ctl, size_t nmemb, size_t sz);
+void vshReadlineHistoryAdd(const char *cmd);
 
 /* Macros to help dealing with mutually exclusive options. */
 
@@ -514,7 +516,7 @@ void *vshCalloc(vshControl *ctl, size_t nmemb, size_t sz);
  */
 #define VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
     if ((EXPR1) && (EXPR2)) { \
-        vshError(ctl, _("Options --%s and --%s are mutually exclusive"), \
+        vshError(ctl, _("Options --%1$s and --%2$s are mutually exclusive"), \
                  NAME1, NAME2); \
         return false; \
     }
@@ -548,6 +550,33 @@ void *vshCalloc(vshControl *ctl, size_t nmemb, size_t sz);
 #define VSH_EXCLUSIVE_OPTIONS_VAR(VARNAME1, VARNAME2) \
     VSH_EXCLUSIVE_OPTIONS_EXPR(#VARNAME1, VARNAME1, #VARNAME2, VARNAME2)
 
+/* Macros to help dealing with alternative mutually exclusive options. */
+
+/* VSH_ALTERNATIVE_OPTIONS_EXPR:
+ *
+ * @NAME1: String containing the name of the option.
+ * @EXPR1: Expression to validate the variable (must evaluate to bool).
+ * @NAME2: String containing the name of the option.
+ * @EXPR2: Expression to validate the variable (must evaluate to bool).
+ *
+ * Require exactly one of the command options in virsh. Use the provided
+ * expression to check the variables.
+ *
+ * This helper does an early return and therefore it has to be called
+ * before anything that would require cleanup.
+ */
+#define VSH_ALTERNATIVE_OPTIONS_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
+    do { \
+        bool _expr1 = EXPR1; \
+        bool _expr2 = EXPR2; \
+        VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, _expr1, NAME2, _expr2); \
+        if (!_expr1 && !_expr2) { \
+           vshError(ctl, _("Either --%1$s or --%2$s must be provided"), \
+                    NAME1, NAME2); \
+           return false; \
+        } \
+    } while (0)
+
 /* Macros to help dealing with required options. */
 
 /* VSH_REQUIRE_OPTION_EXPR:
@@ -566,7 +595,7 @@ void *vshCalloc(vshControl *ctl, size_t nmemb, size_t sz);
 #define VSH_REQUIRE_OPTION_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
     do { \
         if ((EXPR1) && !(EXPR2)) { \
-            vshError(ctl, _("Option --%s is required by option --%s"), \
+            vshError(ctl, _("Option --%1$s is required by option --%2$s"), \
                      NAME2, NAME1); \
             return false; \
         } \

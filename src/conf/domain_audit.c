@@ -34,7 +34,6 @@
 #include "viruuid.h"
 #include "virlog.h"
 #include "viralloc.h"
-#include "virstring.h"
 
 VIR_LOG_INIT("conf.domain_audit");
 
@@ -65,7 +64,7 @@ virDomainAuditGetRdev(const char *path G_GNUC_UNUSED)
 
 
 static const char *
-virDomainAuditGetVirtType(virDomainDefPtr def)
+virDomainAuditGetVirtType(virDomainDef *def)
 {
     const char *virt;
 
@@ -80,7 +79,7 @@ virDomainAuditGetVirtType(virDomainDefPtr def)
 
 
 static void
-virDomainAuditGenericDev(virDomainObjPtr vm,
+virDomainAuditGenericDev(virDomainObj *vm,
                          const char *type,
                          const char *oldsrcpath,
                          const char *newsrcpath,
@@ -120,14 +119,14 @@ virDomainAuditGenericDev(virDomainObjPtr vm,
 
 
 void
-virDomainAuditChardev(virDomainObjPtr vm,
-                      virDomainChrDefPtr oldDef,
-                      virDomainChrDefPtr newDef,
+virDomainAuditChardev(virDomainObj *vm,
+                      virDomainChrDef *oldDef,
+                      virDomainChrDef *newDef,
                       const char *reason,
                       bool success)
 {
-    virDomainChrSourceDefPtr oldsrc = NULL;
-    virDomainChrSourceDefPtr newsrc = NULL;
+    virDomainChrSourceDef *oldsrc = NULL;
+    virDomainChrSourceDef *newsrc = NULL;
 
     if (oldDef)
         oldsrc = oldDef->source;
@@ -143,8 +142,8 @@ virDomainAuditChardev(virDomainObjPtr vm,
 
 
 static void
-virDomainAuditSmartcard(virDomainObjPtr vm,
-                        virDomainSmartcardDefPtr def,
+virDomainAuditSmartcard(virDomainObj *vm,
+                        virDomainSmartcardDef *def,
                         const char *reason,
                         bool success)
 {
@@ -188,9 +187,9 @@ virDomainAuditSmartcard(virDomainObjPtr vm,
 
 
 void
-virDomainAuditDisk(virDomainObjPtr vm,
-                   virStorageSourcePtr oldDef,
-                   virStorageSourcePtr newDef,
+virDomainAuditDisk(virDomainObj *vm,
+                   virStorageSource *oldDef,
+                   virStorageSource *newDef,
                    const char *reason,
                    bool success)
 {
@@ -208,15 +207,15 @@ virDomainAuditDisk(virDomainObjPtr vm,
 
 
 void
-virDomainAuditRNG(virDomainObjPtr vm,
-                  virDomainRNGDefPtr oldDef, virDomainRNGDefPtr newDef,
+virDomainAuditRNG(virDomainObj *vm,
+                  virDomainRNGDef *oldDef, virDomainRNGDef *newDef,
                   const char *reason, bool success)
 {
     const char *newsrcpath = NULL;
     const char *oldsrcpath = NULL;
 
     if (newDef) {
-        switch ((virDomainRNGBackend) newDef->backend) {
+        switch (newDef->backend) {
         case VIR_DOMAIN_RNG_BACKEND_RANDOM:
             newsrcpath = newDef->source.file;
             break;
@@ -232,7 +231,7 @@ virDomainAuditRNG(virDomainObjPtr vm,
     }
 
     if (oldDef) {
-        switch ((virDomainRNGBackend) oldDef->backend) {
+        switch (oldDef->backend) {
         case VIR_DOMAIN_RNG_BACKEND_RANDOM:
             oldsrcpath = oldDef->source.file;
             break;
@@ -252,8 +251,8 @@ virDomainAuditRNG(virDomainObjPtr vm,
 
 
 void
-virDomainAuditFS(virDomainObjPtr vm,
-                 virDomainFSDefPtr oldDef, virDomainFSDefPtr newDef,
+virDomainAuditFS(virDomainObj *vm,
+                 virDomainFSDef *oldDef, virDomainFSDef *newDef,
                  const char *reason, bool success)
 {
     virDomainAuditGenericDev(vm, "fs",
@@ -264,8 +263,8 @@ virDomainAuditFS(virDomainObjPtr vm,
 
 
 void
-virDomainAuditNet(virDomainObjPtr vm,
-                  virDomainNetDefPtr oldDef, virDomainNetDefPtr newDef,
+virDomainAuditNet(virDomainObj *vm,
+                  virDomainNetDef *oldDef, virDomainNetDef *newDef,
                   const char *reason, bool success)
 {
     char newMacstr[VIR_MAC_STRING_BUFLEN];
@@ -296,14 +295,14 @@ virDomainAuditNet(virDomainObjPtr vm,
  * Log an audit message about an attempted network device open.
  */
 void
-virDomainAuditNetDevice(virDomainDefPtr vmDef, virDomainNetDefPtr netDef,
+virDomainAuditNetDevice(virDomainDef *vmDef, virDomainNetDef *netDef,
                         const char *device, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
     char macstr[VIR_MAC_STRING_BUFLEN];
-    char *vmname;
-    char *dev_name = NULL;
-    char *rdev;
+    g_autofree char *vmname = NULL;
+    g_autofree char *dev_name = NULL;
+    g_autofree char *rdev = NULL;
     const char *virt = virDomainAuditGetVirtType(vmDef);
 
     virUUIDFormat(vmDef->uuid, uuidstr);
@@ -313,17 +312,12 @@ virDomainAuditNetDevice(virDomainDefPtr vmDef, virDomainNetDefPtr netDef,
     if (!(vmname = virAuditEncode("vm", vmDef->name)) ||
         !(dev_name = virAuditEncode("path", device))) {
         VIR_WARN("OOM while encoding audit message");
-        goto cleanup;
+        return;
     }
 
     VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
               "virt=%s resrc=net reason=open %s uuid=%s net=%s %s rdev=%s",
               virt, vmname, uuidstr, macstr, dev_name, VIR_AUDIT_STR(rdev));
-
- cleanup:
-    VIR_FREE(vmname);
-    VIR_FREE(dev_name);
-    VIR_FREE(rdev);
 }
 
 /**
@@ -336,20 +330,20 @@ virDomainAuditNetDevice(virDomainDefPtr vmDef, virDomainNetDefPtr netDef,
  * Log an audit message about an attempted device passthrough change.
  */
 void
-virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
+virDomainAuditHostdev(virDomainObj *vm, virDomainHostdevDef *hostdev,
                       const char *reason, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
-    char *address = NULL;
-    char *device = NULL;
+    g_autofree char *vmname = NULL;
+    g_autofree char *address = NULL;
+    g_autofree char *device = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
-    virDomainHostdevSubsysUSBPtr usbsrc = &hostdev->source.subsys.u.usb;
-    virDomainHostdevSubsysPCIPtr pcisrc = &hostdev->source.subsys.u.pci;
-    virDomainHostdevSubsysSCSIPtr scsisrc = &hostdev->source.subsys.u.scsi;
-    virDomainHostdevSubsysSCSIVHostPtr hostsrc = &hostdev->source.subsys.u.scsi_host;
-    virDomainHostdevSubsysMediatedDevPtr mdevsrc = &hostdev->source.subsys.u.mdev;
+    virDomainHostdevSubsysUSB *usbsrc = &hostdev->source.subsys.u.usb;
+    virDomainHostdevSubsysPCI *pcisrc = &hostdev->source.subsys.u.pci;
+    virDomainHostdevSubsysSCSI *scsisrc = &hostdev->source.subsys.u.scsi;
+    virDomainHostdevSubsysSCSIVHost *hostsrc = &hostdev->source.subsys.u.scsi_host;
+    virDomainHostdevSubsysMediatedDev *mdevsrc = &hostdev->source.subsys.u.mdev;
 
     virUUIDFormat(vm->def->uuid, uuidstr);
     if (!(vmname = virAuditEncode("vm", vm->def->name))) {
@@ -357,15 +351,11 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
         return;
     }
 
-    switch ((virDomainHostdevMode) hostdev->mode) {
+    switch (hostdev->mode) {
     case VIR_DOMAIN_HOSTDEV_MODE_SUBSYS:
-        switch ((virDomainHostdevSubsysType) hostdev->source.subsys.type) {
+        switch (hostdev->source.subsys.type) {
         case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
-            address = g_strdup_printf(VIR_PCI_DEVICE_ADDRESS_FMT,
-                                      pcisrc->addr.domain,
-                                      pcisrc->addr.bus,
-                                      pcisrc->addr.slot,
-                                      pcisrc->addr.function);
+            address = virPCIDeviceAddressAsString(&pcisrc->addr);
             break;
         case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
             address = g_strdup_printf("%.3d.%.3d", usbsrc->bus, usbsrc->device);
@@ -376,10 +366,10 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
                 /* Follow virDomainAuditDisk && virDomainAuditGenericDev
                  * and don't audit the networked device.
                  */
-                goto cleanup;
+                return;
             } else {
-                virDomainHostdevSubsysSCSIHostPtr scsihostsrc =
-                    &scsisrc->u.host;
+                virDomainHostdevSubsysSCSIHost *scsihostsrc = &scsisrc->u.host;
+
                 address = g_strdup_printf("%s:%u:%u:%llu",
                                           scsihostsrc->adapter, scsihostsrc->bus,
                                           scsihostsrc->target,
@@ -397,12 +387,12 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
         default:
             VIR_WARN("Unexpected hostdev type while encoding audit message: %d",
                      hostdev->source.subsys.type);
-            goto cleanup;
+            return;
         }
 
         if (!(device = virAuditEncode("device", VIR_AUDIT_STR(address)))) {
             VIR_WARN("OOM while encoding audit message");
-            goto cleanup;
+            return;
         }
 
         VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
@@ -418,7 +408,7 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
             if (!(device = virAuditEncode("disk",
                                           VIR_AUDIT_STR(hostdev->source.caps.u.storage.block)))) {
                 VIR_WARN("OOM while encoding audit message");
-                goto cleanup;
+                return;
             }
 
             VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
@@ -430,7 +420,7 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
             if (!(device = virAuditEncode("chardev",
                                           VIR_AUDIT_STR(hostdev->source.caps.u.misc.chardev)))) {
                 VIR_WARN("OOM while encoding audit message");
-                goto cleanup;
+                return;
             }
 
             VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
@@ -438,10 +428,12 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
                       virt, reason, vmname, uuidstr, device);
             break;
 
+        case VIR_DOMAIN_HOSTDEV_CAPS_TYPE_NET:
+        case VIR_DOMAIN_HOSTDEV_CAPS_TYPE_LAST:
         default:
             VIR_WARN("Unexpected hostdev type while encoding audit message: %d",
                      hostdev->source.caps.type);
-            goto cleanup;
+            return;
         }
         break;
 
@@ -449,13 +441,8 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
     default:
         VIR_WARN("Unexpected hostdev mode while encoding audit message: %d",
                  hostdev->mode);
-        goto cleanup;
+        return;
     }
-
- cleanup:
-    VIR_FREE(vmname);
-    VIR_FREE(device);
-    VIR_FREE(address);
 }
 
 
@@ -469,13 +456,13 @@ virDomainAuditHostdev(virDomainObjPtr vm, virDomainHostdevDefPtr hostdev,
  * Log an audit message about an attempted device passthrough change.
  */
 void
-virDomainAuditRedirdev(virDomainObjPtr vm, virDomainRedirdevDefPtr redirdev,
+virDomainAuditRedirdev(virDomainObj *vm, virDomainRedirdevDef *redirdev,
                       const char *reason, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
-    char *address = NULL;
-    char *device = NULL;
+    g_autofree char *vmname = NULL;
+    g_autofree char *address = NULL;
+    g_autofree char *device = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
     virUUIDFormat(vm->def->uuid, uuidstr);
@@ -491,12 +478,12 @@ virDomainAuditRedirdev(virDomainObjPtr vm, virDomainRedirdevDefPtr redirdev,
     default:
         VIR_WARN("Unexpected redirdev bus while encoding audit message: %d",
                  redirdev->bus);
-        goto cleanup;
+        return;
     }
 
     if (!(device = virAuditEncode("device", VIR_AUDIT_STR(address)))) {
         VIR_WARN("OOM while encoding audit message");
-        goto cleanup;
+        return;
     }
 
     VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
@@ -504,11 +491,6 @@ virDomainAuditRedirdev(virDomainObjPtr vm, virDomainRedirdevDefPtr redirdev,
               virt, reason, vmname, uuidstr,
               virDomainRedirdevBusTypeToString(redirdev->bus),
               device);
-
- cleanup:
-    VIR_FREE(vmname);
-    VIR_FREE(device);
-    VIR_FREE(address);
 }
 
 
@@ -523,13 +505,13 @@ virDomainAuditRedirdev(virDomainObjPtr vm, virDomainRedirdevDefPtr redirdev,
  * change.
  */
 static void
-virDomainAuditTPM(virDomainObjPtr vm, virDomainTPMDefPtr tpm,
+virDomainAuditTPM(virDomainObj *vm, virDomainTPMDef *tpm,
                   const char *reason, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
+    g_autofree char *vmname = NULL;
     char *path = NULL;
-    char *device = NULL;
+    g_autofree char *device = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
     virUUIDFormat(vm->def->uuid, uuidstr);
@@ -540,10 +522,10 @@ virDomainAuditTPM(virDomainObjPtr vm, virDomainTPMDefPtr tpm,
 
     switch (tpm->type) {
     case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
-        path = tpm->data.passthrough.source.data.file.path;
+        path = tpm->data.passthrough.source->data.file.path;
         if (!(device = virAuditEncode("device", VIR_AUDIT_STR(path)))) {
             VIR_WARN("OOM while encoding audit message");
-            goto cleanup;
+            return;
         }
 
         VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
@@ -551,24 +533,31 @@ virDomainAuditTPM(virDomainObjPtr vm, virDomainTPMDefPtr tpm,
                   virt, reason, vmname, uuidstr, device);
         break;
     case VIR_DOMAIN_TPM_TYPE_EMULATOR:
-        path = tpm->data.emulator.source.data.nix.path;
+        path = tpm->data.emulator.source->data.nix.path;
         if (!(device = virAuditEncode("device", VIR_AUDIT_STR(path)))) {
             VIR_WARN("OOM while encoding audit message");
-            goto cleanup;
+            return;
         }
 
         VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
                   "virt=%s resrc=tpm-emulator reason=%s %s uuid=%s %s",
                   virt, reason, vmname, uuidstr, device);
         break;
+    case VIR_DOMAIN_TPM_TYPE_EXTERNAL:
+        path = tpm->data.external.source->data.nix.path;
+        if (!(device = virAuditEncode("device", VIR_AUDIT_STR(path)))) {
+            VIR_WARN("OOM while encoding audit message");
+            return;
+        }
+
+        VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
+                  "virt=%s resrc=tpm-external reason=%s %s uuid=%s %s",
+                  virt, reason, vmname, uuidstr, device);
+        break;
     case VIR_DOMAIN_TPM_TYPE_LAST:
     default:
         break;
     }
-
- cleanup:
-    VIR_FREE(vmname);
-    VIR_FREE(device);
 }
 
 
@@ -586,13 +575,13 @@ virDomainAuditTPM(virDomainObjPtr vm, virDomainTPMDefPtr tpm,
  * Log an audit message about an attempted cgroup device ACL change.
  */
 void
-virDomainAuditCgroup(virDomainObjPtr vm, virCgroupPtr cgroup,
+virDomainAuditCgroup(virDomainObj *vm, virCgroup *cgroup,
                      const char *reason, const char *extra, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
-    char *controller = NULL;
-    char *detail;
+    g_autofree char *vmname = NULL;
+    g_autofree char *controller = NULL;
+    g_autofree char *detail = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
     virUUIDFormat(vm->def->uuid, uuidstr);
@@ -610,10 +599,6 @@ virDomainAuditCgroup(virDomainObjPtr vm, virCgroupPtr cgroup,
               "virt=%s resrc=cgroup reason=%s %s uuid=%s %s class=%s",
               virt, reason, vmname, uuidstr,
               detail ? detail : "cgroup=?", extra);
-
-    VIR_FREE(vmname);
-    VIR_FREE(controller);
-    VIR_FREE(detail);
 }
 
 /**
@@ -629,18 +614,16 @@ virDomainAuditCgroup(virDomainObjPtr vm, virCgroupPtr cgroup,
  * Log an audit message about an attempted cgroup device ACL change.
  */
 void
-virDomainAuditCgroupMajor(virDomainObjPtr vm, virCgroupPtr cgroup,
+virDomainAuditCgroupMajor(virDomainObj *vm, virCgroup *cgroup,
                           const char *reason, int maj, const char *name,
                           const char *perms, bool success)
 {
-    char *extra;
+    g_autofree char *extra = NULL;
 
     extra = g_strdup_printf("major category=%s maj=%02X acl=%s",
                             name, maj, perms);
 
     virDomainAuditCgroup(vm, cgroup, reason, extra, success);
-
-    VIR_FREE(extra);
 }
 
 /**
@@ -656,13 +639,13 @@ virDomainAuditCgroupMajor(virDomainObjPtr vm, virCgroupPtr cgroup,
  * a specific device.
  */
 void
-virDomainAuditCgroupPath(virDomainObjPtr vm, virCgroupPtr cgroup,
+virDomainAuditCgroupPath(virDomainObj *vm, virCgroup *cgroup,
                          const char *reason, const char *path, const char *perms,
                          int rc)
 {
-    char *detail;
-    char *rdev;
-    char *extra = NULL;
+    g_autofree char *detail = NULL;
+    g_autofree char *rdev = NULL;
+    g_autofree char *extra = NULL;
 
     /* Nothing to audit for regular files.  */
     if (rc > 0)
@@ -672,18 +655,13 @@ virDomainAuditCgroupPath(virDomainObjPtr vm, virCgroupPtr cgroup,
 
     if (!(detail = virAuditEncode("path", path))) {
         VIR_WARN("OOM while encoding audit message");
-        goto cleanup;
+        return;
     }
 
     extra = g_strdup_printf("path %s rdev=%s acl=%s",
                             detail, VIR_AUDIT_STR(rdev), perms);
 
     virDomainAuditCgroup(vm, cgroup, reason, extra, rc == 0);
-
- cleanup:
-    VIR_FREE(extra);
-    VIR_FREE(detail);
-    VIR_FREE(rdev);
 }
 
 /**
@@ -698,12 +676,12 @@ virDomainAuditCgroupPath(virDomainObjPtr vm, virCgroupPtr cgroup,
  * Log an audit message about an attempted resource change.
  */
 static void
-virDomainAuditResource(virDomainObjPtr vm, const char *resource,
+virDomainAuditResource(virDomainObj *vm, const char *resource,
                        unsigned long long oldval, unsigned long long newval,
                        const char *reason, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
+    g_autofree char *vmname = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
     virUUIDFormat(vm->def->uuid, uuidstr);
@@ -716,12 +694,10 @@ virDomainAuditResource(virDomainObjPtr vm, const char *resource,
               "virt=%s resrc=%s reason=%s %s uuid=%s old-%s=%lld new-%s=%lld",
               virt, resource, reason, vmname, uuidstr,
               resource, oldval, resource, newval);
-
-    VIR_FREE(vmname);
 }
 
 void
-virDomainAuditMemory(virDomainObjPtr vm,
+virDomainAuditMemory(virDomainObj *vm,
                      unsigned long long oldmem, unsigned long long newmem,
                      const char *reason, bool success)
 {
@@ -729,7 +705,7 @@ virDomainAuditMemory(virDomainObjPtr vm,
 }
 
 void
-virDomainAuditVcpu(virDomainObjPtr vm,
+virDomainAuditVcpu(virDomainObj *vm,
                    unsigned int oldvcpu, unsigned int newvcpu,
                    const char *reason, bool success)
 {
@@ -737,7 +713,7 @@ virDomainAuditVcpu(virDomainObjPtr vm,
 }
 
 void
-virDomainAuditIOThread(virDomainObjPtr vm,
+virDomainAuditIOThread(virDomainObj *vm,
                        unsigned int oldiothread, unsigned int newiothread,
                        const char *reason, bool success)
 {
@@ -746,11 +722,11 @@ virDomainAuditIOThread(virDomainObjPtr vm,
 }
 
 static void
-virDomainAuditLifecycle(virDomainObjPtr vm, const char *op,
+virDomainAuditLifecycle(virDomainObj *vm, const char *op,
                         const char *reason, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
+    g_autofree char *vmname = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
     virUUIDFormat(vm->def->uuid, uuidstr);
@@ -763,13 +739,11 @@ virDomainAuditLifecycle(virDomainObjPtr vm, const char *op,
     VIR_AUDIT(VIR_AUDIT_RECORD_MACHINE_CONTROL, success,
               "virt=%s op=%s reason=%s %s uuid=%s vm-pid=%lld",
               virt, op, reason, vmname, uuidstr, (long long)vm->pid);
-
-    VIR_FREE(vmname);
 }
 
 
 void
-virDomainAuditStart(virDomainObjPtr vm, const char *reason, bool success)
+virDomainAuditStart(virDomainObj *vm, const char *reason, bool success)
 {
     size_t i;
 
@@ -777,22 +751,22 @@ virDomainAuditStart(virDomainObjPtr vm, const char *reason, bool success)
         virDomainAuditDisk(vm, NULL, vm->def->disks[i]->src, "start", true);
 
     for (i = 0; i < vm->def->nfss; i++) {
-        virDomainFSDefPtr fs = vm->def->fss[i];
+        virDomainFSDef *fs = vm->def->fss[i];
         virDomainAuditFS(vm, NULL, fs, "start", true);
     }
 
     for (i = 0; i < vm->def->nnets; i++) {
-        virDomainNetDefPtr net = vm->def->nets[i];
+        virDomainNetDef *net = vm->def->nets[i];
         virDomainAuditNet(vm, NULL, net, "start", true);
     }
 
     for (i = 0; i < vm->def->nhostdevs; i++) {
-        virDomainHostdevDefPtr hostdev = vm->def->hostdevs[i];
+        virDomainHostdevDef *hostdev = vm->def->hostdevs[i];
         virDomainAuditHostdev(vm, hostdev, "start", true);
     }
 
     for (i = 0; i < vm->def->nredirdevs; i++) {
-        virDomainRedirdevDefPtr redirdev = vm->def->redirdevs[i];
+        virDomainRedirdevDef *redirdev = vm->def->redirdevs[i];
         virDomainAuditRedirdev(vm, redirdev, "start", true);
     }
 
@@ -840,12 +814,12 @@ virDomainAuditStart(virDomainObjPtr vm, const char *reason, bool success)
 }
 
 void
-virDomainAuditInit(virDomainObjPtr vm,
+virDomainAuditInit(virDomainObj *vm,
                    pid_t initpid,
                    ino_t pidns)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
+    g_autofree char *vmname = NULL;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
     virUUIDFormat(vm->def->uuid, uuidstr);
@@ -859,21 +833,19 @@ virDomainAuditInit(virDomainObjPtr vm,
               "virt=%s op=init %s uuid=%s vm-pid=%lld init-pid=%lld pid-ns=%lld",
               virt, vmname, uuidstr, (long long)vm->pid, (long long)initpid,
               (long long)pidns);
-
-    VIR_FREE(vmname);
 }
 
 void
-virDomainAuditStop(virDomainObjPtr vm, const char *reason)
+virDomainAuditStop(virDomainObj *vm, const char *reason)
 {
     virDomainAuditLifecycle(vm, "stop", reason, true);
 }
 
 void
-virDomainAuditSecurityLabel(virDomainObjPtr vm, bool success)
+virDomainAuditSecurityLabel(virDomainObj *vm, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname;
+    g_autofree char *vmname = NULL;
     size_t i;
     const char *virt = virDomainAuditGetVirtType(vm->def);
 
@@ -891,26 +863,24 @@ virDomainAuditSecurityLabel(virDomainObjPtr vm, bool success)
                   VIR_AUDIT_STR(vm->def->seclabels[i]->imagelabel),
                   VIR_AUDIT_STR(vm->def->seclabels[i]->model));
     }
-
-    VIR_FREE(vmname);
 }
 
 void
-virDomainAuditShmem(virDomainObjPtr vm,
-                    virDomainShmemDefPtr def,
+virDomainAuditShmem(virDomainObj *vm,
+                    virDomainShmemDef *def,
                     const char *reason, bool success)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *vmname = virAuditEncode("vm", vm->def->name);
-    const char *srcpath = virDomainChrSourceDefGetPath(&def->server.chr);
+    g_autofree char *vmname = virAuditEncode("vm", vm->def->name);
+    const char *srcpath = virDomainChrSourceDefGetPath(def->server.chr);
     const char *virt = virDomainAuditGetVirtType(vm->def);
-    char *shmpath = NULL;
+    g_autofree char *shmpath = NULL;
 
     virUUIDFormat(vm->def->uuid, uuidstr);
 
     if (!vmname) {
         VIR_WARN("OOM while encoding audit message");
-        goto cleanup;
+        return;
     }
 
     shmpath = g_strdup_printf("/dev/shm/%s", def->name);
@@ -930,17 +900,12 @@ virDomainAuditShmem(virDomainObjPtr vm,
                   "virt=%s resrc=shmem reason=%s %s uuid=%s size=%llu path=%s",
                   virt, reason, vmname, uuidstr, def->size, VIR_AUDIT_STR(shmpath));
    }
-
- cleanup:
-    VIR_FREE(vmname);
-    VIR_FREE(shmpath);
-    return;
 }
 
 
 void
-virDomainAuditInput(virDomainObjPtr vm,
-                    virDomainInputDefPtr input,
+virDomainAuditInput(virDomainObj *vm,
+                    virDomainInputDef *input,
                     const char *reason,
                     bool success)
 {
@@ -960,6 +925,7 @@ virDomainAuditInput(virDomainObjPtr vm,
         break;
 
     case VIR_DOMAIN_INPUT_TYPE_PASSTHROUGH:
+    case VIR_DOMAIN_INPUT_TYPE_EVDEV:
         VIR_AUDIT(VIR_AUDIT_RECORD_RESOURCE, success,
                   "virt=%s resrc=evdev reason=%s %s uuid=%s path=%s",
                   virt, reason, vmname, uuidstr, VIR_AUDIT_STR(input->source.evdev));

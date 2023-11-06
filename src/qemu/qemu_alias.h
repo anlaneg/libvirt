@@ -21,56 +21,58 @@
 
 #pragma once
 
-#include "domain_conf.h"
-
 #include "qemu_capabilities.h"
 #include "qemu_domain.h"
 #include "qemu_domain_address.h"
 
-int qemuAssignDeviceChrAlias(virDomainDefPtr def,
-                             virDomainChrDefPtr chr,
+int qemuAssignDeviceChrAlias(virDomainDef *def,
+                             virDomainChrDef *chr,
                              ssize_t idx);
 
-int qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
-                                    virQEMUCapsPtr qemuCaps,
-                                    virDomainControllerDefPtr controller);
+void qemuAssignDeviceControllerAlias(virDomainDef *domainDef,
+                                     virDomainControllerDef *controller);
 
-int qemuAssignDeviceDiskAlias(virDomainDefPtr def,
-                              virDomainDiskDefPtr disk,
-                              virQEMUCapsPtr qemuCaps);
+int qemuAssignDeviceDiskAlias(virDomainDef *def,
+                              virDomainDiskDef *disk);
 
-int qemuAssignDeviceHostdevAlias(virDomainDefPtr def,
-                                 char **alias,
-                                 int idx);
-
-int qemuAssignDeviceNetAlias(virDomainDefPtr def,
-                             virDomainNetDefPtr net,
-                             int idx);
-
-int qemuAssignDeviceRedirdevAlias(virDomainDefPtr def,
-                                  virDomainRedirdevDefPtr redirdev,
+void qemuAssignDeviceHostdevAlias(virDomainDef *def,
+                                  char **alias,
                                   int idx);
 
-int qemuAssignDeviceRNGAlias(virDomainDefPtr def,
-                             virDomainRNGDefPtr rng);
+void qemuAssignDeviceNetAlias(virDomainDef *def,
+                              virDomainNetDef *net,
+                              int idx);
 
-int qemuAssignDeviceMemoryAlias(virDomainDefPtr def,
-                                virDomainMemoryDefPtr mems,
-                                bool oldAlias);
+void
+qemuAssignDeviceFSAlias(virDomainDef *def,
+                        virDomainFSDef *fss);
 
-int qemuAssignDeviceShmemAlias(virDomainDefPtr def,
-                               virDomainShmemDefPtr shmem,
-                               int idx);
+void qemuAssignDeviceRedirdevAlias(virDomainDef *def,
+                                   virDomainRedirdevDef *redirdev,
+                                   int idx);
 
-int qemuAssignDeviceWatchdogAlias(virDomainWatchdogDefPtr watchdog);
+void qemuAssignDeviceRNGAlias(virDomainDef *def,
+                              virDomainRNGDef *rng);
 
-int qemuAssignDeviceInputAlias(virDomainDefPtr def,
-                               virDomainInputDefPtr input,
-                               int idx);
+int qemuAssignDeviceMemoryAlias(virDomainDef *def,
+                                virDomainMemoryDef *mems);
 
-int qemuAssignDeviceVsockAlias(virDomainVsockDefPtr vsock);
+void qemuAssignDeviceShmemAlias(virDomainDef *def,
+                                virDomainShmemDef *shmem,
+                                int idx);
 
-int qemuAssignDeviceAliases(virDomainDefPtr def, virQEMUCapsPtr qemuCaps);
+void
+qemuAssignDeviceWatchdogAlias(virDomainDef *def,
+                              virDomainWatchdogDef *watchdog,
+                              int idx);
+
+void qemuAssignDeviceInputAlias(virDomainDef *def,
+                                virDomainInputDef *input,
+                                int idx);
+
+void qemuAssignDeviceVsockAlias(virDomainVsockDef *vsock);
+
+int qemuAssignDeviceAliases(virDomainDef *def);
 
 int qemuDomainDeviceAliasIndex(const virDomainDeviceInfo *info,
                                const char *prefix);
@@ -84,7 +86,8 @@ char *qemuAliasFromHostdev(const virDomainHostdevDef *hostdev);
 char *qemuDomainGetMasterKeyAlias(void);
 
 char *qemuAliasForSecret(const char *parentalias,
-                         const char *obj);
+                         const char *obj,
+                         size_t secret_idx);
 
 char *qemuAliasTLSObjFromSrcAlias(const char *srcAlias)
     ATTRIBUTE_NONNULL(1);
@@ -97,3 +100,5 @@ const char *qemuDomainGetManagedPRAlias(void);
 char *qemuDomainGetUnmanagedPRAlias(const char *parentalias);
 
 const char *qemuDomainGetDBusVMStateAlias(void);
+
+char *qemuDomainGetVhostUserChrAlias(const char *devalias);

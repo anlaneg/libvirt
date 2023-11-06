@@ -21,7 +21,7 @@
 #ifndef WIN32
 # include <sys/ioctl.h>
 #endif
-#if defined HAVE_SYS_SYSCALL_H
+#if defined WITH_SYS_SYSCALL_H
 # include <sys/syscall.h>
 #endif
 
@@ -30,8 +30,6 @@
 #include "virlog.h"
 #include "virfile.h"
 #include "virstring.h"
-#include "virtypedparam.h"
-#include "viralloc.h"
 
 VIR_LOG_INIT("util.perf");
 
@@ -61,13 +59,12 @@ struct virPerfEvent {
         } cmt;
     } efields;
 };
-typedef struct virPerfEvent *virPerfEventPtr;
 
 struct _virPerf {
     struct virPerfEvent events[VIR_PERF_EVENT_LAST];
 };
 
-#if defined(__linux__) && defined(HAVE_SYS_SYSCALL_H)
+#if defined(__linux__) && defined(WITH_SYS_SYSCALL_H)
 
 # include <linux/perf_event.h>
 
@@ -172,7 +169,6 @@ static struct virPerfEventAttr attrs[] = {
     },
 };
 G_STATIC_ASSERT(G_N_ELEMENTS(attrs) == VIR_PERF_EVENT_LAST);
-typedef struct virPerfEventAttr *virPerfEventAttrPtr;
 
 
 static int
@@ -203,13 +199,13 @@ virPerfRdtAttrInit(void)
 
 
 int
-virPerfEventEnable(virPerfPtr perf,
+virPerfEventEnable(virPerf *perf,
                    virPerfEventType type,
                    pid_t pid)
 {
-    struct perf_event_attr attr;
-    virPerfEventPtr event = &(perf->events[type]);
-    virPerfEventAttrPtr event_attr = &attrs[type];
+    struct perf_event_attr attr = { 0 };
+    struct virPerfEvent *event = &(perf->events[type]);
+    struct virPerfEventAttr *event_attr = &attrs[type];
 
     if (event->enabled)
         return 0;
@@ -218,7 +214,7 @@ virPerfEventEnable(virPerfPtr perf,
                                       type == VIR_PERF_EVENT_MBMT ||
                                       type == VIR_PERF_EVENT_MBML)) {
         virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED,
-                       _("unable to enable host cpu perf event for %s"),
+                       _("unable to enable host cpu perf event for %1$s"),
                        virPerfEventTypeToString(type));
         return -1;
     }
@@ -237,7 +233,6 @@ virPerfEventEnable(virPerfPtr perf,
         }
     }
 
-    memset(&attr, 0, sizeof(attr));
     attr.size = sizeof(attr);
     attr.inherit = 1;
     attr.disabled = 1;
@@ -248,14 +243,14 @@ virPerfEventEnable(virPerfPtr perf,
     event->fd = syscall(__NR_perf_event_open, &attr, pid, -1, -1, 0);
     if (event->fd < 0) {
         virReportSystemError(errno,
-                             _("unable to open host cpu perf event for %s"),
+                             _("unable to open host cpu perf event for %1$s"),
                              virPerfEventTypeToString(type));
         goto error;
     }
 
     if (ioctl(event->fd, PERF_EVENT_IOC_ENABLE) < 0) {
         virReportSystemError(errno,
-                             _("unable to enable host cpu perf event for %s"),
+                             _("unable to enable host cpu perf event for %1$s"),
                              virPerfEventTypeToString(type));
         goto error;
     }
@@ -269,17 +264,17 @@ virPerfEventEnable(virPerfPtr perf,
 }
 
 int
-virPerfEventDisable(virPerfPtr perf,
+virPerfEventDisable(virPerf *perf,
                     virPerfEventType type)
 {
-    virPerfEventPtr event = &(perf->events[type]);
+    struct virPerfEvent *event = &(perf->events[type]);
 
     if (!event->enabled)
         return 0;
 
     if (ioctl(event->fd, PERF_EVENT_IOC_DISABLE) < 0) {
         virReportSystemError(errno,
-                             _("unable to disable host cpu perf event for %s"),
+                             _("unable to disable host cpu perf event for %1$s"),
                              virPerfEventTypeToString(type));
         return -1;
     }
@@ -289,18 +284,18 @@ virPerfEventDisable(virPerfPtr perf,
     return 0;
 }
 
-bool virPerfEventIsEnabled(virPerfPtr perf,
+bool virPerfEventIsEnabled(virPerf *perf,
                            virPerfEventType type)
 {
     return perf && perf->events[type].enabled;
 }
 
 int
-virPerfReadEvent(virPerfPtr perf,
+virPerfReadEvent(virPerf *perf,
                  virPerfEventType type,
                  uint64_t *value)
 {
-    virPerfEventPtr event = &perf->events[type];
+    struct virPerfEvent *event = &perf->events[type];
     if (!event->enabled)
         return -1;
 
@@ -325,7 +320,7 @@ virPerfRdtAttrInit(void)
 
 
 int
-virPerfEventEnable(virPerfPtr perf G_GNUC_UNUSED,
+virPerfEventEnable(virPerf *perf G_GNUC_UNUSED,
                    virPerfEventType type G_GNUC_UNUSED,
                    pid_t pid G_GNUC_UNUSED)
 {
@@ -335,7 +330,7 @@ virPerfEventEnable(virPerfPtr perf G_GNUC_UNUSED,
 }
 
 int
-virPerfEventDisable(virPerfPtr perf G_GNUC_UNUSED,
+virPerfEventDisable(virPerf *perf G_GNUC_UNUSED,
                     virPerfEventType type G_GNUC_UNUSED)
 {
     virReportSystemError(ENXIO, "%s",
@@ -344,14 +339,14 @@ virPerfEventDisable(virPerfPtr perf G_GNUC_UNUSED,
 }
 
 bool
-virPerfEventIsEnabled(virPerfPtr perf G_GNUC_UNUSED,
+virPerfEventIsEnabled(virPerf *perf G_GNUC_UNUSED,
                       virPerfEventType type G_GNUC_UNUSED)
 {
     return false;
 }
 
 int
-virPerfReadEvent(virPerfPtr perf G_GNUC_UNUSED,
+virPerfReadEvent(virPerf *perf G_GNUC_UNUSED,
                  virPerfEventType type G_GNUC_UNUSED,
                  uint64_t *value G_GNUC_UNUSED)
 {
@@ -362,14 +357,13 @@ virPerfReadEvent(virPerfPtr perf G_GNUC_UNUSED,
 
 #endif
 
-virPerfPtr
+virPerf *
 virPerfNew(void)
 {
     size_t i;
-    virPerfPtr perf;
+    virPerf *perf;
 
-    if (VIR_ALLOC(perf) < 0)
-        return NULL;
+    perf = g_new0(virPerf, 1);
 
     for (i = 0; i < VIR_PERF_EVENT_LAST; i++) {
         perf->events[i].fd = -1;
@@ -383,7 +377,7 @@ virPerfNew(void)
 }
 
 void
-virPerfFree(virPerfPtr perf)
+virPerfFree(virPerf *perf)
 {
     size_t i;
 
@@ -395,5 +389,5 @@ virPerfFree(virPerfPtr perf)
             virPerfEventDisable(perf, i);
     }
 
-    VIR_FREE(perf);
+    g_free(perf);
 }

@@ -21,24 +21,24 @@
 #include <config.h>
 
 #include "virsh-completer-volume.h"
-#include "viralloc.h"
+#include "virsh-util.h"
 #include "virsh-pool.h"
 #include "virsh.h"
-#include "virstring.h"
+#include "virsh-volume.h"
 
 char **
 virshStorageVolNameCompleter(vshControl *ctl,
                              const vshCmd *cmd,
                              unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
-    virStoragePoolPtr pool = NULL;
+    virshControl *priv = ctl->privData;
+    g_autoptr(virshStoragePool) pool = NULL;
     virStorageVolPtr *vols = NULL;
     int rc;
     int nvols = 0;
     size_t i = 0;
     char **ret = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -52,8 +52,7 @@ virshStorageVolNameCompleter(vshControl *ctl,
         goto cleanup;
     nvols = rc;
 
-    if (VIR_ALLOC_N(tmp, nvols + 1) < 0)
-        goto cleanup;
+    tmp = g_new0(char *, nvols + 1);
 
     for (i = 0; i < nvols; i++) {
         const char *name = virStorageVolGetName(vols[i]);
@@ -64,9 +63,66 @@ virshStorageVolNameCompleter(vshControl *ctl,
     ret = g_steal_pointer(&tmp);
 
  cleanup:
-    virStoragePoolFree(pool);
     for (i = 0; i < nvols; i++)
-        virStorageVolFree(vols[i]);
-    VIR_FREE(vols);
+        virshStorageVolFree(vols[i]);
+    g_free(vols);
     return ret;
+}
+
+char **
+virshStorageVolKeyCompleter(vshControl *ctl,
+                            const vshCmd *cmd G_GNUC_UNUSED,
+                            unsigned int flags)
+{
+    virshControl *priv = ctl->privData;
+    struct virshStoragePoolList *list = NULL;
+    virStorageVolPtr *vols = NULL;
+    int rc;
+    int nvols = 0;
+    size_t i = 0, j = 0;
+    char **ret = NULL;
+    g_auto(GStrv) tmp = NULL;
+
+    virCheckFlags(0, NULL);
+
+    if (!priv->conn || virConnectIsAlive(priv->conn) <= 0)
+        return NULL;
+
+    list = virshStoragePoolListCollect(ctl, VIR_CONNECT_LIST_STORAGE_POOLS_ACTIVE);
+    if (!list)
+        goto cleanup;
+
+    for (i = 0; i < list->npools; i++) {
+        if ((rc = virStoragePoolListAllVolumes(list->pools[i], &vols, 0)) < 0)
+            goto cleanup;
+
+        tmp = g_renew(char *, tmp, nvols + rc + 1);
+        memset(&tmp[nvols], 0, sizeof(*tmp) * (rc + 1));
+
+        for (j = 0; j < rc; j++) {
+            const char *key = virStorageVolGetKey(vols[j]);
+            tmp[nvols] = g_strdup(key);
+            nvols++;
+            virshStorageVolFree(vols[j]);
+        }
+
+        g_free(vols);
+    }
+
+    ret = g_steal_pointer(&tmp);
+
+ cleanup:
+    virshStoragePoolListFree(list);
+    return ret;
+}
+
+char **
+virshStorageVolWipeAlgorithmCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                      const vshCmd *cmd G_GNUC_UNUSED,
+                                      unsigned int flags)
+{
+    virCheckFlags(0, NULL);
+
+    return virshEnumComplete(VIR_STORAGE_VOL_WIPE_ALG_LAST,
+                             virshStorageVolWipeAlgorithmTypeToString);
 }

@@ -47,17 +47,14 @@ typedef enum {
  * directly if you don't have to, because it may be NULL, use this macro
  * instead.
  *
- * Note that this treats a possible error returned by drv->supports_feature
- * the same as not supported. If you care about the error, call
- * drv->supports_feature directly.
- *
  * Returns:
- *   != 0  Feature is supported.
+ *   -1    Error
+ *   >0    Feature is supported.
  *   0     Feature is not supported.
  */
 #define VIR_DRV_SUPPORTS_FEATURE(drv, conn, feature) \
     ((drv)->connectSupportsFeature ? \
-        (drv)->connectSupportsFeature((conn), (feature)) > 0 : 0)
+        (drv)->connectSupportsFeature((conn), (feature)) : 0)
 
 
 #define __VIR_DRIVER_H_INCLUDES___
@@ -75,8 +72,6 @@ typedef enum {
 #undef __VIR_DRIVER_H_INCLUDES___
 
 typedef struct _virConnectDriver virConnectDriver;
-typedef virConnectDriver *virConnectDriverPtr;
-
 struct _virConnectDriver {
     /* Whether driver permits a server in the URI */
     bool localOnly;/*标记此driver 仅local有效*/
@@ -90,25 +85,25 @@ struct _virConnectDriver {
      *  - NULL list indicates wildcard supporting all schemes
      */
     const char **uriSchemes;/*uri起始模式符，容许有多个*/
-    virHypervisorDriverPtr hypervisorDriver;
-    virInterfaceDriverPtr interfaceDriver;
-    virNetworkDriverPtr networkDriver;
-    virNodeDeviceDriverPtr nodeDeviceDriver;
-    virNWFilterDriverPtr nwfilterDriver;
-    virSecretDriverPtr secretDriver;
-    virStorageDriverPtr storageDriver;
+    virHypervisorDriver *hypervisorDriver;
+    virInterfaceDriver *interfaceDriver;
+    virNetworkDriver *networkDriver;
+    virNodeDeviceDriver *nodeDeviceDriver;
+    virNWFilterDriver *nwfilterDriver;
+    virSecretDriver *secretDriver;
+    virStorageDriver *storageDriver;
 };
 
-int virRegisterConnectDriver(virConnectDriverPtr driver,
+int virRegisterConnectDriver(virConnectDriver *driver,
                              bool setSharedDrivers) G_GNUC_WARN_UNUSED_RESULT;
-int virRegisterStateDriver(virStateDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
+int virRegisterStateDriver(virStateDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
 
-int virSetSharedInterfaceDriver(virInterfaceDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
-int virSetSharedNetworkDriver(virNetworkDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
-int virSetSharedNodeDeviceDriver(virNodeDeviceDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
-int virSetSharedNWFilterDriver(virNWFilterDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
-int virSetSharedSecretDriver(virSecretDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
-int virSetSharedStorageDriver(virStorageDriverPtr driver) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSharedInterfaceDriver(virInterfaceDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSharedNetworkDriver(virNetworkDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSharedNodeDeviceDriver(virNodeDeviceDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSharedNWFilterDriver(virNWFilterDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSharedSecretDriver(virSecretDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSharedStorageDriver(virStorageDriver *driver) G_GNUC_WARN_UNUSED_RESULT;
 
 bool virHasDriverForURIScheme(const char *scheme);
 
@@ -136,3 +131,6 @@ int virSetConnectStorage(virConnectPtr conn);
 bool virConnectValidateURIPath(const char *uriPath,
                                const char *entityName,
                                bool privileged);
+
+bool virDriverFeatureIsGlobal(virDrvFeature feat,
+                              int *supported);

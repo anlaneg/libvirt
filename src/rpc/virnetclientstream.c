@@ -22,7 +22,6 @@
 
 #include "virnetclientstream.h"
 #include "virnetclient.h"
-#include "viralloc.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "virthread.h"
@@ -34,7 +33,7 @@ VIR_LOG_INIT("rpc.netclientstream");
 struct _virNetClientStream {
     virObjectLockable parent;
 
-    virNetClientProgramPtr prog;
+    virNetClientProgram *prog;
     int proc;
     unsigned serial;
 
@@ -47,7 +46,7 @@ struct _virNetClientStream {
      * time by stopping consuming any incoming data
      * off the socket....
      */
-    virNetMessagePtr rx;
+    virNetMessage *rx;
     bool incomingEOF;
     virNetClientStreamClosed closed;
 
@@ -63,7 +62,7 @@ struct _virNetClientStream {
 };
 
 
-static virClassPtr virNetClientStreamClass;
+static virClass *virNetClientStreamClass;
 static void virNetClientStreamDispose(void *obj);
 
 static int virNetClientStreamOnceInit(void)
@@ -78,7 +77,7 @@ VIR_ONCE_GLOBAL_INIT(virNetClientStream);
 
 
 static void
-virNetClientStreamEventTimerUpdate(virNetClientStreamPtr st)
+virNetClientStreamEventTimerUpdate(virNetClientStream *st)
 {
     if (!st->cb)
         return;
@@ -100,7 +99,7 @@ virNetClientStreamEventTimerUpdate(virNetClientStreamPtr st)
 static void
 virNetClientStreamEventTimer(int timer G_GNUC_UNUSED, void *opaque)
 {
-    virNetClientStreamPtr st = opaque;
+    virNetClientStream *st = opaque;
     int events = 0;
 
     virObjectLock(st);
@@ -132,12 +131,12 @@ virNetClientStreamEventTimer(int timer G_GNUC_UNUSED, void *opaque)
 }
 
 
-virNetClientStreamPtr virNetClientStreamNew(virNetClientProgramPtr prog,
+virNetClientStream *virNetClientStreamNew(virNetClientProgram *prog,
                                             int proc,
                                             unsigned serial,
                                             bool allowSkip)
 {
-    virNetClientStreamPtr st;
+    virNetClientStream *st;
 
     if (virNetClientStreamInitialize() < 0)
         return NULL;
@@ -155,19 +154,19 @@ virNetClientStreamPtr virNetClientStreamNew(virNetClientProgramPtr prog,
 
 void virNetClientStreamDispose(void *obj)
 {
-    virNetClientStreamPtr st = obj;
+    virNetClientStream *st = obj;
 
     virResetError(&st->err);
     while (st->rx) {
-        virNetMessagePtr msg = st->rx;
+        virNetMessage *msg = st->rx;
         virNetMessageQueueServe(&st->rx);
         virNetMessageFree(msg);
     }
     virObjectUnref(st->prog);
 }
 
-bool virNetClientStreamMatches(virNetClientStreamPtr st,
-                               virNetMessagePtr msg)
+bool virNetClientStreamMatches(virNetClientStream *st,
+                               virNetMessage *msg)
 {
     bool match = false;
     virObjectLock(st);
@@ -181,7 +180,7 @@ bool virNetClientStreamMatches(virNetClientStreamPtr st,
 
 
 static
-void virNetClientStreamRaiseError(virNetClientStreamPtr st)
+void virNetClientStreamRaiseError(virNetClientStream *st)
 {
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__,
                       st->err.domain,
@@ -197,7 +196,7 @@ void virNetClientStreamRaiseError(virNetClientStreamPtr st)
 
 
 /* MUST be called under stream or client lock */
-int virNetClientStreamCheckState(virNetClientStreamPtr st)
+int virNetClientStreamCheckState(virNetClientStream *st)
 {
     if (st->err.code != VIR_ERR_OK) {
         virNetClientStreamRaiseError(st);
@@ -216,8 +215,8 @@ int virNetClientStreamCheckState(virNetClientStreamPtr st)
 
 /* MUST be called under stream or client lock. This should
  * be called only for message that expect reply.  */
-int virNetClientStreamCheckSendStatus(virNetClientStreamPtr st,
-                                      virNetMessagePtr msg)
+int virNetClientStreamCheckSendStatus(virNetClientStream *st,
+                                      virNetMessage *msg)
 {
     if (st->err.code != VIR_ERR_OK) {
         virNetClientStreamRaiseError(st);
@@ -247,7 +246,7 @@ int virNetClientStreamCheckSendStatus(virNetClientStreamPtr st,
 }
 
 
-void virNetClientStreamSetClosed(virNetClientStreamPtr st,
+void virNetClientStreamSetClosed(virNetClientStream *st,
                                  virNetClientStreamClosed closed)
 {
     virObjectLock(st);
@@ -259,10 +258,10 @@ void virNetClientStreamSetClosed(virNetClientStreamPtr st,
 }
 
 
-int virNetClientStreamSetError(virNetClientStreamPtr st,
-                               virNetMessagePtr msg)
+int virNetClientStreamSetError(virNetClientStream *st,
+                               virNetMessage *msg)
 {
-    virNetMessageError err;
+    virNetMessageError err = { 0 };
     int ret = -1;
 
     virObjectLock(st);
@@ -271,7 +270,6 @@ int virNetClientStreamSetError(virNetClientStreamPtr st,
         VIR_DEBUG("Overwriting existing stream error %s", NULLSTR(st->err.message));
 
     virResetError(&st->err);
-    memset(&err, 0, sizeof(err));
 
     if (virNetMessageDecodePayload(msg, (xdrproc_t)xdr_virNetMessageError, &err) < 0)
         goto cleanup;
@@ -286,22 +284,18 @@ int virNetClientStreamSetError(virNetClientStreamPtr st,
         st->err.code = err.code;
     }
     if (err.message) {
-        st->err.message = *err.message;
-        *err.message = NULL;
+        st->err.message = g_steal_pointer(err.message);
     }
     st->err.domain = err.domain;
     st->err.level = err.level;
     if (err.str1) {
-        st->err.str1 = *err.str1;
-        *err.str1 = NULL;
+        st->err.str1 = g_steal_pointer(err.str1);
     }
     if (err.str2) {
-        st->err.str2 = *err.str2;
-        *err.str2 = NULL;
+        st->err.str2 = g_steal_pointer(err.str2);
     }
     if (err.str3) {
-        st->err.str3 = *err.str3;
-        *err.str3 = NULL;
+        st->err.str3 = g_steal_pointer(err.str3);
     }
     st->err.int1 = err.int1;
     st->err.int2 = err.int2;
@@ -317,10 +311,10 @@ int virNetClientStreamSetError(virNetClientStreamPtr st,
 }
 
 
-int virNetClientStreamQueuePacket(virNetClientStreamPtr st,
-                                  virNetMessagePtr msg)
+int virNetClientStreamQueuePacket(virNetClientStream *st,
+                                  virNetMessage *msg)
 {
-    virNetMessagePtr tmp_msg;
+    virNetMessage *tmp_msg;
 
     VIR_DEBUG("Incoming stream message: stream=%p message=%p", st, msg);
 
@@ -343,10 +337,9 @@ int virNetClientStreamQueuePacket(virNetClientStreamPtr st,
     memcpy(&tmp_msg->header, &msg->header, sizeof(msg->header));
 
     /* Steal message buffer */
-    tmp_msg->buffer = msg->buffer;
+    tmp_msg->buffer = g_steal_pointer(&msg->buffer);
     tmp_msg->bufferLength = msg->bufferLength;
     tmp_msg->bufferOffset = msg->bufferOffset;
-    msg->buffer = NULL;
     msg->bufferLength = msg->bufferOffset = 0;
 
     virObjectLock(st);
@@ -362,13 +355,13 @@ int virNetClientStreamQueuePacket(virNetClientStreamPtr st,
 }
 
 
-int virNetClientStreamSendPacket(virNetClientStreamPtr st,
-                                 virNetClientPtr client,
+int virNetClientStreamSendPacket(virNetClientStream *st,
+                                 virNetClient *client,
                                  int status,
                                  const char *data,
                                  size_t nbytes)
 {
-    virNetMessagePtr msg;
+    virNetMessage *msg;
     VIR_DEBUG("st=%p status=%d data=%p nbytes=%zu", st, status, data, nbytes);
 
     if (!(msg = virNetMessageNew(false)))
@@ -413,7 +406,7 @@ int virNetClientStreamSendPacket(virNetClientStreamPtr st,
 
 
 static int
-virNetClientStreamSetHole(virNetClientStreamPtr st,
+virNetClientStreamSetHole(virNetClientStream *st,
                           long long length,
                           unsigned int flags)
 {
@@ -423,7 +416,7 @@ virNetClientStreamSetHole(virNetClientStreamPtr st,
     /* Shouldn't happen, But it's better to safe than sorry. */
     if (st->holeLength) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unprocessed hole of size %lld already in the queue"),
+                       _("unprocessed hole of size %1$lld already in the queue"),
                        st->holeLength);
         return -1;
     }
@@ -446,17 +439,16 @@ virNetClientStreamSetHole(virNetClientStreamPtr st,
  *          -1 otherwise.
  */
 static int
-virNetClientStreamHandleHole(virNetClientPtr client,
-                             virNetClientStreamPtr st)
+virNetClientStreamHandleHole(virNetClient *client,
+                             virNetClientStream *st)
 {
-    virNetMessagePtr msg;
-    virNetStreamHole data;
+    virNetMessage *msg;
+    virNetStreamHole data = { 0 };
     int ret = -1;
 
     VIR_DEBUG("client=%p st=%p", client, st);
 
     msg = st->rx;
-    memset(&data, 0, sizeof(data));
 
     /* We should not be called unless there's VIR_NET_STREAM_HOLE
      * message at the head of the list. But doesn't hurt to check */
@@ -468,7 +460,7 @@ virNetClientStreamHandleHole(virNetClientPtr client,
 
     if (msg->header.type != VIR_NET_STREAM_HOLE) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Invalid message prog=%d type=%d serial=%u proc=%d"),
+                       _("Invalid message prog=%1$d type=%2$d serial=%3$u proc=%4$d"),
                        msg->header.prog,
                        msg->header.type,
                        msg->header.serial,
@@ -507,8 +499,8 @@ virNetClientStreamHandleHole(virNetClientPtr client,
 }
 
 
-int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
-                                 virNetClientPtr client,
+int virNetClientStreamRecvPacket(virNetClientStream *st,
+                                 virNetClient *client,
                                  char *data,
                                  size_t nbytes,
                                  bool nonblock,
@@ -529,7 +521,7 @@ int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
         goto cleanup;
 
     if (!st->rx && !st->incomingEOF) {
-        virNetMessagePtr msg;
+        virNetMessage *msg;
         int ret;
 
         if (nonblock) {
@@ -605,7 +597,7 @@ int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
     while (want &&
            st->rx &&
            st->rx->header.type == VIR_NET_STREAM) {
-        virNetMessagePtr msg = st->rx;
+        virNetMessage *msg = st->rx;
         size_t len = want;
 
         if (len > msg->bufferLength - msg->bufferOffset)
@@ -634,13 +626,13 @@ int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
 
 
 int
-virNetClientStreamSendHole(virNetClientStreamPtr st,
-                           virNetClientPtr client,
+virNetClientStreamSendHole(virNetClientStream *st,
+                           virNetClient *client,
                            long long length,
                            unsigned int flags)
 {
-    virNetMessagePtr msg = NULL;
-    virNetStreamHole data;
+    virNetMessage *msg = NULL;
+    virNetStreamHole data = { 0 };
     int ret = -1;
 
     VIR_DEBUG("st=%p length=%llu", st, length);
@@ -651,7 +643,6 @@ virNetClientStreamSendHole(virNetClientStreamPtr st,
         return -1;
     }
 
-    memset(&data, 0, sizeof(data));
     data.length = length;
     data.flags = flags;
 
@@ -688,8 +679,8 @@ virNetClientStreamSendHole(virNetClientStreamPtr st,
 
 
 int
-virNetClientStreamRecvHole(virNetClientPtr client G_GNUC_UNUSED,
-                           virNetClientStreamPtr st,
+virNetClientStreamRecvHole(virNetClient *client G_GNUC_UNUSED,
+                           virNetClientStream *st,
                            long long *length)
 {
     if (!st->allowSkip) {
@@ -713,7 +704,7 @@ virNetClientStreamRecvHole(virNetClientPtr client G_GNUC_UNUSED,
 }
 
 
-int virNetClientStreamEventAddCallback(virNetClientStreamPtr st,
+int virNetClientStreamEventAddCallback(virNetClientStream *st,
                                        int events,
                                        virNetClientStreamEventCallback cb,
                                        void *opaque,
@@ -733,7 +724,7 @@ int virNetClientStreamEventAddCallback(virNetClientStreamPtr st,
          virEventAddTimeout(-1,
                             virNetClientStreamEventTimer,
                             st,
-                            virObjectFreeCallback)) < 0) {
+                            virObjectUnref)) < 0) {
         virObjectUnref(st);
         goto cleanup;
     }
@@ -752,7 +743,7 @@ int virNetClientStreamEventAddCallback(virNetClientStreamPtr st,
     return ret;
 }
 
-int virNetClientStreamEventUpdateCallback(virNetClientStreamPtr st,
+int virNetClientStreamEventUpdateCallback(virNetClientStream *st,
                                           int events)
 {
     int ret = -1;
@@ -775,7 +766,7 @@ int virNetClientStreamEventUpdateCallback(virNetClientStreamPtr st,
     return ret;
 }
 
-int virNetClientStreamEventRemoveCallback(virNetClientStreamPtr st)
+int virNetClientStreamEventRemoveCallback(virNetClientStream *st)
 {
     int ret = -1;
 
@@ -802,7 +793,71 @@ int virNetClientStreamEventRemoveCallback(virNetClientStreamPtr st)
     return ret;
 }
 
-bool virNetClientStreamEOF(virNetClientStreamPtr st)
+bool virNetClientStreamEOF(virNetClientStream *st)
 {
     return st->incomingEOF;
+}
+
+
+int virNetClientStreamInData(virNetClientStream *st,
+                             int *inData,
+                             long long *length)
+{
+    int ret = -1;
+    bool msgPopped = false;
+    virNetMessage *msg = NULL;
+
+    virObjectLock(st);
+
+    if (!st->allowSkip) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("Holes are not supported with this stream"));
+        goto cleanup;
+    }
+
+    if (virNetClientStreamCheckState(st) < 0)
+        goto cleanup;
+
+    msg = st->rx;
+
+    if (!msg) {
+        /* No incoming message. This means that the stream is at its end. In
+         * this case, virStreamInData() should set both inData and length to
+         * zero and return success. If there is a trailing hole though (there
+         * shouldn't be), signal that to the caller. */
+        *inData = 0;
+        *length = st->holeLength;
+        st->holeLength = 0;
+    } else if (msg->header.type == VIR_NET_STREAM) {
+        *inData = 1;
+        *length = msg->bufferLength - msg->bufferOffset;
+    } else if (msg->header.type == VIR_NET_STREAM_HOLE) {
+        *inData = 0;
+
+        if (st->holeLength == 0) {
+            if (virNetClientStreamHandleHole(NULL, st) < 0)
+                goto cleanup;
+
+            /* virNetClientStreamHandleHole() called above did pop the message from
+             * the queue (and freed it). Instead of trying to push it back let's
+             * just signal to the caller what we did. */
+            msgPopped = true;
+        }
+
+        *length = st->holeLength;
+        st->holeLength = 0;
+    } else {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Invalid message prog=%1$d type=%2$d serial=%3$u proc=%4$d"),
+                       msg->header.prog,
+                       msg->header.type,
+                       msg->header.serial,
+                       msg->header.proc);
+        goto cleanup;
+    }
+
+    ret = msgPopped ? 1 : 0;
+ cleanup:
+    virObjectUnlock(st);
+    return ret;
 }

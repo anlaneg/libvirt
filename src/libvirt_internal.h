@@ -32,8 +32,11 @@ typedef void (*virStateInhibitCallback)(bool inhibit,
 int virStateInitialize(bool privileged,
                        bool mandatory,
                        const char *root,
+                       bool monolithic,
                        virStateInhibitCallback inhibit,
                        void *opaque);
+int virStateShutdownPrepare(void);
+int virStateShutdownWait(void);
 int virStateCleanup(void);
 int virStateReload(void);
 int virStateStop(void);
@@ -124,10 +127,17 @@ typedef enum {
      * Support for driver close callback rpc
      */
     VIR_DRV_FEATURE_REMOTE_CLOSE_CALLBACK = 15,
+
+    /*
+     * Whether the virNetworkUpdate() API implementation passes arguments to
+     * the driver's callback in correct order. */
+    VIR_DRV_FEATURE_NETWORK_UPDATE_HAS_CORRECT_ORDER = 16,
 } virDrvFeature;
 
 
 int virConnectSupportsFeature(virConnectPtr conn, int feature);
+
+int virDomainMigrateCheckNotLocal(const char *dconnuri);
 
 int virDomainMigratePrepare (virConnectPtr dconn,
                              char **cookie,

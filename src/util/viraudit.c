@@ -72,7 +72,7 @@ void virAuditLog(bool logging)
 }
 
 
-void virAuditSend(virLogSourcePtr source,
+void virAuditSend(virLogSource *source,
                   const char *filename,
                   size_t linenr,
                   const char *funcname,
@@ -140,8 +140,6 @@ char *virAuditEncode(const char *key, const char *value)
 #if WITH_AUDIT
     return audit_encode_nv_string(key, value, 0);
 #else
-    char *str;
-    str = g_strdup_printf("%s=%s", key, value);
-    return str;
+    return g_strdup_printf("%s=%s", key, value);
 #endif
 }

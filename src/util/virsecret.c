@@ -26,7 +26,6 @@
 #include "virerror.h"
 #include "virlog.h"
 #include "virsecret.h"
-#include "virstring.h"
 #include "viruuid.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -39,7 +38,7 @@ VIR_ENUM_IMPL(virSecretUsage,
 );
 
 void
-virSecretLookupDefClear(virSecretLookupTypeDefPtr def)
+virSecretLookupDefClear(virSecretLookupTypeDef *def)
 {
     if (def->type == VIR_SECRET_LOOKUP_TYPE_USAGE)
         VIR_FREE(def->u.usage);
@@ -49,7 +48,7 @@ virSecretLookupDefClear(virSecretLookupTypeDefPtr def)
 
 
 void
-virSecretLookupDefCopy(virSecretLookupTypeDefPtr dst,
+virSecretLookupDefCopy(virSecretLookupTypeDef *dst,
                        const virSecretLookupTypeDef *src)
 {
     dst->type = src->type;
@@ -63,51 +62,44 @@ virSecretLookupDefCopy(virSecretLookupTypeDefPtr dst,
 
 int
 virSecretLookupParseSecret(xmlNodePtr secretnode,
-                           virSecretLookupTypeDefPtr def)
+                           virSecretLookupTypeDef *def)
 {
-    char *uuid;
-    char *usage;
-    int ret = -1;
+    g_autofree char *uuid = NULL;
+    g_autofree char *usage = NULL;
 
     uuid = virXMLPropString(secretnode, "uuid");
     usage = virXMLPropString(secretnode, "usage");
     if (uuid == NULL && usage == NULL) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("missing secret uuid or usage attribute"));
-        goto cleanup;
+        return -1;
     }
 
     if (uuid && usage) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("either secret uuid or usage expected"));
-        goto cleanup;
+        return -1;
     }
 
     if (uuid) {
         if (virUUIDParse(uuid, def->u.uuid) < 0) {
             virReportError(VIR_ERR_XML_ERROR,
-                           _("invalid secret uuid '%s'"), uuid);
-            goto cleanup;
+                           _("invalid secret uuid '%1$s'"), uuid);
+            return -1;
         }
         def->type = VIR_SECRET_LOOKUP_TYPE_UUID;
     } else {
-        def->u.usage = usage;
-        usage = NULL;
+        def->u.usage = g_steal_pointer(&usage);
         def->type = VIR_SECRET_LOOKUP_TYPE_USAGE;
     }
-    ret = 0;
-
- cleanup:
-    VIR_FREE(uuid);
-    VIR_FREE(usage);
-    return ret;
+    return 0;
 }
 
 
 void
-virSecretLookupFormatSecret(virBufferPtr buf,
+virSecretLookupFormatSecret(virBuffer *buf,
                             const char *secrettype,
-                            virSecretLookupTypeDefPtr def)
+                            virSecretLookupTypeDef *def)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
@@ -142,13 +134,12 @@ virSecretLookupFormatSecret(virBufferPtr buf,
  */
 int
 virSecretGetSecretString(virConnectPtr conn,
-                         virSecretLookupTypeDefPtr seclookupdef,
+                         virSecretLookupTypeDef *seclookupdef,
                          virSecretUsageType secretUsageType,
                          uint8_t **secret,
                          size_t *secret_size)
 {
-    virSecretPtr sec = NULL;
-    int ret = -1;
+    g_autoptr(virSecret) sec = NULL;
 
     switch (seclookupdef->type) {
     case VIR_SECRET_LOOKUP_TYPE_UUID:
@@ -162,7 +153,7 @@ virSecretGetSecretString(virConnectPtr conn,
     }
 
     if (!sec)
-        goto cleanup;
+        return -1;
 
     /* NB: NONE is a byproduct of the qemuxml2argvtest test mocking
      * for UUID lookups. Normal secret XML processing would fail if
@@ -174,22 +165,14 @@ virSecretGetSecretString(virConnectPtr conn,
 
         virUUIDFormat(seclookupdef->u.uuid, uuidstr);
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("secret with uuid %s is of type '%s' not "
-                         "expected '%s' type"),
+                       _("secret with uuid %1$s is of type '%2$s' not expected '%3$s' type"),
                        uuidstr, virSecretUsageTypeToString(sec->usageType),
                        virSecretUsageTypeToString(secretUsageType));
-        goto cleanup;
+        return -1;
     }
 
-    *secret = conn->secretDriver->secretGetValue(sec, secret_size, 0,
-                                                 VIR_SECRET_GET_VALUE_INTERNAL_CALL);
+    if (!(*secret = conn->secretDriver->secretGetValue(sec, secret_size, 0)))
+        return -1;
 
-    if (!*secret)
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    virObjectUnref(sec);
-    return ret;
+    return 0;
 }

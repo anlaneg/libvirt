@@ -23,7 +23,7 @@
 #include <signal.h>
 #include <time.h>
 
-#if HAVE_MACH_CLOCK_ROUTINES
+#if WITH_MACH_CLOCK_ROUTINES
 # include <mach/clock.h>
 # include <mach/mach.h>
 #endif
@@ -31,10 +31,8 @@
 #include "testutils.h"
 #include "internal.h"
 #include "virfile.h"
-#include "virthread.h"
 #include "virlog.h"
 #include "virutil.h"
-#include "virevent.h"
 
 VIR_LOG_INIT("tests.eventtest");
 
@@ -89,9 +87,10 @@ G_GNUC_PRINTF(3, 4)
 testEventReport(const char *name, bool failed, const char *msg, ...)
 {
     va_list vargs;
-    va_start(vargs, msg);
-    char *str = NULL;
+    g_autofree char *str = NULL;
     struct testEventResultData data;
+
+    va_start(vargs, msg);
 
     if (msg)
         str = g_strdup_vprintf(msg, vargs);
@@ -101,7 +100,6 @@ testEventReport(const char *name, bool failed, const char *msg, ...)
     ignore_value(virTestRun(name, testEventResultCallback, &data));
 
     va_end(vargs);
-    VIR_FREE(str);
 }
 
 static void
@@ -325,6 +323,7 @@ mymain(void)
     size_t i;
     pthread_t eventThread;
     char one = '1';
+    char *debugEnv = getenv("LIBVIRT_DEBUG");
 
     for (i = 0; i < NUM_FDS; i++) {
         if (virPipeQuiet(handles[i].pipeFD) < 0) {
@@ -333,7 +332,6 @@ mymain(void)
         }
     }
 
-    char *debugEnv = getenv("LIBVIRT_DEBUG");
     if (debugEnv && *debugEnv &&
         (virLogSetDefaultPriority(virLogParseDefaultPriority(debugEnv)) < 0)) {
         fprintf(stderr, "Invalid log level setting.\n");

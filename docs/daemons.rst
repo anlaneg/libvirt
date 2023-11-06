@@ -100,7 +100,7 @@ optionally, one or two TCP sockets:
   with full read-write privileges. A connection to this socket gives the
   client privileges that are equivalent to having a root shell. Access control
   can be enforced either through validation of `x509 certificates
-  <tlscerts.html>`__, and/or by enabling an `authentication mechanism
+  <kbase/tlscerts.html>`__, and/or by enabling an `authentication mechanism
   <auth.html>`__.
 
 NB, some distros will use ``/run`` instead of ``/var/run``.
@@ -208,13 +208,6 @@ controlled via the system unit files
   independently controlled via the ``ListenStream`` parameter in any of the
   ``libvirtd.socket``, ``libvirtd-ro.socket`` and ``libvirtd-admin.socket`` unit
   files.
-
-Systemd releases prior to version 227 lacked support for passing the activation
-socket unit names into the service. When using these old versions, the
-``tcp_port``, ``tls_port`` and ``unix_sock_dir`` settings in ``libvirtd.conf``
-must be changed in lock-step with the equivalent settings in the unit files to
-ensure that ``libvirtd`` can identify the sockets.
-
 
 Modular driver daemons
 ======================
@@ -354,18 +347,11 @@ controlled via the system unit files:
   ``virt${DRIVER}d.socket``, ``virt${DRIVER}d-ro.socket`` and
   ``virt${DRIVER}d-admin.socket`` unit files.
 
-Systemd releases prior to version 227 lacked support for passing the activation
-socket unit names into the service. When using these old versions, the
-``unix_sock_dir`` setting in ``virt${DRIVER}d.conf`` must be changed in
-lock-step with the equivalent setting in the unit files to ensure that
-``virt${DRIVER}d`` can identify the sockets.
-
-
 Switching to modular daemons
 ----------------------------
 
 If a host is currently set to use the monolithic ``libvirtd`` daemon and needs
-to be migrated to the monolithic daemons a number of services need to be
+to be migrated to the modular daemons a number of services need to be
 changed. The steps below outline the process on hosts using the systemd init
 service.
 
@@ -402,7 +388,7 @@ host first.
           systemctl unmask virt${drv}d{,-ro,-admin}.socket
           systemctl enable virt${drv}d.service
           systemctl enable virt${drv}d{,-ro,-admin}.socket
-	done
+        done
 
 #. Start the sockets for the same set of daemons. There is no need to start the
    services as they will get started when the first socket connection is
@@ -413,7 +399,7 @@ host first.
       $ for drv in qemu network nodedev nwfilter secret storage
         do
           systemctl start virt${drv}d{,-ro,-admin}.socket
-	done
+        done
 
 #. If connections from remote hosts need to be supported the proxy daemon
    must be enabled and started
@@ -435,13 +421,61 @@ host first.
       $ systemctl enable virtproxyd-tls.socket
       $ systemctl start virtproxyd-tls.socket
 
+Checking whether modular/monolithic mode is in use
+==================================================
+
+New distributions are likely to use the modular mode although the upgrade
+process preserves whichever mode was in use before the upgrade.
+
+To determine whether modular or monolithic mode is in use on a host running
+``systemd`` as the init system you can take the following steps:
+
+#. Check whether the modular daemon infrastructure is in use
+
+   First check whether the modular daemon you are interested (see
+   `Modular driver daemons`_ for a summary of which daemons are provided by
+   libvirt) in is running:
+
+   #. Check ``.socket`` for socket activated services
+
+     ::
+
+       # systemctl is-active virtqemud.socket
+       active
+
+   #. Check ``.service`` for always-running daemons
+
+     ::
+
+       # systemctl is-active virtqemud.service
+       active
+
+   If either of the above is ``active`` your system is using the modular daemons.
+
+#. Check whether the monolithic daemon is in use
+
+   #. Check ``libvirtd.socket``
+
+     ::
+
+       # systemctl is-active libvirtd.socket
+       active
+
+   #. Check ``libvirtd.service`` for always-running daemon
+
+     ::
+
+       # systemctl is-active libvirtd.service
+       active
+
+   If either of the above is ``active`` your system is using the monolithic
+   daemon.
+
+#. To determine which of the above will be in use on the next boot of the system,
+   substitute ``is-enabled`` for ``is-active`` in the above examples.
 
 Proxy daemon
 ============
-
-The monolithic daemon is known as ``libvirtd`` and has historically been the
-default in libvirt. It is configured via the file ``/etc/libvirt/libvirtd.conf``
-
 
 Proxy sockets
 -------------
@@ -512,7 +546,7 @@ other end of which are owned by the ``virtlogd`` daemon. It will then write
 data on those pipes to log files, while enforcing a maximum file size and
 performing log rollover at the size limit.
 
-Since the daemon holds open anoymous pipe file descriptors, it must never be
+Since the daemon holds open anonymous pipe file descriptors, it must never be
 stopped while any QEMU virtual machines are running. To enable software updates
 to be applied, the daemon is capable of re-executing itself while keeping all
 file descriptors open. This can be triggered by sending the daemon ``SIGUSR1``
@@ -591,12 +625,6 @@ controlled via the system unit files:
   independently controlled via the ``ListenStream`` parameter in any of the
   ``virtlogd.socket`` and ``virtlogd-admin.socket`` unit files.
 
-Systemd releases prior to version 227 lacked support for passing the activation
-socket unit names into the service. When using these old versions, the
-``unix_sock_dir`` setting in ``virtlogd.conf`` must be changed in
-lock-step with the equivalent setting in the unit files to ensure that
-``virtlogd`` can identify the sockets.
-
 Locking daemon
 ==============
 
@@ -605,7 +633,7 @@ images and devices serving as backing storage for virtual disks. The locks
 will be held for as long as there is a QEMU process running with the disk
 open.
 
-To ensure continuity of locking, the daemon holds open anoymous file
+To ensure continuity of locking, the daemon holds open anonymous file
 descriptors, it must never be stopped while any QEMU virtual machines are
 running. To enable software updates to be applied, the daemon is capable of
 re-executing itself while keeping all file descriptors open. This can be
@@ -685,8 +713,23 @@ controlled via the system unit files:
   independently controlled via the ``ListenStream`` parameter in any of the
   ``virtlockd.socket`` and ``virtlockd-admin.socket`` unit files.
 
-Systemd releases prior to version 227 lacked support for passing the activation
-socket unit names into the service. When using these old versions, the
-``unix_sock_dir`` setting in ``virtlockd.conf`` must be changed in
-lock-step with the equivalent setting in the unit files to ensure that
-``virtlockd`` can identify the sockets.
+Changing command line options for daemons
+=========================================
+
+Two ways exist to override the defaults in the provided service files:
+either a systemd "drop-in" configuration file, or a ``/etc/sysconfig/$daemon``
+file must be created.  For example, to change the command line option
+for a debug session of ``libvirtd``, create a file
+``/etc/systemd/system/libvirtd.service.d/debug.conf`` with the following content:
+
+   ::
+
+      [Unit]
+      Description=Virtualization daemon, with override from debug.conf
+
+      [Service]
+      Environment=G_DEBUG=fatal-warnings
+      Environment=LIBVIRTD_ARGS="--listen --verbose"
+
+After changes to systemd "drop-in" configuration files it is required to run
+``systemctl daemon-reload``.

@@ -20,16 +20,25 @@
 
 #pragma once
 
-#include <glib-object.h>
-
-#include "domain_conf.h"
 #include "qemu_capabilities.h"
-#include "qemu_conf.h"
 
-int qemuValidateDomainDef(const virDomainDef *def, void *opaque);
-int qemuValidateDomainDeviceDefDisk(const virDomainDiskDef *disk,
-                                    const virDomainDef *def,
-                                    virQEMUCapsPtr qemuCaps);
-int qemuValidateDomainDeviceDef(const virDomainDeviceDef *dev,
+int
+qemuValidateDomainDef(const virDomainDef *def,
+                      void *opaque,
+                      void *parseOpaque);
+
+int
+qemuValidateDomainDeviceDefDisk(const virDomainDiskDef *disk,
                                 const virDomainDef *def,
-                                void *opaque);
+                                virQEMUCaps *qemuCaps);
+
+int
+qemuValidateDomainDeviceDef(const virDomainDeviceDef *dev,
+                            const virDomainDef *def,
+                            void *opaque,
+                            void *parseOpaque);
+
+int
+qemuValidateLifecycleAction(virDomainLifecycleAction onPoweroff,
+                            virDomainLifecycleAction onReboot,
+                            virDomainLifecycleAction onCrash);

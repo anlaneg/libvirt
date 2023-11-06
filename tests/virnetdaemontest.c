@@ -33,13 +33,12 @@ struct testClientPriv {
 
 
 static void *
-testClientNew(virNetServerClientPtr client G_GNUC_UNUSED,
+testClientNew(virNetServerClient *client G_GNUC_UNUSED,
               void *opaque G_GNUC_UNUSED)
 {
     struct testClientPriv *priv;
 
-    if (VIR_ALLOC(priv) < 0)
-        return NULL;
+    priv = g_new0(struct testClientPriv, 1);
 
     priv->magic = 1729;
 
@@ -47,8 +46,8 @@ testClientNew(virNetServerClientPtr client G_GNUC_UNUSED,
 }
 
 
-static virJSONValuePtr
-testClientPreExec(virNetServerClientPtr client G_GNUC_UNUSED,
+static virJSONValue *
+testClientPreExec(virNetServerClient *client G_GNUC_UNUSED,
                   void *data)
 {
     struct testClientPriv *priv = data;
@@ -58,8 +57,8 @@ testClientPreExec(virNetServerClientPtr client G_GNUC_UNUSED,
 
 
 static void *
-testClientNewPostExec(virNetServerClientPtr client,
-                      virJSONValuePtr object,
+testClientNewPostExec(virNetServerClient *client,
+                      virJSONValue *object,
                       void *opaque)
 {
     int magic;
@@ -77,17 +76,20 @@ testClientNewPostExec(virNetServerClientPtr client,
 static void
 testClientFree(void *opaque)
 {
-    VIR_FREE(opaque);
+    g_free(opaque);
 }
 
 
-static virNetServerPtr
+static virNetServer *
 testCreateServer(const char *server_name, const char *host, int family)
 {
-    virNetServerPtr srv = NULL;
-    virNetServerServicePtr svc1 = NULL, svc2 = NULL;
-    virNetServerClientPtr cln1 = NULL, cln2 = NULL;
-    virNetSocketPtr sk1 = NULL, sk2 = NULL;
+    virNetServer *srv = NULL;
+    virNetServerService *svc1 = NULL;
+    virNetServerService *svc2 = NULL;
+    virNetServerClient *cln1 = NULL;
+    virNetServerClient *cln2 = NULL;
+    virNetSocket *sk1 = NULL;
+    virNetSocket *sk2 = NULL;
     int fdclient[2];
 
     if (socketpair(PF_UNIX, SOCK_STREAM, 0, fdclient) < 0) {
@@ -177,16 +179,15 @@ testCreateServer(const char *server_name, const char *host, int family)
     return srv;
 
  error:
-    virObjectUnref(srv);
-    srv = NULL;
+    g_clear_pointer(&srv, virObjectUnref);
     goto cleanup;
 }
 
 static char *testGenerateJSON(const char *server_name)
 {
-    virNetDaemonPtr dmn = NULL;
-    virNetServerPtr srv = NULL;
-    virJSONValuePtr json = NULL;
+    virNetDaemon *dmn = NULL;
+    virNetServer *srv = NULL;
+    g_autoptr(virJSONValue) json = NULL;
     char *jsonstr = NULL;
     bool has_ipv4, has_ipv6;
 
@@ -224,7 +225,6 @@ static char *testGenerateJSON(const char *server_name)
     virNetServerClose(srv);
     virObjectUnref(srv);
     virObjectUnref(dmn);
-    virJSONValueFree(json);
     if (!jsonstr)
         virDispatchError(NULL);
     return jsonstr;
@@ -238,10 +238,10 @@ struct testExecRestartData {
     bool pass;
 };
 
-static virNetServerPtr
-testNewServerPostExecRestart(virNetDaemonPtr dmn G_GNUC_UNUSED,
+static virNetServer *
+testNewServerPostExecRestart(virNetDaemon *dmn G_GNUC_UNUSED,
                              const char *name,
-                             virJSONValuePtr object,
+                             virJSONValue *object,
                              void *opaque)
 {
     struct testExecRestartData *data = opaque;
@@ -266,11 +266,14 @@ static int testExecRestart(const void *opaque)
 {
     size_t i;
     int ret = -1;
-    virNetDaemonPtr dmn = NULL;
+    virNetDaemon *dmn = NULL;
     const struct testExecRestartData *data = opaque;
-    char *infile = NULL, *outfile = NULL;
-    char *injsonstr = NULL, *outjsonstr = NULL;
-    virJSONValuePtr injson = NULL, outjson = NULL;
+    g_autofree char *infile = NULL;
+    g_autofree char *outfile = NULL;
+    g_autofree char *injsonstr = NULL;
+    g_autofree char *outjsonstr = NULL;
+    g_autoptr(virJSONValue) injson = NULL;
+    g_autoptr(virJSONValue) outjson = NULL;
     int fdclient[2] = { -1, -1 }, fdserver[2] = { -1, -1 };
 
     if (socketpair(PF_UNIX, SOCK_STREAM, 0, fdclient) < 0) {
@@ -300,8 +303,8 @@ static int testExecRestart(const void *opaque)
     infile = g_strdup_printf("%s/virnetdaemondata/input-data-%s.json", abs_srcdir,
                              data->jsonfile);
 
-    outfile = g_strdup_printf("%s/virnetdaemondata/output-data-%s.json",
-                              abs_srcdir, data->jsonfile);
+    outfile = g_strdup_printf("%s/virnetdaemondata/output-data-%s.%s",
+                              abs_srcdir, data->jsonfile, data->pass ? "json" : "err");
 
     if (virFileReadAll(infile, 8192, &injsonstr) < 0)
         goto cleanup;
@@ -328,6 +331,9 @@ static int testExecRestart(const void *opaque)
     if (!(outjson = virNetDaemonPreExecRestart(dmn)))
         goto cleanup;
 
+    if (!data->pass)
+        goto cleanup;
+
     if (!(outjsonstr = virJSONValueToString(outjson, true)))
         goto cleanup;
 
@@ -337,22 +343,16 @@ static int testExecRestart(const void *opaque)
     ret = 0;
  cleanup:
     if (ret < 0) {
-        if (!data->pass) {
-            VIR_TEST_DEBUG("Got expected error: %s",
-                           virGetLastErrorMessage());
+        if (injson && !data->pass) {
+            ret = virTestCompareToFile(virGetLastErrorMessage(), outfile);
+            if (ret < 0)
+                VIR_TEST_DEBUG("Test failed with different error message");
             virResetLastError();
-            ret = 0;
         }
     } else if (!data->pass) {
-            VIR_TEST_DEBUG("Test should have failed");
-            ret = -1;
+        VIR_TEST_DEBUG("Test should have failed");
+        ret = -1;
     }
-    VIR_FREE(infile);
-    VIR_FREE(outfile);
-    VIR_FREE(injsonstr);
-    VIR_FREE(outjsonstr);
-    virJSONValueFree(injson);
-    virJSONValueFree(outjson);
     virObjectUnref(dmn);
     VIR_FORCE_CLOSE(fdserver[0]);
     VIR_FORCE_CLOSE(fdserver[1]);
@@ -413,6 +413,7 @@ mymain(void)
     EXEC_RESTART_TEST_FAIL("anon-clients", 2);
     EXEC_RESTART_TEST("client-auth-pending", 1);
     EXEC_RESTART_TEST_FAIL("client-auth-pending-failure", 1);
+    EXEC_RESTART_TEST_FAIL("invalid-max-clients-failure", 1);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

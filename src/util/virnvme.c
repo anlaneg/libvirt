@@ -23,7 +23,6 @@
 #include "virpci.h"
 #include "viralloc.h"
 #include "virlog.h"
-#include "virstring.h"
 
 VIR_LOG_INIT("util.nvme");
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -42,11 +41,11 @@ struct _virNVMeDeviceList {
     virObjectLockable parent;
 
     size_t count;
-    virNVMeDevicePtr *devs;
+    virNVMeDevice **devs;
 };
 
 
-static virClassPtr virNVMeDeviceListClass;
+static virClass *virNVMeDeviceListClass;
 
 static void virNVMeDeviceListDispose(void *obj);
 
@@ -62,12 +61,12 @@ virNVMeOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virNVMe);
 
 
-virNVMeDevicePtr
+virNVMeDevice *
 virNVMeDeviceNew(const virPCIDeviceAddress *address,
                  unsigned long namespace,
                  bool managed)
 {
-    virNVMeDevicePtr dev = NULL;
+    virNVMeDevice *dev = NULL;
 
     dev = g_new0(virNVMeDevice, 1);
 
@@ -80,20 +79,20 @@ virNVMeDeviceNew(const virPCIDeviceAddress *address,
 
 
 void
-virNVMeDeviceFree(virNVMeDevicePtr dev)
+virNVMeDeviceFree(virNVMeDevice *dev)
 {
     if (!dev)
         return;
 
     virNVMeDeviceUsedByClear(dev);
-    VIR_FREE(dev);
+    g_free(dev);
 }
 
 
-virNVMeDevicePtr
+virNVMeDevice *
 virNVMeDeviceCopy(const virNVMeDevice *dev)
 {
-    virNVMeDevicePtr copy = NULL;
+    virNVMeDevice *copy = NULL;
 
     copy = g_new0(virNVMeDevice, 1);
     copy->drvname = g_strdup(dev->drvname);
@@ -115,7 +114,7 @@ virNVMeDeviceAddressGet(const virNVMeDevice *dev)
 
 
 void
-virNVMeDeviceUsedByClear(virNVMeDevicePtr dev)
+virNVMeDeviceUsedByClear(virNVMeDevice *dev)
 {
     VIR_FREE(dev->drvname);
     VIR_FREE(dev->domname);
@@ -133,7 +132,7 @@ virNVMeDeviceUsedByGet(const virNVMeDevice *dev,
 
 
 void
-virNVMeDeviceUsedBySet(virNVMeDevicePtr dev,
+virNVMeDeviceUsedBySet(virNVMeDevice *dev,
                        const char *drv,
                        const char *dom)
 {
@@ -142,10 +141,10 @@ virNVMeDeviceUsedBySet(virNVMeDevicePtr dev,
 }
 
 
-virNVMeDeviceListPtr
+virNVMeDeviceList *
 virNVMeDeviceListNew(void)
 {
-    virNVMeDeviceListPtr list;
+    virNVMeDeviceList *list;
 
     if (virNVMeInitialize() < 0)
         return NULL;
@@ -160,13 +159,13 @@ virNVMeDeviceListNew(void)
 static void
 virNVMeDeviceListDispose(void *obj)
 {
-    virNVMeDeviceListPtr list = obj;
+    virNVMeDeviceList *list = obj;
     size_t i;
 
     for (i = 0; i < list->count; i++)
         virNVMeDeviceFree(list->devs[i]);
 
-    VIR_FREE(list->devs);
+    g_free(list->devs);
 }
 
 
@@ -178,40 +177,39 @@ virNVMeDeviceListCount(const virNVMeDeviceList *list)
 
 
 int
-virNVMeDeviceListAdd(virNVMeDeviceListPtr list,
+virNVMeDeviceListAdd(virNVMeDeviceList *list,
                      const virNVMeDevice *dev)
 {
-    virNVMeDevicePtr tmp;
+    virNVMeDevice *tmp;
 
     if ((tmp = virNVMeDeviceListLookup(list, dev))) {
         g_autofree char *addrStr = virPCIDeviceAddressAsString(&tmp->address);
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("NVMe device %s namespace %u is already on the list"),
+                       _("NVMe device %1$s namespace %2$u is already on the list"),
                        NULLSTR(addrStr), tmp->namespace);
         return -1;
     }
 
-    if (!(tmp = virNVMeDeviceCopy(dev)) ||
-        VIR_APPEND_ELEMENT(list->devs, list->count, tmp) < 0) {
-        virNVMeDeviceFree(tmp);
+    if (!(tmp = virNVMeDeviceCopy(dev)))
         return -1;
-    }
+
+    VIR_APPEND_ELEMENT(list->devs, list->count, tmp);
 
     return 0;
 }
 
 
 int
-virNVMeDeviceListDel(virNVMeDeviceListPtr list,
+virNVMeDeviceListDel(virNVMeDeviceList *list,
                      const virNVMeDevice *dev)
 {
     ssize_t idx;
-    virNVMeDevicePtr tmp = NULL;
+    virNVMeDevice *tmp = NULL;
 
     if ((idx = virNVMeDeviceListLookupIndex(list, dev)) < 0) {
         g_autofree char *addrStr = virPCIDeviceAddressAsString(&dev->address);
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("NVMe device %s namespace %u not found"),
+                       _("NVMe device %1$s namespace %2$u not found"),
                        NULLSTR(addrStr), dev->namespace);
         return -1;
     }
@@ -223,16 +221,16 @@ virNVMeDeviceListDel(virNVMeDeviceListPtr list,
 }
 
 
-virNVMeDevicePtr
-virNVMeDeviceListGet(virNVMeDeviceListPtr list,
+virNVMeDevice *
+virNVMeDeviceListGet(virNVMeDeviceList *list,
                      size_t i)
 {
     return i < list->count ? list->devs[i] : NULL;
 }
 
 
-virNVMeDevicePtr
-virNVMeDeviceListLookup(virNVMeDeviceListPtr list,
+virNVMeDevice *
+virNVMeDeviceListLookup(virNVMeDeviceList *list,
                         const virNVMeDevice *dev)
 {
     ssize_t idx;
@@ -245,7 +243,7 @@ virNVMeDeviceListLookup(virNVMeDeviceListPtr list,
 
 
 ssize_t
-virNVMeDeviceListLookupIndex(virNVMeDeviceListPtr list,
+virNVMeDeviceListLookupIndex(virNVMeDeviceList *list,
                              const virNVMeDevice *dev)
 {
     size_t i;
@@ -254,7 +252,7 @@ virNVMeDeviceListLookupIndex(virNVMeDeviceListPtr list,
         return -1;
 
     for (i = 0; i < list->count; i++) {
-        virNVMeDevicePtr other = list->devs[i];
+        virNVMeDevice *other = list->devs[i];
 
         if (virPCIDeviceAddressEqual(&dev->address, &other->address) &&
             dev->namespace == other->namespace)
@@ -265,8 +263,8 @@ virNVMeDeviceListLookupIndex(virNVMeDeviceListPtr list,
 }
 
 
-static virNVMeDevicePtr
-virNVMeDeviceListLookupByPCIAddress(virNVMeDeviceListPtr list,
+static virNVMeDevice *
+virNVMeDeviceListLookupByPCIAddress(virNVMeDeviceList *list,
                                     const virPCIDeviceAddress *address)
 {
     size_t i;
@@ -275,7 +273,7 @@ virNVMeDeviceListLookupByPCIAddress(virNVMeDeviceListPtr list,
         return NULL;
 
     for (i = 0; i < list->count; i++) {
-        virNVMeDevicePtr other = list->devs[i];
+        virNVMeDevice *other = list->devs[i];
 
         if (virPCIDeviceAddressEqual(address, &other->address))
             return other;
@@ -285,19 +283,16 @@ virNVMeDeviceListLookupByPCIAddress(virNVMeDeviceListPtr list,
 }
 
 
-static virPCIDevicePtr
+static virPCIDevice *
 virNVMeDeviceCreatePCIDevice(const virNVMeDevice *nvme)
 {
     g_autoptr(virPCIDevice) pci = NULL;
 
-    if (!(pci = virPCIDeviceNew(nvme->address.domain,
-                                nvme->address.bus,
-                                nvme->address.slot,
-                                nvme->address.function)))
+    if (!(pci = virPCIDeviceNew(&nvme->address)))
         return NULL;
 
     /* NVMe devices must be bound to vfio */
-    virPCIDeviceSetStubDriver(pci, VIR_PCI_STUB_DRIVER_VFIO);
+    virPCIDeviceSetStubDriverType(pci, VIR_PCI_STUB_DRIVER_VFIO);
     virPCIDeviceSetManaged(pci, nvme->managed);
 
     return g_steal_pointer(&pci);
@@ -320,9 +315,9 @@ virNVMeDeviceCreatePCIDevice(const virNVMeDevice *nvme)
  * Returns: a list on success,
  *          NULL otherwise.
  */
-virPCIDeviceListPtr
-virNVMeDeviceListCreateDetachList(virNVMeDeviceListPtr activeList,
-                                  virNVMeDeviceListPtr toDetachList)
+virPCIDeviceList *
+virNVMeDeviceListCreateDetachList(virNVMeDeviceList *activeList,
+                                  virNVMeDeviceList *toDetachList)
 {
     g_autoptr(virPCIDeviceList) pciDevices = NULL;
     size_t i;
@@ -386,9 +381,9 @@ virNVMeDeviceListCreateDetachList(virNVMeDeviceListPtr activeList,
  * Returns: a list on success,
  *          NULL otherwise.
  */
-virPCIDeviceListPtr
-virNVMeDeviceListCreateReAttachList(virNVMeDeviceListPtr activeList,
-                                    virNVMeDeviceListPtr toReAttachList)
+virPCIDeviceList *
+virNVMeDeviceListCreateReAttachList(virNVMeDeviceList *activeList,
+                                    virNVMeDeviceList *toReAttachList)
 {
     g_autoptr(virPCIDeviceList) pciDevices = NULL;
     size_t i;
@@ -400,12 +395,13 @@ virNVMeDeviceListCreateReAttachList(virNVMeDeviceListPtr activeList,
         const virNVMeDevice *d = toReAttachList->devs[i];
         g_autoptr(virPCIDevice) pci = NULL;
         size_t nused = 0;
+        size_t j;
 
         /* Check if there is any other NVMe device with the same PCI address as
          * @d. To simplify this, let's just count how many NVMe devices with
          * the same PCI address there are on the @activeList. */
-        for (i = 0; i < activeList->count; i++) {
-            virNVMeDevicePtr other = activeList->devs[i];
+        for (j = 0; j < activeList->count; j++) {
+            virNVMeDevice *other = activeList->devs[j];
 
             if (!virPCIDeviceAddressEqual(&d->address, &other->address))
                 continue;
@@ -424,7 +420,7 @@ virNVMeDeviceListCreateReAttachList(virNVMeDeviceListPtr activeList,
             /* Shouldn't happen (TM) */
             g_autofree char *addrStr = virPCIDeviceAddressAsString(&d->address);
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("NVMe device %s namespace %u not found"),
+                           _("NVMe device %1$s namespace %2$u not found"),
                            NULLSTR(addrStr), d->namespace);
             return NULL;
         } else if (nused > 1) {

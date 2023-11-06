@@ -20,6 +20,8 @@
 
 #include <config.h>
 
+#include <libxml/uri.h>
+
 #include "viruri.h"
 
 #include "viralloc.h"
@@ -32,8 +34,8 @@
 
 VIR_LOG_INIT("util.uri");
 
-static int
-virURIParamAppend(virURIPtr uri,
+static void
+virURIParamAppend(virURI *uri,
                   const char *name,
                   const char *value)
 {
@@ -43,25 +45,19 @@ virURIParamAppend(virURIPtr uri,
     pname = g_strdup(name);
     pvalue = g_strdup(value);
 
-    if (VIR_RESIZE_N(uri->params, uri->paramsAlloc, uri->paramsCount, 1) < 0)
-        goto error;
+    VIR_RESIZE_N(uri->params, uri->paramsAlloc, uri->paramsCount, 1);
 
     uri->params[uri->paramsCount].name = pname;
     uri->params[uri->paramsCount].value = pvalue;
     uri->params[uri->paramsCount].ignore = false;
     uri->paramsCount++;
 
-    return 0;
-
- error:
-    VIR_FREE(pname);
-    VIR_FREE(pvalue);
-    return -1;
+    return;
 }
 
 
 static int
-virURIParseParams(virURIPtr uri)
+virURIParseParams(virURI *uri)
 {
     const char *end, *eq;
     const char *query = uri->query;
@@ -117,8 +113,7 @@ virURIParseParams(virURIPtr uri)
         }
 
         /* Append to the parameter set. */
-        if (virURIParamAppend(uri, name, NULLSTR_EMPTY(value)) < 0)
-            return -1;
+        virURIParamAppend(uri, name, NULLSTR_EMPTY(value));
 
     next:
         query = end;
@@ -140,23 +135,22 @@ virURIParseParams(virURIPtr uri)
  *
  * @returns the parsed uri object with some fixes
  */
-virURIPtr
+virURI *
 virURIParse(const char *uri)
 {
     xmlURIPtr xmluri;
-    virURIPtr ret = NULL;
+    virURI *ret = NULL;
 
     xmluri = xmlParseURI(uri);
 
     if (!xmluri) {
         /* libxml2 does not tell us what failed. Grr :-( */
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to parse URI %s"), uri);
+                       _("Unable to parse URI %1$s"), uri);
         return NULL;
     }
 
-    if (VIR_ALLOC(ret) < 0)
-        goto error;
+    ret = g_new0(virURI, 1);
 
     ret->scheme = g_strdup(xmluri->scheme);
     ret->server = g_strdup(xmluri->server);
@@ -200,18 +194,16 @@ virURIParse(const char *uri)
  * Wrapper for xmlSaveUri
  *
  * This function constructs back everything that @ref virURIParse
- * changes after parsing
+ * changes after parsing. It aborts on error.
  *
  * @returns the constructed uri as a string
  */
 char *
-virURIFormat(virURIPtr uri)
+virURIFormat(virURI *uri)
 {
-    xmlURI xmluri;
-    char *tmpserver = NULL;
+    xmlURI xmluri = { 0 };
+    g_autofree char *tmpserver = NULL;
     char *ret;
-
-    memset(&xmluri, 0, sizeof(xmluri));
 
     xmluri.scheme = uri->scheme;
     xmluri.server = uri->server;
@@ -237,22 +229,17 @@ virURIFormat(virURIPtr uri)
     if (!xmluri.server && !xmluri.port)
         xmluri.port = -1;
 
-    ret = (char *)xmlSaveUri(&xmluri);
-    if (!ret) {
-        virReportOOMError();
-        goto cleanup;
-    }
-
- cleanup:
-    VIR_FREE(tmpserver);
+    /* xmlSaveUri can fail only on OOM condition if argument is non-NULL */
+    if (!(ret = (char *)xmlSaveUri(&xmluri)))
+        abort();
 
     return ret;
 }
 
 
-char *virURIFormatParams(virURIPtr uri)
+char *virURIFormatParams(virURI *uri)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     size_t i;
     bool amp = false;
 
@@ -274,27 +261,27 @@ char *virURIFormatParams(virURIPtr uri)
  *
  * Frees the URI
  */
-void virURIFree(virURIPtr uri)
+void virURIFree(virURI *uri)
 {
     size_t i;
 
     if (!uri)
         return;
 
-    VIR_FREE(uri->scheme);
-    VIR_FREE(uri->server);
-    VIR_FREE(uri->user);
-    VIR_FREE(uri->path);
-    VIR_FREE(uri->query);
-    VIR_FREE(uri->fragment);
+    g_free(uri->scheme);
+    g_free(uri->server);
+    g_free(uri->user);
+    g_free(uri->path);
+    g_free(uri->query);
+    g_free(uri->fragment);
 
     for (i = 0; i < uri->paramsCount; i++) {
-        VIR_FREE(uri->params[i].name);
-        VIR_FREE(uri->params[i].value);
+        g_free(uri->params[i].name);
+        g_free(uri->params[i].value);
     }
-    VIR_FREE(uri->params);
+    g_free(uri->params);
 
-    VIR_FREE(uri);
+    g_free(uri);
 }
 
 
@@ -313,16 +300,15 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
 
         if (!(offset = strchr(*aliases, '='))) {
             virReportError(VIR_ERR_CONF_SYNTAX,
-                           _("Malformed 'uri_aliases' config entry '%s', "
-                             "expected 'alias=uri://host/path'"), *aliases);
+                           _("Malformed 'uri_aliases' config entry '%1$s', expected 'alias=uri://host/path'"),
+                           *aliases);
             return -1;
         }
 
         safe = strspn(*aliases, URI_ALIAS_CHARS);
         if (safe < (offset - *aliases)) {
             virReportError(VIR_ERR_CONF_SYNTAX,
-                           _("Malformed 'uri_aliases' config entry '%s', "
-                             "aliases may only contain 'a-Z, 0-9, _, -'"),
+                           _("Malformed 'uri_aliases' config entry '%1$s', aliases may only contain 'a-Z, 0-9, _, -'"),
                            *aliases);
             return -1;
         }
@@ -356,10 +342,10 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
  * Returns 0 on success, -1 on error.
  */
 int
-virURIResolveAlias(virConfPtr conf, const char *alias, char **uri)
+virURIResolveAlias(virConf *conf, const char *alias, char **uri)
 {
     int ret = -1;
-    char **aliases = NULL;
+    g_auto(GStrv) aliases = NULL;
 
     *uri = NULL;
 
@@ -370,7 +356,6 @@ virURIResolveAlias(virConfPtr conf, const char *alias, char **uri)
     if (aliases && *aliases) {
         /*执行别名匹配*/
         ret = virURIFindAliasMatch(aliases, alias, uri);
-        virStringListFree(aliases);
     } else {
         ret = 0;
     }
@@ -379,17 +364,78 @@ virURIResolveAlias(virConfPtr conf, const char *alias, char **uri)
 }
 
 
+/**
+ * virURIGetParam:
+ * @uri: URI to get parameter from
+ * @name: name of the parameter
+ *
+ * For parsed @uri, find parameter with name @name and return its value. The
+ * string comparison is case insensitive, by design.
+ *
+ * Returns: a value on success, or
+ *          NULL on error (with error reported)
+ */
 const char *
-virURIGetParam(virURIPtr uri, const char *name)
+virURIGetParam(virURI *uri, const char *name)
 {
     size_t i;
 
     for (i = 0; i < uri->paramsCount; i++) {
-        if (STREQ(uri->params[i].name, name))
+        if (STRCASEEQ(uri->params[i].name, name))
             return uri->params[i].value;
     }
 
     virReportError(VIR_ERR_INVALID_ARG,
-                   _("Missing URI parameter '%s'"), name);
+                   _("Missing URI parameter '%1$s'"), name);
     return NULL;
+}
+
+
+/**
+ * virURICheckUnixSocket:
+ * @uri: URI to check
+ *
+ * Check if the URI looks like it refers to a non-standard socket path.  In such
+ * scenario the socket might be proxied to a remote server even though the URI
+ * looks like it is only local.
+ *
+ * The "socket" parameter is looked for in case insensitive manner, by design.
+ *
+ * Returns: true if the URI might be proxied to a remote server
+ */
+bool
+virURICheckUnixSocket(virURI *uri)
+{
+    size_t i = 0;
+
+    if (!uri->scheme)
+        return false;
+
+    if (STRNEQ_NULLABLE(strchr(uri->scheme, '+'), "+unix"))
+        return false;
+
+    for (i = 0; i < uri->paramsCount; i++) {
+        if (STRCASEEQ(uri->params[i].name, "socket"))
+            return true;
+    }
+
+    return false;
+}
+
+
+void
+virURIParamsSetIgnore(virURI *uri,
+                      bool ignore,
+                      const char *names[])
+{
+    size_t i;
+
+    for (i = 0; i < uri->paramsCount; i++) {
+        size_t j;
+
+        for (j = 0; names[j]; j++) {
+            if (STRCASEEQ(uri->params[i].name, names[j]))
+                uri->params[i].ignore = ignore;
+        }
+    }
 }

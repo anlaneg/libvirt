@@ -21,6 +21,7 @@
 #pragma once
 
 #include "internal.h"
+#include "virnetdevbandwidth.h"
 #include "virnetdevvportprofile.h"
 #include "virnetdevvlan.h"
 
@@ -57,13 +58,25 @@ int virNetDevOpenvswitchInterfaceStats(const char *ifname,
                                        virDomainInterfaceStatsPtr stats)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-int virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
+int
+virNetDevOpenvswitchMaybeUnescapeReply(char *reply)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
 int virNetDevOpenvswitchGetVhostuserIfname(const char *path,
+                                           bool server,
                                            char **ifname)
-    ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT G_GNUC_NO_INLINE;
+    ATTRIBUTE_NONNULL(3) G_GNUC_WARN_UNUSED_RESULT G_NO_INLINE;
 
 int virNetDevOpenvswitchUpdateVlan(const char *ifname,
                                    const virNetDevVlan *virtVlan)
     ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
+
+int virNetDevOpenvswitchInterfaceSetQos(const char *ifname,
+                                        const virNetDevBandwidth *bandwidth,
+                                        const unsigned char *vmuuid,
+                                        bool swapped)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3) G_GNUC_WARN_UNUSED_RESULT;
+
+int virNetDevOpenvswitchInterfaceClearQos(const char *ifname,
+                                          const unsigned char *vmuuid)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;

@@ -22,10 +22,8 @@
 
 #include "internal.h"
 #include "datatypes.h"
-#include "domain_conf.h"
 #include "domain_event.h"
 #include "virlog.h"
-#include "virstring.h"
 #include "viralloc.h"
 #include "network_conf.h"
 
@@ -46,7 +44,7 @@ static vboxUniformedAPI gVBoxAPI;
 
 static int vboxConnectNumOfNetworks(virConnectPtr conn)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     vboxArray networkInterfaces = VBOX_ARRAY_INITIALIZER;
     IHost *host = NULL;
     size_t i = 0;
@@ -91,7 +89,7 @@ static int vboxConnectNumOfNetworks(virConnectPtr conn)
 
 static int vboxConnectListNetworks(virConnectPtr conn, char **const names, int nnames)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     vboxArray networkInterfaces = VBOX_ARRAY_INITIALIZER;
     IHost *host = NULL;
     size_t i = 0;
@@ -148,7 +146,7 @@ static int vboxConnectListNetworks(virConnectPtr conn, char **const names, int n
 
 static int vboxConnectNumOfDefinedNetworks(virConnectPtr conn)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     vboxArray networkInterfaces = VBOX_ARRAY_INITIALIZER;
     IHost *host = NULL;
     size_t i = 0;
@@ -193,7 +191,7 @@ static int vboxConnectNumOfDefinedNetworks(virConnectPtr conn)
 
 static int vboxConnectListDefinedNetworks(virConnectPtr conn, char **const names, int nnames)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     vboxArray networkInterfaces = VBOX_ARRAY_INITIALIZER;
     IHost *host = NULL;
     size_t i = 0;
@@ -250,7 +248,7 @@ static int vboxConnectListDefinedNetworks(virConnectPtr conn, char **const names
 
 static virNetworkPtr vboxNetworkLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     PRUint32 interfaceType = 0;
     char *nameUtf8 = NULL;
     PRUnichar *nameUtf16 = NULL;
@@ -302,7 +300,7 @@ static virNetworkPtr vboxNetworkLookupByUUID(virConnectPtr conn, const unsigned 
 
 static virNetworkPtr vboxNetworkLookupByName(virConnectPtr conn, const char *name)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     PRUnichar *nameUtf16 = NULL;
     IHostNetworkInterface *networkInterface = NULL;
     PRUint32 interfaceType = 0;
@@ -350,7 +348,7 @@ static virNetworkPtr vboxNetworkLookupByName(virConnectPtr conn, const char *nam
 }
 
 static PRUnichar *
-vboxSocketFormatAddrUtf16(vboxDriverPtr data, virSocketAddrPtr addr)
+vboxSocketFormatAddrUtf16(struct _vboxDriver *data, virSocketAddr *addr)
 {
     char *utf8 = NULL;
     PRUnichar *utf16 = NULL;
@@ -367,16 +365,17 @@ vboxSocketFormatAddrUtf16(vboxDriverPtr data, virSocketAddrPtr addr)
 }
 
 static virNetworkPtr
-vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
+vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start,
+                           unsigned int flags)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     PRUnichar *networkInterfaceNameUtf16 = NULL;
     char *networkInterfaceNameUtf8 = NULL;
     PRUnichar *networkNameUtf16 = NULL;
     char *networkNameUtf8 = NULL;
     IHostNetworkInterface *networkInterface = NULL;
-    virNetworkDefPtr def = virNetworkDefParseString(xml, NULL);
-    virNetworkIPDefPtr ipdef = NULL;
+    g_autoptr(virNetworkDef) def = NULL;
+    virNetworkIPDef *ipdef = NULL;
     unsigned char uuid[VIR_UUID_BUFLEN];
     vboxIID vboxnetiid;
     virSocketAddrRange addr;
@@ -384,6 +383,15 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
     IHost *host = NULL;
     virNetworkPtr ret = NULL;
     nsresult rc;
+    bool validate;
+
+    if (start) {
+        virCheckFlags(VIR_NETWORK_CREATE_VALIDATE, NULL);
+        validate = flags & VIR_NETWORK_CREATE_VALIDATE;
+    } else {
+        virCheckFlags(VIR_NETWORK_DEFINE_VALIDATE, NULL);
+        validate = flags & VIR_NETWORK_DEFINE_VALIDATE;
+    }
 
     if (!data->vboxObj)
         return ret;
@@ -394,7 +402,7 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
 
     VBOX_IID_INITIALIZE(&vboxnetiid);
 
-    if ((!def) ||
+    if (!(def = virNetworkDefParse(xml, NULL, NULL, validate)) ||
         (def->forward.type != VIR_NETWORK_FORWARD_NONE) ||
         (def->nips == 0 || !def->ips))
         goto cleanup;
@@ -421,8 +429,7 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
      * NULL. (We can't assign a new name to hostonly network, only
      * take the given name, say vboxnet0)
      */
-    gVBoxAPI.UIHost.CreateHostOnlyNetworkInterface(data, host, def->name,
-                                                   &networkInterface);
+    gVBoxAPI.UIHost.CreateHostOnlyNetworkInterface(host, &networkInterface);
 
     if (!networkInterface)
         goto cleanup;
@@ -439,7 +446,7 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
     VBOX_UTF8_TO_UTF16(networkNameUtf8, &networkNameUtf16);
 
     /* Currently support only one dhcp server per network
-     * with contigious address space from start to end
+     * with contiguous address space from start to end
      */
     addr = ipdef->ranges[0].addr;
     if ((ipdef->nranges >= 1) &&
@@ -492,7 +499,6 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
             if (start)
                 gVBoxAPI.UIDHCPServer.Start(dhcpServer,
                                             networkNameUtf16,
-                                            networkInterfaceNameUtf16,
                                             trunkTypeUtf16);
 
             VBOX_UTF16_FREE(ipAddressUtf16);
@@ -548,24 +554,35 @@ vboxNetworkDefineCreateXML(virConnectPtr conn, const char *xml, bool start)
     VBOX_UTF8_FREE(networkInterfaceNameUtf8);
     VBOX_UTF16_FREE(networkInterfaceNameUtf16);
     VBOX_RELEASE(host);
-    virNetworkDefFree(def);
     return ret;
 }
 
 static virNetworkPtr vboxNetworkCreateXML(virConnectPtr conn, const char *xml)
 {
-    return vboxNetworkDefineCreateXML(conn, xml, true);
+    return vboxNetworkDefineCreateXML(conn, xml, true, 0);
+}
+
+static virNetworkPtr vboxNetworkCreateXMLFlags(virConnectPtr conn, const char *xml,
+                                               unsigned int flags)
+{
+    return vboxNetworkDefineCreateXML(conn, xml, true, flags);
 }
 
 static virNetworkPtr vboxNetworkDefineXML(virConnectPtr conn, const char *xml)
 {
-    return vboxNetworkDefineCreateXML(conn, xml, false);
+    return vboxNetworkDefineCreateXML(conn, xml, false, 0);
+}
+
+static virNetworkPtr vboxNetworkDefineXMLFlags(virConnectPtr conn, const char *xml,
+                                               unsigned int flags)
+{
+    return vboxNetworkDefineCreateXML(conn, xml, false, flags);
 }
 
 static int
 vboxNetworkUndefineDestroy(virNetworkPtr network, bool removeinterface)
 {
-    vboxDriverPtr data = network->conn->privateData;
+    struct _vboxDriver *data = network->conn->privateData;
     char *networkNameUtf8 = NULL;
     PRUnichar *networkInterfaceNameUtf16 = NULL;
     IHostNetworkInterface *networkInterface = NULL;
@@ -626,7 +643,7 @@ vboxNetworkUndefineDestroy(virNetworkPtr network, bool removeinterface)
         gVBoxAPI.UIProgress.GetResultCode(progress, &resultCode);
         if (RC_FAILED(resultCode)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Error while removing hostonly network interface, rc=%08x"),
+                           _("Error while removing hostonly network interface, rc=%1$08x"),
                            resultCode.uResultCode);
             goto cleanup;
         }
@@ -669,7 +686,7 @@ static int vboxNetworkDestroy(virNetworkPtr network)
 
 static int vboxNetworkCreate(virNetworkPtr network)
 {
-    vboxDriverPtr data = network->conn->privateData;
+    struct _vboxDriver *data = network->conn->privateData;
     char *networkNameUtf8 = NULL;
     PRUnichar *networkInterfaceNameUtf16 = NULL;
     IHostNetworkInterface *networkInterface = NULL;
@@ -722,7 +739,6 @@ static int vboxNetworkCreate(virNetworkPtr network)
 
     gVBoxAPI.UIDHCPServer.Start(dhcpServer,
                                 networkNameUtf16,
-                                networkInterfaceNameUtf16,
                                 trunkTypeUtf16);
 
     VBOX_UTF16_FREE(trunkTypeUtf16);
@@ -739,8 +755,8 @@ static int vboxNetworkCreate(virNetworkPtr network)
 }
 
 static int
-vboxSocketParseAddrUtf16(vboxDriverPtr data, const PRUnichar *utf16,
-                         virSocketAddrPtr addr)
+vboxSocketParseAddrUtf16(struct _vboxDriver *data, const PRUnichar *utf16,
+                         virSocketAddr *addr)
 {
     int result = -1;
     char *utf8 = NULL;
@@ -760,9 +776,9 @@ vboxSocketParseAddrUtf16(vboxDriverPtr data, const PRUnichar *utf16,
 
 static char *vboxNetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
 {
-    vboxDriverPtr data = network->conn->privateData;
-    virNetworkDefPtr def = NULL;
-    virNetworkIPDefPtr ipdef = NULL;
+    struct _vboxDriver *data = network->conn->privateData;
+    g_autoptr(virNetworkDef) def = NULL;
+    virNetworkIPDef *ipdef = NULL;
     char *networkNameUtf8 = NULL;
     PRUnichar *networkInterfaceNameUtf16 = NULL;
     IHostNetworkInterface *networkInterface = NULL;
@@ -785,10 +801,8 @@ static char *vboxNetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
     VBOX_IID_INITIALIZE(&vboxnet0IID);
     virCheckFlags(0, NULL);
 
-    if (VIR_ALLOC(def) < 0)
-        goto cleanup;
-    if (VIR_ALLOC(ipdef) < 0)
-        goto cleanup;
+    def = g_new0(virNetworkDef, 1);
+    ipdef = g_new0(virNetworkIPDef, 1);
     def->ips = ipdef;
     def->nips = 1;
 
@@ -821,69 +835,62 @@ static char *vboxNetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
                                                       networkNameUtf16,
                                                       &dhcpServer);
     if (dhcpServer) {
+        PRUnichar *ipAddressUtf16 = NULL;
+        PRUnichar *networkMaskUtf16 = NULL;
+        PRUnichar *fromIPAddressUtf16 = NULL;
+        PRUnichar *toIPAddressUtf16 = NULL;
+        PRUnichar *macAddressUtf16 = NULL;
+        bool errorOccurred = false;
+
         ipdef->nranges = 1;
-        if (VIR_ALLOC_N(ipdef->ranges, ipdef->nranges) >= 0) {
-            PRUnichar *ipAddressUtf16 = NULL;
-            PRUnichar *networkMaskUtf16 = NULL;
-            PRUnichar *fromIPAddressUtf16 = NULL;
-            PRUnichar *toIPAddressUtf16 = NULL;
-            bool errorOccurred = false;
+        ipdef->ranges = g_new0(virNetworkDHCPRangeDef, ipdef->nranges);
 
-            gVBoxAPI.UIDHCPServer.GetIPAddress(dhcpServer, &ipAddressUtf16);
-            gVBoxAPI.UIDHCPServer.GetNetworkMask(dhcpServer, &networkMaskUtf16);
-            gVBoxAPI.UIDHCPServer.GetLowerIP(dhcpServer, &fromIPAddressUtf16);
-            gVBoxAPI.UIDHCPServer.GetUpperIP(dhcpServer, &toIPAddressUtf16);
-            /* Currently virtualbox supports only one dhcp server per network
-             * with contigious address space from start to end
-             */
-            addr = ipdef->ranges[0].addr;
-            if (vboxSocketParseAddrUtf16(data, ipAddressUtf16,
-                                         &ipdef->address) < 0 ||
-                vboxSocketParseAddrUtf16(data, networkMaskUtf16,
-                                         &ipdef->netmask) < 0 ||
-                vboxSocketParseAddrUtf16(data, fromIPAddressUtf16,
-                                         &addr.start) < 0 ||
-                vboxSocketParseAddrUtf16(data, toIPAddressUtf16,
-                                         &addr.end) < 0) {
-                errorOccurred = true;
-            }
-
-            VBOX_UTF16_FREE(ipAddressUtf16);
-            VBOX_UTF16_FREE(networkMaskUtf16);
-            VBOX_UTF16_FREE(fromIPAddressUtf16);
-            VBOX_UTF16_FREE(toIPAddressUtf16);
-
-            if (errorOccurred)
-                goto cleanup;
-        } else {
-            ipdef->nranges = 0;
+        gVBoxAPI.UIDHCPServer.GetIPAddress(dhcpServer, &ipAddressUtf16);
+        gVBoxAPI.UIDHCPServer.GetNetworkMask(dhcpServer, &networkMaskUtf16);
+        gVBoxAPI.UIDHCPServer.GetLowerIP(dhcpServer, &fromIPAddressUtf16);
+        gVBoxAPI.UIDHCPServer.GetUpperIP(dhcpServer, &toIPAddressUtf16);
+        /* Currently virtualbox supports only one dhcp server per network
+         * with contiguous address space from start to end
+         */
+        addr = ipdef->ranges[0].addr;
+        if (vboxSocketParseAddrUtf16(data, ipAddressUtf16,
+                                     &ipdef->address) < 0 ||
+            vboxSocketParseAddrUtf16(data, networkMaskUtf16,
+                                     &ipdef->netmask) < 0 ||
+            vboxSocketParseAddrUtf16(data, fromIPAddressUtf16,
+                                     &addr.start) < 0 ||
+            vboxSocketParseAddrUtf16(data, toIPAddressUtf16,
+                                     &addr.end) < 0) {
+            errorOccurred = true;
         }
+
+        VBOX_UTF16_FREE(ipAddressUtf16);
+        VBOX_UTF16_FREE(networkMaskUtf16);
+        VBOX_UTF16_FREE(fromIPAddressUtf16);
+        VBOX_UTF16_FREE(toIPAddressUtf16);
+
+        if (errorOccurred)
+            goto cleanup;
 
         ipdef->nhosts = 1;
-        if (VIR_ALLOC_N(ipdef->hosts, ipdef->nhosts) >= 0) {
-            PRUnichar *macAddressUtf16 = NULL;
-            PRUnichar *ipAddressUtf16 = NULL;
-            bool errorOccurred = false;
+        ipdef->hosts = g_new0(virNetworkDHCPHostDef, ipdef->nhosts);
 
-            ipdef->hosts[0].name = g_strdup(network->name);
-            gVBoxAPI.UIHNInterface.GetHardwareAddress(networkInterface, &macAddressUtf16);
-            gVBoxAPI.UIHNInterface.GetIPAddress(networkInterface, &ipAddressUtf16);
+        ipdef->hosts[0].name = g_strdup(network->name);
+        gVBoxAPI.UIHNInterface.GetHardwareAddress(networkInterface, &macAddressUtf16);
+        gVBoxAPI.UIHNInterface.GetIPAddress(networkInterface, &ipAddressUtf16);
 
-            VBOX_UTF16_TO_UTF8(macAddressUtf16, &ipdef->hosts[0].mac);
+        VBOX_UTF16_TO_UTF8(macAddressUtf16, &ipdef->hosts[0].mac);
 
-            if (vboxSocketParseAddrUtf16(data, ipAddressUtf16,
-                                         &ipdef->hosts[0].ip) < 0) {
-                errorOccurred = true;
-            }
-
-            VBOX_UTF16_FREE(macAddressUtf16);
-            VBOX_UTF16_FREE(ipAddressUtf16);
-
-            if (errorOccurred)
-                goto cleanup;
-        } else {
-            ipdef->nhosts = 0;
+        if (vboxSocketParseAddrUtf16(data, ipAddressUtf16,
+                                     &ipdef->hosts[0].ip) < 0) {
+            errorOccurred = true;
         }
+
+        VBOX_UTF16_FREE(macAddressUtf16);
+        VBOX_UTF16_FREE(ipAddressUtf16);
+
+        if (errorOccurred)
+            goto cleanup;
     } else {
         PRUnichar *networkMaskUtf16 = NULL;
         PRUnichar *ipAddressUtf16 = NULL;
@@ -915,7 +922,6 @@ static char *vboxNetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
     VBOX_RELEASE(networkInterface);
     VBOX_UTF16_FREE(networkInterfaceNameUtf16);
     VBOX_RELEASE(host);
-    virNetworkDefFree(def);
     VIR_FREE(networkNameUtf8);
     VBOX_RELEASE(dhcpServer);
     return ret;
@@ -929,14 +935,16 @@ virNetworkDriver vboxNetworkDriver = {
     .networkLookupByUUID = vboxNetworkLookupByUUID, /* 0.6.4 */
     .networkLookupByName = vboxNetworkLookupByName, /* 0.6.4 */
     .networkCreateXML = vboxNetworkCreateXML, /* 0.6.4 */
+    .networkCreateXMLFlags = vboxNetworkCreateXMLFlags, /* 7.8.0 */
     .networkDefineXML = vboxNetworkDefineXML, /* 0.6.4 */
+    .networkDefineXMLFlags = vboxNetworkDefineXMLFlags, /* 7.7.0 */
     .networkUndefine = vboxNetworkUndefine, /* 0.6.4 */
     .networkCreate = vboxNetworkCreate, /* 0.6.4 */
     .networkDestroy = vboxNetworkDestroy, /* 0.6.4 */
     .networkGetXMLDesc = vboxNetworkGetXMLDesc, /* 0.6.4 */
 };
 
-virNetworkDriverPtr vboxGetNetworkDriver(uint32_t uVersion)
+virNetworkDriver *vboxGetNetworkDriver(uint32_t uVersion)
 {
     /* Install gVBoxAPI according to the vbox API version. */
     int result = 0;

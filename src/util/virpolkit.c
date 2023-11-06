@@ -20,15 +20,14 @@
  */
 
 #include <config.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include "virpolkit.h"
 #include "virerror.h"
 #include "virlog.h"
-#include "virstring.h"
-#include "virprocess.h"
 #include "viralloc.h"
-#include "virdbus.h"
+#include "virgdbus.h"
 #include "virfile.h"
 #include "virutil.h"
 
@@ -40,7 +39,7 @@ VIR_LOG_INIT("util.polkit");
 # include <poll.h>
 
 struct _virPolkitAgent {
-    virCommandPtr cmd;
+    virCommand *cmd;
 };
 
 /*
@@ -63,90 +62,99 @@ int virPolkitCheckAuth(const char *actionid,
                        const char **details,
                        bool allowInteraction)
 {
-    DBusConnection *sysbus;
-    DBusMessage *reply = NULL;
-    char **retdetails = NULL;
-    size_t nretdetails = 0;
-    bool is_authorized;
-    bool is_challenge;
+    GDBusConnection *sysbus;
+    GVariantBuilder builder;
+    GVariant *gprocess = NULL;
+    GVariant *gdetails = NULL;
+    g_autoptr(GVariant) message = NULL;
+    g_autoptr(GVariant) reply = NULL;
+    g_autoptr(GVariantIter) iter = NULL;
+    char *retkey;
+    char *retval;
+    gboolean is_authorized;
+    gboolean is_challenge;
     bool is_dismissed = false;
-    size_t i;
-    int ret = -1;
+    const char **next;
 
-    if (!(sysbus = virDBusGetSystemBus()))
-        goto cleanup;
+    if (!(sysbus = virGDBusGetSystemBus()))
+        return -1;
 
     VIR_INFO("Checking PID %lld running as %d",
              (long long) pid, uid);
 
-    if (virDBusCallMethod(sysbus,
-                          &reply,
-                          NULL,
-                          "org.freedesktop.PolicyKit1",
-                          "/org/freedesktop/PolicyKit1/Authority",
-                          "org.freedesktop.PolicyKit1.Authority",
-                          "CheckAuthorization",
-                          "(sa{sv})sa&{ss}us",
-                          "unix-process",
-                          3,
-                          "pid", "u", (unsigned int)pid,
-                          "start-time", "t", startTime,
-                          "uid", "i", (int)uid,
-                          actionid,
-                          virStringListLength(details) / 2,
-                          details,
-                          allowInteraction,
-                          "" /* cancellation ID */) < 0)
-        goto cleanup;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&builder, "{sv}", "pid", g_variant_new_uint32(pid));
+    g_variant_builder_add(&builder, "{sv}", "start-time", g_variant_new_uint64(startTime));
+    g_variant_builder_add(&builder, "{sv}", "uid", g_variant_new_int32(uid));
+    gprocess = g_variant_builder_end(&builder);
 
-    if (virDBusMessageDecode(reply,
-                             "(bba&{ss})",
-                             &is_authorized,
-                             &is_challenge,
-                             &nretdetails,
-                             &retdetails) < 0)
-        goto cleanup;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{ss}"));
 
-    for (i = 0; i < (nretdetails / 2); i++) {
-        if (STREQ(retdetails[(i * 2)], "polkit.dismissed") &&
-            STREQ(retdetails[(i * 2) + 1], "true"))
+    if (details) {
+        for (next = details; *next; next++) {
+            const char *detail1 = *(next++);
+            const char *detail2 = *next;
+            g_variant_builder_add(&builder, "{ss}", detail1, detail2);
+        }
+    }
+
+    gdetails = g_variant_builder_end(&builder);
+
+    message = g_variant_new("((s@a{sv})s@a{ss}us)",
+                            "unix-process",
+                            gprocess,
+                            actionid,
+                            gdetails,
+                            allowInteraction,
+                            "" /* cancellation ID */);
+
+    if (virGDBusCallMethod(sysbus,
+                           &reply,
+                           G_VARIANT_TYPE("((bba{ss}))"),
+                           NULL,
+                           "org.freedesktop.PolicyKit1",
+                           "/org/freedesktop/PolicyKit1/Authority",
+                           "org.freedesktop.PolicyKit1.Authority",
+                           "CheckAuthorization",
+                           message) < 0)
+        return -1;
+
+    g_variant_get(reply, "((bba{ss}))", &is_authorized, &is_challenge, &iter);
+
+    while (g_variant_iter_loop(iter, "{ss}", &retkey, &retval)) {
+        if (STREQ(retkey, "polkit.dismissed") && STREQ(retval, "true"))
             is_dismissed = true;
     }
 
     VIR_DEBUG("is auth %d  is challenge %d",
               is_authorized, is_challenge);
 
-    if (is_authorized) {
-        ret = 0;
+    if (is_authorized)
+        return 0;
+
+    if (is_dismissed) {
+        virReportError(VIR_ERR_AUTH_CANCELLED, "%s",
+                       _("user cancelled authentication process"));
+    } else if (is_challenge) {
+        virReportError(VIR_ERR_AUTH_UNAVAILABLE,
+                       _("no polkit agent available to authenticate action '%1$s'"),
+                       actionid);
     } else {
-        ret = -2;
-        if (is_dismissed)
-            virReportError(VIR_ERR_AUTH_CANCELLED, "%s",
-                           _("user cancelled authentication process"));
-        else if (is_challenge)
-            virReportError(VIR_ERR_AUTH_UNAVAILABLE,
-                           _("no polkit agent available to authenticate "
-                             "action '%s'"),
-                           actionid);
-        else
-            virReportError(VIR_ERR_AUTH_FAILED, "%s",
-                           _("access denied by policy"));
+        virReportError(VIR_ERR_AUTH_FAILED, "%s",
+                       _("access denied by policy"));
     }
 
- cleanup:
-    virStringListFreeCount(retdetails, nretdetails);
-    virDBusMessageUnref(reply);
-    return ret;
+    return -2;
 }
 
 
 /* virPolkitAgentDestroy:
- * @cmd: Pointer to the virCommandPtr created during virPolkitAgentCreate
+ * @cmd: Pointer to the virCommand * created during virPolkitAgentCreate
  *
  * Destroy resources used by Polkit Agent
  */
 void
-virPolkitAgentDestroy(virPolkitAgentPtr agent)
+virPolkitAgentDestroy(virPolkitAgent *agent)
 {
     if (!agent)
         return;
@@ -159,25 +167,27 @@ virPolkitAgentDestroy(virPolkitAgentPtr agent)
  *
  * Allocate and setup a polkit agent
  *
- * Returns a virCommandPtr on success and NULL on failure
+ * Returns newly allocated virPolkitAgent * on success and NULL on failure
  */
-virPolkitAgentPtr
+virPolkitAgent *
 virPolkitAgentCreate(void)
 {
-    virPolkitAgentPtr agent = NULL;
+    virPolkitAgent *agent = NULL;
     int pipe_fd[2] = {-1, -1};
     struct pollfd pollfd;
     int outfd = STDOUT_FILENO;
     int errfd = STDERR_FILENO;
 
-    if (!isatty(STDIN_FILENO))
+    if (!virPolkitAgentAvailable()) {
+        virReportError(VIR_ERR_SYSTEM_ERROR, "%s",
+                       _("polkit text authentication agent unavailable"));
         goto error;
+    }
 
     if (virPipe(pipe_fd) < 0)
         goto error;
 
-    if (VIR_ALLOC(agent) < 0)
-        goto error;
+    agent = g_new0(virPolkitAgent, 1);
 
     agent->cmd = virCommandNewArgList(PKTTYAGENT, "--process", NULL);
 
@@ -196,8 +206,11 @@ virPolkitAgentCreate(void)
     pollfd.fd = pipe_fd[0];
     pollfd.events = POLLHUP;
 
-    if (poll(&pollfd, 1, -1) < 0)
+    if (poll(&pollfd, 1, -1) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("error in poll call"));
         goto error;
+    }
 
     return agent;
 
@@ -208,6 +221,42 @@ virPolkitAgentCreate(void)
     return NULL;
 }
 
+
+/*
+ * virPolkitAgentAvailable
+ *
+ * This function does some preliminary checking that the pkttyagent does not
+ * fail starting so that it can be started without waiting for first failed
+ * connection with VIR_ERR_AUTH_UNAVAILABLE.
+ */
+bool
+virPolkitAgentAvailable(void)
+{
+    const char *termid = ctermid(NULL);
+    VIR_AUTOCLOSE fd = -1;
+
+    if (!virFileIsExecutable(PKTTYAGENT))
+        return false;
+
+    if (!termid)
+        return false;
+
+    /*
+     *The pkttyagent needs to open the controlling terminal.
+     *
+     * Just in case we are running without a ctty make sure this open() does not
+     * change that.
+     *
+     * We could check if our session has a controlling terminal available
+     * instead, but it would require parsing `/proc/self/stat` on Linux, which
+     * is not portable and moreover requires way more work than just open().
+     */
+    fd = open(termid, O_RDWR | O_NOCTTY);
+    if (fd < 0)
+        return false;
+
+    return true;
+}
 
 #else /* ! WITH_POLKIT */
 
@@ -226,17 +275,24 @@ int virPolkitCheckAuth(const char *actionid G_GNUC_UNUSED,
 
 
 void
-virPolkitAgentDestroy(virPolkitAgentPtr agent G_GNUC_UNUSED)
+virPolkitAgentDestroy(virPolkitAgent *agent G_GNUC_UNUSED)
 {
     return; /* do nothing */
 }
 
 
-virPolkitAgentPtr
+virPolkitAgent *
 virPolkitAgentCreate(void)
 {
     virReportError(VIR_ERR_AUTH_FAILED, "%s",
                    _("polkit text authentication agent unavailable"));
     return NULL;
 }
+
+bool
+virPolkitAgentAvailable(void)
+{
+    return false;
+}
+
 #endif /* WITH_POLKIT */

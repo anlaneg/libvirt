@@ -34,12 +34,11 @@
 VIR_LOG_INIT("bhyve.bhyve_domain");
 
 static void *
-bhyveDomainObjPrivateAlloc(void *opaque G_GNUC_UNUSED)
+bhyveDomainObjPrivateAlloc(void *opaque)
 {
-    bhyveDomainObjPrivatePtr priv;
+    bhyveDomainObjPrivate *priv = g_new0(bhyveDomainObjPrivate, 1);
 
-    if (VIR_ALLOC(priv) < 0)
-        return NULL;
+    priv->driver = opaque;
 
     return priv;
 }
@@ -47,11 +46,11 @@ bhyveDomainObjPrivateAlloc(void *opaque G_GNUC_UNUSED)
 static void
 bhyveDomainObjPrivateFree(void *data)
 {
-    bhyveDomainObjPrivatePtr priv = data;
+    bhyveDomainObjPrivate *priv = data;
 
     virDomainPCIAddressSetFree(priv->pciaddrs);
 
-    VIR_FREE(priv);
+    g_free(priv);
 }
 
 virDomainXMLPrivateDataCallbacks virBhyveDriverPrivateDataCallbacks = {
@@ -59,13 +58,16 @@ virDomainXMLPrivateDataCallbacks virBhyveDriverPrivateDataCallbacks = {
     .free = bhyveDomainObjPrivateFree,
 };
 
-bool
-bhyveDomainDefNeedsISAController(virDomainDefPtr def)
+static bool
+bhyveDomainDefNeedsISAController(virDomainDef *def)
 {
     if (def->os.bootloader == NULL && def->os.loader)
         return true;
 
-    if (def->nserials)
+    if (def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_EFI)
+        return true;
+
+    if (def->nserials || def->nconsoles)
         return true;
 
     if (def->ngraphics && def->nvideos)
@@ -75,12 +77,12 @@ bhyveDomainDefNeedsISAController(virDomainDefPtr def)
 }
 
 static int
-bhyveDomainDefPostParse(virDomainDefPtr def,
+bhyveDomainDefPostParse(virDomainDef *def,
                         unsigned int parseFlags G_GNUC_UNUSED,
                         void *opaque,
                         void *parseOpaque G_GNUC_UNUSED)
 {
-    bhyveConnPtr driver = opaque;
+    struct _bhyveConn *driver = opaque;
     g_autoptr(virCaps) caps = bhyveDriverGetCapabilities(driver);
     if (!caps)
         return -1;
@@ -95,19 +97,24 @@ bhyveDomainDefPostParse(virDomainDefPtr def,
                                        VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT) < 0)
         return -1;
 
+    if (bhyveDomainDefNeedsISAController(def))
+        if (virDomainDefMaybeAddController(def, VIR_DOMAIN_CONTROLLER_TYPE_ISA, 0,
+                                           VIR_DOMAIN_CONTROLLER_MODEL_ISA_DEFAULT) < 0)
+            return -1;
+
     return 0;
 }
 
 static int
-bhyveDomainDiskDefAssignAddress(bhyveConnPtr driver,
-                                virDomainDiskDefPtr def,
+bhyveDomainDiskDefAssignAddress(struct _bhyveConn *driver,
+                                virDomainDiskDef *def,
                                 const virDomainDef *vmdef G_GNUC_UNUSED)
 {
     int idx = virDiskNameToIndex(def->dst);
 
     if (idx < 0) {
         virReportError(VIR_ERR_XML_ERROR,
-                       _("Unknown disk name '%s' and no address specified"),
+                       _("Unknown disk name '%1$s' and no address specified"),
                        def->dst);
         return -1;
     }
@@ -126,21 +133,33 @@ bhyveDomainDiskDefAssignAddress(bhyveConnPtr driver,
 
         def->info.addr.drive.bus = 0;
         break;
+    case VIR_DOMAIN_DISK_BUS_SCSI:
+    case VIR_DOMAIN_DISK_BUS_IDE:
+    case VIR_DOMAIN_DISK_BUS_FDC:
+    case VIR_DOMAIN_DISK_BUS_NONE:
+    case VIR_DOMAIN_DISK_BUS_VIRTIO:
+    case VIR_DOMAIN_DISK_BUS_XEN:
+    case VIR_DOMAIN_DISK_BUS_USB:
+    case VIR_DOMAIN_DISK_BUS_UML:
+    case VIR_DOMAIN_DISK_BUS_SD:
+    case VIR_DOMAIN_DISK_BUS_LAST:
+    default:
+        break;
     }
     return 0;
 }
 
 static int
-bhyveDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
+bhyveDomainDeviceDefPostParse(virDomainDeviceDef *dev,
                               const virDomainDef *def,
                               unsigned int parseFlags G_GNUC_UNUSED,
                               void *opaque,
                               void *parseOpaque G_GNUC_UNUSED)
 {
-    bhyveConnPtr driver = opaque;
+    struct _bhyveConn *driver = opaque;
 
     if (dev->type == VIR_DOMAIN_DEVICE_DISK) {
-        virDomainDiskDefPtr disk = dev->data.disk;
+        virDomainDiskDef *disk = dev->data.disk;
 
         if (disk->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE &&
             bhyveDomainDiskDefAssignAddress(driver, disk, def) < 0)
@@ -148,15 +167,14 @@ bhyveDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
     }
 
     if (dev->type == VIR_DOMAIN_DEVICE_CONTROLLER) {
-        virDomainControllerDefPtr cont = dev->data.controller;
+        virDomainControllerDef *cont = dev->data.controller;
 
         if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI &&
             (cont->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT ||
              cont->model == VIR_DOMAIN_CONTROLLER_MODEL_PCIE_ROOT) &&
             cont->idx != 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("pci-root and pcie-root controllers "
-                             "should have index 0"));
+                           _("pci-root and pcie-root controllers should have index 0"));
             return -1;
         }
     }
@@ -164,6 +182,20 @@ bhyveDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
     if (dev->type == VIR_DOMAIN_DEVICE_VIDEO &&
         dev->data.video->type == VIR_DOMAIN_VIDEO_TYPE_DEFAULT) {
         dev->data.video->type = VIR_DOMAIN_VIDEO_TYPE_GOP;
+    }
+
+    if (dev->type == VIR_DOMAIN_DEVICE_CHR &&
+        dev->data.chr->source->type == VIR_DOMAIN_CHR_TYPE_NMDM) {
+        virDomainChrDef *chr = dev->data.chr;
+
+        if (!chr->source->data.nmdm.master) {
+            char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+            virUUIDFormat(def->uuid, uuidstr);
+
+            chr->source->data.nmdm.master = g_strdup_printf("/dev/nmdm%sA", uuidstr);
+            chr->source->data.nmdm.slave = g_strdup_printf("/dev/nmdm%sB", uuidstr);
+        }
     }
 
     return 0;
@@ -181,26 +213,52 @@ bhyveDomainDefAssignAddresses(virDomainDef *def,
     return 0;
 }
 
-virDomainXMLOptionPtr
-virBhyveDriverCreateXMLConf(bhyveConnPtr driver)
+virDomainXMLOption *
+virBhyveDriverCreateXMLConf(struct _bhyveConn *driver)
 {
+    virDomainXMLOption *ret = NULL;
+
     virBhyveDriverDomainDefParserConfig.priv = driver;
-    return virDomainXMLOptionNew(&virBhyveDriverDomainDefParserConfig,
-                                 &virBhyveDriverPrivateDataCallbacks,
-                                 &virBhyveDriverDomainXMLNamespace,
-                                 NULL, NULL);
+
+    ret = virDomainXMLOptionNew(&virBhyveDriverDomainDefParserConfig,
+                                &virBhyveDriverPrivateDataCallbacks,
+                                &virBhyveDriverDomainXMLNamespace,
+                                NULL, NULL, NULL);
+
+    virDomainXMLOptionSetCloseCallbackAlloc(ret, virCloseCallbacksDomainAlloc);
+
+    return ret;
+}
+
+
+static int
+bhyveDomainDeviceDefValidate(const virDomainDeviceDef *dev,
+                             const virDomainDef *def G_GNUC_UNUSED,
+                             void *opaque G_GNUC_UNUSED,
+                             void *parseOpaque G_GNUC_UNUSED)
+{
+    if (dev->type == VIR_DOMAIN_DEVICE_CONTROLLER &&
+        dev->data.controller->type == VIR_DOMAIN_CONTROLLER_TYPE_ISA &&
+        dev->data.controller->idx != 0) {
+        return -1;
+    }
+
+    return 0;
 }
 
 virDomainDefParserConfig virBhyveDriverDomainDefParserConfig = {
     .devicesPostParseCallback = bhyveDomainDeviceDefPostParse,
     .domainPostParseCallback = bhyveDomainDefPostParse,
     .assignAddressesCallback = bhyveDomainDefAssignAddresses,
+    .deviceValidateCallback = bhyveDomainDeviceDefValidate,
+
+    .features = VIR_DOMAIN_DEF_FEATURE_FW_AUTOSELECT,
 };
 
 static void
 bhyveDomainDefNamespaceFree(void *nsdata)
 {
-    bhyveDomainCmdlineDefPtr cmd = nsdata;
+    bhyveDomainCmdlineDef *cmd = nsdata;
 
     bhyveDomainCmdlineDefFree(cmd);
 }
@@ -209,14 +267,13 @@ static int
 bhyveDomainDefNamespaceParse(xmlXPathContextPtr ctxt,
                              void **data)
 {
-    bhyveDomainCmdlineDefPtr cmd = NULL;
+    bhyveDomainCmdlineDef *cmd = NULL;
     xmlNodePtr *nodes = NULL;
     int n;
     size_t i;
     int ret = -1;
 
-    if (VIR_ALLOC(cmd) < 0)
-        return -1;
+    cmd = g_new0(bhyveDomainCmdlineDef, 1);
 
     n = virXPathNodeSet("./bhyve:commandline/bhyve:arg", ctxt, &nodes);
     if (n == 0)
@@ -224,8 +281,7 @@ bhyveDomainDefNamespaceParse(xmlXPathContextPtr ctxt,
     if (n <= 0)
         goto cleanup;
 
-    if (VIR_ALLOC_N(cmd->args, n) < 0)
-        goto cleanup;
+    cmd->args = g_new0(char *, n);
 
     for (i = 0; i < n; i++) {
         cmd->args[cmd->num_args] = virXMLPropString(nodes[i], "value");
@@ -248,10 +304,10 @@ bhyveDomainDefNamespaceParse(xmlXPathContextPtr ctxt,
 }
 
 static int
-bhyveDomainDefNamespaceFormatXML(virBufferPtr buf,
+bhyveDomainDefNamespaceFormatXML(virBuffer *buf,
                                  void *nsdata)
 {
-    bhyveDomainCmdlineDefPtr cmd = nsdata;
+    bhyveDomainCmdlineDef *cmd = nsdata;
     size_t i;
 
     if (!cmd->num_args)

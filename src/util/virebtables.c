@@ -23,10 +23,7 @@
 
 #include "internal.h"
 #include "virebtables.h"
-#include "viralloc.h"
-#include "virerror.h"
 #include "virlog.h"
-#include "virstring.h"
 #include "virfirewall.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -55,8 +52,7 @@ ebtablesContextNew(const char *driver)
 {
     ebtablesContext *ctx = NULL;
 
-    if (VIR_ALLOC(ctx) < 0)
-        return NULL;
+    ctx = g_new0(ebtablesContext, 1);
 
     ctx->chain = g_strdup_printf("libvirt_%s_FORWARD", driver);
 
@@ -74,18 +70,16 @@ ebtablesContextFree(ebtablesContext *ctx)
 {
     if (!ctx)
         return;
-    VIR_FREE(ctx->chain);
-    VIR_FREE(ctx);
+    g_free(ctx->chain);
+    g_free(ctx);
 }
 
 
 int
 ebtablesAddForwardPolicyReject(ebtablesContext *ctx)
 {
-    virFirewallPtr fw = NULL;
-    int ret = -1;
+    g_autoptr(virFirewall) fw = virFirewallNew();
 
-    fw = virFirewallNew();
     virFirewallStartTransaction(fw, VIR_FIREWALL_TRANSACTION_IGNORE_ERRORS);
     virFirewallAddRule(fw, VIR_FIREWALL_LAYER_ETHERNET,
                        "--new-chain", ctx->chain,
@@ -99,13 +93,7 @@ ebtablesAddForwardPolicyReject(ebtablesContext *ctx)
                        "-P", ctx->chain, "DROP",
                        NULL);
 
-    if (virFirewallApply(fw) < 0)
-        goto cleanup;
-
-    ret = 0;
- cleanup:
-    virFirewallFree(fw);
-    return ret;
+    return virFirewallApply(fw);
 }
 
 
@@ -118,10 +106,8 @@ ebtablesForwardAllowIn(ebtablesContext *ctx,
                        const char *macaddr,
                        int action)
 {
-    virFirewallPtr fw = NULL;
-    int ret = -1;
+    g_autoptr(virFirewall) fw = virFirewallNew();
 
-    fw = virFirewallNew();
     virFirewallStartTransaction(fw, 0);
     virFirewallAddRule(fw, VIR_FIREWALL_LAYER_ETHERNET,
                        action == ADD ? "--insert" : "--delete",
@@ -131,13 +117,7 @@ ebtablesForwardAllowIn(ebtablesContext *ctx,
                        "--jump", "ACCEPT",
                        NULL);
 
-    if (virFirewallApply(fw) < 0)
-        goto cleanup;
-
-    ret = 0;
- cleanup:
-    virFirewallFree(fw);
-    return ret;
+    return virFirewallApply(fw);
 }
 
 /**

@@ -8,54 +8,44 @@
 #include "internal.h"
 #include "testutils.h"
 #include "interface_conf.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 static int
 testCompareXMLToXMLFiles(const char *xml)
 {
-    char *xmlData = NULL;
-    char *actual = NULL;
-    int ret = -1;
-    virInterfaceDefPtr dev = NULL;
+    g_autofree char *xmlData = NULL;
+    g_autofree char *actual = NULL;
+    g_autoptr(virInterfaceDef) dev = NULL;
 
     if (virTestLoadFile(xml, &xmlData) < 0)
-        goto fail;
+        return -1;
 
-    if (!(dev = virInterfaceDefParseString(xmlData)))
-        goto fail;
+    if (!(dev = virInterfaceDefParseString(xmlData, 0)))
+        return -1;
 
     if (!(actual = virInterfaceDefFormat(dev)))
-        goto fail;
+        return -1;
 
     if (STRNEQ(xmlData, actual)) {
         virTestDifferenceFull(stderr, xmlData, xml, actual, NULL);
-        goto fail;
+        return -1;
     }
 
-    ret = 0;
-
- fail:
-    VIR_FREE(xmlData);
-    VIR_FREE(actual);
-    virInterfaceDefFree(dev);
-    return ret;
+    return 0;
 }
 
 static int
 testCompareXMLToXMLHelper(const void *data)
 {
     int result = -1;
-    char *xml = NULL;
+    g_autofree char *xml = NULL;
 
     xml = g_strdup_printf("%s/interfaceschemadata/%s.xml", abs_srcdir,
                           (const char *)data);
 
     result = testCompareXMLToXMLFiles(xml);
 
-    VIR_FREE(xml);
     return result;
 }
 

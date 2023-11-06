@@ -22,16 +22,15 @@
 
 #include "internal.h"
 
-#include "logging/log_protocol.h"
-
 typedef struct _virLogManager virLogManager;
-typedef virLogManager *virLogManagerPtr;
 
-virLogManagerPtr virLogManagerNew(bool privileged);
+virLogManager *virLogManagerNew(bool privileged);
 
-void virLogManagerFree(virLogManagerPtr mgr);
+void virLogManagerFree(virLogManager *mgr);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virLogManager, virLogManagerFree);
 
-int virLogManagerDomainOpenLogFile(virLogManagerPtr mgr,
+
+int virLogManagerDomainOpenLogFile(virLogManager *mgr,
                                    const char *driver,
                                    const unsigned char *domuuid,
                                    const char *domname,
@@ -40,20 +39,20 @@ int virLogManagerDomainOpenLogFile(virLogManagerPtr mgr,
                                    ino_t *inode,
                                    off_t *offset);
 
-int virLogManagerDomainGetLogFilePosition(virLogManagerPtr mgr,
+int virLogManagerDomainGetLogFilePosition(virLogManager *mgr,
                                           const char *path,
                                           unsigned int flags,
                                           ino_t *inode,
                                           off_t *offset);
 
-char *virLogManagerDomainReadLogFile(virLogManagerPtr mgr,
+char *virLogManagerDomainReadLogFile(virLogManager *mgr,
                                      const char *path,
                                      ino_t inode,
                                      off_t offset,
                                      size_t maxlen,
                                      unsigned int flags);
 
-int virLogManagerDomainAppendMessage(virLogManagerPtr mgr,
+int virLogManagerDomainAppendMessage(virLogManager *mgr,
                                      const char *driver,
                                      const unsigned char *domuuid,
                                      const char *domname,

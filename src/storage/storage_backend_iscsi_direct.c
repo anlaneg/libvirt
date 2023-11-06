@@ -27,13 +27,13 @@
 #include "virsecret.h"
 #include "storage_backend_iscsi_direct.h"
 #include "storage_util.h"
-#include "viralloc.h"
 #include "virerror.h"
+#include "viridentity.h"
 #include "virlog.h"
 #include "virobject.h"
 #include "virstring.h"
 #include "virtime.h"
-#include "viruuid.h"
+#include "virsecureerase.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -52,13 +52,13 @@ virISCSIDirectCreateContext(const char* initiator_iqn)
     iscsi = iscsi_create_context(initiator_iqn);
     if (!iscsi)
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to create iscsi context for %s"),
+                       _("Failed to create iscsi context for %1$s"),
                        initiator_iqn);
     return iscsi;
 }
 
 static char *
-virStorageBackendISCSIDirectPortal(virStoragePoolSourcePtr source)
+virStorageBackendISCSIDirectPortal(virStoragePoolSource *source)
 {
     char *portal = NULL;
 
@@ -85,13 +85,14 @@ virStorageBackendISCSIDirectPortal(virStoragePoolSourcePtr source)
 
 static int
 virStorageBackendISCSIDirectSetAuth(struct iscsi_context *iscsi,
-                                    virStoragePoolSourcePtr source)
+                                    virStoragePoolSource *source)
 {
-    unsigned char *secret_value = NULL;
+    g_autofree unsigned char *secret_value = NULL;
     size_t secret_size;
-    virStorageAuthDefPtr authdef = source->auth;
-    int ret = -1;
-    virConnectPtr conn = NULL;
+    g_autofree char *secret_str = NULL;
+    virStorageAuthDef *authdef = source->auth;
+    g_autoptr(virConnect) conn = NULL;
+    VIR_IDENTITY_AUTORESTORE virIdentity *oldident = NULL;
 
     if (!authdef || authdef->authType == VIR_STORAGE_AUTH_TYPE_NONE)
         return 0;
@@ -102,36 +103,34 @@ virStorageBackendISCSIDirectSetAuth(struct iscsi_context *iscsi,
     if (authdef->authType != VIR_STORAGE_AUTH_TYPE_CHAP) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("iscsi-direct pool only supports 'chap' auth type"));
-        return ret;
+        return -1;
     }
 
+    if (!(oldident = virIdentityElevateCurrent()))
+        return -1;
+
     if (!(conn = virGetConnectSecret()))
-        return ret;
+        return -1;
 
     if (virSecretGetSecretString(conn, &authdef->seclookupdef,
                                  VIR_SECRET_USAGE_TYPE_ISCSI,
                                  &secret_value, &secret_size) < 0)
-        goto cleanup;
+        return -1;
 
-    if (VIR_REALLOC_N(secret_value, secret_size + 1) < 0)
-        goto cleanup;
-
-    secret_value[secret_size] = '\0';
+    secret_str = g_strndup((char *)secret_value, secret_size);
+    virSecureErase(secret_value, secret_size);
 
     if (iscsi_set_initiator_username_pwd(iscsi,
-                                         authdef->username,
-                                         (const char *)secret_value) < 0) {
+                                         authdef->username, secret_str) < 0) {
+        virSecureErase(secret_str, secret_size);
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to set credential: %s"),
+                       _("Failed to set credential: %1$s"),
                        iscsi_get_error(iscsi));
-        goto cleanup;
+        return -1;
     }
+    virSecureErase(secret_str, secret_size);
 
-    ret = 0;
- cleanup:
-    VIR_DISPOSE_N(secret_value, secret_size);
-    virObjectUnref(conn);
-    return ret;
+    return 0;
 }
 
 static int
@@ -141,21 +140,21 @@ virISCSIDirectSetContext(struct iscsi_context *iscsi,
 {
     if (iscsi_init_transport(iscsi, TCP_TRANSPORT) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to init transport: %s"),
+                       _("Failed to init transport: %1$s"),
                        iscsi_get_error(iscsi));
         return -1;
     }
     if (session == ISCSI_SESSION_NORMAL) {
         if (iscsi_set_targetname(iscsi, target_name) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to set target name: %s"),
+                           _("Failed to set target name: %1$s"),
                            iscsi_get_error(iscsi));
             return -1;
         }
     }
     if (iscsi_set_session_type(iscsi, session) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to set session type: %s"),
+                       _("Failed to set session type: %1$s"),
                        iscsi_get_error(iscsi));
         return -1;
     }
@@ -168,13 +167,13 @@ virISCSIDirectConnect(struct iscsi_context *iscsi,
 {
     if (iscsi_connect_sync(iscsi, portal) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to connect: %s"),
+                       _("Failed to connect: %1$s"),
                        iscsi_get_error(iscsi));
         return -1;
     }
     if (iscsi_login_sync(iscsi) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to login: %s"),
+                       _("Failed to login: %1$s"),
                        iscsi_get_error(iscsi));
         return -1;
     }
@@ -196,7 +195,7 @@ virISCSIDirectTestUnitReady(struct iscsi_context *iscsi,
     do {
         if (!(task = iscsi_testunitready_sync(iscsi, lun))) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed testunitready: %s"),
+                           _("Failed testunitready: %1$s"),
                            iscsi_get_error(iscsi));
             goto cleanup;
         }
@@ -211,7 +210,7 @@ virISCSIDirectTestUnitReady(struct iscsi_context *iscsi,
 
     if (task->status != SCSI_STATUS_GOOD) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed testunitready: %s"),
+                       _("Failed testunitready: %1$s"),
                        iscsi_get_error(iscsi));
         goto cleanup;
     }
@@ -223,12 +222,12 @@ virISCSIDirectTestUnitReady(struct iscsi_context *iscsi,
 }
 
 static int
-virISCSIDirectSetVolumeAttributes(virStoragePoolObjPtr pool,
-                                  virStorageVolDefPtr vol,
+virISCSIDirectSetVolumeAttributes(virStoragePoolObj *pool,
+                                  virStorageVolDef *vol,
                                   int lun,
                                   char *portal)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
 
     vol->name = g_strdup_printf("%s%u", VOL_NAME_PREFIX, lun);
     vol->key = g_strdup_printf("ip-%s-iscsi-%s-lun-%u", portal,
@@ -251,14 +250,14 @@ virISCSIDirectGetVolumeCapacity(struct iscsi_context *iscsi,
     if (!(task = iscsi_inquiry_sync(iscsi, lun, 0, 0, 64)) ||
         task->status != SCSI_STATUS_GOOD) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to send inquiry command: %s"),
+                       _("Failed to send inquiry command: %1$s"),
                        iscsi_get_error(iscsi));
         goto cleanup;
     }
 
     if (!(inq = scsi_datain_unmarshall(task))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to unmarshall reply: %s"),
+                       _("Failed to unmarshall reply: %1$s"),
                        iscsi_get_error(iscsi));
         goto cleanup;
     }
@@ -266,20 +265,19 @@ virISCSIDirectGetVolumeCapacity(struct iscsi_context *iscsi,
     if (inq->device_type == SCSI_INQUIRY_PERIPHERAL_DEVICE_TYPE_DIRECT_ACCESS) {
         struct scsi_readcapacity16 *rc16 = NULL;
 
-        scsi_free_scsi_task(task);
-        task = NULL;
+        g_clear_pointer(&task, scsi_free_scsi_task);
 
         if (!(task = iscsi_readcapacity16_sync(iscsi, lun)) ||
             task->status != SCSI_STATUS_GOOD) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to get capacity of lun: %s"),
+                           _("Failed to get capacity of lun: %1$s"),
                            iscsi_get_error(iscsi));
             goto cleanup;
         }
 
         if (!(rc16 = scsi_datain_unmarshall(task))) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to unmarshall reply: %s"),
+                           _("Failed to unmarshall reply: %1$s"),
                            iscsi_get_error(iscsi));
             goto cleanup;
         }
@@ -296,21 +294,20 @@ virISCSIDirectGetVolumeCapacity(struct iscsi_context *iscsi,
 }
 
 static int
-virISCSIDirectRefreshVol(virStoragePoolObjPtr pool,
+virISCSIDirectRefreshVol(virStoragePoolObj *pool,
                          struct iscsi_context *iscsi,
                          int lun,
                          char *portal)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    uint32_t block_size;
-    uint64_t nb_block;
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
+    uint32_t block_size = 0;
+    uint64_t nb_block = 0;
     g_autoptr(virStorageVolDef) vol = NULL;
 
     if (virISCSIDirectTestUnitReady(iscsi, lun) < 0)
         return -1;
 
-    if (VIR_ALLOC(vol) < 0)
-        return -1;
+    vol = g_new0(virStorageVolDef, 1);
 
     vol->type = VIR_STORAGE_VOL_NETWORK;
 
@@ -333,11 +330,11 @@ virISCSIDirectRefreshVol(virStoragePoolObjPtr pool,
 }
 
 static int
-virISCSIDirectReportLuns(virStoragePoolObjPtr pool,
+virISCSIDirectReportLuns(virStoragePoolObj *pool,
                          struct iscsi_context *iscsi,
                          char *portal)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     struct scsi_task *task = NULL;
     struct scsi_reportluns_list *list = NULL;
     int full_size;
@@ -346,7 +343,7 @@ virISCSIDirectReportLuns(virStoragePoolObjPtr pool,
 
     if (!(task = iscsi_reportluns_sync(iscsi, 0, 16))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to reportluns: %s"),
+                       _("Failed to reportluns: %1$s"),
                        iscsi_get_error(iscsi));
         goto cleanup;
     }
@@ -357,7 +354,7 @@ virISCSIDirectReportLuns(virStoragePoolObjPtr pool,
         scsi_free_scsi_task(task);
         if (!(task = iscsi_reportluns_sync(iscsi, 0, full_size))) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to reportluns: %s"),
+                           _("Failed to reportluns: %1$s"),
                            iscsi_get_error(iscsi));
             goto cleanup;
         }
@@ -365,7 +362,7 @@ virISCSIDirectReportLuns(virStoragePoolObjPtr pool,
 
     if (!(list = scsi_datain_unmarshall(task))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to unmarshall reportluns: %s"),
+                       _("Failed to unmarshall reportluns: %1$s"),
                        iscsi_get_error(iscsi));
         goto cleanup;
     }
@@ -386,19 +383,28 @@ virISCSIDirectReportLuns(virStoragePoolObjPtr pool,
 static int
 virISCSIDirectDisconnect(struct iscsi_context *iscsi)
 {
+    virErrorPtr orig_err;
+    int ret = -1;
+
+    virErrorPreserveLast(&orig_err);
+
     if (iscsi_logout_sync(iscsi) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to logout: %s"),
+                       _("Failed to logout: %1$s"),
                        iscsi_get_error(iscsi));
-        return -1;
+        goto cleanup;
     }
     if (iscsi_disconnect(iscsi) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to disconnect: %s"),
+                       _("Failed to disconnect: %1$s"),
                        iscsi_get_error(iscsi));
-        return -1;
+        goto cleanup;
     }
-    return 0;
+
+    ret = 0;
+ cleanup:
+    virErrorRestore(&orig_err);
+    return ret;
 }
 
 static int
@@ -406,37 +412,30 @@ virISCSIDirectUpdateTargets(struct iscsi_context *iscsi,
                             size_t *ntargets,
                             char ***targets)
 {
-    int ret = -1;
     struct iscsi_discovery_address *addr;
     struct iscsi_discovery_address *tmp_addr;
-    size_t tmp_ntargets = 0;
-    char **tmp_targets = NULL;
+    size_t i = 0;
+
+    *ntargets = 0;
 
     if (!(addr = iscsi_discovery_sync(iscsi))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to discover session: %s"),
+                       _("Failed to discover session: %1$s"),
                        iscsi_get_error(iscsi));
-        return ret;
+        return -1;
     }
 
-    for (tmp_addr = addr; tmp_addr; tmp_addr = tmp_addr->next) {
-        g_autofree char *target = NULL;
+    for (tmp_addr = addr; tmp_addr; tmp_addr = tmp_addr->next)
+        (*ntargets)++;
 
-        target = g_strdup(tmp_addr->target_name);
+    *targets = g_new0(char *, *ntargets + 1);
 
-        if (VIR_APPEND_ELEMENT(tmp_targets, tmp_ntargets, target) < 0)
-            goto cleanup;
-    }
+    for (tmp_addr = addr; tmp_addr; tmp_addr = tmp_addr->next)
+        *targets[i++] = g_strdup(tmp_addr->target_name);
 
-    *targets = g_steal_pointer(&tmp_targets);
-    *ntargets = tmp_ntargets;
-    tmp_ntargets = 0;
-
-    ret = 0;
- cleanup:
     iscsi_free_discovery_data(iscsi, addr);
-    virStringListFreeCount(tmp_targets, tmp_ntargets);
-    return ret;
+
+    return 0;
 }
 
 static int
@@ -466,7 +465,7 @@ virISCSIDirectScanTargets(char *initiator_iqn,
 }
 
 static int
-virStorageBackendISCSIDirectCheckPool(virStoragePoolObjPtr pool,
+virStorageBackendISCSIDirectCheckPool(virStoragePoolObj *pool,
                                       bool *isActive)
 {
     *isActive = virStoragePoolObjIsActive(pool);
@@ -478,18 +477,15 @@ virStorageBackendISCSIDirectFindPoolSources(const char *srcSpec,
                                             unsigned int flags)
 {
     size_t ntargets = 0;
-    char **targets = NULL;
-    char *ret = NULL;
+    g_auto(GStrv) targets = NULL;
     size_t i;
-    virStoragePoolSourceList list = {
-        .type = VIR_STORAGE_POOL_ISCSI_DIRECT,
-        .nsources = 0,
-        .sources = NULL
-    };
+    g_autoptr(virStoragePoolSourceList) list = g_new0(virStoragePoolSourceList, 1);
     g_autofree char *portal = NULL;
     g_autoptr(virStoragePoolSource) source = NULL;
 
     virCheckFlags(0, NULL);
+
+    list->type = VIR_STORAGE_POOL_ISCSI_DIRECT;
 
     if (!srcSpec) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
@@ -497,64 +493,53 @@ virStorageBackendISCSIDirectFindPoolSources(const char *srcSpec,
         return NULL;
     }
 
-    if (!(source = virStoragePoolDefParseSourceString(srcSpec, list.type)))
+    if (!(source = virStoragePoolDefParseSourceString(srcSpec, list->type)))
         return NULL;
 
     if (source->nhost != 1) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("Expected exactly 1 host for the storage pool"));
-        goto cleanup;
+        return NULL;
     }
 
     if (!source->initiator.iqn) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("missing initiator IQN"));
-        goto cleanup;
+        return NULL;
     }
 
     if (!(portal = virStorageBackendISCSIDirectPortal(source)))
-        goto cleanup;
+        return NULL;
 
     if (virISCSIDirectScanTargets(source->initiator.iqn, portal, &ntargets, &targets) < 0)
-        goto cleanup;
+        return NULL;
 
-    if (VIR_ALLOC_N(list.sources, ntargets) < 0)
-        goto cleanup;
+    list->sources = g_new0(virStoragePoolSource, ntargets);
 
     for (i = 0; i < ntargets; i++) {
-        if (VIR_ALLOC_N(list.sources[i].devices, 1) < 0 ||
-            VIR_ALLOC_N(list.sources[i].hosts, 1) < 0)
-            goto cleanup;
-        list.sources[i].nhost = 1;
-        list.sources[i].hosts[0] = source->hosts[0];
-        list.sources[i].initiator = source->initiator;
-        list.sources[i].ndevice = 1;
-        list.sources[i].devices[0].path = targets[i];
-        list.nsources++;
+        list->sources[i].hosts = g_new0(virStoragePoolSourceHost, 1);
+        list->sources[i].nhost = 1;
+        list->sources[i].hosts[0].name = g_strdup(source->hosts[0].name);
+        list->sources[i].hosts[0].port = source->hosts[0].port;
+
+        virStorageSourceInitiatorCopy(&list->sources[i].initiator,
+                                      &source->initiator);
+
+        list->sources[i].devices = g_new0(virStoragePoolSourceDevice, 1);
+        list->sources[i].ndevice = 1;
+        list->sources[i].devices[0].path = g_strdup(targets[i]);
+
+        list->nsources++;
     }
 
-    if (!(ret = virStoragePoolSourceListFormat(&list)))
-        goto cleanup;
-
- cleanup:
-    if (list.sources) {
-        for (i = 0; i < ntargets; i++) {
-            VIR_FREE(list.sources[i].hosts);
-            VIR_FREE(list.sources[i].devices);
-        }
-        VIR_FREE(list.sources);
-    }
-    for (i = 0; i < ntargets; i++)
-        VIR_FREE(targets[i]);
-    VIR_FREE(targets);
-    return ret;
+    return virStoragePoolSourceListFormat(list);
 }
 
 static struct iscsi_context *
-virStorageBackendISCSIDirectSetConnection(virStoragePoolObjPtr pool,
+virStorageBackendISCSIDirectSetConnection(virStoragePoolObj *pool,
                                           char **portalRet)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     struct iscsi_context *iscsi = NULL;
     g_autofree char *portal = NULL;
 
@@ -580,7 +565,7 @@ virStorageBackendISCSIDirectSetConnection(virStoragePoolObjPtr pool,
 }
 
 static int
-virStorageBackendISCSIDirectRefreshPool(virStoragePoolObjPtr pool)
+virStorageBackendISCSIDirectRefreshPool(virStoragePoolObj *pool)
 {
     struct iscsi_context *iscsi = NULL;
     int ret = -1;
@@ -595,7 +580,7 @@ virStorageBackendISCSIDirectRefreshPool(virStoragePoolObjPtr pool)
 }
 
 static int
-virStorageBackendISCSIDirectGetLun(virStorageVolDefPtr vol,
+virStorageBackendISCSIDirectGetLun(virStorageVolDef *vol,
                                    int *lun)
 {
     const char *name;
@@ -603,7 +588,7 @@ virStorageBackendISCSIDirectGetLun(virStorageVolDefPtr vol,
     if (!(name = STRSKIP(vol->name, VOL_NAME_PREFIX)) ||
         virStrToLong_i(name, NULL, 10, lun) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Invalid volume name %s"), vol->name);
+                       _("Invalid volume name %1$s"), vol->name);
         return -1;
     }
 
@@ -611,12 +596,12 @@ virStorageBackendISCSIDirectGetLun(virStorageVolDefPtr vol,
 }
 
 static int
-virStorageBackendISCSIDirectVolWipeZero(virStorageVolDefPtr vol,
+virStorageBackendISCSIDirectVolWipeZero(virStorageVolDef *vol,
                                         struct iscsi_context *iscsi)
 {
     uint64_t lba = 0;
-    uint32_t block_size;
-    uint64_t nb_block;
+    uint32_t block_size = 0;
+    uint64_t nb_block = 0;
     struct scsi_task *task = NULL;
     int lun = 0;
     int ret = -1;
@@ -628,8 +613,7 @@ virStorageBackendISCSIDirectVolWipeZero(virStorageVolDefPtr vol,
         return ret;
     if (virISCSIDirectGetVolumeCapacity(iscsi, lun, &block_size, &nb_block))
         return ret;
-    if (VIR_ALLOC_N(data, block_size * BLOCK_PER_PACKET))
-        return ret;
+    data = g_new0(unsigned char, block_size * BLOCK_PER_PACKET);
 
     while (lba < nb_block) {
         const uint64_t to_write = MIN(nb_block - lba + 1, BLOCK_PER_PACKET);
@@ -641,7 +625,7 @@ virStorageBackendISCSIDirectVolWipeZero(virStorageVolDefPtr vol,
         if (!task ||
             task->status != SCSI_STATUS_GOOD) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("failed to write to LUN %d: %s"),
+                           _("failed to write to LUN %1$d: %2$s"),
                            lun, iscsi_get_error(iscsi));
             scsi_free_scsi_task(task);
             return -1;
@@ -655,8 +639,8 @@ virStorageBackendISCSIDirectVolWipeZero(virStorageVolDefPtr vol,
 }
 
 static int
-virStorageBackenISCSIDirectWipeVol(virStoragePoolObjPtr pool,
-                                   virStorageVolDefPtr vol,
+virStorageBackenISCSIDirectWipeVol(virStoragePoolObj *pool,
+                                   virStorageVolDef *vol,
                                    unsigned int algorithm,
                                    unsigned int flags)
 {
@@ -687,7 +671,7 @@ virStorageBackenISCSIDirectWipeVol(virStoragePoolObjPtr pool,
     case VIR_STORAGE_VOL_WIPE_ALG_PFITZNER33:
     case VIR_STORAGE_VOL_WIPE_ALG_RANDOM:
     case VIR_STORAGE_VOL_WIPE_ALG_LAST:
-        virReportError(VIR_ERR_INVALID_ARG, _("unsupported algorithm %d"),
+        virReportError(VIR_ERR_INVALID_ARG, _("unsupported algorithm %1$d"),
                        algorithm);
         goto cleanup;
     }

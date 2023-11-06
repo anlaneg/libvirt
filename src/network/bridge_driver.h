@@ -22,30 +22,19 @@
 #pragma once
 
 #include "internal.h"
-#include "domain_conf.h"
-#include "vircommand.h"
 #include "virdnsmasq.h"
 #include "virnetworkobj.h"
 
-extern virXMLNamespace networkDnsmasqXMLNamespace;
-
-typedef struct _networkDnsmasqXmlNsDef networkDnsmasqXmlNsDef;
-typedef networkDnsmasqXmlNsDef *networkDnsmasqXmlNsDefPtr;
-struct _networkDnsmasqXmlNsDef {
-    size_t noptions;
-    char **options;
-};
-
-virNetworkXMLOptionPtr
+virNetworkXMLOption *
 networkDnsmasqCreateXMLConf(void);
 
 int
 networkRegister(void);
 
 int
-networkDnsmasqConfContents(virNetworkObjPtr obj,
+networkDnsmasqConfContents(virNetworkObj *obj,
                            const char *pidfile,
                            char **configstr,
                            char **hostsfilestr,
                            dnsmasqContext *dctx,
-                           dnsmasqCapsPtr caps);
+                           dnsmasqCaps *caps);

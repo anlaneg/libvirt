@@ -27,19 +27,19 @@
 
 
 typedef struct _testQemuData testQemuData;
-typedef testQemuData *testQemuDataPtr;
 struct _testQemuData {
     const char *inputDir;
     const char *outputDir;
     const char *prefix;
     const char *version;
     const char *archName;
+    const char *variant;
     const char *suffix;
     int ret;
 };
 
 static int
-testQemuDataInit(testQemuDataPtr data)
+testQemuDataInit(testQemuData *data)
 {
     data->outputDir = abs_srcdir "/qemucaps2xmloutdata";
 
@@ -48,58 +48,45 @@ testQemuDataInit(testQemuDataPtr data)
     return 0;
 }
 
-static virQEMUCapsPtr
+static virQEMUCaps *
 testQemuGetCaps(char *caps)
 {
-    virQEMUCapsPtr qemuCaps = NULL;
-    xmlDocPtr xml;
-    xmlXPathContextPtr ctxt = NULL;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     ssize_t i, n;
-    xmlNodePtr *nodes = NULL;
+    g_autofree xmlNodePtr *nodes = NULL;
 
     if (!(xml = virXMLParseStringCtxt(caps, "(test caps)", &ctxt)))
-        goto error;
+        return NULL;
 
     if ((n = virXPathNodeSet("/qemuCaps/flag", ctxt, &nodes)) < 0) {
         fprintf(stderr, "failed to parse qemu capabilities flags");
-        goto error;
+        return NULL;
     }
 
-    if (!(qemuCaps = virQEMUCapsNew()))
-        goto error;
+    qemuCaps = virQEMUCapsNew();
 
     for (i = 0; i < n; i++) {
-        char *str = virXMLPropString(nodes[i], "name");
+        g_autofree char *str = virXMLPropString(nodes[i], "name");
         if (str) {
             int flag = virQEMUCapsTypeFromString(str);
             if (flag < 0) {
                 fprintf(stderr, "Unknown qemu capabilities flag %s", str);
-                VIR_FREE(str);
-                goto error;
+                return NULL;
             }
-            VIR_FREE(str);
             virQEMUCapsSet(qemuCaps, flag);
         }
     }
 
-    VIR_FREE(nodes);
-    xmlFreeDoc(xml);
-    xmlXPathFreeContext(ctxt);
-    return qemuCaps;
-
- error:
-    VIR_FREE(nodes);
-    virObjectUnref(qemuCaps);
-    xmlFreeDoc(xml);
-    xmlXPathFreeContext(ctxt);
-    return NULL;
+    return g_steal_pointer(&qemuCaps);
 }
 
-static virCapsPtr
+static virCaps *
 testGetCaps(char *capsData, const testQemuData *data)
 {
-    virQEMUCapsPtr qemuCaps = NULL;
-    virCapsPtr caps = NULL;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
+    g_autoptr(virCaps) caps = NULL;
     virArch arch = virArchFromString(data->archName);
     g_autofree char *binary = NULL;
 
@@ -107,68 +94,49 @@ testGetCaps(char *capsData, const testQemuData *data)
 
     if ((qemuCaps = testQemuGetCaps(capsData)) == NULL) {
         fprintf(stderr, "failed to parse qemu capabilities flags");
-        goto error;
+        return NULL;
     }
 
     if ((caps = virCapabilitiesNew(arch, false, false)) == NULL) {
         fprintf(stderr, "failed to create the fake capabilities");
-        goto error;
+        return NULL;
     }
 
-    if (virQEMUCapsInitGuestFromBinary(caps,
-                                       binary,
-                                       qemuCaps,
-                                       arch) < 0) {
-        fprintf(stderr, "failed to create the capabilities from qemu");
-        goto error;
-    }
+    virQEMUCapsInitGuestFromBinary(caps, binary, qemuCaps, arch);
 
-    virObjectUnref(qemuCaps);
-    return caps;
-
- error:
-    virObjectUnref(qemuCaps);
-    virObjectUnref(caps);
-    return NULL;
+    return g_steal_pointer(&caps);
 }
 
 static int
 testQemuCapsXML(const void *opaque)
 {
-    int ret = -1;
     const testQemuData *data = opaque;
-    char *capsFile = NULL, *xmlFile = NULL;
-    char *capsData = NULL;
-    char *capsXml = NULL;
-    virCapsPtr capsProvided = NULL;
+    g_autofree char *capsFile = NULL;
+    g_autofree char *xmlFile = NULL;
+    g_autofree char *capsData = NULL;
+    g_autofree char *capsXml = NULL;
+    g_autoptr(virCaps) capsProvided = NULL;
 
-    xmlFile = g_strdup_printf("%s/caps.%s.xml", data->outputDir, data->archName);
+    xmlFile = g_strdup_printf("%s/caps.%s%s.xml", data->outputDir, data->archName, data->variant);
 
-    capsFile = g_strdup_printf("%s/%s_%s.%s.%s",
+    capsFile = g_strdup_printf("%s/%s_%s_%s%s.%s",
                                data->inputDir, data->prefix, data->version,
-                               data->archName, data->suffix);
+                               data->archName, data->variant, data->suffix);
 
     if (virTestLoadFile(capsFile, &capsData) < 0)
-        goto cleanup;
+        return -1;
 
     if (!(capsProvided = testGetCaps(capsData, data)))
-        goto cleanup;
+        return -1;
 
     capsXml = virCapabilitiesFormatXML(capsProvided);
     if (!capsXml)
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(capsXml, xmlFile) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    VIR_FREE(xmlFile);
-    VIR_FREE(capsFile);
-    VIR_FREE(capsXml);
-    VIR_FREE(capsData);
-    virObjectUnref(capsProvided);
-    return ret;
+    return 0;
 }
 
 static int
@@ -176,10 +144,11 @@ doCapsTest(const char *inputDir,
            const char *prefix,
            const char *version,
            const char *archName,
+           const char *variant,
            const char *suffix,
            void *opaque)
 {
-    testQemuDataPtr data = (testQemuDataPtr) opaque;
+    testQemuData *data = (testQemuData *) opaque;
     g_autofree char *title = NULL;
 
     title = g_strdup_printf("%s (%s)", version, archName);
@@ -188,6 +157,7 @@ doCapsTest(const char *inputDir,
     data->prefix = prefix;
     data->version = version;
     data->archName = archName;
+    data->variant = variant;
     data->suffix = suffix;
 
     if (virTestRun(title, testQemuCapsXML, data) < 0)

@@ -28,92 +28,74 @@
 #include "libxl/xen_xm.h"
 #include "testutils.h"
 #include "testutilsxen.h"
-#include "viralloc.h"
-#include "virstring.h"
 #include "libxl/libxl_conf.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-static libxlDriverPrivatePtr driver;
+static libxlDriverPrivate *driver;
 
 static int
 testCompareParseXML(const char *xmcfg, const char *xml)
 {
-    char *gotxmcfgData = NULL;
+    g_autofree char *gotxmcfgData = NULL;
     g_autoptr(virConf) conf = NULL;
-    int ret = -1;
-    virConnectPtr conn = NULL;
+    g_autoptr(virConnect) conn = NULL;
     int wrote = 4096;
-    virDomainDefPtr def = NULL;
+    g_autoptr(virDomainDef) def = NULL;
 
-    if (VIR_ALLOC_N(gotxmcfgData, wrote) < 0)
-        goto fail;
+    gotxmcfgData = g_new0(char, wrote);
 
     conn = virGetConnect();
-    if (!conn) goto fail;
+    if (!conn)
+        return -1;
 
     if (!(def = virDomainDefParseFile(xml, driver->xmlopt, NULL,
                                       VIR_DOMAIN_DEF_PARSE_INACTIVE)))
-        goto fail;
+        return -1;
 
     if (!virDomainDefCheckABIStability(def, def, driver->xmlopt)) {
         fprintf(stderr, "ABI stability check failed on %s", xml);
-        goto fail;
+        return -1;
     }
 
     if (!(conf = xenFormatXM(conn, def)))
-        goto fail;
+        return -1;
 
     if (virConfWriteMem(gotxmcfgData, &wrote, conf) < 0)
-        goto fail;
+        return -1;
     gotxmcfgData[wrote] = '\0';
 
     if (virTestCompareToFile(gotxmcfgData, xmcfg) < 0)
-        goto fail;
+        return -1;
 
-    ret = 0;
-
- fail:
-    VIR_FREE(gotxmcfgData);
-    virDomainDefFree(def);
-    virObjectUnref(conn);
-
-    return ret;
+    return 0;
 }
 
 static int
 testCompareFormatXML(const char *xmcfg, const char *xml)
 {
-    char *xmcfgData = NULL;
-    char *gotxml = NULL;
+    g_autofree char *xmcfgData = NULL;
+    g_autofree char *gotxml = NULL;
     g_autoptr(virConf) conf = NULL;
-    int ret = -1;
-    virDomainDefPtr def = NULL;
+    g_autoptr(virDomainDef) def = NULL;
     g_autoptr(libxlDriverConfig) cfg = libxlDriverConfigGet(driver);
 
     if (virTestLoadFile(xmcfg, &xmcfgData) < 0)
-        goto fail;
+        return -1;
 
     if (!(conf = virConfReadString(xmcfgData, 0)))
-        goto fail;
+        return -1;
 
     if (!(def = xenParseXM(conf, cfg->caps, driver->xmlopt)))
-        goto fail;
+        return -1;
 
     if (!(gotxml = virDomainDefFormat(def, driver->xmlopt, VIR_DOMAIN_DEF_FORMAT_SECURE)))
-        goto fail;
+        return -1;
 
     if (virTestCompareToFile(gotxml, xml) < 0)
-        goto fail;
+        return -1;
 
-    ret = 0;
-
- fail:
-    VIR_FREE(xmcfgData);
-    VIR_FREE(gotxml);
-    virDomainDefFree(def);
-
-    return ret;
+    return 0;
 }
 
 
@@ -127,8 +109,8 @@ testCompareHelper(const void *data)
 {
     int result = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *cfg = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *cfg = NULL;
 
     xml = g_strdup_printf("%s/xmconfigdata/test-%s.xml", abs_srcdir, info->name);
     cfg = g_strdup_printf("%s/xmconfigdata/test-%s.cfg", abs_srcdir, info->name);
@@ -137,9 +119,6 @@ testCompareHelper(const void *data)
         result = testCompareParseXML(cfg, xml);
     else
         result = testCompareFormatXML(cfg, xml);
-
-    VIR_FREE(xml);
-    VIR_FREE(cfg);
 
     return result;
 }
@@ -216,6 +195,7 @@ mymain(void)
     DO_TEST("escape-paths");
     DO_TEST("no-source-cdrom");
     DO_TEST("pci-devs");
+    DO_TEST_FORMAT("pci-dev-syntax");
 
     DO_TEST("disk-drv-blktap-raw");
     DO_TEST("disk-drv-blktap2-raw");

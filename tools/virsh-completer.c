@@ -21,8 +21,6 @@
 #include <config.h>
 
 #include "virsh-completer.h"
-#include "viralloc.h"
-#include "virstring.h"
 
 /**
  * A completer callback is a function that accepts three arguments:
@@ -58,6 +56,33 @@
 
 
 /**
+ * virshEnumComplete:
+ * @last: The number of element in enum (pass VIR_XXX_LAST)
+ * @intToStr: integer to string conversion (pass virXXXTypeToString)
+ *
+ * Convenient function to generate completions across all values
+ * of given enum. The enum, or values we want to generate, must
+ * start at 0 and be continuous until @last.
+ *
+ * Returns: string list of completions.
+ */
+char **
+virshEnumComplete(unsigned int last,
+                  const char *(*intToStr)(int))
+{
+    char **ret = NULL;
+    size_t i;
+
+    ret = g_new0(char *, last + 1);
+
+    for (i = 0; i < last; i++)
+        ret[i] = g_strdup(intToStr(i));
+
+    return ret;
+}
+
+
+/**
  * virshCommaStringListComplete:
  * @input: user input so far
  * @options: ALL options available for argument
@@ -66,7 +91,7 @@
  *
  *   virsh command --arg str1,str2,str3
  *
- * This does not play nicely with our completer funtions, because
+ * This does not play nicely with our completer functions, because
  * they have to return strings prepended with user's input. For
  * instance:
  *
@@ -87,10 +112,10 @@ char **
 virshCommaStringListComplete(const char *input,
                              const char **options)
 {
-    const size_t optionsLen = virStringListLength(options);
+    const size_t optionsLen = g_strv_length((char **) options);
     g_autofree char *inputCopy = NULL;
-    VIR_AUTOSTRINGLIST inputList = NULL;
-    VIR_AUTOSTRINGLIST ret = NULL;
+    g_auto(GStrv) inputList = NULL;
+    g_auto(GStrv) ret = NULL;
     size_t nret = 0;
     size_t i;
 
@@ -105,17 +130,17 @@ virshCommaStringListComplete(const char *input,
         if ((comma = strrchr(inputCopy, ',')))
             *comma = '\0';
         else
-            VIR_FREE(inputCopy);
+            g_clear_pointer(&inputCopy, g_free);
     }
 
-    if (inputCopy && !(inputList = virStringSplit(inputCopy, ",", 0)))
+    if (inputCopy && !(inputList = g_strsplit(inputCopy, ",", 0)))
         return NULL;
 
-    if (VIR_ALLOC_N(ret, optionsLen + 1) < 0)
-        return NULL;
+    ret = g_new0(char *, optionsLen + 1);
 
     for (i = 0; i < optionsLen; i++) {
-        if (virStringListHasString((const char **)inputList, options[i]))
+        if (inputList &&
+            g_strv_contains((const char **)inputList, options[i]))
             continue;
 
         if (inputCopy)
@@ -127,4 +152,39 @@ virshCommaStringListComplete(const char *input,
     }
 
     return g_steal_pointer(&ret);
+}
+
+
+/**
+ * virshCompletePathLocalExisting:
+ *
+ * Complete a path to a existing file used as input. The file is used as input
+ * for virsh so only local files are considered.
+ *
+ * Note: For now this is a no-op. Readline does the correct thing.
+ */
+char **
+virshCompletePathLocalExisting(vshControl *ctl G_GNUC_UNUSED,
+                               const vshCmd *cmd G_GNUC_UNUSED,
+                               unsigned int completerflags G_GNUC_UNUSED)
+{
+    return NULL;
+}
+
+
+/**
+ * virshCompleteEmpty:
+ *
+ * Complete nothing. For cases where an user input is required and we can't
+ * suggest anything.
+ *
+ * TODO: This is currently just an annotation, readline still completes local
+ * file list.
+ */
+char **
+virshCompleteEmpty(vshControl *ctl G_GNUC_UNUSED,
+                   const vshCmd *cmd G_GNUC_UNUSED,
+                   unsigned int completerflags G_GNUC_UNUSED)
+{
+    return NULL;
 }

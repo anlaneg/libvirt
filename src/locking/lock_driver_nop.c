@@ -22,9 +22,7 @@
 #include <config.h>
 
 #include "lock_driver_nop.h"
-#include "viralloc.h"
 #include "virlog.h"
-#include "viruuid.h"
 
 VIR_LOG_INIT("locking.lock_driver_nop");
 
@@ -47,27 +45,27 @@ static int virLockManagerNopDeinit(void)
 }
 
 
-static int virLockManagerNopNew(virLockManagerPtr lock G_GNUC_UNUSED,
+static int virLockManagerNopNew(virLockManager *lock G_GNUC_UNUSED,
                                 unsigned int type G_GNUC_UNUSED,
                                 size_t nparams G_GNUC_UNUSED,
-                                virLockManagerParamPtr params G_GNUC_UNUSED,
+                                virLockManagerParam *params G_GNUC_UNUSED,
                                 unsigned int flags_unused G_GNUC_UNUSED)
 {
     return 0;
 }
 
-static int virLockManagerNopAddResource(virLockManagerPtr lock G_GNUC_UNUSED,
+static int virLockManagerNopAddResource(virLockManager *lock G_GNUC_UNUSED,
                                         unsigned int type G_GNUC_UNUSED,
                                         const char *name G_GNUC_UNUSED,
                                         size_t nparams G_GNUC_UNUSED,
-                                        virLockManagerParamPtr params G_GNUC_UNUSED,
+                                        virLockManagerParam *params G_GNUC_UNUSED,
                                         unsigned int flags_unused G_GNUC_UNUSED)
 {
     return 0;
 }
 
 
-static int virLockManagerNopAcquire(virLockManagerPtr lock G_GNUC_UNUSED,
+static int virLockManagerNopAcquire(virLockManager *lock G_GNUC_UNUSED,
                                     const char *state G_GNUC_UNUSED,
                                     unsigned int flags_unused G_GNUC_UNUSED,
                                     virDomainLockFailureAction action G_GNUC_UNUSED,
@@ -76,7 +74,7 @@ static int virLockManagerNopAcquire(virLockManagerPtr lock G_GNUC_UNUSED,
     return 0;
 }
 
-static int virLockManagerNopRelease(virLockManagerPtr lock G_GNUC_UNUSED,
+static int virLockManagerNopRelease(virLockManager *lock G_GNUC_UNUSED,
                                     char **state,
                                     unsigned int flags_unused G_GNUC_UNUSED)
 {
@@ -86,7 +84,7 @@ static int virLockManagerNopRelease(virLockManagerPtr lock G_GNUC_UNUSED,
     return 0;
 }
 
-static int virLockManagerNopInquire(virLockManagerPtr lock G_GNUC_UNUSED,
+static int virLockManagerNopInquire(virLockManager *lock G_GNUC_UNUSED,
                                     char **state,
                                     unsigned int flags_unused G_GNUC_UNUSED)
 {
@@ -96,7 +94,7 @@ static int virLockManagerNopInquire(virLockManagerPtr lock G_GNUC_UNUSED,
     return 0;
 }
 
-static void virLockManagerNopFree(virLockManagerPtr lock G_GNUC_UNUSED)
+static void virLockManagerNopFree(virLockManager *lock G_GNUC_UNUSED)
 {
 }
 

@@ -17,16 +17,16 @@
         "max_memkb": 1048576,
         "target_memkb": 1048576,
         "video_memkb": 8192,
-        "shadow_memkb": 12288,
+        "shadow_memkb": 1234,
         "device_model_version": "qemu_xen",
         "device_model": "/bin/true",
         "sched_params": {
 
         },
+        "apic": "True",
+        "acpi": "True",
         "type.hvm": {
             "pae": "True",
-            "apic": "True",
-            "acpi": "True",
             "hpet": "True",
             "vga": {
                 "kind": "cirrus"
@@ -87,6 +87,12 @@
         {
             "dev": 16,
             "bus": 10,
+	    "rdm_policy": "invalid"
+        },
+        {
+            "dev": 8,
+            "bus": 10,
+            "permissive": true,
 	    "rdm_policy": "invalid"
         }
     ],

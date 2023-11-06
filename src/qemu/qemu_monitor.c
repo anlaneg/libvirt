@@ -31,7 +31,7 @@
 #include "qemu_monitor_text.h"
 #include "qemu_monitor_json.h"
 #include "qemu_domain.h"
-#include "qemu_process.h"
+#include "qemu_capabilities.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
@@ -41,7 +41,6 @@
 #include "virprobe.h"
 #include "virstring.h"
 #include "virtime.h"
-#include "virsocket.h"
 #include "virutil.h"
 
 #ifdef WITH_DTRACE_PROBES
@@ -55,9 +54,6 @@
 
 VIR_LOG_INIT("qemu.qemu_monitor");
 
-#define DEBUG_IO 0
-#define DEBUG_RAW_IO 0
-
 /* We read from QEMU until seeing a \r\n pair to indicate a
  * completed reply or event. To avoid memory denial-of-service
  * though, we must have a size limit on amount of data we
@@ -67,52 +63,6 @@ VIR_LOG_INIT("qemu.qemu_monitor");
  */
 #define QEMU_MONITOR_MAX_RESPONSE (10 * 1024 * 1024)
 
-struct _qemuMonitor {
-    virObjectLockable parent;
-
-    virCond notify;
-
-    int fd;
-
-    GMainContext *context;
-    GSocket *socket;
-    GSource *watch;
-
-    virDomainObjPtr vm;
-
-    qemuMonitorCallbacksPtr cb;
-    void *callbackOpaque;
-
-    /* If there's a command being processed this will be
-     * non-NULL */
-    qemuMonitorMessagePtr msg;
-
-    /* Buffer incoming data ready for Text/QMP monitor
-     * code to process & find message boundaries */
-    size_t bufferOffset;
-    size_t bufferLength;
-    char *buffer;
-
-    /* If anything went wrong, this will be fed back
-     * the next monitor msg */
-    virError lastError;
-
-    int nextSerial;
-
-    bool waitGreeting;
-
-    /* cache of query-command-line-options results */
-    virJSONValuePtr options;
-
-    /* If found, path to the virtio memballoon driver */
-    char *balloonpath;
-    bool ballooninit;
-
-    /* Log file context of the qemu process to dig for usable info */
-    qemuMonitorReportDomainLogError logFunc;
-    void *logOpaque;
-    virFreeCallback logDestroy;
-};
 
 /**
  * QEMU_CHECK_MONITOR_FULL:
@@ -145,7 +95,7 @@ struct _qemuMonitor {
 #define QEMU_CHECK_MONITOR_GOTO(mon, label) \
     QEMU_CHECK_MONITOR_FULL(mon, goto label)
 
-static virClassPtr qemuMonitorClass;
+static virClass *qemuMonitorClass;
 static __thread bool qemuMonitorDisposed;
 static void qemuMonitorDispose(void *obj);
 
@@ -159,22 +109,72 @@ static int qemuMonitorOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(qemuMonitor);
 
+VIR_ENUM_IMPL(qemuMonitorJob,
+              QEMU_MONITOR_JOB_TYPE_LAST,
+              "",
+              "commit",
+              "stream",
+              "mirror",
+              "backup",
+              "create",
+);
+
+VIR_ENUM_IMPL(qemuMonitorJobStatus,
+              QEMU_MONITOR_JOB_STATUS_LAST,
+              "",
+              "created",
+              "running",
+              "paused",
+              "ready",
+              "standby",
+              "waiting",
+              "pending",
+              "aborting",
+              "concluded",
+              "undefined",
+              "null",
+);
+
+VIR_ENUM_IMPL(qemuMonitorCPUProperty,
+              QEMU_MONITOR_CPU_PROPERTY_LAST,
+              "boolean",
+              "string",
+              "number",
+);
 
 VIR_ENUM_IMPL(qemuMonitorMigrationStatus,
               QEMU_MONITOR_MIGRATION_STATUS_LAST,
-              "inactive", "setup",
-              "active", "pre-switchover",
-              "device", "postcopy-active",
-              "completed", "failed",
-              "cancelling", "cancelled",
+              "inactive",
+              "setup",
+              "active",
+              "pre-switchover",
+              "device",
+              "postcopy-active",
+              "postcopy-paused",
+              "postcopy-recover",
+              "completed",
+              "failed",
+              "cancelling",
+              "cancelled",
               "wait-unplug",
 );
 
 VIR_ENUM_IMPL(qemuMonitorVMStatus,
               QEMU_MONITOR_VM_STATUS_LAST,
-              "debug", "inmigrate", "internal-error", "io-error", "paused",
-              "postmigrate", "prelaunch", "finish-migrate", "restore-vm",
-              "running", "save-vm", "shutdown", "watchdog", "guest-panicked",
+              "debug",
+              "inmigrate",
+              "internal-error",
+              "io-error",
+              "paused",
+              "postmigrate",
+              "prelaunch",
+              "finish-migrate",
+              "restore-vm",
+              "running",
+              "save-vm",
+              "shutdown",
+              "watchdog",
+              "guest-panicked",
 );
 
 typedef enum {
@@ -197,55 +197,38 @@ VIR_ENUM_IMPL(qemuMonitorDumpStatus,
               "none", "active", "completed", "failed",
 );
 
+VIR_ENUM_IMPL(qemuMonitorMemoryFailureRecipient,
+              QEMU_MONITOR_MEMORY_FAILURE_RECIPIENT_LAST,
+              "hypervisor", "guest");
 
-#if DEBUG_RAW_IO
-static char *
-qemuMonitorEscapeNonPrintable(const char *text)
-{
-    size_t i;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    for (i = 0; text[i] != '\0'; i++) {
-        if (g_ascii_isprint(text[i]) ||
-            text[i] == '\n' ||
-            (text[i] == '\r' && text[i + 1] == '\n'))
-            virBufferAddChar(&buf, text[i]);
-        else
-            virBufferAsprintf(&buf, "0x%02x", text[i]);
-    }
-    return virBufferContentAndReset(&buf);
-}
-#endif
-
+VIR_ENUM_IMPL(qemuMonitorMemoryFailureAction,
+              QEMU_MONITOR_MEMORY_FAILURE_ACTION_LAST,
+              "ignore", "inject",
+              "fatal", "reset");
 
 static void
 qemuMonitorDispose(void *obj)
 {
-    qemuMonitorPtr mon = obj;
+    qemuMonitor *mon = obj;
 
     VIR_DEBUG("mon=%p", mon);
     qemuMonitorDisposed = true;
-    if (mon->cb && mon->cb->destroy)
-        (mon->cb->destroy)(mon, mon->vm, mon->callbackOpaque);
     virObjectUnref(mon->vm);
 
     g_main_context_unref(mon->context);
     virResetError(&mon->lastError);
     virCondDestroy(&mon->notify);
-    VIR_FREE(mon->buffer);
-    virJSONValueFree(mon->options);
-    VIR_FREE(mon->balloonpath);
+    g_free(mon->buffer);
+    g_free(mon->balloonpath);
+    g_free(mon->domainName);
 }
 
 
 static int
-qemuMonitorOpenUnix(const char *monitor,
-                    pid_t cpid,
-                    bool retry,
-                    unsigned long long timeout)
+qemuMonitorOpenUnix(const char *monitor)
 {
-    struct sockaddr_un addr;
-    int monfd;
-    virTimeBackOffVar timebackoff;
+    struct sockaddr_un addr = { 0 };
+    VIR_AUTOCLOSE monfd = -1;
     int ret = -1;
 
     if ((monfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
@@ -254,54 +237,23 @@ qemuMonitorOpenUnix(const char *monitor,
         return -1;
     }
 
-    memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     if (virStrcpyStatic(addr.sun_path, monitor) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Monitor path %s too big for destination"), monitor);
-        goto error;
+                       _("Monitor path %1$s too big for destination"), monitor);
+        return -1;
     }
 
-    if (retry) {
-        if (virTimeBackOffStart(&timebackoff, 1, timeout * 1000) < 0)
-            goto error;
-        while (virTimeBackOffWait(&timebackoff)) {
-            ret = connect(monfd, (struct sockaddr *)&addr, sizeof(addr));
-
-            if (ret == 0)
-                break;
-
-            if ((errno == ENOENT || errno == ECONNREFUSED) &&
-                (!cpid || virProcessKill(cpid, 0) == 0)) {
-                /* ENOENT       : Socket may not have shown up yet
-                 * ECONNREFUSED : Leftover socket hasn't been removed yet */
-                continue;
-            }
-
-            virReportSystemError(errno, "%s",
-                                 _("failed to connect to monitor socket"));
-            goto error;
-        }
-
-        if (ret != 0) {
-            virReportSystemError(errno, "%s",
-                                 _("monitor socket did not show up"));
-            goto error;
-        }
-    } else {
-        ret = connect(monfd, (struct sockaddr *) &addr, sizeof(addr));
-        if (ret < 0) {
-            virReportSystemError(errno, "%s",
-                                 _("failed to connect to monitor socket"));
-            goto error;
-        }
+    if (connect(monfd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("failed to connect to monitor socket"));
+        return -1;
     }
 
-    return monfd;
+    ret = monfd;
+    monfd = -1;
 
- error:
-    VIR_FORCE_CLOSE(monfd);
-    return -1;
+    return ret;
 }
 
 
@@ -310,27 +262,16 @@ qemuMonitorOpenUnix(const char *monitor,
  * replies/errors.
  */
 static int
-qemuMonitorIOProcess(qemuMonitorPtr mon)
+qemuMonitorIOProcess(qemuMonitor *mon)
 {
     int len;
-    qemuMonitorMessagePtr msg = NULL;
+    qemuMonitorMessage *msg = NULL;
 
     /* See if there's a message & whether its ready for its reply
      * ie whether its completed writing all its data */
     if (mon->msg && mon->msg->txOffset == mon->msg->txLength)
         msg = mon->msg;
 
-#if DEBUG_IO
-# if DEBUG_RAW_IO
-    char *str1 = qemuMonitorEscapeNonPrintable(msg ? msg->txBuffer : "");
-    char *str2 = qemuMonitorEscapeNonPrintable(mon->buffer);
-    VIR_ERROR(_("Process %d %p %p [[[[%s]]][[[%s]]]"), (int)mon->bufferOffset, mon->msg, msg, str1, str2);
-    VIR_FREE(str1);
-    VIR_FREE(str2);
-# else
-    VIR_DEBUG("Process %d", (int)mon->bufferOffset);
-# endif
-#endif
 
     PROBE_QUIET(QEMU_MONITOR_IO_PROCESS, "mon=%p buf=%s len=%zu",
                 mon, mon->buffer, mon->bufferOffset);
@@ -351,10 +292,6 @@ qemuMonitorIOProcess(qemuMonitorPtr mon)
         VIR_FREE(mon->buffer);
         mon->bufferOffset = mon->bufferLength = 0;
     }
-#if DEBUG_IO
-    VIR_DEBUG("Process done %d used %d", (int)mon->bufferOffset, len);
-#endif
-
     /* As the monitor mutex was unlocked in qemuMonitorJSONIOProcess()
      * while dealing with qemu event, mon->msg could be changed which
      * means the above 'msg' may be invalid, thus we use 'mon->msg' here */
@@ -365,20 +302,17 @@ qemuMonitorIOProcess(qemuMonitorPtr mon)
 
 
 /* Call this function while holding the monitor lock. */
-static int
-qemuMonitorIOWriteWithFD(qemuMonitorPtr mon,
+int
+qemuMonitorIOWriteWithFD(qemuMonitor *mon,
                          const char *data,
                          size_t len,
                          int fd)
 {
-    struct msghdr msg;
+    struct msghdr msg = { 0 };
     struct iovec iov[1];
     int ret;
-    char control[CMSG_SPACE(sizeof(int))];
+    char control[CMSG_SPACE(sizeof(int))] = { 0 };
     struct cmsghdr *cmsg;
-
-    memset(&msg, 0, sizeof(msg));
-    memset(control, 0, sizeof(control));
 
     iov[0].iov_base = (void *)data;
     iov[0].iov_len = len;
@@ -390,9 +324,6 @@ qemuMonitorIOWriteWithFD(qemuMonitorPtr mon,
     msg.msg_controllen = sizeof(control);
 
     cmsg = CMSG_FIRSTHDR(&msg);
-    /* Some static analyzers, like clang 2.6-0.6.pre2, fail to see
-       that our use of CMSG_FIRSTHDR will not return NULL.  */
-    sa_assert(cmsg);
     cmsg->cmsg_len = CMSG_LEN(sizeof(int));
     cmsg->cmsg_level = SOL_SOCKET;
     cmsg->cmsg_type = SCM_RIGHTS;
@@ -411,10 +342,10 @@ qemuMonitorIOWriteWithFD(qemuMonitorPtr mon,
  * Call this function while holding the monitor lock.
  */
 static int
-qemuMonitorIOWrite(qemuMonitorPtr mon)
+qemuMonitorIOWrite(qemuMonitor *mon)
 {
     int done;
-    char *buf;
+    const char *buf;
     size_t len;
 
     /* If no active message, or fully transmitted, the no-op */
@@ -424,7 +355,7 @@ qemuMonitorIOWrite(qemuMonitorPtr mon)
     buf = mon->msg->txBuffer + mon->msg->txOffset;
     len = mon->msg->txLength - mon->msg->txOffset;
     if (mon->msg->txFD == -1)
-        done = write(mon->fd, buf, len);
+        done = write(mon->fd, buf, len); /* sc_avoid_write */
     else
         done = qemuMonitorIOWriteWithFD(mon, buf, len, mon->msg->txFD);
 
@@ -458,7 +389,7 @@ qemuMonitorIOWrite(qemuMonitorPtr mon)
  * Returns -1 on error, or number of bytes read
  */
 static int
-qemuMonitorIORead(qemuMonitorPtr mon)
+qemuMonitorIORead(qemuMonitor *mon)
 {
     size_t avail = mon->bufferLength - mon->bufferOffset;
     int ret = 0;
@@ -466,13 +397,11 @@ qemuMonitorIORead(qemuMonitorPtr mon)
     if (avail < 1024) {
         if (mon->bufferLength >= QEMU_MONITOR_MAX_RESPONSE) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("QEMU monitor reply exceeds buffer size (%d bytes)"),
+                           _("QEMU monitor reply exceeds buffer size (%1$d bytes)"),
                            QEMU_MONITOR_MAX_RESPONSE);
             return -1;
         }
-        if (VIR_REALLOC_N(mon->buffer,
-                          mon->bufferLength + 1024) < 0)
-            return -1;
+        VIR_REALLOC_N(mon->buffer, mon->bufferLength + 1024);
         mon->bufferLength += 1024;
         avail += 1024;
     }
@@ -501,16 +430,12 @@ qemuMonitorIORead(qemuMonitorPtr mon)
         mon->buffer[mon->bufferOffset] = '\0';
     }
 
-#if DEBUG_IO
-    VIR_DEBUG("Now read %d bytes of data", (int)mon->bufferOffset);
-#endif
-
     return ret;
 }
 
 
 static void
-qemuMonitorUpdateWatch(qemuMonitorPtr mon)
+qemuMonitorUpdateWatch(qemuMonitor *mon)
 {
     qemuMonitorUnregister(mon);
     if (mon->socket)
@@ -523,18 +448,14 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
               GIOCondition cond,
               gpointer opaque)
 {
-    qemuMonitorPtr mon = opaque;
+    qemuMonitor *mon = opaque;
     bool error = false;
-    bool eof = false;
     bool hangup = false;
 
     virObjectRef(mon);
 
     /* lock access to the monitor and protect fd */
     virObjectLock(mon);
-#if DEBUG_IO
-    VIR_DEBUG("Monitor %p I/O on socket %p cond %d", mon, socket, cond);
-#endif
     if (mon->fd == -1 || !mon->watch) {
         virObjectUnlock(mon);
         virObjectUnref(mon);
@@ -543,7 +464,7 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
 
     if (mon->lastError.code != VIR_ERR_OK) {
         if (cond & (G_IO_HUP | G_IO_ERR))
-            eof = true;
+            mon->goteof = true;
         error = true;
     } else {
         if (cond & G_IO_OUT) {
@@ -561,7 +482,7 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
                 if (errno == ECONNRESET)
                     hangup = true;
             } else if (got == 0) {
-                eof = true;
+                mon->goteof = true;
             } else {
                 /* Ignore hangup/error cond if we read some data, to
                  * give time for that data to be consumed */
@@ -574,32 +495,32 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
 
         if (cond & G_IO_HUP) {
             hangup = true;
-            if (!error) {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("End of file from qemu monitor"));
-                eof = true;
-            }
+            if (!error)
+                mon->goteof = true;
         }
 
-        if (!error && !eof &&
+        if (!error && !mon->goteof &&
             cond & G_IO_ERR) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("Invalid file descriptor while waiting for monitor"));
-            eof = true;
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Invalid file descriptor while waiting for monitor (vm='%1$s')"), mon->domainName);
+            mon->goteof = true;
         }
     }
 
-    if (error || eof) {
+    if (error || mon->goteof) {
         if (hangup && mon->logFunc != NULL) {
+            g_autofree char *errmsg = NULL;
+
             /* Check if an error message from qemu is available and if so, use
              * it to overwrite the actual message. It's done only in early
              * startup phases or during incoming migration when the message
              * from qemu is certainly more interesting than a
              * "connection reset by peer" message.
              */
-            mon->logFunc(mon,
-                         _("qemu unexpectedly closed the monitor"),
-                         mon->logOpaque);
+
+            errmsg = g_strdup_printf(_("QEMU unexpectedly closed the monitor (vm='%1$s')"),
+                                     mon->domainName);
+            mon->logFunc(mon, errmsg, mon->logOpaque);
             virCopyLastError(&mon->lastError);
             virResetLastError();
         }
@@ -608,14 +529,15 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
             /* Already have an error, so clear any new error */
             virResetLastError();
         } else {
-            if (virGetLastErrorCode() == VIR_ERR_OK)
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Error while processing monitor IO"));
+            if (virGetLastErrorCode() == VIR_ERR_OK && !mon->goteof)
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Error while processing monitor IO (vm='%1$s')"), mon->domainName);
             virCopyLastError(&mon->lastError);
             virResetLastError();
         }
 
-        VIR_DEBUG("Error on monitor %s", NULLSTR(mon->lastError.message));
+        VIR_DEBUG("Error on monitor %s mon=%p vm=%p name=%s",
+                  NULLSTR(mon->lastError.message), mon, mon->vm, mon->domainName);
         /* If IO process resulted in an error & we have a message,
          * then wakeup that waiter */
         if (mon->msg && !mon->msg->finished) {
@@ -628,26 +550,28 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
 
     /* We have to unlock to avoid deadlock against command thread,
      * but is this safe ?  I think it is, because the callback
-     * will try to acquire the virDomainObjPtr mutex next */
-    if (eof) {
+     * will try to acquire the virDomainObj *mutex next */
+    if (mon->goteof) {
         qemuMonitorEofNotifyCallback eofNotify = mon->cb->eofNotify;
-        virDomainObjPtr vm = mon->vm;
+        virDomainObj *vm = mon->vm;
 
         /* Make sure anyone waiting wakes up now */
         virCondSignal(&mon->notify);
         virObjectUnlock(mon);
-        VIR_DEBUG("Triggering EOF callback");
-        (eofNotify)(mon, vm, mon->callbackOpaque);
+        VIR_DEBUG("Triggering EOF callback mon=%p vm=%p name=%s",
+                  mon, mon->vm, mon->domainName);
+        (eofNotify)(mon, vm);
         virObjectUnref(mon);
     } else if (error) {
         qemuMonitorErrorNotifyCallback errorNotify = mon->cb->errorNotify;
-        virDomainObjPtr vm = mon->vm;
+        virDomainObj *vm = mon->vm;
 
         /* Make sure anyone waiting wakes up now */
         virCondSignal(&mon->notify);
         virObjectUnlock(mon);
-        VIR_DEBUG("Triggering error callback");
-        (errorNotify)(mon, vm, mon->callbackOpaque);
+        VIR_DEBUG("Triggering error callback mon=%p vm=%p name=%s",
+                  mon, mon->vm, mon->domainName);
+        (errorNotify)(mon, vm);
         virObjectUnref(mon);
     } else {
         virObjectUnlock(mon);
@@ -658,14 +582,14 @@ qemuMonitorIO(GSocket *socket G_GNUC_UNUSED,
 }
 
 
-static qemuMonitorPtr
-qemuMonitorOpenInternal(virDomainObjPtr vm,
+static qemuMonitor *
+qemuMonitorOpenInternal(virDomainObj *vm,
                         int fd,
                         GMainContext *context,
-                        qemuMonitorCallbacksPtr cb,
-                        void *opaque)
+                        qemuMonitorCallbacks *cb)
 {
-    qemuMonitorPtr mon;
+    qemuDomainObjPrivate *priv = vm->privateData;
+    qemuMonitor *mon;
     g_autoptr(GError) gerr = NULL;
 
     if (!cb->eofNotify) {
@@ -693,9 +617,14 @@ qemuMonitorOpenInternal(virDomainObjPtr vm,
     mon->fd = fd;
     mon->context = g_main_context_ref(context);
     mon->vm = virObjectRef(vm);
+    mon->domainName = g_strdup(NULLSTR(vm->def->name));
     mon->waitGreeting = true;
     mon->cb = cb;
-    mon->callbackOpaque = opaque;
+
+    if (priv) {
+        mon->objectAddNoWrap = virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_OBJECT_JSON);
+        mon->queryNamedBlockNodesFlat = virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_QMP_QUERY_NAMED_BLOCK_NODES_FLAT);
+    }
 
     if (virSetCloseExec(mon->fd) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -706,7 +635,7 @@ qemuMonitorOpenInternal(virDomainObjPtr vm,
     mon->socket = g_socket_new_from_fd(fd, &gerr);
     if (!mon->socket) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to create socket object: %s"),
+                       _("Unable to create socket object: %1$s"),
                        gerr->message);
         goto cleanup;
     }
@@ -722,7 +651,7 @@ qemuMonitorOpenInternal(virDomainObjPtr vm,
  cleanup:
     /* We don't want the 'destroy' callback invoked during
      * cleanup from construction failure, because that can
-     * give a double-unref on virDomainObjPtr in the caller,
+     * give a double-unref on virDomainObj *in the caller,
      * so kill the callbacks now.
      */
     mon->cb = NULL;
@@ -733,68 +662,47 @@ qemuMonitorOpenInternal(virDomainObjPtr vm,
 }
 
 
-#define QEMU_DEFAULT_MONITOR_WAIT 30
-
 /**
  * qemuMonitorOpen:
  * @vm: domain object
  * @config: monitor configuration
- * @timeout: number of seconds to add to default timeout
  * @cb: monitor event handles
- * @opaque: opaque data for @cb
  *
- * Opens the monitor for running qemu. It may happen that it
- * takes some time for qemu to create the monitor socket (e.g.
- * because kernel is zeroing configured hugepages), therefore we
- * wait up to default + timeout seconds for the monitor to show
- * up after which a failure is claimed.
+ * Opens the monitor for running qemu.
  *
  * Returns monitor object, NULL on error.
  */
-qemuMonitorPtr
-qemuMonitorOpen(virDomainObjPtr vm,
-                virDomainChrSourceDefPtr config,
-                bool retry,
-                unsigned long long timeout,
+qemuMonitor *
+qemuMonitorOpen(virDomainObj *vm,
+                virDomainChrSourceDef *config,
                 GMainContext *context,
-                qemuMonitorCallbacksPtr cb,
-                void *opaque)
+                qemuMonitorCallbacks *cb)
 {
-    int fd = -1;
-    qemuMonitorPtr ret = NULL;
-
-    timeout += QEMU_DEFAULT_MONITOR_WAIT;
-
-    /* Hold an extra reference because we can't allow 'vm' to be
-     * deleted until the monitor gets its own reference. */
-    virObjectRef(vm);
+    VIR_AUTOCLOSE fd = -1;
+    qemuMonitor *ret = NULL;
 
     if (config->type != VIR_DOMAIN_CHR_TYPE_UNIX) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unable to handle monitor type: %s"),
+                       _("unable to handle monitor type: %1$s"),
                        virDomainChrTypeToString(config->type));
-        goto cleanup;
+        return NULL;
     }
 
     virObjectUnlock(vm);
-    fd = qemuMonitorOpenUnix(config->data.nix.path,
-                             vm->pid, retry, timeout);
+    fd = qemuMonitorOpenUnix(config->data.nix.path);
     virObjectLock(vm);
 
     if (fd < 0)
-        goto cleanup;
+        return NULL;
 
     if (!virDomainObjIsActive(vm)) {
         virReportError(VIR_ERR_OPERATION_FAILED, "%s",
                        _("domain is not running"));
-        goto cleanup;
+        return NULL;
     }
 
-    ret = qemuMonitorOpenInternal(vm, fd, context, cb, opaque);
- cleanup:
-    if (!ret)
-        VIR_FORCE_CLOSE(fd);
-    virObjectUnref(vm);
+    ret = qemuMonitorOpenInternal(vm, fd, context, cb);
+    fd = -1;
     return ret;
 }
 
@@ -819,7 +727,7 @@ bool qemuMonitorWasDisposed(void)
  * lock for @mon.
  */
 void
-qemuMonitorRegister(qemuMonitorPtr mon)
+qemuMonitorRegister(qemuMonitor *mon)
 {
     GIOCondition cond = 0;
 
@@ -846,18 +754,25 @@ qemuMonitorRegister(qemuMonitorPtr mon)
 }
 
 
+/**
+ * qemuMonitorUnregister:
+ * @mon: monitor object
+ *
+ * Unregister monitor from the event loop. The monitor object
+ * must be locked before calling this function.
+ */
 void
-qemuMonitorUnregister(qemuMonitorPtr mon)
+qemuMonitorUnregister(qemuMonitor *mon)
 {
     if (mon->watch) {
         g_source_destroy(mon->watch);
-        g_source_unref(mon->watch);
+        vir_g_source_unref(mon->watch, mon->context);
         mon->watch = NULL;
     }
 }
 
 void
-qemuMonitorClose(qemuMonitorPtr mon)
+qemuMonitorClose(qemuMonitor *mon)
 {
     if (!mon)
         return;
@@ -869,8 +784,7 @@ qemuMonitorClose(qemuMonitorPtr mon)
 
     if (mon->socket) {
         qemuMonitorUnregister(mon);
-        g_object_unref(mon->socket);
-        mon->socket = NULL;
+        g_clear_pointer(&mon->socket, g_object_unref);
         mon->fd = -1;
     }
 
@@ -907,34 +821,36 @@ qemuMonitorClose(qemuMonitorPtr mon)
 
 
 char *
-qemuMonitorNextCommandID(qemuMonitorPtr mon)
+qemuMonitorNextCommandID(qemuMonitor *mon)
 {
-    char *id;
-
-    id = g_strdup_printf("libvirt-%d", ++mon->nextSerial);
-    return id;
+    return g_strdup_printf("libvirt-%d", ++mon->nextSerial);
 }
 
 
 /* for use only in the test suite */
 void
-qemuMonitorResetCommandID(qemuMonitorPtr mon)
+qemuMonitorResetCommandID(qemuMonitor *mon)
 {
     mon->nextSerial = 0;
 }
 
 
 int
-qemuMonitorSend(qemuMonitorPtr mon,
-                qemuMonitorMessagePtr msg)
+qemuMonitorSend(qemuMonitor *mon,
+                qemuMonitorMessage *msg)
 {
     int ret = -1;
 
     /* Check whether qemu quit unexpectedly */
     if (mon->lastError.code != VIR_ERR_OK) {
-        VIR_DEBUG("Attempt to send command while error is set %s",
-                  NULLSTR(mon->lastError.message));
+        VIR_DEBUG("Attempt to send command while error is set %s mon=%p vm=%p name=%s",
+                  NULLSTR(mon->lastError.message), mon, mon->vm, mon->domainName);
         virSetError(&mon->lastError);
+        return -1;
+    }
+    if (mon->goteof) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("End of file from qemu monitor (vm='%1$s')"), mon->domainName);
         return -1;
     }
 
@@ -947,15 +863,15 @@ qemuMonitorSend(qemuMonitorPtr mon,
 
     while (!mon->msg->finished) {
         if (virCondWait(&mon->notify, &mon->parent.lock) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("Unable to wait on monitor condition"));
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Unable to wait on monitor condition (vm='%1$s')"), mon->domainName);
             goto cleanup;
         }
     }
 
     if (mon->lastError.code != VIR_ERR_OK) {
-        VIR_DEBUG("Send command resulted in error %s",
-                  NULLSTR(mon->lastError.message));
+        VIR_DEBUG("Send command resulted in error %s mon=%p vm=%p name=%s",
+                  NULLSTR(mon->lastError.message), mon, mon->vm, mon->domainName);
         virSetError(&mon->lastError);
         goto cleanup;
     }
@@ -975,26 +891,12 @@ qemuMonitorSend(qemuMonitorPtr mon,
  * for freeing it.
  */
 virErrorPtr
-qemuMonitorLastError(qemuMonitorPtr mon)
+qemuMonitorLastError(qemuMonitor *mon)
 {
     if (mon->lastError.code == VIR_ERR_OK)
         return NULL;
 
     return virErrorCopyNew(&mon->lastError);
-}
-
-
-virJSONValuePtr
-qemuMonitorGetOptions(qemuMonitorPtr mon)
-{
-    return mon->options;
-}
-
-
-void
-qemuMonitorSetOptions(qemuMonitorPtr mon, virJSONValuePtr options)
-{
-    mon->options = options;
 }
 
 
@@ -1008,13 +910,13 @@ qemuMonitorSetOptions(qemuMonitorPtr mon, virJSONValuePtr options)
  * This feature was added to QEMU 1.5.
  */
 static void
-qemuMonitorInitBalloonObjectPath(qemuMonitorPtr mon,
-                                 virDomainMemballoonDefPtr balloon)
+qemuMonitorInitBalloonObjectPath(qemuMonitor *mon,
+                                 virDomainMemballoonDef *balloon)
 {
     ssize_t i, nprops = 0;
     char *path = NULL;
     const char *name;
-    qemuMonitorJSONListPathPtr *bprops = NULL;
+    qemuMonitorJSONListPath **bprops = NULL;
 
     if (mon->balloonpath) {
         return;
@@ -1027,11 +929,43 @@ qemuMonitorInitBalloonObjectPath(qemuMonitorPtr mon,
 
     switch (balloon->info.type) {
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI:
-        name = "virtio-balloon-pci";
+        switch (balloon->model) {
+            case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO:
+                name = "virtio-balloon-pci";
+                break;
+            case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO_TRANSITIONAL:
+                name = "virtio-balloon-pci-transitional";
+                break;
+            case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO_NON_TRANSITIONAL:
+                name = "virtio-balloon-pci-non-transitional";
+                break;
+            case VIR_DOMAIN_MEMBALLOON_MODEL_XEN:
+            case VIR_DOMAIN_MEMBALLOON_MODEL_NONE:
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                               _("invalid model for virtio-balloon-pci"));
+                return;
+            case VIR_DOMAIN_MEMBALLOON_MODEL_LAST:
+            default:
+                virReportEnumRangeError(virDomainMemballoonModel,
+                                        balloon->model);
+                return;
+        }
         break;
     case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW:
         name = "virtio-balloon-ccw";
         break;
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_SERIAL:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCID:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_USB:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_MMIO:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DIMM:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_UNASSIGNED:
+    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_LAST:
     default:
         return;
     }
@@ -1046,8 +980,7 @@ qemuMonitorInitBalloonObjectPath(qemuMonitorPtr mon,
     for (i = 0; i < nprops; i++) {
         if (STREQ(bprops[i]->name, "guest-stats-polling-interval")) {
             VIR_DEBUG("Found Balloon Object Path %s", path);
-            mon->balloonpath = path;
-            path = NULL;
+            mon->balloonpath = g_steal_pointer(&path);
             goto cleanup;
         }
     }
@@ -1055,8 +988,7 @@ qemuMonitorInitBalloonObjectPath(qemuMonitorPtr mon,
 
     /* If we get here, we found the path, but not the property */
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("Property 'guest-stats-polling-interval' "
-                     "not found on memory balloon driver."));
+                   _("Property 'guest-stats-polling-interval' not found on memory balloon driver."));
 
  cleanup:
     for (i = 0; i < nprops; i++)
@@ -1074,8 +1006,8 @@ qemuMonitorInitBalloonObjectPath(qemuMonitorPtr mon,
  * Returns 0 on success, -1 on failure and sets proper error message.
  */
 int
-qemuMonitorUpdateVideoMemorySize(qemuMonitorPtr mon,
-                                 virDomainVideoDefPtr video,
+qemuMonitorUpdateVideoMemorySize(qemuMonitor *mon,
+                                 virDomainVideoDef *video,
                                  const char *videoName)
 {
     int rc = -1;
@@ -1088,8 +1020,8 @@ qemuMonitorUpdateVideoMemorySize(qemuMonitorPtr mon,
     if (rc < 0) {
         if (rc == -2)
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to find QOM Object path for "
-                             "device '%s'"), videoName);
+                           _("Failed to find QOM Object path for device '%1$s'"),
+                           videoName);
         return -1;
     }
 
@@ -1104,8 +1036,8 @@ qemuMonitorUpdateVideoMemorySize(qemuMonitorPtr mon,
  * Returns 0 on success, -1 on failure and sets proper error message.
  */
 int
-qemuMonitorUpdateVideoVram64Size(qemuMonitorPtr mon,
-                                 virDomainVideoDefPtr video,
+qemuMonitorUpdateVideoVram64Size(qemuMonitor *mon,
+                                 virDomainVideoDef *video,
                                  const char *videoName)
 {
     int rc = -1;
@@ -1118,8 +1050,8 @@ qemuMonitorUpdateVideoVram64Size(qemuMonitorPtr mon,
     if (rc < 0) {
         if (rc == -2)
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to find QOM Object path for "
-                             "device '%s'"), videoName);
+                           _("Failed to find QOM Object path for device '%1$s'"),
+                           videoName);
         return -1;
     }
 
@@ -1128,138 +1060,108 @@ qemuMonitorUpdateVideoVram64Size(qemuMonitorPtr mon,
 
 
 /* Ensure proper locking around callbacks.  */
-#define QEMU_MONITOR_CALLBACK(mon, ret, callback, ...) \
+#define QEMU_MONITOR_CALLBACK(mon, callback, ...) \
     do { \
         virObjectRef(mon); \
         virObjectUnlock(mon); \
         if ((mon)->cb && (mon)->cb->callback) \
-            (ret) = (mon)->cb->callback(mon, __VA_ARGS__, \
-                                        (mon)->callbackOpaque); \
+            (mon)->cb->callback(mon, __VA_ARGS__); \
         virObjectLock(mon); \
         virObjectUnref(mon); \
     } while (0)
 
 
-int
-qemuMonitorEmitEvent(qemuMonitorPtr mon, const char *event,
+void
+qemuMonitorEmitEvent(qemuMonitor *mon, const char *event,
                      long long seconds, unsigned int micros,
                      const char *details)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p event=%s", mon, event);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainEvent, mon->vm, event, seconds,
+    QEMU_MONITOR_CALLBACK(mon, domainEvent, mon->vm, event, seconds,
                           micros, details);
-    return ret;
 }
 
 
-int
-qemuMonitorEmitShutdown(qemuMonitorPtr mon, virTristateBool guest)
+void
+qemuMonitorEmitShutdown(qemuMonitor *mon, virTristateBool guest)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p guest=%u", mon, guest);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainShutdown, mon->vm, guest);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainShutdown, mon->vm, guest);
 }
 
 
-int
-qemuMonitorEmitReset(qemuMonitorPtr mon)
+void
+qemuMonitorEmitReset(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainReset, mon->vm);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainReset, mon->vm);
 }
 
 
-int
-qemuMonitorEmitPowerdown(qemuMonitorPtr mon)
+void
+qemuMonitorEmitStop(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainPowerdown, mon->vm);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainStop, mon->vm);
 }
 
 
-int
-qemuMonitorEmitStop(qemuMonitorPtr mon)
+void
+qemuMonitorEmitResume(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainStop, mon->vm);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainResume, mon->vm);
 }
 
 
-int
-qemuMonitorEmitResume(qemuMonitorPtr mon)
+void
+qemuMonitorEmitGuestPanic(qemuMonitor *mon,
+                          qemuMonitorEventPanicInfo *info)
 {
-    int ret = -1;
+    VIR_DEBUG("mon=%p", mon);
+    QEMU_MONITOR_CALLBACK(mon, domainGuestPanic, mon->vm, info);
+}
+
+
+void
+qemuMonitorEmitRTCChange(qemuMonitor *mon, long long offset)
+{
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainResume, mon->vm);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainRTCChange, mon->vm, offset);
 }
 
 
-int
-qemuMonitorEmitGuestPanic(qemuMonitorPtr mon,
-                          qemuMonitorEventPanicInfoPtr info)
+void
+qemuMonitorEmitWatchdog(qemuMonitor *mon, int action)
 {
-    int ret = -1;
-    VIR_DEBUG("mon=%p", mon);
-    QEMU_MONITOR_CALLBACK(mon, ret, domainGuestPanic, mon->vm, info);
-    return ret;
-}
-
-
-int
-qemuMonitorEmitRTCChange(qemuMonitorPtr mon, long long offset)
-{
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainRTCChange, mon->vm, offset);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainWatchdog, mon->vm, action);
 }
 
 
-int
-qemuMonitorEmitWatchdog(qemuMonitorPtr mon, int action)
-{
-    int ret = -1;
-    VIR_DEBUG("mon=%p", mon);
-
-    QEMU_MONITOR_CALLBACK(mon, ret, domainWatchdog, mon->vm, action);
-    return ret;
-}
-
-
-int
-qemuMonitorEmitIOError(qemuMonitorPtr mon,
+void
+qemuMonitorEmitIOError(qemuMonitor *mon,
                        const char *diskAlias,
                        const char *nodename,
                        int action,
                        const char *reason)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainIOError, mon->vm,
+    QEMU_MONITOR_CALLBACK(mon, domainIOError, mon->vm,
                           diskAlias, nodename, action, reason);
-    return ret;
 }
 
 
-int
-qemuMonitorEmitGraphics(qemuMonitorPtr mon,
+void
+qemuMonitorEmitGraphics(qemuMonitor *mon,
                         int phase,
                         int localFamily,
                         const char *localNode,
@@ -1271,288 +1173,259 @@ qemuMonitorEmitGraphics(qemuMonitorPtr mon,
                         const char *x509dname,
                         const char *saslUsername)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainGraphics, mon->vm, phase,
+    QEMU_MONITOR_CALLBACK(mon, domainGraphics, mon->vm, phase,
                           localFamily, localNode, localService,
                           remoteFamily, remoteNode, remoteService,
                           authScheme, x509dname, saslUsername);
-    return ret;
 }
 
 
-int
-qemuMonitorEmitTrayChange(qemuMonitorPtr mon,
+void
+qemuMonitorEmitTrayChange(qemuMonitor *mon,
                           const char *devAlias,
                           const char *devid,
                           int reason)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainTrayChange, mon->vm,
+    QEMU_MONITOR_CALLBACK(mon, domainTrayChange, mon->vm,
                           devAlias, devid, reason);
-
-    return ret;
 }
 
 
-int
-qemuMonitorEmitPMWakeup(qemuMonitorPtr mon)
+void
+qemuMonitorEmitPMWakeup(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainPMWakeup, mon->vm);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainPMWakeup, mon->vm);
 }
 
 
-int
-qemuMonitorEmitPMSuspend(qemuMonitorPtr mon)
+void
+qemuMonitorEmitPMSuspend(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainPMSuspend, mon->vm);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainPMSuspend, mon->vm);
 }
 
 
-int
-qemuMonitorEmitPMSuspendDisk(qemuMonitorPtr mon)
+void
+qemuMonitorEmitPMSuspendDisk(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainPMSuspendDisk, mon->vm);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainPMSuspendDisk, mon->vm);
 }
 
 
-int
-qemuMonitorEmitBlockJob(qemuMonitorPtr mon,
-                        const char *diskAlias,
-                        int type,
-                        int status,
-                        const char *error)
-{
-    int ret = -1;
-    VIR_DEBUG("mon=%p", mon);
-
-    QEMU_MONITOR_CALLBACK(mon, ret, domainBlockJob, mon->vm,
-                          diskAlias, type, status, error);
-    return ret;
-}
-
-
-int
-qemuMonitorEmitJobStatusChange(qemuMonitorPtr mon,
+void
+qemuMonitorEmitJobStatusChange(qemuMonitor *mon,
                                const char *jobname,
                                qemuMonitorJobStatus status)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, jobStatusChange, mon->vm, jobname, status);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, jobStatusChange, mon->vm, jobname, status);
 }
 
 
-int
-qemuMonitorEmitBalloonChange(qemuMonitorPtr mon,
+void
+qemuMonitorEmitBalloonChange(qemuMonitor *mon,
                              unsigned long long actual)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainBalloonChange, mon->vm, actual);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainBalloonChange, mon->vm, actual);
 }
 
 
-int
-qemuMonitorEmitDeviceDeleted(qemuMonitorPtr mon,
+void
+qemuMonitorEmitDeviceDeleted(qemuMonitor *mon,
                              const char *devAlias)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainDeviceDeleted, mon->vm, devAlias);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainDeviceDeleted, mon->vm, devAlias);
 }
 
 
-int
-qemuMonitorEmitNicRxFilterChanged(qemuMonitorPtr mon,
+void
+qemuMonitorEmitDeviceUnplugErr(qemuMonitor *mon,
+                               const char *devPath,
+                               const char *devAlias)
+{
+    VIR_DEBUG("mon=%p", mon);
+
+    QEMU_MONITOR_CALLBACK(mon, domainDeviceUnplugError, mon->vm,
+                          devPath, devAlias);
+}
+
+
+void
+qemuMonitorEmitNicRxFilterChanged(qemuMonitor *mon,
                                   const char *devAlias)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainNicRxFilterChanged, mon->vm, devAlias);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainNicRxFilterChanged, mon->vm, devAlias);
 }
 
 
-int
-qemuMonitorEmitSerialChange(qemuMonitorPtr mon,
+void
+qemuMonitorEmitNetdevStreamDisconnected(qemuMonitor *mon,
+                                        const char *devAlias)
+{
+    VIR_DEBUG("mon=%p", mon);
+
+    QEMU_MONITOR_CALLBACK(mon, domainNetdevStreamDisconnected,
+                          mon->vm, devAlias);
+}
+
+
+void
+qemuMonitorEmitSerialChange(qemuMonitor *mon,
                             const char *devAlias,
                             bool connected)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p, devAlias='%s', connected=%d", mon, devAlias, connected);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainSerialChange, mon->vm, devAlias, connected);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainSerialChange, mon->vm, devAlias, connected);
 }
 
 
-int
-qemuMonitorEmitSpiceMigrated(qemuMonitorPtr mon)
+void
+qemuMonitorEmitSpiceMigrated(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainSpiceMigrated, mon->vm);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainSpiceMigrated, mon->vm);
 }
 
 
-int
-qemuMonitorEmitMigrationStatus(qemuMonitorPtr mon,
+void
+qemuMonitorEmitMemoryDeviceSizeChange(qemuMonitor *mon,
+                                      const char *devAlias,
+                                      unsigned long long size)
+{
+    VIR_DEBUG("mon=%p, devAlias='%s', size=%llu", mon, devAlias, size);
+
+    QEMU_MONITOR_CALLBACK(mon, domainMemoryDeviceSizeChange, mon->vm, devAlias, size);
+}
+
+
+void
+qemuMonitorEmitMemoryFailure(qemuMonitor *mon,
+                             qemuMonitorEventMemoryFailure *mfp)
+{
+    QEMU_MONITOR_CALLBACK(mon, domainMemoryFailure, mon->vm, mfp);
+}
+
+
+void
+qemuMonitorEmitMigrationStatus(qemuMonitor *mon,
                                int status)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p, status=%s",
               mon, NULLSTR(qemuMonitorMigrationStatusTypeToString(status)));
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainMigrationStatus, mon->vm, status);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainMigrationStatus, mon->vm, status);
 }
 
 
-int
-qemuMonitorEmitMigrationPass(qemuMonitorPtr mon,
+void
+qemuMonitorEmitMigrationPass(qemuMonitor *mon,
                              int pass)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p, pass=%d", mon, pass);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainMigrationPass, mon->vm, pass);
-
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainMigrationPass, mon->vm, pass);
 }
 
 
-int
-qemuMonitorEmitAcpiOstInfo(qemuMonitorPtr mon,
+void
+qemuMonitorEmitAcpiOstInfo(qemuMonitor *mon,
                            const char *alias,
                            const char *slotType,
                            const char *slot,
                            unsigned int source,
                            unsigned int status)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p, alias='%s', slotType='%s', slot='%s', source='%u' status=%u",
               mon, NULLSTR(alias), slotType, slot, source, status);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainAcpiOstInfo, mon->vm,
+    QEMU_MONITOR_CALLBACK(mon, domainAcpiOstInfo, mon->vm,
                           alias, slotType, slot, source, status);
-
-    return ret;
 }
 
 
-int
-qemuMonitorEmitBlockThreshold(qemuMonitorPtr mon,
+void
+qemuMonitorEmitBlockThreshold(qemuMonitor *mon,
                               const char *nodename,
                               unsigned long long threshold,
                               unsigned long long excess)
 {
-    int ret = -1;
-
     VIR_DEBUG("mon=%p, node-name='%s', threshold='%llu', excess='%llu'",
               mon, nodename, threshold, excess);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainBlockThreshold, mon->vm,
+    QEMU_MONITOR_CALLBACK(mon, domainBlockThreshold, mon->vm,
                           nodename, threshold, excess);
-
-    return ret;
 }
 
 
-int
-qemuMonitorEmitDumpCompleted(qemuMonitorPtr mon,
+void
+qemuMonitorEmitDumpCompleted(qemuMonitor *mon,
                              int status,
-                             qemuMonitorDumpStatsPtr stats,
+                             qemuMonitorDumpStats *stats,
                              const char *error)
 {
-    int ret = -1;
-
     VIR_DEBUG("mon=%p", mon);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainDumpCompleted, mon->vm,
+    QEMU_MONITOR_CALLBACK(mon, domainDumpCompleted, mon->vm,
                           status, stats, error);
-
-    return ret;
 }
 
 
-int
-qemuMonitorEmitPRManagerStatusChanged(qemuMonitorPtr mon,
+void
+qemuMonitorEmitPRManagerStatusChanged(qemuMonitor *mon,
                                       const char *prManager,
                                       bool connected)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p, prManager='%s', connected=%d", mon, prManager, connected);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainPRManagerStatusChanged,
+    QEMU_MONITOR_CALLBACK(mon, domainPRManagerStatusChanged,
                           mon->vm, prManager, connected);
-
-    return ret;
 }
 
 
-int
-qemuMonitorEmitRdmaGidStatusChanged(qemuMonitorPtr mon,
+void
+qemuMonitorEmitRdmaGidStatusChanged(qemuMonitor *mon,
                                     const char *netdev,
                                     bool gid_status,
                                     unsigned long long subnet_prefix,
                                     unsigned long long interface_id)
 {
-    int ret = -1;
     VIR_DEBUG("netdev=%s, gid_status=%d, subnet_prefix=0x%llx, interface_id=0x%llx",
               netdev, gid_status, subnet_prefix, interface_id);
 
-    QEMU_MONITOR_CALLBACK(mon, ret, domainRdmaGidStatusChanged, mon->vm,
+    QEMU_MONITOR_CALLBACK(mon, domainRdmaGidStatusChanged, mon->vm,
                           netdev, gid_status, subnet_prefix, interface_id);
-
-    return ret;
 }
 
 
-int
-qemuMonitorEmitGuestCrashloaded(qemuMonitorPtr mon)
+void
+qemuMonitorEmitGuestCrashloaded(qemuMonitor *mon)
 {
-    int ret = -1;
     VIR_DEBUG("mon=%p", mon);
-    QEMU_MONITOR_CALLBACK(mon, ret, domainGuestCrashloaded, mon->vm);
-    return ret;
+    QEMU_MONITOR_CALLBACK(mon, domainGuestCrashloaded, mon->vm);
 }
 
 
 int
-qemuMonitorSetCapabilities(qemuMonitorPtr mon)
+qemuMonitorSetCapabilities(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -1561,7 +1434,7 @@ qemuMonitorSetCapabilities(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorStartCPUs(qemuMonitorPtr mon)
+qemuMonitorStartCPUs(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -1570,7 +1443,7 @@ qemuMonitorStartCPUs(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorStopCPUs(qemuMonitorPtr mon)
+qemuMonitorStopCPUs(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -1579,7 +1452,7 @@ qemuMonitorStopCPUs(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorCheck(qemuMonitorPtr mon)
+qemuMonitorCheck(qemuMonitor *mon)
 {
     bool running;
     return qemuMonitorGetStatus(mon, &running, NULL);
@@ -1587,7 +1460,7 @@ qemuMonitorCheck(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorGetStatus(qemuMonitorPtr mon,
+qemuMonitorGetStatus(qemuMonitor *mon,
                      bool *running,
                      virDomainPausedReason *reason)
 {
@@ -1600,7 +1473,7 @@ qemuMonitorGetStatus(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorSystemPowerdown(qemuMonitorPtr mon)
+qemuMonitorSystemPowerdown(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -1609,7 +1482,7 @@ qemuMonitorSystemPowerdown(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorSystemReset(qemuMonitorPtr mon)
+qemuMonitorSystemReset(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -1618,7 +1491,7 @@ qemuMonitorSystemReset(qemuMonitorPtr mon)
 
 
 static void
-qemuMonitorCPUInfoClear(qemuMonitorCPUInfoPtr cpus,
+qemuMonitorCPUInfoClear(qemuMonitorCPUInfo *cpus,
                         size_t ncpus)
 {
     size_t i;
@@ -1638,13 +1511,13 @@ qemuMonitorCPUInfoClear(qemuMonitorCPUInfoPtr cpus,
         VIR_FREE(cpus[i].qom_path);
         VIR_FREE(cpus[i].alias);
         VIR_FREE(cpus[i].type);
-        virJSONValueFree(cpus[i].props);
+        g_clear_pointer(&cpus[i].props, virJSONValueFree);
     }
 }
 
 
 void
-qemuMonitorCPUInfoFree(qemuMonitorCPUInfoPtr cpus,
+qemuMonitorCPUInfoFree(qemuMonitorCPUInfo *cpus,
                        size_t ncpus)
 {
     if (!cpus)
@@ -1652,7 +1525,7 @@ qemuMonitorCPUInfoFree(qemuMonitorCPUInfoPtr cpus,
 
     qemuMonitorCPUInfoClear(cpus, ncpus);
 
-    VIR_FREE(cpus);
+    g_free(cpus);
 }
 
 void
@@ -1665,9 +1538,9 @@ qemuMonitorQueryCpusFree(struct qemuMonitorQueryCpusEntry *entries,
         return;
 
     for (i = 0; i < nentries; i++)
-        VIR_FREE(entries[i].qom_path);
+        g_free(entries[i].qom_path);
 
-    VIR_FREE(entries);
+    g_free(entries);
 }
 
 
@@ -1677,7 +1550,7 @@ qemuMonitorQueryCpusFree(struct qemuMonitorQueryCpusEntry *entries,
 static void
 qemuMonitorGetCPUInfoLegacy(struct qemuMonitorQueryCpusEntry *cpuentries,
                             size_t ncpuentries,
-                            qemuMonitorCPUInfoPtr vcpus,
+                            qemuMonitorCPUInfo *vcpus,
                             size_t maxvcpus)
 {
     size_t i;
@@ -1687,6 +1560,7 @@ qemuMonitorGetCPUInfoLegacy(struct qemuMonitorQueryCpusEntry *cpuentries,
             vcpus[i].tid = cpuentries[i].tid;
             vcpus[i].halted = cpuentries[i].halted;
             vcpus[i].qemu_id = cpuentries[i].qemu_id;
+            vcpus[i].qom_path = g_strdup(cpuentries[i].qom_path);
         }
 
         /* for legacy hotplug to work we need to fake the vcpu count added by
@@ -1701,16 +1575,16 @@ qemuMonitorGetCPUInfoLegacy(struct qemuMonitorQueryCpusEntry *cpuentries,
  *
  * This function stitches together data retrieved via query-hotpluggable-cpus
  * which returns entities on the hotpluggable level (which may describe more
- * than one guest logical vcpu) with the output of query-cpus (or
- * query-cpus-fast), having an entry per enabled guest logical vcpu.
+ * than one guest logical vcpu) with the output of query-cpus-fast,
+ * having an entry per enabled guest logical vcpu.
  *
  * query-hotpluggable-cpus conveys following information:
  * - topology information and number of logical vcpus this entry creates
  * - device type name of the entry that needs to be used when hotplugging
  * - qom path in qemu which can be used to map the entry against
- *   query-cpus[-fast]
+ *   query-cpus-fast
  *
- * query-cpus[-fast] conveys following information:
+ * query-cpus-fast conveys following information:
  * - thread id of a given guest logical vcpu
  * - order in which the vcpus were inserted
  * - qom path to allow mapping the two together
@@ -1728,7 +1602,7 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
                              size_t nhotplugvcpus,
                              struct qemuMonitorQueryCpusEntry *cpuentries,
                              size_t ncpuentries,
-                             qemuMonitorCPUInfoPtr vcpus,
+                             qemuMonitorCPUInfo *vcpus,
                              size_t maxvcpus)
 {
     char *tmp;
@@ -1745,7 +1619,7 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
     for (i = 0; i < nhotplugvcpus; i++)
         totalvcpus += hotplugvcpus[i].vcpus;
 
-    /* trim '/thread...' suffix from the data returned by query-cpus[-fast] */
+    /* trim '/thread...' suffix from the data returned by query-cpus-fast */
     for (i = 0; i < ncpuentries; i++) {
         if (cpuentries[i].qom_path &&
             (tmp = strstr(cpuentries[i].qom_path, "/thread")))
@@ -1758,7 +1632,7 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
     }
 
     /* Note the order in which the hotpluggable entities are inserted by
-     * matching them to the query-cpus[-fast] entries */
+     * matching them to the query-cpus-fast entries */
     for (i = 0; i < ncpuentries; i++) {
         for (j = 0; j < nhotplugvcpus; j++) {
             if (!cpuentries[i].qom_path ||
@@ -1815,7 +1689,7 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
         }
 
         if (anyvcpu == maxvcpus) {
-            VIR_DEBUG("too many query-cpus[-fast] entries for a given "
+            VIR_DEBUG("too many query-cpus-fast entries for a given "
                       "query-hotpluggable-cpus entry");
             return -1;
         }
@@ -1843,7 +1717,6 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
  * @vcpus: pointer filled by array of qemuMonitorCPUInfo structures
  * @maxvcpus: total possible number of vcpus
  * @hotplug: query data relevant for hotplug support
- * @fast: use QMP query-cpus-fast if supported
  *
  * Detects VCPU information. If qemu doesn't support or fails reporting
  * information this function will return success as other parts of libvirt
@@ -1853,11 +1726,10 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
  *  -1 on error (reports libvirt error).
  */
 int
-qemuMonitorGetCPUInfo(qemuMonitorPtr mon,
-                      qemuMonitorCPUInfoPtr *vcpus,
+qemuMonitorGetCPUInfo(qemuMonitor *mon,
+                      qemuMonitorCPUInfo **vcpus,
                       size_t maxvcpus,
-                      bool hotplug,
-                      bool fast)
+                      bool hotplug)
 {
     struct qemuMonitorQueryHotpluggableCpusEntry *hotplugcpus = NULL;
     size_t nhotplugcpus = 0;
@@ -1865,12 +1737,11 @@ qemuMonitorGetCPUInfo(qemuMonitorPtr mon,
     size_t ncpuentries = 0;
     int ret = -1;
     int rc;
-    qemuMonitorCPUInfoPtr info = NULL;
+    qemuMonitorCPUInfo *info = NULL;
 
     QEMU_CHECK_MONITOR(mon);
 
-    if (VIR_ALLOC_N(info, maxvcpus) < 0)
-        return -1;
+    info = g_new0(qemuMonitorCPUInfo, maxvcpus);
 
     /* initialize a few non-zero defaults */
     qemuMonitorCPUInfoClear(info, maxvcpus);
@@ -1879,8 +1750,7 @@ qemuMonitorGetCPUInfo(qemuMonitorPtr mon,
         (qemuMonitorJSONGetHotpluggableCPUs(mon, &hotplugcpus, &nhotplugcpus)) < 0)
         goto cleanup;
 
-    rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries, hotplug,
-                                  fast);
+    rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries, hotplug);
 
     if (rc < 0) {
         if (!hotplug && rc == -2) {
@@ -1916,29 +1786,26 @@ qemuMonitorGetCPUInfo(qemuMonitorPtr mon,
  * qemuMonitorGetCpuHalted:
  *
  * Returns a bitmap of vcpu id's that are halted. The id's correspond to the
- * 'CPU' field as reported by query-cpus[-fast]'.
+ * 'CPU' field as reported by query-cpus-fast'.
  */
-virBitmapPtr
-qemuMonitorGetCpuHalted(qemuMonitorPtr mon,
-                        size_t maxvcpus,
-                        bool fast)
+virBitmap *
+qemuMonitorGetCpuHalted(qemuMonitor *mon,
+                        size_t maxvcpus)
 {
     struct qemuMonitorQueryCpusEntry *cpuentries = NULL;
     size_t ncpuentries = 0;
     size_t i;
     int rc;
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
     QEMU_CHECK_MONITOR_NULL(mon);
 
-    rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries, false,
-                                  fast);
+    rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries, false);
 
     if (rc < 0)
         goto cleanup;
 
-    if (!(ret = virBitmapNew(maxvcpus)))
-        goto cleanup;
+    ret = virBitmapNew(maxvcpus);
 
     for (i = 0; i < ncpuentries; i++) {
         if (cpuentries[i].halted)
@@ -1952,7 +1819,7 @@ qemuMonitorGetCpuHalted(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorSetLink(qemuMonitorPtr mon,
+qemuMonitorSetLink(qemuMonitor *mon,
                    const char *name,
                    virDomainNetInterfaceLinkState state)
 {
@@ -1964,22 +1831,12 @@ qemuMonitorSetLink(qemuMonitorPtr mon,
 }
 
 
-int
-qemuMonitorGetVirtType(qemuMonitorPtr mon,
-                       virDomainVirtType *virtType)
-{
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONGetVirtType(mon, virtType);
-}
-
-
 /**
  * Returns: 0 if balloon not supported, +1 if balloon query worked
  * or -1 on failure
  */
 int
-qemuMonitorGetBalloonInfo(qemuMonitorPtr mon,
+qemuMonitorGetBalloonInfo(qemuMonitor *mon,
                           unsigned long long *currmem)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -1989,8 +1846,8 @@ qemuMonitorGetBalloonInfo(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetMemoryStats(qemuMonitorPtr mon,
-                          virDomainMemballoonDefPtr balloon,
+qemuMonitorGetMemoryStats(qemuMonitor *mon,
+                          virDomainMemballoonDef *balloon,
                           virDomainMemoryStatPtr stats,
                           unsigned int nr_stats)
 {
@@ -2012,8 +1869,8 @@ qemuMonitorGetMemoryStats(qemuMonitorPtr mon,
  * Returns 0 on success and -1 on error, but does *not* set an error.
  */
 int
-qemuMonitorSetMemoryStatsPeriod(qemuMonitorPtr mon,
-                                virDomainMemballoonDefPtr balloon,
+qemuMonitorSetMemoryStatsPeriod(qemuMonitor *mon,
+                                virDomainMemballoonDef *balloon,
                                 int period)
 {
     int ret = -1;
@@ -2050,7 +1907,7 @@ qemuMonitorBlockIOStatusToError(const char *status)
 
     if (st < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unknown block IO status: %s"), status);
+                       _("unknown block IO status: %1$s"), status);
         return -1;
     }
 
@@ -2075,30 +1932,23 @@ qemuDomainDiskInfoFree(void *value)
 {
     struct qemuDomainDiskInfo *info = value;
 
-    VIR_FREE(info->nodename);
-    VIR_FREE(info);
+    g_free(info->nodename);
+    g_free(info);
 }
 
 
-virHashTablePtr
-qemuMonitorGetBlockInfo(qemuMonitorPtr mon)
+GHashTable *
+qemuMonitorGetBlockInfo(qemuMonitor *mon)
 {
-    int ret;
-    virHashTablePtr table;
+    g_autoptr(GHashTable) table = virHashNew(qemuDomainDiskInfoFree);
 
     QEMU_CHECK_MONITOR_NULL(mon);
 
-    if (!(table = virHashCreate(32, qemuDomainDiskInfoFree)))
-        return NULL;
-
-    ret = qemuMonitorJSONGetBlockInfo(mon, table);
-
-    if (ret < 0) {
-        virHashFree(table);
+    if (qemuMonitorJSONGetBlockInfo(mon, table) < 0) {
         return NULL;
     }
 
-    return table;
+    return g_steal_pointer(&table);
 }
 
 
@@ -2106,14 +1956,14 @@ qemuMonitorGetBlockInfo(qemuMonitorPtr mon)
  * qemuMonitorQueryBlockstats:
  * @mon: monitor object
  *
- * Returns data from a call to 'query-blockstats'.
+ * Returns data from a call to 'query-blockstats' without using 'query-nodes'
  */
-virJSONValuePtr
-qemuMonitorQueryBlockstats(qemuMonitorPtr mon)
+virJSONValue *
+qemuMonitorQueryBlockstats(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR_NULL(mon);
 
-    return qemuMonitorJSONQueryBlockstats(mon);
+    return qemuMonitorJSONQueryBlockstats(mon, false);
 }
 
 
@@ -2121,59 +1971,34 @@ qemuMonitorQueryBlockstats(qemuMonitorPtr mon)
  * qemuMonitorGetAllBlockStatsInfo:
  * @mon: monitor object
  * @ret_stats: pointer that is filled with a hash table containing the stats
- * @backingChain: recurse into the backing chain of devices
  *
- * Creates a hash table in @ret_stats with block stats of all devices. In case
- * @backingChain is true @ret_stats will additionally contain stats for
- * backing chain members of block devices.
+ * Creates a hash table in @ret_stats with block stats of all devices and the
+ * backing chains for the block devices.
  *
  * Returns < 0 on error, count of supported block stats fields on success.
  */
 int
-qemuMonitorGetAllBlockStatsInfo(qemuMonitorPtr mon,
-                                virHashTablePtr *ret_stats,
-                                bool backingChain)
+qemuMonitorGetAllBlockStatsInfo(qemuMonitor *mon,
+                                GHashTable **ret_stats)
 {
-    int ret = -1;
-    VIR_DEBUG("ret_stats=%p, backing=%d", ret_stats, backingChain);
+    int ret;
+    g_autoptr(GHashTable) stats = virHashNew(g_free);
 
     QEMU_CHECK_MONITOR(mon);
 
-    if (!(*ret_stats = virHashCreate(10, virHashValueFree)))
-        goto error;
-
-    ret = qemuMonitorJSONGetAllBlockStatsInfo(mon, *ret_stats,
-                                              backingChain);
+    ret = qemuMonitorJSONGetAllBlockStatsInfo(mon, stats);
 
     if (ret < 0)
-        goto error;
+        return -1;
 
+    *ret_stats = g_steal_pointer(&stats);
     return ret;
-
- error:
-    virHashFree(*ret_stats);
-    *ret_stats = NULL;
-    return -1;
-}
-
-
-/* Updates "stats" to fill virtual and physical size of the image */
-int
-qemuMonitorBlockStatsUpdateCapacity(qemuMonitorPtr mon,
-                                    virHashTablePtr stats,
-                                    bool backingChain)
-{
-    VIR_DEBUG("stats=%p, backing=%d", stats, backingChain);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONBlockStatsUpdateCapacity(mon, stats, backingChain);
 }
 
 
 int
-qemuMonitorBlockStatsUpdateCapacityBlockdev(qemuMonitorPtr mon,
-                                            virHashTablePtr stats)
+qemuMonitorBlockStatsUpdateCapacityBlockdev(qemuMonitor *mon,
+                                            GHashTable *stats)
 {
     VIR_DEBUG("stats=%p", stats);
 
@@ -2186,25 +2011,22 @@ qemuMonitorBlockStatsUpdateCapacityBlockdev(qemuMonitorPtr mon,
 /**
  * qemuMonitorBlockGetNamedNodeData:
  * @mon: monitor object
- * @supports_flat: don't query data for backing store
  *
  * Uses 'query-named-block-nodes' to retrieve information about individual
- * storage nodes and returns them in a hash table of qemuBlockNamedNodeDataPtrs
+ * storage nodes and returns them in a hash table of qemuBlockNamedNodeData *s
  * filled with the data. The hash table keys are node names.
  */
-virHashTablePtr
-qemuMonitorBlockGetNamedNodeData(qemuMonitorPtr mon,
-                                 bool supports_flat)
+GHashTable *
+qemuMonitorBlockGetNamedNodeData(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR_NULL(mon);
-    VIR_DEBUG("supports_flat=%d", supports_flat);
 
-    return qemuMonitorJSONBlockGetNamedNodeData(mon, supports_flat);
+    return qemuMonitorJSONBlockGetNamedNodeData(mon);
 }
 
 
 int
-qemuMonitorBlockResize(qemuMonitorPtr mon,
+qemuMonitorBlockResize(qemuMonitor *mon,
                        const char *device,
                        const char *nodename,
                        unsigned long long size)
@@ -2234,7 +2056,7 @@ qemuMonitorTypeToProtocol(int type)
         return "spice";
     default:
         virReportError(VIR_ERR_INVALID_ARG,
-                       _("unsupported protocol type %s"),
+                       _("unsupported protocol type %1$s"),
                        virDomainGraphicsTypeToString(type));
         return NULL;
     }
@@ -2242,7 +2064,7 @@ qemuMonitorTypeToProtocol(int type)
 
 
 int
-qemuMonitorSetPassword(qemuMonitorPtr mon,
+qemuMonitorSetPassword(qemuMonitor *mon,
                        int type,
                        const char *password,
                        const char *action_if_connected)
@@ -2252,8 +2074,8 @@ qemuMonitorSetPassword(qemuMonitorPtr mon,
     if (!protocol)
         return -1;
 
-    VIR_DEBUG("protocol=%s, password=%p, action_if_connected=%s",
-              protocol, password, action_if_connected);
+    VIR_DEBUG("protocol=%s, action_if_connected=%s",
+              protocol, action_if_connected);
 
     QEMU_CHECK_MONITOR(mon);
 
@@ -2268,7 +2090,7 @@ qemuMonitorSetPassword(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorExpirePassword(qemuMonitorPtr mon,
+qemuMonitorExpirePassword(qemuMonitor *mon,
                           int type,
                           const char *expire_time)
 {
@@ -2293,7 +2115,7 @@ qemuMonitorExpirePassword(qemuMonitorPtr mon,
  * or -1 on failure
  */
 int
-qemuMonitorSetBalloon(qemuMonitorPtr mon,
+qemuMonitorSetBalloon(qemuMonitor *mon,
                       unsigned long long newmem)
 {
     VIR_DEBUG("newmem=%llu", newmem);
@@ -2304,49 +2126,8 @@ qemuMonitorSetBalloon(qemuMonitorPtr mon,
 }
 
 
-/*
- * Returns: 0 if CPU modification was successful or -1 on failure
- */
 int
-qemuMonitorSetCPU(qemuMonitorPtr mon, int cpu, bool online)
-{
-    VIR_DEBUG("cpu=%d online=%d", cpu, online);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONSetCPU(mon, cpu, online);
-}
-
-
-int
-qemuMonitorEjectMedia(qemuMonitorPtr mon,
-                      const char *dev_name,
-                      bool force)
-{
-    VIR_DEBUG("dev_name=%s force=%d", dev_name, force);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONEjectMedia(mon, dev_name, force);
-}
-
-
-int
-qemuMonitorChangeMedia(qemuMonitorPtr mon,
-                       const char *dev_name,
-                       const char *newmedia,
-                       const char *format)
-{
-    VIR_DEBUG("dev_name=%s newmedia=%s format=%s", dev_name, newmedia, format);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONChangeMedia(mon, dev_name, newmedia, format);
-}
-
-
-int
-qemuMonitorSaveVirtualMemory(qemuMonitorPtr mon,
+qemuMonitorSaveVirtualMemory(qemuMonitor *mon,
                              unsigned long long offset,
                              unsigned long long length,
                              const char *path)
@@ -2360,7 +2141,7 @@ qemuMonitorSaveVirtualMemory(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorSavePhysicalMemory(qemuMonitorPtr mon,
+qemuMonitorSavePhysicalMemory(qemuMonitor *mon,
                               unsigned long long offset,
                               unsigned long long length,
                               const char *path)
@@ -2374,77 +2155,29 @@ qemuMonitorSavePhysicalMemory(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorSetDBusVMStateIdList(qemuMonitorPtr mon,
-                                const char **list)
+qemuMonitorSetDBusVMStateIdList(qemuMonitor *mon,
+                                GSList *list)
 {
     g_autofree char *path = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    GSList *next;
 
     VIR_DEBUG("list=%p", list);
 
-    if (virStringListLength(list) == 0)
+    QEMU_CHECK_MONITOR(mon);
+
+    if (!list)
         return 0;
 
-    path = g_strdup_printf("/objects/%s",
-                           qemuDomainGetDBusVMStateAlias());
+    for (next = list; next; next = next->next)
+        virBufferAsprintf(&buf, "%s,", (const char *) next->data);
 
-    QEMU_CHECK_MONITOR(mon);
+    virBufferTrim(&buf, ",");
 
-    return qemuMonitorJSONSetDBusVMStateIdList(mon, path, list);
-}
+    path = g_strdup_printf("/objects/%s", qemuDomainGetDBusVMStateAlias());
 
-
-int
-qemuMonitorSetMigrationSpeed(qemuMonitorPtr mon,
-                             unsigned long bandwidth)
-{
-    VIR_DEBUG("bandwidth=%lu", bandwidth);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    if (bandwidth > QEMU_DOMAIN_MIG_BANDWIDTH_MAX) {
-        virReportError(VIR_ERR_OVERFLOW,
-                       _("bandwidth must be less than %llu"),
-                       QEMU_DOMAIN_MIG_BANDWIDTH_MAX + 1ULL);
-        return -1;
-    }
-
-    return qemuMonitorJSONSetMigrationSpeed(mon, bandwidth);
-}
-
-
-int
-qemuMonitorSetMigrationDowntime(qemuMonitorPtr mon,
-                                unsigned long long downtime)
-{
-    VIR_DEBUG("downtime=%llu", downtime);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONSetMigrationDowntime(mon, downtime);
-}
-
-
-int
-qemuMonitorGetMigrationCacheSize(qemuMonitorPtr mon,
-                                 unsigned long long *cacheSize)
-{
-    VIR_DEBUG("cacheSize=%p", cacheSize);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONGetMigrationCacheSize(mon, cacheSize);
-}
-
-
-int
-qemuMonitorSetMigrationCacheSize(qemuMonitorPtr mon,
-                                 unsigned long long cacheSize)
-{
-    VIR_DEBUG("cacheSize=%llu", cacheSize);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONSetMigrationCacheSize(mon, cacheSize);
+    return qemuMonitorJSONSetDBusVMStateIdList(mon, path,
+                                               virBufferCurrentContent(&buf));
 }
 
 
@@ -2453,15 +2186,13 @@ qemuMonitorSetMigrationCacheSize(qemuMonitorPtr mon,
  * @mon: Pointer to the monitor object.
  * @params: Where to store migration parameters.
  *
- * If QEMU does not support querying migration parameters, the function will
- * set @params to NULL and return 0 (success). The caller is responsible for
- * freeing @params.
+ * The caller is responsible for freeing @params.
  *
  * Returns 0 on success, -1 on error.
  */
 int
-qemuMonitorGetMigrationParams(qemuMonitorPtr mon,
-                              virJSONValuePtr *params)
+qemuMonitorGetMigrationParams(qemuMonitor *mon,
+                              virJSONValue **params)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -2474,28 +2205,23 @@ qemuMonitorGetMigrationParams(qemuMonitorPtr mon,
  * @mon: Pointer to the monitor object.
  * @params: Migration parameters.
  *
- * The @params object is consumed and should not be referenced by the caller
- * after this function returns.
+ * The @params object is consumed and cleared on success and some errors.
  *
  * Returns 0 on success, -1 on error.
  */
 int
-qemuMonitorSetMigrationParams(qemuMonitorPtr mon,
-                              virJSONValuePtr params)
+qemuMonitorSetMigrationParams(qemuMonitor *mon,
+                              virJSONValue **params)
 {
-    QEMU_CHECK_MONITOR_GOTO(mon, error);
+    QEMU_CHECK_MONITOR(mon);
 
     return qemuMonitorJSONSetMigrationParams(mon, params);
-
- error:
-    virJSONValueFree(params);
-    return -1;
 }
 
 
 int
-qemuMonitorGetMigrationStats(qemuMonitorPtr mon,
-                             qemuMonitorMigrationStatsPtr stats,
+qemuMonitorGetMigrationStats(qemuMonitor *mon,
+                             qemuMonitorMigrationStats *stats,
                              char **error)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -2508,7 +2234,7 @@ qemuMonitorGetMigrationStats(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorMigrateToFd(qemuMonitorPtr mon,
+qemuMonitorMigrateToFd(qemuMonitor *mon,
                        unsigned int flags,
                        int fd)
 {
@@ -2532,7 +2258,7 @@ qemuMonitorMigrateToFd(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorMigrateToHost(qemuMonitorPtr mon,
+qemuMonitorMigrateToHost(qemuMonitor *mon,
                          unsigned int flags,
                          const char *protocol,
                          const char *hostname,
@@ -2556,7 +2282,22 @@ qemuMonitorMigrateToHost(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorMigrateCancel(qemuMonitorPtr mon)
+qemuMonitorMigrateToSocket(qemuMonitor *mon,
+                           unsigned int flags,
+                           const char *socketPath)
+{
+    g_autofree char *uri = g_strdup_printf("unix:%s", socketPath);
+
+    VIR_DEBUG("socketPath=%s flags=0x%x", socketPath, flags);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONMigrate(mon, flags, uri);
+}
+
+
+int
+qemuMonitorMigrateCancel(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -2565,8 +2306,17 @@ qemuMonitorMigrateCancel(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorQueryDump(qemuMonitorPtr mon,
-                     qemuMonitorDumpStatsPtr stats)
+qemuMonitorMigratePause(qemuMonitor *mon)
+{
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONMigratePause(mon);
+}
+
+
+int
+qemuMonitorQueryDump(qemuMonitor *mon,
+                     qemuMonitorDumpStats *stats)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -2578,7 +2328,7 @@ qemuMonitorQueryDump(qemuMonitorPtr mon,
  * Returns 1 if @capability is supported, 0 if it's not, or -1 on error.
  */
 int
-qemuMonitorGetDumpGuestMemoryCapability(qemuMonitorPtr mon,
+qemuMonitorGetDumpGuestMemoryCapability(qemuMonitor *mon,
                                         const char *capability)
 {
     VIR_DEBUG("capability=%s", capability);
@@ -2590,7 +2340,7 @@ qemuMonitorGetDumpGuestMemoryCapability(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorDumpToFd(qemuMonitorPtr mon,
+qemuMonitorDumpToFd(qemuMonitor *mon,
                     int fd,
                     const char *dumpformat,
                     bool detach)
@@ -2615,7 +2365,7 @@ qemuMonitorDumpToFd(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGraphicsRelocate(qemuMonitorPtr mon,
+qemuMonitorGraphicsRelocate(qemuMonitor *mon,
                             int type,
                             const char *hostname,
                             int port,
@@ -2636,8 +2386,95 @@ qemuMonitorGraphicsRelocate(qemuMonitorPtr mon,
 }
 
 
+/**
+ * qemuMonitorAddFileHandleToSet:
+ * @mon: monitor object
+ * @fd: file descriptor to pass to qemu
+ * @fdset: the fdset to register this fd with, -1 to create a new fdset
+ * @opaque: opaque data to associated with this fd
+ *
+ * Attempts to register a file descriptor with qemu that can then be referenced
+ * via the file path /dev/fdset/$FDSETID
+ * Returns 0 if ok, and -1 on failure */
 int
-qemuMonitorSendFileHandle(qemuMonitorPtr mon,
+qemuMonitorAddFileHandleToSet(qemuMonitor *mon,
+                              int fd,
+                              int fdset,
+                              const char *opaque)
+{
+    VIR_DEBUG("fd=%d,fdset=%i,opaque=%s", fd, fdset, opaque);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    if (fd < 0) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("fd must be valid"));
+        return -1;
+    }
+
+    return qemuMonitorJSONAddFileHandleToSet(mon, fd, fdset, opaque);
+}
+
+
+/**
+ * qemuMonitorRemoveFdset:
+ * @mon: monitor object
+ * @fdset: id of the fdset to remove
+ *
+ * Attempts to remove @fdset from qemu and close associated file descriptors
+ * Returns 0 if ok, and -1 on failure */
+int
+qemuMonitorRemoveFdset(qemuMonitor *mon,
+                       unsigned int fdset)
+{
+    VIR_DEBUG("fdset=%u", fdset);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONRemoveFdset(mon, fdset);
+}
+
+
+void qemuMonitorFdsetsFree(qemuMonitorFdsets *fdsets)
+{
+    size_t i;
+
+    for (i = 0; i < fdsets->nfdsets; i++) {
+        size_t j;
+        qemuMonitorFdsetInfo *set = &fdsets->fdsets[i];
+
+        for (j = 0; j < set->nfds; j++)
+            g_free(set->fds[j].opaque);
+
+        g_free(set->fds);
+    }
+    g_free(fdsets->fdsets);
+    g_free(fdsets);
+}
+
+
+/**
+ * qemuMonitorQueryFdsets:
+ * @mon: monitor object
+ * @fdsets: a pointer that is filled with a new qemuMonitorFdsets struct
+ *
+ * Queries qemu for the fdsets that are registered with that instance, and
+ * returns a structure describing those fdsets. The returned struct should be
+ * freed with qemuMonitorFdsetsFree();
+ *
+ * Returns 0 if ok, and -1 on failure */
+int
+qemuMonitorQueryFdsets(qemuMonitor *mon,
+                       qemuMonitorFdsets **fdsets)
+{
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONQueryFdsets(mon, fdsets);
+}
+
+
+int
+qemuMonitorSendFileHandle(qemuMonitor *mon,
                           const char *fdname,
                           int fd)
 {
@@ -2656,7 +2493,7 @@ qemuMonitorSendFileHandle(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorCloseFileHandle(qemuMonitorPtr mon,
+qemuMonitorCloseFileHandle(qemuMonitor *mon,
                            const char *fdname)
 {
     int ret = -1;
@@ -2677,58 +2514,18 @@ qemuMonitorCloseFileHandle(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorAddNetdev(qemuMonitorPtr mon,
-                     virJSONValuePtr *props,
-                     int *tapfd, char **tapfdName, int tapfdSize,
-                     int *vhostfd, char **vhostfdName, int vhostfdSize,
-                     int slirpfd, char *slirpfdName)
+qemuMonitorAddNetdev(qemuMonitor *mon,
+                     virJSONValue **props)
 {
-    int ret = -1;
-    size_t i = 0, j = 0;
-
-    VIR_DEBUG("props=%p tapfd=%p tapfdName=%p tapfdSize=%d"
-              "vhostfd=%p vhostfdName=%p vhostfdSize=%d"
-              "slirpfd=%d slirpfdName=%s",
-              props, tapfd, tapfdName, tapfdSize,
-              vhostfd, vhostfdName, vhostfdSize, slirpfd, slirpfdName);
 
     QEMU_CHECK_MONITOR(mon);
 
-    for (i = 0; i < tapfdSize; i++) {
-        if (qemuMonitorSendFileHandle(mon, tapfdName[i], tapfd[i]) < 0)
-            goto cleanup;
-    }
-    for (j = 0; j < vhostfdSize; j++) {
-        if (qemuMonitorSendFileHandle(mon, vhostfdName[j], vhostfd[j]) < 0)
-            goto cleanup;
-    }
-
-    if (slirpfd > 0 &&
-        qemuMonitorSendFileHandle(mon, slirpfdName, slirpfd) < 0)
-        goto cleanup;
-
-    ret = qemuMonitorJSONAddNetdev(mon, props);
-
- cleanup:
-    if (ret < 0) {
-        while (i--) {
-            if (qemuMonitorCloseFileHandle(mon, tapfdName[i]) < 0)
-                VIR_WARN("failed to close device handle '%s'", tapfdName[i]);
-        }
-        while (j--) {
-            if (qemuMonitorCloseFileHandle(mon, vhostfdName[j]) < 0)
-                VIR_WARN("failed to close device handle '%s'", vhostfdName[j]);
-        }
-        if (qemuMonitorCloseFileHandle(mon, slirpfdName) < 0)
-            VIR_WARN("failed to close device handle '%s'", slirpfdName);
-    }
-
-    return ret;
+    return qemuMonitorJSONAddNetdev(mon, props);
 }
 
 
 int
-qemuMonitorRemoveNetdev(qemuMonitorPtr mon,
+qemuMonitorRemoveNetdev(qemuMonitor *mon,
                         const char *alias)
 {
     VIR_DEBUG("alias=%s", alias);
@@ -2740,8 +2537,8 @@ qemuMonitorRemoveNetdev(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorQueryRxFilter(qemuMonitorPtr mon, const char *alias,
-                         virNetDevRxFilterPtr *filter)
+qemuMonitorQueryRxFilter(qemuMonitor *mon, const char *alias,
+                         virNetDevRxFilter **filter)
 {
     VIR_DEBUG("alias=%s filter=%p", alias, filter);
 
@@ -2754,59 +2551,28 @@ qemuMonitorQueryRxFilter(qemuMonitorPtr mon, const char *alias,
 void
 qemuMonitorChardevInfoFree(void *data)
 {
-    qemuMonitorChardevInfoPtr info = data;
+    qemuMonitorChardevInfo *info = data;
 
-    VIR_FREE(info->ptyPath);
-    VIR_FREE(info);
+    g_free(info->ptyPath);
+    g_free(info);
 }
 
 
 int
-qemuMonitorGetChardevInfo(qemuMonitorPtr mon,
-                          virHashTablePtr *retinfo)
+qemuMonitorGetChardevInfo(qemuMonitor *mon,
+                          GHashTable **retinfo)
 {
-    int ret;
-    virHashTablePtr info = NULL;
+    g_autoptr(GHashTable) info = virHashNew(qemuMonitorChardevInfoFree);
 
     VIR_DEBUG("retinfo=%p", retinfo);
 
-    QEMU_CHECK_MONITOR_GOTO(mon, error);
-
-    if (!(info = virHashCreate(10, qemuMonitorChardevInfoFree)))
-        goto error;
-
-    ret = qemuMonitorJSONGetChardevInfo(mon, info);
-
-    if (ret < 0)
-        goto error;
-
-    *retinfo = info;
-    return 0;
-
- error:
-    virHashFree(info);
-    *retinfo = NULL;
-    return -1;
-}
-
-
-/**
- * qemuMonitorDriveDel:
- * @mon: monitor object
- * @drivestr: identifier of drive to delete.
- *
- * Attempts to remove a host drive.
- * Returns 1 if unsupported, 0 if ok, and -1 on other failure */
-int
-qemuMonitorDriveDel(qemuMonitorPtr mon,
-                    const char *drivestr)
-{
-    VIR_DEBUG("drivestr=%s", drivestr);
-
     QEMU_CHECK_MONITOR(mon);
 
-    /* there won't be a direct replacement for drive_del in QMP */
-    return qemuMonitorTextDriveDel(mon, drivestr);
+    if (qemuMonitorJSONGetChardevInfo(mon, info) < 0)
+        return -1;
+
+    *retinfo = g_steal_pointer(&info);
+    return 0;
 }
 
 
@@ -2821,7 +2587,7 @@ qemuMonitorDriveDel(qemuMonitorPtr mon,
  *         -1 otherwise (error reported)
  */
 int
-qemuMonitorDelDevice(qemuMonitorPtr mon,
+qemuMonitorDelDevice(qemuMonitor *mon,
                      const char *devalias)
 {
     VIR_DEBUG("devalias=%s", devalias);
@@ -2832,72 +2598,23 @@ qemuMonitorDelDevice(qemuMonitorPtr mon,
 }
 
 
-int
-qemuMonitorAddDeviceWithFd(qemuMonitorPtr mon,
-                           const char *devicestr,
-                           int fd,
-                           const char *fdname)
-{
-    VIR_DEBUG("device=%s fd=%d fdname=%s", devicestr, fd, NULLSTR(fdname));
-    int ret;
-
-    QEMU_CHECK_MONITOR(mon);
-
-    if (fd >= 0 && qemuMonitorSendFileHandle(mon, fdname, fd) < 0)
-        return -1;
-
-    ret = qemuMonitorJSONAddDevice(mon, devicestr);
-
-    if (ret < 0 && fd >= 0) {
-        if (qemuMonitorCloseFileHandle(mon, fdname) < 0)
-            VIR_WARN("failed to close device handle '%s'", fdname);
-    }
-
-    return ret;
-}
-
-
-int
-qemuMonitorAddDevice(qemuMonitorPtr mon,
-                     const char *devicestr)
-{
-    return qemuMonitorAddDeviceWithFd(mon, devicestr, -1, NULL);
-}
-
-
 /**
- * qemuMonitorAddDeviceArgs:
+ * qemuMonitorAddDeviceProps:
  * @mon: monitor object
- * @args: arguments for device add, consumed on success or failure
+ * @props: JSON object describing the device to add, the object is consumed
+ *         and cleared.
  *
- * Adds a device described by @args. Requires JSON monitor.
+ * Adds a device described by @props.
  * Returns 0 on success -1 on error.
  */
 int
-qemuMonitorAddDeviceArgs(qemuMonitorPtr mon,
-                         virJSONValuePtr args)
+qemuMonitorAddDeviceProps(qemuMonitor *mon,
+                          virJSONValue **props)
 {
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONAddDeviceArgs(mon, args);
+    return qemuMonitorJSONAddDeviceProps(mon, props);
 }
-
-
-virJSONValuePtr
-qemuMonitorCreateObjectPropsWrap(const char *type,
-                                 const char *alias,
-                                 virJSONValuePtr *props)
-{
-    virJSONValuePtr ret;
-
-    ignore_value(virJSONValueObjectCreate(&ret,
-                                          "s:qom-type", type,
-                                          "s:id", alias,
-                                          "A:props", props,
-                                          NULL));
-    return ret;
-}
-
 
 
 /**
@@ -2910,31 +2627,33 @@ qemuMonitorCreateObjectPropsWrap(const char *type,
  * Returns a JSONValue containing everything on success and NULL on error.
  */
 int
-qemuMonitorCreateObjectProps(virJSONValuePtr *propsret,
+qemuMonitorCreateObjectProps(virJSONValue **propsret,
                              const char *type,
                              const char *alias,
                              ...)
 {
-    virJSONValuePtr props = NULL;
-    int ret = -1;
+    g_autoptr(virJSONValue) props = NULL;
+    int rc;
     va_list args;
 
-    *propsret = NULL;
+    if (virJSONValueObjectAdd(&props,
+                              "s:qom-type", type,
+                              "s:id", alias,
+                              NULL) < 0)
+        return -1;
+
 
     va_start(args, alias);
 
-    if (virJSONValueObjectCreateVArgs(&props, args) < 0)
-        goto cleanup;
+    rc = virJSONValueObjectAddVArgs(&props, args);
 
-    if (!(*propsret = qemuMonitorCreateObjectPropsWrap(type, alias, &props)))
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    virJSONValueFree(props);
     va_end(args);
-    return ret;
+
+    if (rc < 0)
+        return -1;
+
+    *propsret = g_steal_pointer(&props);
+    return 0;
 }
 
 
@@ -2950,19 +2669,19 @@ qemuMonitorCreateObjectProps(virJSONValuePtr *propsret,
  * Returns 0 on success -1 on error.
  */
 int
-qemuMonitorAddObject(qemuMonitorPtr mon,
-                     virJSONValuePtr *props,
+qemuMonitorAddObject(qemuMonitor *mon,
+                     virJSONValue **props,
                      char **alias)
 {
+    g_autoptr(virJSONValue) pr = NULL;
     const char *type = NULL;
     const char *id = NULL;
-    char *tmp = NULL;
-    int ret = -1;
+    g_autofree char *aliasCopy = NULL;
 
     if (!*props) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("object props can't be NULL"));
-        goto cleanup;
+        return -1;
     }
 
     type = virJSONValueObjectGetString(*props, "qom-type");
@@ -2970,34 +2689,53 @@ qemuMonitorAddObject(qemuMonitorPtr mon,
 
     VIR_DEBUG("type=%s id=%s", NULLSTR(type), NULLSTR(id));
 
-    QEMU_CHECK_MONITOR_GOTO(mon, cleanup);
+    QEMU_CHECK_MONITOR(mon);
 
     if (!id || !type) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("missing alias or qom-type for qemu object '%s'"),
+                       _("missing alias or qom-type for qemu object '%1$s'"),
                        NULLSTR(type));
-        goto cleanup;
+        return -1;
     }
 
     if (alias)
-        tmp = g_strdup(id);
+        aliasCopy = g_strdup(id);
 
-    ret = qemuMonitorJSONAddObject(mon, *props);
-    *props = NULL;
+    if (mon->objectAddNoWrap) {
+        pr = g_steal_pointer(props);
+    } else {
+        /* we need to create a wrapper which has the 'qom-type' and 'id' and
+         * store everything else under a 'props' sub-object */
+        g_autoptr(virJSONValue) typeobj = NULL;
+        g_autoptr(virJSONValue) idobj = NULL;
+
+        ignore_value(virJSONValueObjectRemoveKey(*props, "qom-type", &typeobj));
+        ignore_value(virJSONValueObjectRemoveKey(*props, "id", &idobj));
+
+        /* avoid empty 'props' member */
+        if (!virJSONValueObjectGetKey(*props, 0))
+            g_clear_pointer(props, virJSONValueFree);
+
+        if (virJSONValueObjectAdd(&pr,
+                                  "s:qom-type", type,
+                                  "s:id", id,
+                                  "A:props", props,
+                                  NULL) < 0)
+            return -1;
+    }
+
+    if (qemuMonitorJSONAddObject(mon, &pr) < 0)
+        return -1;
 
     if (alias)
-        *alias = g_steal_pointer(&tmp);
+        *alias = g_steal_pointer(&aliasCopy);
 
- cleanup:
-    VIR_FREE(tmp);
-    virJSONValueFree(*props);
-    *props = NULL;
-    return ret;
+    return 0;
 }
 
 
 int
-qemuMonitorDelObject(qemuMonitorPtr mon,
+qemuMonitorDelObject(qemuMonitor *mon,
                      const char *objalias,
                      bool report_error)
 {
@@ -3010,20 +2748,7 @@ qemuMonitorDelObject(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorAddDrive(qemuMonitorPtr mon,
-                    const char *drivestr)
-{
-    VIR_DEBUG("drive=%s", drivestr);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    /* there won't ever be a direct QMP replacement for this function */
-    return qemuMonitorTextAddDrive(mon, drivestr);
-}
-
-
-int
-qemuMonitorCreateSnapshot(qemuMonitorPtr mon, const char *name)
+qemuMonitorCreateSnapshot(qemuMonitor *mon, const char *name)
 {
     VIR_DEBUG("name=%s", name);
 
@@ -3033,20 +2758,9 @@ qemuMonitorCreateSnapshot(qemuMonitorPtr mon, const char *name)
     return qemuMonitorTextCreateSnapshot(mon, name);
 }
 
-int
-qemuMonitorLoadSnapshot(qemuMonitorPtr mon, const char *name)
-{
-    VIR_DEBUG("name=%s", name);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    /* there won't ever be a direct QMP replacement for this function */
-    return qemuMonitorTextLoadSnapshot(mon, name);
-}
-
 
 int
-qemuMonitorDeleteSnapshot(qemuMonitorPtr mon, const char *name)
+qemuMonitorDeleteSnapshot(qemuMonitor *mon, const char *name)
 {
     VIR_DEBUG("name=%s", name);
 
@@ -3057,29 +2771,8 @@ qemuMonitorDeleteSnapshot(qemuMonitorPtr mon, const char *name)
 }
 
 
-/* Start a drive-mirror block job.  bandwidth is in bytes/sec.  */
 int
-qemuMonitorDriveMirror(qemuMonitorPtr mon,
-                       const char *device, const char *file,
-                       const char *format, unsigned long long bandwidth,
-                       unsigned int granularity, unsigned long long buf_size,
-                       bool shallow,
-                       bool reuse)
-{
-    VIR_DEBUG("device=%s, file=%s, format=%s, bandwidth=%lld, "
-              "granularity=%#x, buf_size=%lld, shallow=%d, reuse=%d",
-              device, file, NULLSTR(format), bandwidth, granularity,
-              buf_size, shallow, reuse);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONDriveMirror(mon, device, file, format, bandwidth,
-                                      granularity, buf_size, shallow, reuse);
-}
-
-
-int
-qemuMonitorBlockdevMirror(qemuMonitorPtr mon,
+qemuMonitorBlockdevMirror(qemuMonitor *mon,
                           const char *jobname,
                           bool persistjob,
                           const char *device,
@@ -3087,23 +2780,25 @@ qemuMonitorBlockdevMirror(qemuMonitorPtr mon,
                           unsigned long long bandwidth,
                           unsigned int granularity,
                           unsigned long long buf_size,
-                          bool shallow)
+                          bool shallow,
+                          bool syncWrite)
 {
     VIR_DEBUG("jobname=%s, persistjob=%d, device=%s, target=%s, bandwidth=%lld, "
-              "granularity=%#x, buf_size=%lld, shallow=%d",
+              "granularity=%#x, buf_size=%lld, shallow=%d syncWrite=%d",
               NULLSTR(jobname), persistjob, device, target, bandwidth, granularity,
-              buf_size, shallow);
+              buf_size, shallow, syncWrite);
 
     QEMU_CHECK_MONITOR(mon);
 
     return qemuMonitorJSONBlockdevMirror(mon, jobname, persistjob, device, target,
-                                         bandwidth, granularity, buf_size, shallow);
+                                         bandwidth, granularity, buf_size, shallow,
+                                         syncWrite);
 }
 
 
 /* Use the transaction QMP command to run atomic snapshot commands.  */
 int
-qemuMonitorTransaction(qemuMonitorPtr mon, virJSONValuePtr *actions)
+qemuMonitorTransaction(qemuMonitor *mon, virJSONValue **actions)
 {
     VIR_DEBUG("actions=%p", *actions);
 
@@ -3115,87 +2810,46 @@ qemuMonitorTransaction(qemuMonitorPtr mon, virJSONValuePtr *actions)
 
 /* Start a block-commit block job.  bandwidth is in bytes/sec.  */
 int
-qemuMonitorBlockCommit(qemuMonitorPtr mon,
+qemuMonitorBlockCommit(qemuMonitor *mon,
                        const char *device,
                        const char *jobname,
-                       bool persistjob,
-                       const char *top,
                        const char *topNode,
-                       const char *base,
                        const char *baseNode,
                        const char *backingName,
-                       unsigned long long bandwidth)
+                       unsigned long long bandwidth,
+                       virTristateBool autofinalize)
 {
-    VIR_DEBUG("device=%s, jobname=%s, persistjob=%d, top=%s, topNode=%s, "
-              "base=%s, baseNode=%s, backingName=%s, bandwidth=%llu",
-              device, NULLSTR(jobname), persistjob, NULLSTR(top), NULLSTR(topNode),
-              NULLSTR(base), NULLSTR(baseNode), NULLSTR(backingName), bandwidth);
+    VIR_DEBUG("device=%s, jobname=%s, topNode=%s, baseNode=%s, backingName=%s, bandwidth=%llu, autofinalize=%d",
+              device, NULLSTR(jobname), NULLSTR(topNode),
+              NULLSTR(baseNode), NULLSTR(backingName), bandwidth, autofinalize);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONBlockCommit(mon, device, jobname, persistjob, top,
-                                      topNode, base, baseNode, backingName,
-                                      bandwidth);
-}
-
-
-/* Probe whether active commits are supported by a given qemu binary. */
-bool
-qemuMonitorSupportsActiveCommit(qemuMonitorPtr mon)
-{
-    if (!mon)
-        return false;
-
-    return qemuMonitorJSONSupportsActiveCommit(mon);
-}
-
-
-/* Determine the name that qemu is using for tracking the backing
- * element TARGET within the chain starting at TOP.  */
-char *
-qemuMonitorDiskNameLookup(qemuMonitorPtr mon,
-                          const char *device,
-                          virStorageSourcePtr top,
-                          virStorageSourcePtr target)
-{
-    QEMU_CHECK_MONITOR_NULL(mon);
-
-    return qemuMonitorJSONDiskNameLookup(mon, device, top, target);
-}
-
-
-/* Use the block-job-complete monitor command to pivot a block copy job.  */
-int
-qemuMonitorDrivePivot(qemuMonitorPtr mon,
-                      const char *jobname)
-{
-    VIR_DEBUG("jobname=%s", jobname);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONDrivePivot(mon, jobname);
+    return qemuMonitorJSONBlockCommit(mon, device, jobname, topNode, baseNode,
+                                      backingName, bandwidth, autofinalize);
 }
 
 
 int
-qemuMonitorArbitraryCommand(qemuMonitorPtr mon,
+qemuMonitorArbitraryCommand(qemuMonitor *mon,
                             const char *cmd,
+                            int fd,
                             char **reply,
                             bool hmp)
 {
-    VIR_DEBUG("cmd=%s, reply=%p, hmp=%d", cmd, reply, hmp);
+    VIR_DEBUG("cmd=%s, fd=%d, reply=%p, hmp=%d", cmd, fd, reply, hmp);
 
     QEMU_CHECK_MONITOR(mon);
 
     if (hmp)
-        return qemuMonitorJSONHumanCommand(mon, cmd, reply);
+        return qemuMonitorJSONHumanCommand(mon, cmd, fd, reply);
     else
-        return qemuMonitorJSONArbitraryCommand(mon, cmd, reply);
+        return qemuMonitorJSONArbitraryCommand(mon, cmd, fd, reply);
 }
 
 
 int
-qemuMonitorInjectNMI(qemuMonitorPtr mon)
+qemuMonitorInjectNMI(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -3204,7 +2858,7 @@ qemuMonitorInjectNMI(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorSendKey(qemuMonitorPtr mon,
+qemuMonitorSendKey(qemuMonitor *mon,
                    unsigned int holdtime,
                    unsigned int *keycodes,
                    unsigned int nkeycodes)
@@ -3218,62 +2872,56 @@ qemuMonitorSendKey(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorScreendump(qemuMonitorPtr mon,
+qemuMonitorScreendump(qemuMonitor *mon,
                       const char *device,
                       unsigned int head,
+                      const char *format,
                       const char *file)
 {
-    VIR_DEBUG("file=%s", file);
+    VIR_DEBUG("device=%s head=%u format=%s file=%s",
+              device, head, NULLSTR(format), file);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONScreendump(mon, device, head, file);
+    return qemuMonitorJSONScreendump(mon, device, head, format, file);
 }
 
 
 /* bandwidth is in bytes/sec */
 int
-qemuMonitorBlockStream(qemuMonitorPtr mon,
+qemuMonitorBlockStream(qemuMonitor *mon,
                        const char *device,
                        const char *jobname,
-                       bool persistjob,
-                       const char *base,
                        const char *baseNode,
                        const char *backingName,
                        unsigned long long bandwidth)
 {
-    VIR_DEBUG("device=%s, jobname=%s, persistjob=%d, base=%s, baseNode=%s, "
-              "backingName=%s, bandwidth=%lluB",
-              device, NULLSTR(jobname), persistjob, NULLSTR(base),
+    VIR_DEBUG("device=%s, jobname=%s, baseNode=%s, backingName=%s, bandwidth=%lluB",
+              device, NULLSTR(jobname),
               NULLSTR(baseNode), NULLSTR(backingName), bandwidth);
 
     QEMU_CHECK_MONITOR(mon);
 
-    if (base && baseNode) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("'base' and 'baseNode' can't be used together"));
-        return -1;
-    }
-
-    return qemuMonitorJSONBlockStream(mon, device, jobname, persistjob, base,
+    return qemuMonitorJSONBlockStream(mon, device, jobname,
                                       baseNode, backingName, bandwidth);
 }
 
 
 int
-qemuMonitorBlockJobCancel(qemuMonitorPtr mon,
-                          const char *jobname)
+qemuMonitorBlockJobCancel(qemuMonitor *mon,
+                          const char *jobname,
+                          bool force)
 {
-    VIR_DEBUG("jobname=%s", jobname);
+    VIR_DEBUG("jobname=%s force=%d", jobname, force);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONBlockJobCancel(mon, jobname);
+    return qemuMonitorJSONBlockJobCancel(mon, jobname, force);
 }
 
 
 int
-qemuMonitorBlockJobSetSpeed(qemuMonitorPtr mon,
+qemuMonitorBlockJobSetSpeed(qemuMonitor *mon,
                             const char *jobname,
                             unsigned long long bandwidth)
 {
@@ -3285,8 +2933,8 @@ qemuMonitorBlockJobSetSpeed(qemuMonitorPtr mon,
 }
 
 
-virHashTablePtr
-qemuMonitorGetAllBlockJobInfo(qemuMonitorPtr mon,
+GHashTable *
+qemuMonitorGetAllBlockJobInfo(qemuMonitor *mon,
                               bool rawjobname)
 {
     QEMU_CHECK_MONITOR_NULL(mon);
@@ -3294,37 +2942,8 @@ qemuMonitorGetAllBlockJobInfo(qemuMonitorPtr mon,
 }
 
 
-/**
- * qemuMonitorGetBlockJobInfo:
- * Parse Block Job information, and populate info for the named device.
- * Return 1 if info available, 0 if device has no block job, and -1 on error.
- */
 int
-qemuMonitorGetBlockJobInfo(qemuMonitorPtr mon,
-                           const char *alias,
-                           qemuMonitorBlockJobInfoPtr info)
-{
-    virHashTablePtr all;
-    qemuMonitorBlockJobInfoPtr data;
-    int ret = 0;
-
-    VIR_DEBUG("alias=%s, info=%p", alias, info);
-
-    if (!(all = qemuMonitorGetAllBlockJobInfo(mon, true)))
-        return -1;
-
-    if ((data = virHashLookup(all, alias))) {
-        *info = *data;
-        ret = 1;
-    }
-
-    virHashFree(all);
-    return ret;
-}
-
-
-int
-qemuMonitorJobDismiss(qemuMonitorPtr mon,
+qemuMonitorJobDismiss(qemuMonitor *mon,
                       const char *jobname)
 {
     VIR_DEBUG("jobname=%s", jobname);
@@ -3336,20 +2955,19 @@ qemuMonitorJobDismiss(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorJobCancel(qemuMonitorPtr mon,
-                     const char *jobname,
-                     bool quiet)
+qemuMonitorJobFinalize(qemuMonitor *mon,
+                       const char *jobname)
 {
-    VIR_DEBUG("jobname='%s' quiet=%d", jobname, quiet);
+    VIR_DEBUG("jobname=%s", jobname);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONJobCancel(mon, jobname, quiet);
+    return qemuMonitorJSONJobFinalize(mon, jobname);
 }
 
 
 int
-qemuMonitorJobComplete(qemuMonitorPtr mon,
+qemuMonitorJobComplete(qemuMonitor *mon,
                        const char *jobname)
 {
     VIR_DEBUG("jobname=%s", jobname);
@@ -3361,38 +2979,28 @@ qemuMonitorJobComplete(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorSetBlockIoThrottle(qemuMonitorPtr mon,
-                              const char *drivealias,
+qemuMonitorSetBlockIoThrottle(qemuMonitor *mon,
                               const char *qomid,
-                              virDomainBlockIoTuneInfoPtr info,
-                              bool supportMaxOptions,
-                              bool supportGroupNameOption,
-                              bool supportMaxLengthOptions)
+                              virDomainBlockIoTuneInfo *info)
 {
-    VIR_DEBUG("drivealias=%s, qomid=%s, info=%p",
-              NULLSTR(drivealias), NULLSTR(qomid), info);
+    VIR_DEBUG("qomid=%s, info=%p", NULLSTR(qomid), info);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONSetBlockIoThrottle(mon, drivealias, qomid, info,
-                                             supportMaxOptions,
-                                             supportGroupNameOption,
-                                             supportMaxLengthOptions);
+    return qemuMonitorJSONSetBlockIoThrottle(mon, qomid, info);
 }
 
 
 int
-qemuMonitorGetBlockIoThrottle(qemuMonitorPtr mon,
-                              const char *drivealias,
+qemuMonitorGetBlockIoThrottle(qemuMonitor *mon,
                               const char *qdevid,
-                              virDomainBlockIoTuneInfoPtr reply)
+                              virDomainBlockIoTuneInfo *reply)
 {
-    VIR_DEBUG("drivealias=%s, qdevid=%s, reply=%p",
-              NULLSTR(drivealias), NULLSTR(qdevid), reply);
+    VIR_DEBUG("qdevid=%s, reply=%p", NULLSTR(qdevid), reply);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONGetBlockIoThrottle(mon, drivealias, qdevid, reply);
+    return qemuMonitorJSONGetBlockIoThrottle(mon, qdevid, reply);
 }
 
 
@@ -3452,15 +3060,16 @@ qemuMonitorVMStatusToPausedReason(const char *status)
 
 
 int
-qemuMonitorOpenGraphics(qemuMonitorPtr mon,
+qemuMonitorOpenGraphics(qemuMonitor *mon,
                         const char *protocol,
                         int fd,
                         const char *fdname,
                         bool skipauth)
 {
+    int ret;
+
     VIR_DEBUG("protocol=%s fd=%d fdname=%s skipauth=%d",
               protocol, fd, NULLSTR(fdname), skipauth);
-    int ret;
 
     QEMU_CHECK_MONITOR(mon);
 
@@ -3479,7 +3088,7 @@ qemuMonitorOpenGraphics(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorSystemWakeup(qemuMonitorPtr mon)
+qemuMonitorSystemWakeup(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -3488,7 +3097,7 @@ qemuMonitorSystemWakeup(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorGetVersion(qemuMonitorPtr mon,
+qemuMonitorGetVersion(qemuMonitor *mon,
                       int *major,
                       int *minor,
                       int *micro,
@@ -3504,8 +3113,8 @@ qemuMonitorGetVersion(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetMachines(qemuMonitorPtr mon,
-                       qemuMonitorMachineInfoPtr **machines)
+qemuMonitorGetMachines(qemuMonitor *mon,
+                       qemuMonitorMachineInfo ***machines)
 {
     VIR_DEBUG("machines=%p", machines);
 
@@ -3516,20 +3125,21 @@ qemuMonitorGetMachines(qemuMonitorPtr mon,
 
 
 void
-qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine)
+qemuMonitorMachineInfoFree(qemuMonitorMachineInfo *machine)
 {
     if (!machine)
         return;
-    VIR_FREE(machine->name);
-    VIR_FREE(machine->alias);
-    VIR_FREE(machine->defaultCPU);
-    VIR_FREE(machine);
+    g_free(machine->name);
+    g_free(machine->alias);
+    g_free(machine->defaultCPU);
+    g_free(machine->defaultRAMid);
+    g_free(machine);
 }
 
 
 int
-qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
-                             qemuMonitorCPUDefsPtr *cpuDefs)
+qemuMonitorGetCPUDefinitions(qemuMonitor *mon,
+                             qemuMonitorCPUDefs **cpuDefs)
 {
     VIR_DEBUG("cpuDefs=%p", cpuDefs);
 
@@ -3540,7 +3150,7 @@ qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
 
 
 void
-qemuMonitorCPUDefsFree(qemuMonitorCPUDefsPtr defs)
+qemuMonitorCPUDefsFree(qemuMonitorCPUDefs *defs)
 {
     size_t i;
 
@@ -3558,7 +3168,7 @@ qemuMonitorCPUDefsFree(qemuMonitorCPUDefsPtr defs)
 }
 
 
-qemuMonitorCPUDefsPtr
+qemuMonitorCPUDefs *
 qemuMonitorCPUDefsNew(size_t count)
 {
     g_autoptr(qemuMonitorCPUDefs) defs = NULL;
@@ -3571,8 +3181,8 @@ qemuMonitorCPUDefsNew(size_t count)
 }
 
 
-qemuMonitorCPUDefsPtr
-qemuMonitorCPUDefsCopy(qemuMonitorCPUDefsPtr src)
+qemuMonitorCPUDefs *
+qemuMonitorCPUDefsCopy(qemuMonitorCPUDefs *src)
 {
     g_autoptr(qemuMonitorCPUDefs) defs = NULL;
     size_t i;
@@ -3582,13 +3192,14 @@ qemuMonitorCPUDefsCopy(qemuMonitorCPUDefsPtr src)
 
     defs = qemuMonitorCPUDefsNew(src->ncpus);
     for (i = 0; i < src->ncpus; i++) {
-        qemuMonitorCPUDefInfoPtr cpuDst = defs->cpus + i;
-        qemuMonitorCPUDefInfoPtr cpuSrc = src->cpus + i;
+        qemuMonitorCPUDefInfo *cpuDst = defs->cpus + i;
+        qemuMonitorCPUDefInfo *cpuSrc = src->cpus + i;
 
         cpuDst->usable = cpuSrc->usable;
         cpuDst->name = g_strdup(cpuSrc->name);
         cpuDst->type = g_strdup(cpuSrc->type);
         cpuDst->blockers = g_strdupv(cpuSrc->blockers);
+        cpuDst->deprecated = cpuSrc->deprecated;
     }
 
     return g_steal_pointer(&defs);
@@ -3596,28 +3207,29 @@ qemuMonitorCPUDefsCopy(qemuMonitorCPUDefsPtr src)
 
 
 int
-qemuMonitorGetCPUModelExpansion(qemuMonitorPtr mon,
+qemuMonitorGetCPUModelExpansion(qemuMonitor *mon,
                                 qemuMonitorCPUModelExpansionType type,
-                                virCPUDefPtr cpu,
+                                virCPUDef *cpu,
                                 bool migratable,
+                                bool hv_passthrough,
                                 bool fail_no_props,
-                                qemuMonitorCPUModelInfoPtr *model_info)
+                                qemuMonitorCPUModelInfo **model_info)
 {
     VIR_DEBUG("type=%d cpu=%p migratable=%d", type, cpu, migratable);
 
     QEMU_CHECK_MONITOR(mon);
 
     return qemuMonitorJSONGetCPUModelExpansion(mon, type, cpu,
-                                               migratable, fail_no_props,
-                                               model_info);
+                                               migratable, hv_passthrough,
+                                               fail_no_props, model_info);
 }
 
 
 int
-qemuMonitorGetCPUModelBaseline(qemuMonitorPtr mon,
-                               virCPUDefPtr cpu_a,
-                               virCPUDefPtr cpu_b,
-                               qemuMonitorCPUModelInfoPtr *baseline)
+qemuMonitorGetCPUModelBaseline(qemuMonitor *mon,
+                               virCPUDef *cpu_a,
+                               virCPUDef *cpu_b,
+                               qemuMonitorCPUModelInfo **baseline)
 {
     VIR_DEBUG("cpu_a=%p cpu_b=%p", cpu_a, cpu_b);
 
@@ -3628,9 +3240,9 @@ qemuMonitorGetCPUModelBaseline(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetCPUModelComparison(qemuMonitorPtr mon,
-                                 virCPUDefPtr cpu_a,
-                                 virCPUDefPtr cpu_b,
+qemuMonitorGetCPUModelComparison(qemuMonitor *mon,
+                                 virCPUDef *cpu_a,
+                                 virCPUDef *cpu_b,
                                  char **result)
 {
     VIR_DEBUG("cpu_a=%p cpu_b=%p", cpu_a, cpu_b);
@@ -3642,7 +3254,7 @@ qemuMonitorGetCPUModelComparison(qemuMonitorPtr mon,
 
 
 void
-qemuMonitorCPUModelInfoFree(qemuMonitorCPUModelInfoPtr model_info)
+qemuMonitorCPUModelInfoFree(qemuMonitorCPUModelInfo *model_info)
 {
     size_t i;
 
@@ -3650,28 +3262,26 @@ qemuMonitorCPUModelInfoFree(qemuMonitorCPUModelInfoPtr model_info)
         return;
 
     for (i = 0; i < model_info->nprops; i++) {
-        VIR_FREE(model_info->props[i].name);
+        g_free(model_info->props[i].name);
         if (model_info->props[i].type == QEMU_MONITOR_CPU_PROPERTY_STRING)
-            VIR_FREE(model_info->props[i].value.string);
+            g_free(model_info->props[i].value.string);
     }
 
-    VIR_FREE(model_info->props);
-    VIR_FREE(model_info->name);
-    VIR_FREE(model_info);
+    g_free(model_info->props);
+    g_free(model_info->name);
+    g_free(model_info);
 }
 
 
-qemuMonitorCPUModelInfoPtr
+qemuMonitorCPUModelInfo *
 qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig)
 {
-    qemuMonitorCPUModelInfoPtr copy;
+    qemuMonitorCPUModelInfo *copy;
     size_t i;
 
-    if (VIR_ALLOC(copy) < 0)
-        goto error;
+    copy = g_new0(qemuMonitorCPUModelInfo, 1);
 
-    if (VIR_ALLOC_N(copy->props, orig->nprops) < 0)
-        goto error;
+    copy->props = g_new0(qemuMonitorCPUProperty, orig->nprops);
 
     copy->name = g_strdup(orig->name);
 
@@ -3702,56 +3312,20 @@ qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig)
     }
 
     return copy;
-
- error:
-    qemuMonitorCPUModelInfoFree(copy);
-    return NULL;
 }
 
 
-int
-qemuMonitorGetCommands(qemuMonitorPtr mon,
-                       char ***commands)
+GHashTable *
+qemuMonitorGetCommandLineOptions(qemuMonitor *mon)
 {
-    VIR_DEBUG("commands=%p", commands);
+    QEMU_CHECK_MONITOR_NULL(mon);
 
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONGetCommands(mon, commands);
+    return qemuMonitorJSONGetCommandLineOptions(mon);
 }
 
 
 int
-qemuMonitorGetEvents(qemuMonitorPtr mon,
-                     char ***events)
-{
-    VIR_DEBUG("events=%p", events);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONGetEvents(mon, events);
-}
-
-
-/* Collect the parameters associated with a given command line option.
- * Return count of known parameters or -1 on error.  */
-int
-qemuMonitorGetCommandLineOptionParameters(qemuMonitorPtr mon,
-                                          const char *option,
-                                          char ***params,
-                                          bool *found)
-{
-    VIR_DEBUG("option=%s params=%p", option, params);
-
-    QEMU_CHECK_MONITOR(mon);
-
-    return qemuMonitorJSONGetCommandLineOptionParameters(mon, option,
-                                                         params, found);
-}
-
-
-int
-qemuMonitorGetKVMState(qemuMonitorPtr mon,
+qemuMonitorGetKVMState(qemuMonitor *mon,
                        bool *enabled,
                        bool *present)
 {
@@ -3764,7 +3338,7 @@ qemuMonitorGetKVMState(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
+qemuMonitorGetObjectTypes(qemuMonitor *mon,
                           char ***types)
 {
     VIR_DEBUG("types=%p", types);
@@ -3775,8 +3349,8 @@ qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
 }
 
 
-virHashTablePtr
-qemuMonitorGetDeviceProps(qemuMonitorPtr mon,
+GHashTable *
+qemuMonitorGetDeviceProps(qemuMonitor *mon,
                           const char *device)
 {
     VIR_DEBUG("device=%s", device);
@@ -3788,7 +3362,7 @@ qemuMonitorGetDeviceProps(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetObjectProps(qemuMonitorPtr mon,
+qemuMonitorGetObjectProps(qemuMonitor *mon,
                           const char *object,
                           char ***props)
 {
@@ -3801,7 +3375,7 @@ qemuMonitorGetObjectProps(qemuMonitorPtr mon,
 
 
 char *
-qemuMonitorGetTargetArch(qemuMonitorPtr mon)
+qemuMonitorGetTargetArch(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR_NULL(mon);
 
@@ -3810,7 +3384,7 @@ qemuMonitorGetTargetArch(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorGetMigrationCapabilities(qemuMonitorPtr mon,
+qemuMonitorGetMigrationCapabilities(qemuMonitor *mon,
                                     char ***capabilities)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -3824,22 +3398,17 @@ qemuMonitorGetMigrationCapabilities(qemuMonitorPtr mon,
  * @mon: Pointer to the monitor object.
  * @caps: Migration capabilities.
  *
- * The @caps object is consumed and should not be referenced by the caller
- * after this function returns.
+ * The @caps object is consumed cleared on success and some errors.
  *
  * Returns 0 on success, -1 on error.
  */
 int
-qemuMonitorSetMigrationCapabilities(qemuMonitorPtr mon,
-                                    virJSONValuePtr caps)
+qemuMonitorSetMigrationCapabilities(qemuMonitor *mon,
+                                    virJSONValue **caps)
 {
-    QEMU_CHECK_MONITOR_GOTO(mon, error);
+    QEMU_CHECK_MONITOR(mon);
 
     return qemuMonitorJSONSetMigrationCapabilities(mon, caps);
-
- error:
-    virJSONValueFree(caps);
-    return -1;
 }
 
 
@@ -3851,7 +3420,7 @@ qemuMonitorSetMigrationCapabilities(qemuMonitorPtr mon,
  * See qemuMonitorJSONGetGICCapabilities().
  */
 int
-qemuMonitorGetGICCapabilities(qemuMonitorPtr mon,
+qemuMonitorGetGICCapabilities(qemuMonitor *mon,
                               virGICCapability **capabilities)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -3861,7 +3430,7 @@ qemuMonitorGetGICCapabilities(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetSEVCapabilities(qemuMonitorPtr mon,
+qemuMonitorGetSEVCapabilities(qemuMonitor *mon,
                               virSEVCapability **capabilities)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -3871,7 +3440,17 @@ qemuMonitorGetSEVCapabilities(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorNBDServerStart(qemuMonitorPtr mon,
+qemuMonitorGetSGXCapabilities(qemuMonitor *mon,
+                              virSGXCapability **capabilities)
+{
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONGetSGXCapabilities(mon, capabilities);
+}
+
+
+int
+qemuMonitorNBDServerStart(qemuMonitor *mon,
                           const virStorageNetHostDef *server,
                           const char *tls_alias)
 {
@@ -3890,7 +3469,7 @@ qemuMonitorNBDServerStart(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorNBDServerAdd(qemuMonitorPtr mon,
+qemuMonitorNBDServerAdd(qemuMonitor *mon,
                         const char *deviceID,
                         const char *export,
                         bool writable,
@@ -3907,7 +3486,7 @@ qemuMonitorNBDServerAdd(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorNBDServerStop(qemuMonitorPtr mon)
+qemuMonitorNBDServerStop(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -3916,8 +3495,18 @@ qemuMonitorNBDServerStop(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorGetTPMModels(qemuMonitorPtr mon,
-                            char ***tpmmodels)
+qemuMonitorBlockExportAdd(qemuMonitor *mon,
+                          virJSONValue **props)
+{
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONBlockExportAdd(mon, props);
+}
+
+
+int
+qemuMonitorGetTPMModels(qemuMonitor *mon,
+                        char ***tpmmodels)
 {
     VIR_DEBUG("tpmmodels=%p", tpmmodels);
 
@@ -3928,7 +3517,7 @@ qemuMonitorGetTPMModels(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetTPMTypes(qemuMonitorPtr mon,
+qemuMonitorGetTPMTypes(qemuMonitor *mon,
                        char ***tpmtypes)
 {
     VIR_DEBUG("tpmtypes=%p", tpmtypes);
@@ -3940,9 +3529,9 @@ qemuMonitorGetTPMTypes(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorAttachCharDev(qemuMonitorPtr mon,
+qemuMonitorAttachCharDev(qemuMonitor *mon,
                          const char *chrID,
-                         virDomainChrSourceDefPtr chr)
+                         virDomainChrSourceDef *chr)
 {
     VIR_DEBUG("chrID=%s chr=%p", chrID, chr);
 
@@ -3953,7 +3542,7 @@ qemuMonitorAttachCharDev(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorDetachCharDev(qemuMonitorPtr mon,
+qemuMonitorDetachCharDev(qemuMonitor *mon,
                          const char *chrID)
 {
     VIR_DEBUG("chrID=%s", chrID);
@@ -3965,7 +3554,7 @@ qemuMonitorDetachCharDev(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetDeviceAliases(qemuMonitorPtr mon,
+qemuMonitorGetDeviceAliases(qemuMonitor *mon,
                             char ***aliases)
 {
     VIR_DEBUG("aliases=%p", aliases);
@@ -3988,7 +3577,7 @@ qemuMonitorGetDeviceAliases(qemuMonitorPtr mon,
  * locked already!
  */
 void
-qemuMonitorSetDomainLogLocked(qemuMonitorPtr mon,
+qemuMonitorSetDomainLogLocked(qemuMonitor *mon,
                               qemuMonitorReportDomainLogError func,
                               void *opaque,
                               virFreeCallback destroy)
@@ -4014,7 +3603,7 @@ qemuMonitorSetDomainLogLocked(qemuMonitorPtr mon,
  * unlocked.
  */
 void
-qemuMonitorSetDomainLog(qemuMonitorPtr mon,
+qemuMonitorSetDomainLog(qemuMonitor *mon,
                         qemuMonitorReportDomainLogError func,
                         void *opaque,
                         virFreeCallback destroy)
@@ -4028,6 +3617,7 @@ qemuMonitorSetDomainLog(qemuMonitorPtr mon,
 /**
  * qemuMonitorJSONGetGuestCPUx86:
  * @mon: Pointer to the monitor
+ * @cpuQOMPath: QOM path of a CPU to probe
  * @data: returns the cpu data
  * @disabled: returns the CPU data for features which were disabled by QEMU
  *
@@ -4037,11 +3627,12 @@ qemuMonitorSetDomainLog(qemuMonitorPtr mon,
  * -1 on other errors.
  */
 int
-qemuMonitorGetGuestCPUx86(qemuMonitorPtr mon,
-                          virCPUDataPtr *data,
-                          virCPUDataPtr *disabled)
+qemuMonitorGetGuestCPUx86(qemuMonitor *mon,
+                          const char *cpuQOMPath,
+                          virCPUData **data,
+                          virCPUData **disabled)
 {
-    VIR_DEBUG("data=%p disabled=%p", data, disabled);
+    VIR_DEBUG("cpuQOMPath=%s data=%p disabled=%p", cpuQOMPath, data, disabled);
 
     QEMU_CHECK_MONITOR(mon);
 
@@ -4049,7 +3640,7 @@ qemuMonitorGetGuestCPUx86(qemuMonitorPtr mon,
     if (disabled)
         *disabled = NULL;
 
-    return qemuMonitorJSONGetGuestCPUx86(mon, data, disabled);
+    return qemuMonitorJSONGetGuestCPUx86(mon, cpuQOMPath, data, disabled);
 }
 
 
@@ -4057,6 +3648,7 @@ qemuMonitorGetGuestCPUx86(qemuMonitorPtr mon,
  * qemuMonitorGetGuestCPU:
  * @mon: Pointer to the monitor
  * @arch: CPU architecture
+ * @cpuQOMPath: QOM path of a CPU to probe
  * @translate: callback for translating CPU feature names from QEMU to libvirt
  * @opaque: data for @translate callback
  * @enabled: returns the CPU data for all enabled features
@@ -4068,15 +3660,15 @@ qemuMonitorGetGuestCPUx86(qemuMonitorPtr mon,
  * Returns 0 on success, -1 on error.
  */
 int
-qemuMonitorGetGuestCPU(qemuMonitorPtr mon,
+qemuMonitorGetGuestCPU(qemuMonitor *mon,
                        virArch arch,
+                       const char *cpuQOMPath,
                        qemuMonitorCPUFeatureTranslationCallback translate,
-                       void *opaque,
-                       virCPUDataPtr *enabled,
-                       virCPUDataPtr *disabled)
+                       virCPUData **enabled,
+                       virCPUData **disabled)
 {
-    VIR_DEBUG("arch=%s translate=%p opaque=%p enabled=%p disabled=%p",
-              virArchToString(arch), translate, opaque, enabled, disabled);
+    VIR_DEBUG("arch=%s cpuQOMPath=%s translate=%p enabled=%p disabled=%p",
+              virArchToString(arch), cpuQOMPath, translate, enabled, disabled);
 
     QEMU_CHECK_MONITOR(mon);
 
@@ -4084,7 +3676,7 @@ qemuMonitorGetGuestCPU(qemuMonitorPtr mon,
     if (disabled)
         *disabled = NULL;
 
-    return qemuMonitorJSONGetGuestCPU(mon, arch, translate, opaque,
+    return qemuMonitorJSONGetGuestCPU(mon, arch, cpuQOMPath, translate,
                                       enabled, disabled);
 }
 
@@ -4102,7 +3694,7 @@ qemuMonitorGetGuestCPU(qemuMonitorPtr mon,
  *        -1 on error.
  */
 int
-qemuMonitorRTCResetReinjection(qemuMonitorPtr mon)
+qemuMonitorRTCResetReinjection(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -4114,22 +3706,24 @@ qemuMonitorRTCResetReinjection(qemuMonitorPtr mon)
  * qemuMonitorGetIOThreads:
  * @mon: Pointer to the monitor
  * @iothreads: Location to return array of IOThreadInfo data
+ * @niothreads: Count of the number of IOThreads in the array
  *
  * Issue query-iothreads command.
  * Retrieve the list of iothreads defined/running for the machine
  *
- * Returns count of IOThreadInfo structures on success
+ * Returns 0 on success
  *        -1 on error.
  */
 int
-qemuMonitorGetIOThreads(qemuMonitorPtr mon,
-                        qemuMonitorIOThreadInfoPtr **iothreads)
+qemuMonitorGetIOThreads(qemuMonitor *mon,
+                        qemuMonitorIOThreadInfo ***iothreads,
+                        int *niothreads)
 {
     VIR_DEBUG("iothreads=%p", iothreads);
 
     QEMU_CHECK_MONITOR(mon);
 
-    return qemuMonitorJSONGetIOThreads(mon, iothreads);
+    return qemuMonitorJSONGetIOThreads(mon, iothreads, niothreads);
 }
 
 
@@ -4141,8 +3735,8 @@ qemuMonitorGetIOThreads(qemuMonitorPtr mon,
  * Alter the specified IOThread's IOThreadInfo values.
  */
 int
-qemuMonitorSetIOThread(qemuMonitorPtr mon,
-                       qemuMonitorIOThreadInfoPtr iothreadInfo)
+qemuMonitorSetIOThread(qemuMonitor *mon,
+                       qemuMonitorIOThreadInfo *iothreadInfo)
 {
     VIR_DEBUG("iothread=%p", iothreadInfo);
 
@@ -4160,35 +3754,31 @@ qemuMonitorSetIOThread(qemuMonitorPtr mon,
  * Retrieve state and addresses of frontend memory devices present in
  * the guest.
  *
- * Returns 0 on success and fills @info with a newly allocated struct; if the
- * data can't be retrieved due to lack of support in qemu, returns -2. On
- * other errors returns -1.
+ * Returns: 0 on success and fills @info with a newly allocated struct,
+ *         -1 otherwise.
  */
 int
-qemuMonitorGetMemoryDeviceInfo(qemuMonitorPtr mon,
-                               virHashTablePtr *info)
+qemuMonitorGetMemoryDeviceInfo(qemuMonitor *mon,
+                               GHashTable **info)
 {
-    VIR_DEBUG("info=%p", info);
+    g_autoptr(GHashTable) hash = virHashNew(g_free);
     int ret;
+
+    VIR_DEBUG("info=%p", info);
 
     *info = NULL;
 
     QEMU_CHECK_MONITOR(mon);
 
-    if (!(*info = virHashCreate(10, virHashValueFree)))
-        return -1;
-
-    if ((ret = qemuMonitorJSONGetMemoryDeviceInfo(mon, *info)) < 0) {
-        virHashFree(*info);
-        *info = NULL;
-    }
+    if ((ret = qemuMonitorJSONGetMemoryDeviceInfo(mon, hash)) >= 0)
+        *info = g_steal_pointer(&hash);
 
     return ret;
 }
 
 
 int
-qemuMonitorMigrateIncoming(qemuMonitorPtr mon,
+qemuMonitorMigrateIncoming(qemuMonitor *mon,
                            const char *uri)
 {
     VIR_DEBUG("uri=%s", uri);
@@ -4200,7 +3790,7 @@ qemuMonitorMigrateIncoming(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorMigrateStartPostCopy(qemuMonitorPtr mon)
+qemuMonitorMigrateStartPostCopy(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -4209,7 +3799,7 @@ qemuMonitorMigrateStartPostCopy(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorMigrateContinue(qemuMonitorPtr mon,
+qemuMonitorMigrateContinue(qemuMonitor *mon,
                            qemuMonitorMigrationStatus status)
 {
     VIR_DEBUG("status=%s", qemuMonitorMigrationStatusTypeToString(status));
@@ -4221,7 +3811,7 @@ qemuMonitorMigrateContinue(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorGetRTCTime(qemuMonitorPtr mon,
+qemuMonitorGetRTCTime(qemuMonitor *mon,
                       struct tm *tm)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -4230,8 +3820,8 @@ qemuMonitorGetRTCTime(qemuMonitorPtr mon,
 }
 
 
-virJSONValuePtr
-qemuMonitorQueryQMPSchema(qemuMonitorPtr mon)
+virJSONValue *
+qemuMonitorQueryQMPSchema(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR_NULL(mon);
 
@@ -4240,7 +3830,7 @@ qemuMonitorQueryQMPSchema(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorSetBlockThreshold(qemuMonitorPtr mon,
+qemuMonitorSetBlockThreshold(qemuMonitor *mon,
                              const char *nodename,
                              unsigned long long threshold)
 {
@@ -4252,17 +3842,8 @@ qemuMonitorSetBlockThreshold(qemuMonitorPtr mon,
 }
 
 
-virJSONValuePtr
-qemuMonitorQueryNamedBlockNodes(qemuMonitorPtr mon)
-{
-    QEMU_CHECK_MONITOR_NULL(mon);
-
-    return qemuMonitorJSONQueryNamedBlockNodes(mon, false);
-}
-
-
 char *
-qemuMonitorGuestPanicEventInfoFormatMsg(qemuMonitorEventPanicInfoPtr info)
+qemuMonitorGuestPanicEventInfoFormatMsg(qemuMonitorEventPanicInfo *info)
 {
     char *ret = NULL;
 
@@ -4292,14 +3873,14 @@ qemuMonitorGuestPanicEventInfoFormatMsg(qemuMonitorEventPanicInfoPtr info)
 
 
 void
-qemuMonitorEventPanicInfoFree(qemuMonitorEventPanicInfoPtr info)
+qemuMonitorEventPanicInfoFree(qemuMonitorEventPanicInfo *info)
 {
     if (!info)
         return;
 
     switch (info->type) {
     case QEMU_MONITOR_EVENT_PANIC_INFO_TYPE_S390:
-        VIR_FREE(info->data.s390.reason);
+        g_free(info->data.s390.reason);
         break;
     case QEMU_MONITOR_EVENT_PANIC_INFO_TYPE_NONE:
     case QEMU_MONITOR_EVENT_PANIC_INFO_TYPE_HYPERV:
@@ -4307,23 +3888,33 @@ qemuMonitorEventPanicInfoFree(qemuMonitorEventPanicInfoPtr info)
         break;
     }
 
-    VIR_FREE(info);
+    g_free(info);
 }
 
 
 void
-qemuMonitorEventRdmaGidStatusFree(qemuMonitorRdmaGidStatusPtr info)
+qemuMonitorEventRdmaGidStatusFree(qemuMonitorRdmaGidStatus *info)
 {
     if (!info)
         return;
 
-    VIR_FREE(info->netdev);
-    VIR_FREE(info);
+    g_free(info->netdev);
+    g_free(info);
+}
+
+
+void
+qemuMonitorMemoryDeviceSizeChangeFree(qemuMonitorMemoryDeviceSizeChangePtr info)
+{
+    if (!info)
+        return;
+
+    g_free(info->devAlias);
 }
 
 
 int
-qemuMonitorSetWatchdogAction(qemuMonitorPtr mon,
+qemuMonitorSetWatchdogAction(qemuMonitor *mon,
                              const char *action)
 {
     VIR_DEBUG("watchdogAction=%s", action);
@@ -4338,30 +3929,23 @@ qemuMonitorSetWatchdogAction(qemuMonitorPtr mon,
  * qemuMonitorBlockdevCreate:
  * @mon: monitor object
  * @jobname: name of the job
- * @props: JSON object describing the blockdev to add
+ * @props: JSON object describing the blockdev to add (consumed on success)
  *
- * Instructs qemu to create/format a new stroage or format layer. Note that
+ * Instructs qemu to create/format a new storage or format layer. Note that
  * the job does not add the created/formatted image into qemu and
  * qemuMonitorBlockdevAdd needs to be called separately with corresponding
  * arguments. Note that the arguments for creating and adding are different.
- *
- * Note that @props is always consumed by this function and should not be
- * accessed after calling this function.
  */
 int
-qemuMonitorBlockdevCreate(qemuMonitorPtr mon,
+qemuMonitorBlockdevCreate(qemuMonitor *mon,
                           const char *jobname,
-                          virJSONValuePtr props)
+                          virJSONValue **props)
 {
     VIR_DEBUG("jobname=%s props=%p", jobname, props);
 
-    QEMU_CHECK_MONITOR_GOTO(mon, error);
+    QEMU_CHECK_MONITOR(mon);
 
     return qemuMonitorJSONBlockdevCreate(mon, jobname, props);
-
- error:
-    virJSONValueFree(props);
-    return -1;
 }
 
 /**
@@ -4373,8 +3957,8 @@ qemuMonitorBlockdevCreate(qemuMonitorPtr mon,
  * and set to NULL on success.
  */
 int
-qemuMonitorBlockdevAdd(qemuMonitorPtr mon,
-                       virJSONValuePtr *props)
+qemuMonitorBlockdevAdd(qemuMonitor *mon,
+                       virJSONValue **props)
 {
     VIR_DEBUG("props=%p (node-name=%s)", *props,
               NULLSTR(virJSONValueObjectGetString(*props, "node-name")));
@@ -4386,8 +3970,8 @@ qemuMonitorBlockdevAdd(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorBlockdevReopen(qemuMonitorPtr mon,
-                          virJSONValuePtr *props)
+qemuMonitorBlockdevReopen(qemuMonitor *mon,
+                          virJSONValue **props)
 {
     VIR_DEBUG("props=%p (node-name=%s)", *props,
               NULLSTR(virJSONValueObjectGetString(*props, "node-name")));
@@ -4399,7 +3983,7 @@ qemuMonitorBlockdevReopen(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorBlockdevDel(qemuMonitorPtr mon,
+qemuMonitorBlockdevDel(qemuMonitor *mon,
                        const char *nodename)
 {
     VIR_DEBUG("nodename=%s", nodename);
@@ -4410,7 +3994,7 @@ qemuMonitorBlockdevDel(qemuMonitorPtr mon,
 }
 
 int
-qemuMonitorBlockdevTrayOpen(qemuMonitorPtr mon,
+qemuMonitorBlockdevTrayOpen(qemuMonitor *mon,
                             const char *id,
                             bool force)
 {
@@ -4423,7 +4007,7 @@ qemuMonitorBlockdevTrayOpen(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorBlockdevTrayClose(qemuMonitorPtr mon,
+qemuMonitorBlockdevTrayClose(qemuMonitor *mon,
                              const char *id)
 {
     VIR_DEBUG("id=%s", id);
@@ -4435,7 +4019,7 @@ qemuMonitorBlockdevTrayClose(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorBlockdevMediumRemove(qemuMonitorPtr mon,
+qemuMonitorBlockdevMediumRemove(qemuMonitor *mon,
                                 const char *id)
 {
     VIR_DEBUG("id=%s", id);
@@ -4447,7 +4031,7 @@ qemuMonitorBlockdevMediumRemove(qemuMonitorPtr mon,
 
 
 int
-qemuMonitorBlockdevMediumInsert(qemuMonitorPtr mon,
+qemuMonitorBlockdevMediumInsert(qemuMonitor *mon,
                                 const char *id,
                                 const char *nodename)
 {
@@ -4460,7 +4044,7 @@ qemuMonitorBlockdevMediumInsert(qemuMonitorPtr mon,
 
 
 char *
-qemuMonitorGetSEVMeasurement(qemuMonitorPtr mon)
+qemuMonitorGetSEVMeasurement(qemuMonitor *mon)
 {
     QEMU_CHECK_MONITOR_NULL(mon);
 
@@ -4469,33 +4053,53 @@ qemuMonitorGetSEVMeasurement(qemuMonitorPtr mon)
 
 
 int
-qemuMonitorGetPRManagerInfo(qemuMonitorPtr mon,
-                            virHashTablePtr *retinfo)
+qemuMonitorGetSEVInfo(qemuMonitor *mon,
+                      unsigned int *apiMajor,
+                      unsigned int *apiMinor,
+                      unsigned int *buildID,
+                      unsigned int *policy)
 {
-    int ret = -1;
-    virHashTablePtr info = NULL;
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONGetSEVInfo(mon, apiMajor, apiMinor, buildID, policy);
+}
+
+
+int
+qemuMonitorSetLaunchSecurityState(qemuMonitor *mon,
+                                  const char *secrethdr,
+                                  const char *secret,
+                                  unsigned long long setaddr,
+                                  bool hasSetaddr)
+{
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONSetLaunchSecurityState(mon, secrethdr, secret,
+                                                 setaddr, hasSetaddr);
+}
+
+
+int
+qemuMonitorGetPRManagerInfo(qemuMonitor *mon,
+                            GHashTable **retinfo)
+{
+    g_autoptr(GHashTable) info = virHashNew(g_free);
 
     *retinfo = NULL;
 
     QEMU_CHECK_MONITOR(mon);
 
-    if (!(info = virHashCreate(10, virHashValueFree)))
-        goto cleanup;
-
     if (qemuMonitorJSONGetPRManagerInfo(mon, info) < 0)
-        goto cleanup;
+        return -1;
 
     *retinfo = g_steal_pointer(&info);
-    ret = 0;
- cleanup:
-    virHashFree(info);
-    return ret;
+    return 0;
 }
 
 
 int
-qemuMonitorGetCurrentMachineInfo(qemuMonitorPtr mon,
-                                 qemuMonitorCurrentMachineInfoPtr info)
+qemuMonitorGetCurrentMachineInfo(qemuMonitor *mon,
+                                 qemuMonitorCurrentMachineInfo *info)
 {
     QEMU_CHECK_MONITOR(mon);
 
@@ -4504,20 +4108,20 @@ qemuMonitorGetCurrentMachineInfo(qemuMonitorPtr mon,
 
 
 void
-qemuMonitorJobInfoFree(qemuMonitorJobInfoPtr job)
+qemuMonitorJobInfoFree(qemuMonitorJobInfo *job)
 {
     if (!job)
         return;
 
-    VIR_FREE(job->id);
-    VIR_FREE(job->error);
-    VIR_FREE(job);
+    g_free(job->id);
+    g_free(job->error);
+    g_free(job);
 }
 
 
 int
-qemuMonitorGetJobInfo(qemuMonitorPtr mon,
-                      qemuMonitorJobInfoPtr **jobs,
+qemuMonitorGetJobInfo(qemuMonitor *mon,
+                      qemuMonitorJobInfo ***jobs,
                       size_t *njobs)
 {
     QEMU_CHECK_MONITOR(mon);
@@ -4526,8 +4130,27 @@ qemuMonitorGetJobInfo(qemuMonitorPtr mon,
 }
 
 
+/* qemuMonitorGetCPUMigratable:
+ *
+ * Get the migratable property of the CPU object.
+ *
+ * Returns -1 on error,
+ *          1 when the property is not supported,
+ *          0 on success (@migratable is set accordingly).
+ */
 int
-qemuMonitorTransactionBitmapAdd(virJSONValuePtr actions,
+qemuMonitorGetCPUMigratable(qemuMonitor *mon,
+                            const char *cpuQOMPath,
+                            bool *migratable)
+{
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONGetCPUMigratable(mon, cpuQOMPath, migratable);
+}
+
+
+int
+qemuMonitorTransactionBitmapAdd(virJSONValue *actions,
                                 const char *node,
                                 const char *name,
                                 bool persistent,
@@ -4540,7 +4163,7 @@ qemuMonitorTransactionBitmapAdd(virJSONValuePtr actions,
 
 
 int
-qemuMonitorTransactionBitmapRemove(virJSONValuePtr actions,
+qemuMonitorTransactionBitmapRemove(virJSONValue *actions,
                                    const char *node,
                                    const char *name)
 {
@@ -4549,7 +4172,20 @@ qemuMonitorTransactionBitmapRemove(virJSONValuePtr actions,
 
 
 int
-qemuMonitorTransactionBitmapEnable(virJSONValuePtr actions,
+qemuMonitorBitmapRemove(qemuMonitor *mon,
+                        const char *node,
+                        const char *name)
+{
+    VIR_DEBUG("node='%s', name='%s'", node, name);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONBitmapRemove(mon, node, name);
+}
+
+
+int
+qemuMonitorTransactionBitmapEnable(virJSONValue *actions,
                                    const char *node,
                                    const char *name)
 {
@@ -4558,7 +4194,7 @@ qemuMonitorTransactionBitmapEnable(virJSONValuePtr actions,
 
 
 int
-qemuMonitorTransactionBitmapDisable(virJSONValuePtr actions,
+qemuMonitorTransactionBitmapDisable(virJSONValue *actions,
                                     const char *node,
                                     const char *name)
 {
@@ -4567,17 +4203,17 @@ qemuMonitorTransactionBitmapDisable(virJSONValuePtr actions,
 
 
 int
-qemuMonitorTransactionBitmapMerge(virJSONValuePtr actions,
+qemuMonitorTransactionBitmapMerge(virJSONValue *actions,
                                   const char *node,
                                   const char *target,
-                                  virJSONValuePtr *sources)
+                                  virJSONValue **sources)
 {
     return qemuMonitorJSONTransactionBitmapMerge(actions, node, target, sources);
 }
 
 
 int
-qemuMonitorTransactionBitmapMergeSourceAddBitmap(virJSONValuePtr sources,
+qemuMonitorTransactionBitmapMergeSourceAddBitmap(virJSONValue *sources,
                                                  const char *sourcenode,
                                                  const char *sourcebitmap)
 {
@@ -4586,19 +4222,7 @@ qemuMonitorTransactionBitmapMergeSourceAddBitmap(virJSONValuePtr sources,
 
 
 int
-qemuMonitorTransactionSnapshotLegacy(virJSONValuePtr actions,
-                                     const char *device,
-                                     const char *path,
-                                     const char *format,
-                                     bool existing)
-{
-    return qemuMonitorJSONTransactionSnapshotLegacy(actions, device, path,
-                                                    format, existing);
-}
-
-
-int
-qemuMonitorTransactionSnapshotBlockdev(virJSONValuePtr actions,
+qemuMonitorTransactionSnapshotBlockdev(virJSONValue *actions,
                                        const char *node,
                                        const char *overlay)
 {
@@ -4607,7 +4231,7 @@ qemuMonitorTransactionSnapshotBlockdev(virJSONValuePtr actions,
 
 
 int
-qemuMonitorTransactionBackup(virJSONValuePtr actions,
+qemuMonitorTransactionBackup(virJSONValue *actions,
                              const char *device,
                              const char *jobname,
                              const char *target,
@@ -4616,4 +4240,275 @@ qemuMonitorTransactionBackup(virJSONValuePtr actions,
 {
     return qemuMonitorJSONTransactionBackup(actions, device, jobname, target,
                                             bitmap, syncmode);
+}
+
+
+VIR_ENUM_IMPL(qemuMonitorDirtyRateCalcMode,
+              QEMU_MONITOR_DIRTYRATE_CALC_MODE_LAST,
+              "page-sampling",
+              "dirty-bitmap",
+              "dirty-ring",
+);
+
+
+int
+qemuMonitorStartDirtyRateCalc(qemuMonitor *mon,
+                              int seconds,
+                              qemuMonitorDirtyRateCalcMode mode)
+{
+    VIR_DEBUG("seconds=%d", seconds);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONStartDirtyRateCalc(mon, seconds, mode);
+}
+
+
+int
+qemuMonitorQueryDirtyRate(qemuMonitor *mon,
+                          qemuMonitorDirtyRateInfo *info)
+{
+    VIR_DEBUG("info=%p", info);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONQueryDirtyRate(mon, info);
+}
+
+
+int
+qemuMonitorSetAction(qemuMonitor *mon,
+                     qemuMonitorActionShutdown shutdown,
+                     qemuMonitorActionReboot reboot,
+                     qemuMonitorActionWatchdog watchdog,
+                     qemuMonitorActionPanic panic)
+{
+    VIR_DEBUG("shutdown=%u, reboot=%u, watchdog=%u panic=%u",
+              shutdown, reboot, watchdog, panic);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONSetAction(mon, shutdown, reboot, watchdog, panic);
+}
+
+
+int
+qemuMonitorChangeMemoryRequestedSize(qemuMonitor *mon,
+                                     const char *alias,
+                                     unsigned long long requestedsize)
+{
+    VIR_DEBUG("alias=%s requestedsize=%llu", alias, requestedsize);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONChangeMemoryRequestedSize(mon, alias, requestedsize);
+}
+
+
+int
+qemuMonitorMigrateRecover(qemuMonitor *mon,
+                          const char *uri)
+{
+    VIR_DEBUG("uri=%s", uri);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONMigrateRecover(mon, uri);
+}
+
+
+int
+qemuMonitorGetMigrationBlockers(qemuMonitor *mon,
+                                char ***blockers)
+{
+    VIR_DEBUG("blockers=%p", blockers);
+
+    QEMU_CHECK_MONITOR(mon);
+
+    return qemuMonitorJSONGetMigrationBlockers(mon, blockers);
+}
+
+
+VIR_ENUM_IMPL(qemuMonitorQueryStatsTarget,
+              QEMU_MONITOR_QUERY_STATS_TARGET_LAST,
+              "vm",
+              "vcpu",
+);
+
+
+VIR_ENUM_IMPL(qemuMonitorQueryStatsName,
+              QEMU_MONITOR_QUERY_STATS_NAME_LAST,
+              "halt_poll_success_ns",
+              "halt_poll_fail_ns",
+);
+
+
+VIR_ENUM_IMPL(qemuMonitorQueryStatsProvider,
+              QEMU_MONITOR_QUERY_STATS_PROVIDER_LAST,
+              "kvm",
+);
+
+
+void
+qemuMonitorQueryStatsProviderFree(qemuMonitorQueryStatsProvider *provider)
+{
+    virBitmapFree(provider->names);
+    g_free(provider);
+}
+
+
+qemuMonitorQueryStatsProvider *
+qemuMonitorQueryStatsProviderNew(qemuMonitorQueryStatsProviderType provider_type,
+                                 ...)
+{
+    qemuMonitorQueryStatsProvider *provider = g_new0(qemuMonitorQueryStatsProvider, 1);
+    qemuMonitorQueryStatsNameType stat;
+    va_list name_list;
+
+    /*
+     * This can be lowered later in case of the enum getting quite large, hence
+     *  the virBitmapSetExpand below which also incidentally makes this function
+     *  non-fallible.
+     */
+    provider->names = virBitmapNew(QEMU_MONITOR_QUERY_STATS_NAME_LAST);
+    provider->type = provider_type;
+
+    va_start(name_list, provider_type);
+
+    while ((stat = va_arg(name_list, qemuMonitorQueryStatsNameType)) !=
+           QEMU_MONITOR_QUERY_STATS_NAME_LAST)
+        virBitmapSetBitExpand(provider->names, stat);
+
+    va_end(name_list);
+
+    return provider;
+}
+
+
+VIR_ENUM_IMPL(qemuMonitorQueryStatsUnit,
+              QEMU_MONITOR_QUERY_STATS_UNIT_LAST,
+              "bytes",
+              "seconds",
+              "cycles",
+              "boolean",
+);
+
+
+VIR_ENUM_IMPL(qemuMonitorQueryStatsType,
+              QEMU_MONITOR_QUERY_STATS_TYPE_LAST,
+              "cumulative",
+              "instant",
+              "peak",
+              "linear-histogram",
+              "log2-histogram",
+);
+
+
+GHashTable *
+qemuMonitorQueryStatsSchema(qemuMonitor *mon,
+                            qemuMonitorQueryStatsProviderType provider_type)
+{
+    QEMU_CHECK_MONITOR_NULL(mon);
+
+    return qemuMonitorJSONQueryStatsSchema(mon, provider_type);
+}
+
+
+virJSONValue *
+qemuMonitorQueryStats(qemuMonitor *mon,
+                      qemuMonitorQueryStatsTargetType target,
+                      char **vcpus,
+                      GPtrArray *providers)
+{
+    VIR_DEBUG("target=%u vcpus=%p providers=%p", target, vcpus, providers);
+
+    QEMU_CHECK_MONITOR_NULL(mon);
+
+    if (target != QEMU_MONITOR_QUERY_STATS_TARGET_VCPU && vcpus)
+        return NULL;
+
+    return qemuMonitorJSONQueryStats(mon, target, vcpus, providers);
+}
+
+
+/**
+ * qemuMonitorExtractQueryStats:
+ * @info: One of the array members returned by qemuMonitorQueryStat
+ *
+ * Converts all the statistics into a GHashTable similar to virQEMU
+ * except only object with the key "value" is stored as the value i
+ *
+ * Returns NULL on failure.
+ */
+GHashTable *
+qemuMonitorExtractQueryStats(virJSONValue *info)
+{
+    g_autoptr(GHashTable) hash_table = NULL;
+    virJSONValue *stats = NULL;
+    size_t i;
+
+    if (!virJSONValueIsObject(info))
+        return NULL;
+
+    stats = virJSONValueObjectGetArray(info, "stats");
+    if (!stats)
+        return NULL;
+
+    hash_table = virHashNew(virJSONValueHashFree);
+
+    for (i = 0; i < virJSONValueArraySize(stats); i++) {
+        virJSONValue *stat = virJSONValueArrayGet(stats, i);
+        virJSONValue *value = NULL;
+        const char *name = NULL;
+
+        if (!virJSONValueIsObject(stat))
+            continue;
+
+        name = virJSONValueObjectGetString(stat, "name");
+        if (!name)
+            continue;
+
+        if (virJSONValueObjectRemoveKey(stat, "value", &value) < 0)
+            continue;
+
+        virHashAddEntry(hash_table, name, value);
+    }
+
+    return g_steal_pointer(&hash_table);
+}
+
+
+/**
+ * qemuMonitorStatsSchemaByQOMPath:
+ * @arr: Array of objects returned by qemuMonitorQueryStats
+ *
+ * Returns the object which matches the QOM path of the vCPU
+ *
+ * Returns NULL on failure.
+ */
+virJSONValue *
+qemuMonitorGetStatsByQOMPath(virJSONValue *arr,
+                             char *qom_path)
+{
+    size_t i;
+
+    if (!virJSONValueIsArray(arr) || !qom_path)
+        return NULL;
+
+    for (i = 0; i < virJSONValueArraySize(arr); i++) {
+        virJSONValue *obj = virJSONValueArrayGet(arr, i);
+        const char *test_qom_path = NULL;
+
+        if (!obj)
+            return NULL;
+
+        test_qom_path = virJSONValueObjectGetString(obj, "qom-path");
+        if (!test_qom_path)
+            return NULL;
+
+        if (STRCASEEQ(qom_path, test_qom_path))
+            return obj;
+    }
+
+    return NULL;
 }

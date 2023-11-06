@@ -21,21 +21,20 @@
 #include <config.h>
 
 #include "virsh-completer-nwfilter.h"
-#include "viralloc.h"
+#include "virsh-util.h"
 #include "virsh.h"
-#include "virstring.h"
 
 char **
 virshNWFilterNameCompleter(vshControl *ctl,
                            const vshCmd *cmd G_GNUC_UNUSED,
                            unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
     virNWFilterPtr *nwfilters = NULL;
     int nnwfilters = 0;
     size_t i = 0;
     char **ret = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -45,8 +44,7 @@ virshNWFilterNameCompleter(vshControl *ctl,
     if ((nnwfilters = virConnectListAllNWFilters(priv->conn, &nwfilters, flags)) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, nnwfilters + 1) < 0)
-        goto cleanup;
+    tmp = g_new0(char *, nnwfilters + 1);
 
     for (i = 0; i < nnwfilters; i++) {
         const char *name = virNWFilterGetName(nwfilters[i]);
@@ -56,10 +54,9 @@ virshNWFilterNameCompleter(vshControl *ctl,
 
     ret = g_steal_pointer(&tmp);
 
- cleanup:
     for (i = 0; i < nnwfilters; i++)
-        virNWFilterFree(nwfilters[i]);
-    VIR_FREE(nwfilters);
+        virshNWFilterFree(nwfilters[i]);
+    g_free(nwfilters);
     return ret;
 }
 
@@ -69,12 +66,12 @@ virshNWFilterBindingNameCompleter(vshControl *ctl,
                                   const vshCmd *cmd G_GNUC_UNUSED,
                                   unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
     virNWFilterBindingPtr *bindings = NULL;
     int nbindings = 0;
     size_t i = 0;
     char **ret = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -84,8 +81,7 @@ virshNWFilterBindingNameCompleter(vshControl *ctl,
     if ((nbindings = virConnectListAllNWFilterBindings(priv->conn, &bindings, flags)) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, nbindings + 1) < 0)
-        goto cleanup;
+    tmp = g_new0(char *, nbindings + 1);
 
     for (i = 0; i < nbindings; i++) {
         const char *name = virNWFilterBindingGetPortDev(bindings[i]);
@@ -95,9 +91,8 @@ virshNWFilterBindingNameCompleter(vshControl *ctl,
 
     ret = g_steal_pointer(&tmp);
 
- cleanup:
     for (i = 0; i < nbindings; i++)
         virNWFilterBindingFree(bindings[i]);
-    VIR_FREE(bindings);
+    g_free(bindings);
     return ret;
 }

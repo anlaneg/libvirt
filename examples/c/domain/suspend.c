@@ -76,11 +76,11 @@ parse_argv(int argc, char *argv[],
     unsigned long val;
     char *p;
     struct option opt[] = {
-        {"debug", no_argument, NULL, 'd'},
-        {"help", no_argument, NULL, 'h'},
-        {"connect", required_argument, NULL, 'c'},
-        {"seconds", required_argument, NULL, 's'},
-        {NULL, 0, NULL, 0}
+        { "debug", no_argument, NULL, 'd' },
+        { "help", no_argument, NULL, 'h' },
+        { "connect", required_argument, NULL, 'c' },
+        { "seconds", required_argument, NULL, 's' },
+        { NULL, 0, NULL, 0 },
     };
 
     while ((arg = getopt_long(argc, argv, "+:dhc:s:", opt, NULL)) != -1) {
@@ -105,7 +105,7 @@ parse_argv(int argc, char *argv[],
             }
             *seconds = val;
             if (*seconds != val) {
-                ERROR("Integer overflow: %ld", val);
+                ERROR("Integer overflow: %lu", val);
                 return -1;
             }
             break;

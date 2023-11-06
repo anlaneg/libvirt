@@ -27,7 +27,7 @@ struct testData {
     const char *file;
     const char *domain;
     const char * const * macs;
-    virMacMapPtr mgr;
+    virMacMap *mgr;
 };
 
 
@@ -35,50 +35,47 @@ static int
 testMACLookup(const void *opaque)
 {
     const struct testData *data = opaque;
-    virMacMapPtr mgr = NULL;
-    const char * const * macs;
+    g_autoptr(virMacMap) mgr = NULL;
+    GSList *macs;
+    GSList *next;
     size_t i, j;
-    char *file = NULL;
-    int ret = -1;
+    g_autofree char *file = NULL;
 
     file = g_strdup_printf("%s/virmacmaptestdata/%s.json", abs_srcdir, data->file);
 
     if (!(mgr = virMacMapNew(file)))
-        goto cleanup;
+        return -1;
 
     macs = virMacMapLookup(mgr, data->domain);
 
-    for (i = 0; macs && macs[i]; i++) {
+    for (next = macs; next; next = next->next) {
         for (j = 0; data->macs && data->macs[j]; j++) {
-            if (STREQ(macs[i], data->macs[j]))
+            if (STREQ((const char *) next->data, data->macs[j]))
                 break;
         }
 
         if (!data->macs || !data->macs[j]) {
             fprintf(stderr,
-                    "Unexpected %s in the returned list of MACs\n", macs[i]);
-            goto cleanup;
+                    "Unexpected %s in the returned list of MACs\n",
+                    (const char *) next->data);
+            return -1;
         }
     }
 
     for (i = 0; data->macs && data->macs[i]; i++) {
-        for (j = 0; macs && macs[j]; j++) {
-            if (STREQ(data->macs[i], macs[j]))
+        for (next = macs; next; next = next->next) {
+            if (STREQ(data->macs[i], (const char *) next->data))
                 break;
         }
 
-        if (!macs || !macs[j]) {
+        if (!next) {
             fprintf(stderr,
                     "Expected %s in the returned list of MACs\n", data->macs[i]);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(file);
-    virObjectUnref(mgr);
-    return ret;
+    return 0;
 }
 
 
@@ -86,36 +83,32 @@ static int
 testMACRemove(const void *opaque)
 {
     const struct testData *data = opaque;
-    virMacMapPtr mgr = NULL;
-    const char * const * macs;
+    g_autoptr(virMacMap) mgr = NULL;
+    GSList *macs;
     size_t i;
-    char *file = NULL;
-    int ret = -1;
+    g_autofree char *file = NULL;
 
     file = g_strdup_printf("%s/virmacmaptestdata/%s.json", abs_srcdir, data->file);
 
     if (!(mgr = virMacMapNew(file)))
-        goto cleanup;
+        return -1;
 
     for (i = 0; data->macs && data->macs[i]; i++) {
         if (virMacMapRemove(mgr, data->domain, data->macs[i]) < 0) {
             fprintf(stderr,
                     "Error when removing %s from the list of MACs\n", data->macs[i]);
-            goto cleanup;
+            return -1;
         }
     }
 
     if ((macs = virMacMapLookup(mgr, data->domain))) {
         fprintf(stderr,
-                "Not removed all MACs for domain %s: %s\n", data->domain, macs[0]);
-        goto cleanup;
+                "Not removed all MACs for domain %s: %s\n",
+                data->domain, (const char *) macs->data);
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(file);
-    virObjectUnref(mgr);
-    return ret;
+    return 0;
 }
 
 
@@ -123,23 +116,18 @@ static int
 testMACFlush(const void *opaque)
 {
     const struct testData *data = opaque;
-    char *file = NULL;
-    char *str = NULL;
-    int ret = -1;
+    g_autofree char *file = NULL;
+    g_autofree char *str = NULL;
 
     file = g_strdup_printf("%s/virmacmaptestdata/%s.json", abs_srcdir, data->file);
 
     if (virMacMapDumpStr(data->mgr, &str) < 0)
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(str, file) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    VIR_FREE(file);
-    VIR_FREE(str);
-    return ret;
+    return 0;
 }
 
 
@@ -147,7 +135,7 @@ static int
 mymain(void)
 {
     int ret = 0;
-    virMacMapPtr mgr = NULL;
+    virMacMap *mgr = NULL;
 
 #define DO_TEST_BASIC(f, d, ...) \
     do { \
@@ -225,4 +213,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virdeterministichash"))
+VIR_TEST_MAIN(mymain)

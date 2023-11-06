@@ -29,8 +29,6 @@
 #include "lxc_process.h"
 #include "lxc_domain.h"
 #include "lxc_container.h"
-#include "lxc_cgroup.h"
-#include "lxc_fuse.h"
 #include "datatypes.h"
 #include "virfile.h"
 #include "virpidfile.h"
@@ -42,14 +40,13 @@
 #include "domain_nwfilter.h"
 #include "viralloc.h"
 #include "domain_audit.h"
+#include "domain_validate.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "vircommand.h"
 #include "lxc_hostdev.h"
 #include "virhook.h"
-#include "virstring.h"
 #include "virprocess.h"
-#include "virsystemd.h"
 #include "netdev_bandwidth_conf.h"
 #include "virutil.h"
 
@@ -59,20 +56,25 @@ VIR_LOG_INIT("lxc.lxc_process");
 
 #define START_POSTFIX ": starting up\n"
 
+typedef enum {
+    VIR_LXC_PROCESS_CLEANUP_RELEASE_SECLABEL = (1 << 0),
+    VIR_LXC_PROCESS_CLEANUP_RESTORE_SECLABEL = (1 << 1),
+    VIR_LXC_PROCESS_CLEANUP_REMOVE_TRANSIENT = (1 << 2),
+    VIR_LXC_PROCESS_CLEANUP_AUTODESTROY = (1 << 3),
+} virLXCProcessCleanupFlags;
+
 static void
-lxcProcessAutoDestroy(virDomainObjPtr dom,
-                      virConnectPtr conn,
-                      void *opaque)
+lxcProcessAutoDestroy(virDomainObj *dom,
+                      virConnectPtr conn)
 {
-    virLXCDriverPtr driver = opaque;
-    virObjectEventPtr event = NULL;
-    virLXCDomainObjPrivatePtr priv;
+    virObjectEvent *event = NULL;
+    virLXCDomainObjPrivate *priv = dom->privateData;
+    virLXCDriver *driver = priv->driver;
 
     VIR_DEBUG("driver=%p dom=%s conn=%p", driver, dom->def->name, conn);
 
-    priv = dom->privateData;
     VIR_DEBUG("Killing domain");
-    virLXCProcessStop(driver, dom, VIR_DOMAIN_SHUTOFF_DESTROYED);
+    virLXCProcessStop(driver, dom, VIR_DOMAIN_SHUTOFF_DESTROYED, 0);
     virDomainAuditStop(dom, "destroyed");
     event = virDomainEventLifecycleNewFromObj(dom,
                                      VIR_DOMAIN_EVENT_STOPPED,
@@ -89,51 +91,35 @@ lxcProcessAutoDestroy(virDomainObjPtr dom,
  * Precondition: driver is locked
  */
 static int
-virLXCProcessReboot(virLXCDriverPtr driver,
-                    virDomainObjPtr vm)
+virLXCProcessReboot(virLXCDriver *driver,
+                    virDomainObj *vm)
 {
-    virConnectPtr conn = virCloseCallbacksGetConn(driver->closeCallbacks, vm);
+    /* we want to keep the autodestroy callback registered */
+    unsigned int stopFlags = ~(VIR_LXC_PROCESS_CLEANUP_AUTODESTROY);
     int reason = vm->state.reason;
-    bool autodestroy = false;
-    int ret = -1;
-    virDomainDefPtr savedDef;
+    virDomainDef *savedDef;
 
     VIR_DEBUG("Faking reboot");
-
-    if (conn) {
-        virObjectRef(conn);
-        autodestroy = true;
-    } else {
-        conn = virConnectOpen("lxc:///system");
-        /* Ignoring NULL conn which is mostly harmless here */
-    }
 
     /* In a reboot scenario, we need to make sure we continue
      * to use the current 'def', and not switch to 'newDef'.
      * So temporarily hide the newDef and then reinstate it
      */
-    savedDef = vm->newDef;
-    vm->newDef = NULL;
-    virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN);
+    savedDef = g_steal_pointer(&vm->newDef);
+    virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN, stopFlags);
     vm->newDef = savedDef;
-    if (virLXCProcessStart(conn, driver, vm,
-                           0, NULL, autodestroy, reason) < 0) {
-        VIR_WARN("Unable to handle reboot of vm %s",
-                 vm->def->name);
-        goto cleanup;
+    if (virLXCProcessStart(driver, vm, 0, NULL, NULL, reason) < 0) {
+        VIR_WARN("Unable to handle reboot of vm %s", vm->def->name);
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virObjectUnref(conn);
-    return ret;
+    return 0;
 }
 
 
 static void
-lxcProcessRemoveDomainStatus(virLXCDriverConfigPtr cfg,
-                              virDomainObjPtr vm)
+lxcProcessRemoveDomainStatus(virLXCDriverConfig *cfg,
+                              virDomainObj *vm)
 {
     g_autofree char *file = g_strdup_printf("%s/%s.xml",
                                             cfg->stateDir,
@@ -150,22 +136,28 @@ lxcProcessRemoveDomainStatus(virLXCDriverConfigPtr cfg,
  * @driver: pointer to driver structure
  * @vm: pointer to VM to clean up
  * @reason: reason for switching the VM to shutoff state
+ * @flags: allows to run selective cleanups only
  *
- * Cleanout resources associated with the now dead VM
- *
+ * Clean out resources associated with the now dead VM.
+ * If @flags is zero then whole cleanup process is done,
+ * otherwise only selected sections are run.
  */
-static void virLXCProcessCleanup(virLXCDriverPtr driver,
-                                 virDomainObjPtr vm,
-                                 virDomainShutoffReason reason)
+static void virLXCProcessCleanup(virLXCDriver *driver,
+                                 virDomainObj *vm,
+                                 virDomainShutoffReason reason,
+                                 unsigned int flags)
 {
     size_t i;
-    virLXCDomainObjPrivatePtr priv = vm->privateData;
+    virLXCDomainObjPrivate *priv = vm->privateData;
     const virNetDevVPortProfile *vport = NULL;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
-    virConnectPtr conn = NULL;
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
+    g_autoptr(virConnect) conn = NULL;
 
-    VIR_DEBUG("Cleanup VM name=%s pid=%d reason=%d",
-              vm->def->name, (int)vm->pid, (int)reason);
+    VIR_DEBUG("Cleanup VM name=%s pid=%d reason=%d flags=0x%x",
+              vm->def->name, (int)vm->pid, (int)reason, flags);
+
+    if (flags == 0)
+        flags = ~0;
 
     /* now that we know it's stopped call the hook if present */
     if (virHookPresent(VIR_HOOK_DRIVER_LXC)) {
@@ -177,35 +169,38 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
                     NULL, xml, NULL);
     }
 
-    virSecurityManagerRestoreAllLabel(driver->securityManager,
-                                      vm->def, false, false);
-    virSecurityManagerReleaseLabel(driver->securityManager, vm->def);
+    if (flags & VIR_LXC_PROCESS_CLEANUP_RESTORE_SECLABEL) {
+        virSecurityManagerRestoreAllLabel(driver->securityManager,
+                                          vm->def, false, false);
+    }
+
+    if (flags & VIR_LXC_PROCESS_CLEANUP_RELEASE_SECLABEL) {
+        virSecurityManagerReleaseLabel(driver->securityManager, vm->def);
+    }
+
     /* Clear out dynamically assigned labels */
     if (vm->def->nseclabels &&
         vm->def->seclabels[0]->type == VIR_DOMAIN_SECLABEL_DYNAMIC) {
-        g_free(vm->def->seclabels[0]->model);
-        g_free(vm->def->seclabels[0]->label);
-        g_free(vm->def->seclabels[0]->imagelabel);
-        vm->def->seclabels[0]->model = NULL;
-        vm->def->seclabels[0]->label = NULL;
-        vm->def->seclabels[0]->imagelabel = NULL;
+        g_clear_pointer(&vm->def->seclabels[0]->model, g_free);
+        g_clear_pointer(&vm->def->seclabels[0]->label, g_free);
+        g_clear_pointer(&vm->def->seclabels[0]->imagelabel, g_free);
     }
 
     /* Stop autodestroy in case guest is restarted */
-    virCloseCallbacksUnset(driver->closeCallbacks, vm,
-                           lxcProcessAutoDestroy);
+    if (flags & VIR_LXC_PROCESS_CLEANUP_AUTODESTROY) {
+        virCloseCallbacksDomainRemove(vm, NULL, lxcProcessAutoDestroy);
+    }
 
     if (priv->monitor) {
         virLXCMonitorClose(priv->monitor);
-        virObjectUnref(priv->monitor);
-        priv->monitor = NULL;
+        g_clear_pointer(&priv->monitor, virObjectUnref);
     }
 
     virPidFileDelete(cfg->stateDir, vm->def->name);
     lxcProcessRemoveDomainStatus(cfg, vm);
 
     virDomainObjSetState(vm, VIR_DOMAIN_SHUTOFF, reason);
-    vm->pid = -1;
+    vm->pid = 0;
     vm->def->id = -1;
 
     if (!!g_atomic_int_dec_and_test(&driver->nactive) && driver->inhibitCallback)
@@ -214,7 +209,7 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
     virLXCDomainReAttachHostDevices(driver, vm->def);
 
     for (i = 0; i < vm->def->nnets; i++) {
-        virDomainNetDefPtr iface = vm->def->nets[i];
+        virDomainNetDef *iface = vm->def->nets[i];
         vport = virDomainNetGetActualVirtPortProfile(iface);
         if (iface->ifname) {
             if (vport &&
@@ -236,7 +231,7 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
 
     if (priv->cgroup) {
         virCgroupRemove(priv->cgroup);
-        virCgroupFree(&priv->cgroup);
+        g_clear_pointer(&priv->cgroup, virCgroupFree);
     }
 
     /* Get machined to terminate the machine as it may not have cleaned it
@@ -244,8 +239,7 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
      * the bug we are working around here.
      */
     virCgroupTerminateMachine(priv->machineName);
-    g_free(priv->machineName);
-    priv->machineName = NULL;
+    g_clear_pointer(&priv->machineName, g_free);
 
     /* The "release" hook cleans up additional resources */
     if (virHookPresent(VIR_HOOK_DRIVER_LXC)) {
@@ -257,14 +251,13 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
                     NULL, xml, NULL);
     }
 
-    virDomainObjRemoveTransientDef(vm);
-    virObjectUnref(cfg);
-    virObjectUnref(conn);
+    if (flags & VIR_LXC_PROCESS_CLEANUP_REMOVE_TRANSIENT)
+        virDomainObjRemoveTransientDef(vm);
 }
 
 
 int
-virLXCProcessValidateInterface(virDomainNetDefPtr net)
+virLXCProcessValidateInterface(virDomainNetDef *net)
 {
     if (net->script) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -276,22 +269,20 @@ virLXCProcessValidateInterface(virDomainNetDefPtr net)
 
 
 char *
-virLXCProcessSetupInterfaceTap(virDomainDefPtr vm,
-                               virDomainNetDefPtr net,
+virLXCProcessSetupInterfaceTap(virDomainDef *vm,
+                               virDomainNetDef *net,
                                const char *brname)
 {
-    char *parentVeth;
-    char *containerVeth = NULL;
+    g_autofree char *parentVeth = NULL;
+    g_autofree char *containerVeth = NULL;
     const virNetDevVPortProfile *vport = virDomainNetGetActualVirtPortProfile(net);
 
     VIR_DEBUG("calling vethCreate()");
-    parentVeth = net->ifname;
+    parentVeth = g_strdup(net->ifname);
+
     if (virNetDevVethCreate(&parentVeth, &containerVeth) < 0)
         return NULL;
     VIR_DEBUG("parentVeth: %s, containerVeth: %s", parentVeth, containerVeth);
-
-    if (net->ifname == NULL)
-        net->ifname = parentVeth;
 
     if (virNetDevSetMAC(containerVeth, &net->mac) < 0)
         return NULL;
@@ -332,20 +323,23 @@ virLXCProcessSetupInterfaceTap(virDomainDefPtr vm,
         virDomainConfNWFilterInstantiate(vm->name, vm->uuid, net, false) < 0)
         return NULL;
 
-    return containerVeth;
+    /* success is guaranteed, so update the interface object */
+    g_free(net->ifname);
+    net->ifname = g_steal_pointer(&parentVeth);
+
+    return g_steal_pointer(&containerVeth);
 }
 
 
 char *
-virLXCProcessSetupInterfaceDirect(virLXCDriverPtr driver,
-                                  virDomainDefPtr def,
-                                  virDomainNetDefPtr net)
+virLXCProcessSetupInterfaceDirect(virLXCDriver *driver,
+                                  virDomainDef *def,
+                                  virDomainNetDef *net)
 {
-    char *ret = NULL;
     char *res_ifname = NULL;
     const virNetDevBandwidth *bw;
     const virNetDevVPortProfile *prof;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
     const char *linkdev = virDomainNetGetActualDirectDev(net);
     unsigned int macvlan_create_flags = VIR_NETDEV_MACVLAN_CREATE_IFUP;
 
@@ -387,13 +381,9 @@ virLXCProcessSetupInterfaceDirect(virLXCDriverPtr driver,
             cfg->stateDir,
             NULL, 0,
             macvlan_create_flags) < 0)
-        goto cleanup;
+        return NULL;
 
-    ret = res_ifname;
-
- cleanup:
-    virObjectUnref(cfg);
-    return ret;
+    return res_ifname;
 }
 
 static const char *nsInfoLocal[VIR_LXC_DOMAIN_NAMESPACE_LAST] = {
@@ -402,19 +392,19 @@ static const char *nsInfoLocal[VIR_LXC_DOMAIN_NAMESPACE_LAST] = {
     [VIR_LXC_DOMAIN_NAMESPACE_SHAREUTS] = "uts",
 };
 
-static int virLXCProcessSetupNamespaceName(virLXCDriverPtr driver,
+static int virLXCProcessSetupNamespaceName(virLXCDriver *driver,
                                            int ns_type,
                                            const char *name)
 {
     int fd = -1;
-    virDomainObjPtr vm;
-    virLXCDomainObjPrivatePtr priv;
+    virDomainObj *vm;
+    virLXCDomainObjPrivate *priv;
     g_autofree char *path = NULL;
 
     vm = virDomainObjListFindByName(driver->domains, name);
     if (!vm) {
         virReportError(VIR_ERR_NO_DOMAIN,
-                       _("No domain with matching name '%s'"), name);
+                       _("No domain with matching name '%1$s'"), name);
         return -1;
     }
 
@@ -430,7 +420,7 @@ static int virLXCProcessSetupNamespaceName(virLXCDriverPtr driver,
 
     if ((fd = open(path, O_RDONLY)) < 0) {
         virReportSystemError(errno,
-                             _("failed to open ns %s"),
+                             _("failed to open ns %1$s"),
                              virLXCDomainNamespaceTypeToString(ns_type));
         goto cleanup;
     }
@@ -448,7 +438,7 @@ static int virLXCProcessSetupNamespacePID(int ns_type, const char *name)
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         virReportSystemError(errno,
-                             _("failed to open ns %s"),
+                             _("failed to open ns %1$s"),
                              virLXCDomainNamespaceTypeToString(ns_type));
         return -1;
     }
@@ -462,8 +452,7 @@ static int virLXCProcessSetupNamespaceNet(int ns_type, const char *name)
     int fd;
     if (ns_type != VIR_LXC_DOMAIN_NAMESPACE_SHARENET) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("'netns' namespace source can only be "
-                         "used with sharenet"));
+                       _("'netns' namespace source can only be used with sharenet"));
         return -1;
     }
 
@@ -471,7 +460,7 @@ static int virLXCProcessSetupNamespaceNet(int ns_type, const char *name)
     fd = open(path, O_RDONLY);
     if (fd < 0) {
         virReportSystemError(errno,
-                             _("failed to open netns %s"), name);
+                             _("failed to open netns %1$s"), name);
         return -1;
     }
     return fd;
@@ -490,8 +479,8 @@ static int virLXCProcessSetupNamespaceNet(int ns_type, const char *name)
  * Returns 0 on success or -1 in case of error
  */
 static int
-virLXCProcessSetupNamespaces(virLXCDriverPtr driver,
-                             lxcDomainDefPtr lxcDef,
+virLXCProcessSetupNamespaces(virLXCDriver *driver,
+                             lxcDomainDef *lxcDef,
                              int *nsFDs)
 {
     size_t i;
@@ -538,16 +527,16 @@ virLXCProcessSetupNamespaces(virLXCDriverPtr driver,
  * Returns 0 on success or -1 in case of error
  */
 static int
-virLXCProcessSetupInterfaces(virLXCDriverPtr driver,
-                             virDomainDefPtr def,
+virLXCProcessSetupInterfaces(virLXCDriver *driver,
+                             virDomainDef *def,
                              char ***veths)
 {
     int ret = -1;
     size_t i;
     size_t niface = 0;
-    virDomainNetDefPtr net;
+    virDomainNetDef *net;
     virDomainNetType type;
-    virConnectPtr netconn = NULL;
+    g_autoptr(virConnect) netconn = NULL;
     virErrorPtr save_err = NULL;
 
     *veths = g_new0(char *, def->nnets + 1);
@@ -604,10 +593,13 @@ virLXCProcessSetupInterfaces(virLXCDriverPtr driver,
         case VIR_DOMAIN_NET_TYPE_MCAST:
         case VIR_DOMAIN_NET_TYPE_UDP:
         case VIR_DOMAIN_NET_TYPE_INTERNAL:
-        case VIR_DOMAIN_NET_TYPE_LAST:
         case VIR_DOMAIN_NET_TYPE_HOSTDEV:
+        case VIR_DOMAIN_NET_TYPE_VDPA:
+        case VIR_DOMAIN_NET_TYPE_NULL:
+        case VIR_DOMAIN_NET_TYPE_VDS:
+        case VIR_DOMAIN_NET_TYPE_LAST:
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Unsupported network type %s"),
+                           _("Unsupported network type %1$s"),
                            virDomainNetTypeToString(type));
             goto cleanup;
 
@@ -644,7 +636,7 @@ virLXCProcessSetupInterfaces(virLXCDriverPtr driver,
     if (ret < 0) {
         virErrorPreserveLast(&save_err);
         for (i = 0; i < def->nnets; i++) {
-            virDomainNetDefPtr iface = def->nets[i];
+            virDomainNetDef *iface = def->nets[i];
             const virNetDevVPortProfile *vport = virDomainNetGetActualVirtPortProfile(iface);
             if (vport && vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH)
                 ignore_value(virNetDevOpenvswitchRemovePort(
@@ -655,39 +647,37 @@ virLXCProcessSetupInterfaces(virLXCDriverPtr driver,
         }
         virErrorRestore(&save_err);
     }
-    virObjectUnref(netconn);
     return ret;
 }
 
 static void
-virLXCProcessCleanInterfaces(virDomainDefPtr def)
+virLXCProcessCleanInterfaces(virDomainDef *def)
 {
     size_t i;
 
     for (i = 0; i < def->nnets; i++) {
-        g_free(def->nets[i]->ifname_guest_actual);
-        def->nets[i]->ifname_guest_actual = NULL;
+        g_clear_pointer(&def->nets[i]->ifname_guest_actual, g_free);
         VIR_DEBUG("Cleared net names: %s", def->nets[i]->ifname_guest);
     }
 }
 
 
-extern virLXCDriverPtr lxc_driver;
-static void virLXCProcessMonitorEOFNotify(virLXCMonitorPtr mon,
-                                          virDomainObjPtr vm)
+extern virLXCDriver *lxc_driver;
+static void virLXCProcessMonitorEOFNotify(virLXCMonitor *mon,
+                                          virDomainObj *vm)
 {
-    virLXCDriverPtr driver = lxc_driver;
-    virObjectEventPtr event = NULL;
-    virLXCDomainObjPrivatePtr priv;
+    virLXCDriver *driver = lxc_driver;
+    virObjectEvent *event = NULL;
+    virLXCDomainObjPrivate *priv;
 
     VIR_DEBUG("mon=%p vm=%p", mon, vm);
 
     virObjectLock(vm);
 
     priv = vm->privateData;
-    virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN);
+    virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN, 0);
     if (!priv->wantReboot) {
-        virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN);
+        virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN, 0);
         if (!priv->doneStopEvent) {
             event = virDomainEventLifecycleNewFromObj(vm,
                                              VIR_DOMAIN_EVENT_STOPPED,
@@ -720,11 +710,11 @@ static void virLXCProcessMonitorEOFNotify(virLXCMonitorPtr mon,
     virObjectEventStateQueue(driver->domainEventState, event);
 }
 
-static void virLXCProcessMonitorExitNotify(virLXCMonitorPtr mon G_GNUC_UNUSED,
+static void virLXCProcessMonitorExitNotify(virLXCMonitor *mon G_GNUC_UNUSED,
                                            virLXCMonitorExitStatus status,
-                                           virDomainObjPtr vm)
+                                           virDomainObj *vm)
 {
-    virLXCDomainObjPrivatePtr priv = vm->privateData;
+    virLXCDomainObjPrivate *priv = vm->privateData;
 
     virObjectLock(vm);
 
@@ -761,7 +751,7 @@ virLXCProcessGetNsInode(pid_t pid,
 
     if (stat(path, &sb) < 0) {
         virReportSystemError(errno,
-                             _("Unable to stat %s"), path);
+                             _("Unable to stat %1$s"), path);
         return -1;
     }
 
@@ -772,14 +762,14 @@ virLXCProcessGetNsInode(pid_t pid,
 
 
 /* XXX a little evil */
-extern virLXCDriverPtr lxc_driver;
-static void virLXCProcessMonitorInitNotify(virLXCMonitorPtr mon G_GNUC_UNUSED,
+extern virLXCDriver *lxc_driver;
+static void virLXCProcessMonitorInitNotify(virLXCMonitor *mon G_GNUC_UNUSED,
                                            pid_t initpid,
-                                           virDomainObjPtr vm)
+                                           virDomainObj *vm)
 {
-    virLXCDriverPtr driver = lxc_driver;
-    virLXCDomainObjPrivatePtr priv;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
+    virLXCDriver *driver = lxc_driver;
+    virLXCDomainObjPrivate *priv;
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
     ino_t inode = 0;
 
     virObjectLock(vm);
@@ -799,7 +789,6 @@ static void virLXCProcessMonitorInitNotify(virLXCMonitorPtr mon G_GNUC_UNUSED,
         VIR_WARN("Cannot update XML with PID for LXC %s", vm->def->name);
 
     virObjectUnlock(vm);
-    virObjectUnref(cfg);
 }
 
 static virLXCMonitorCallbacks monitorCallbacks = {
@@ -809,14 +798,14 @@ static virLXCMonitorCallbacks monitorCallbacks = {
 };
 
 
-static virLXCMonitorPtr virLXCProcessConnectMonitor(virLXCDriverPtr driver,
-                                                    virDomainObjPtr vm)
+static virLXCMonitor *virLXCProcessConnectMonitor(virLXCDriver *driver,
+                                                    virDomainObj *vm)
 {
-    virLXCMonitorPtr monitor = NULL;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
+    virLXCMonitor *monitor = NULL;
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
 
     if (virSecurityManagerSetSocketLabel(driver->securityManager, vm->def) < 0)
-        goto cleanup;
+        return NULL;
 
     /* Hold an extra reference because we can't allow 'vm' to be
      * deleted while the monitor is active. This will be unreffed
@@ -829,25 +818,22 @@ static virLXCMonitorPtr virLXCProcessConnectMonitor(virLXCDriverPtr driver,
         virObjectUnref(vm);
 
     if (virSecurityManagerClearSocketLabel(driver->securityManager, vm->def) < 0) {
-        if (monitor) {
+        if (monitor)
             virObjectUnref(monitor);
-            monitor = NULL;
-        }
-        goto cleanup;
+        return NULL;
     }
 
- cleanup:
-    virObjectUnref(cfg);
     return monitor;
 }
 
 
-int virLXCProcessStop(virLXCDriverPtr driver,
-                      virDomainObjPtr vm,
-                      virDomainShutoffReason reason)
+int virLXCProcessStop(virLXCDriver *driver,
+                      virDomainObj *vm,
+                      virDomainShutoffReason reason,
+                      unsigned int cleanupFlags)
 {
     int rc;
-    virLXCDomainObjPrivatePtr priv;
+    virLXCDomainObjPrivate *priv;
 
     VIR_DEBUG("Stopping VM name=%s pid=%d reason=%d",
               vm->def->name, (int)vm->pid, (int)reason);
@@ -861,7 +847,7 @@ int virLXCProcessStop(virLXCDriverPtr driver,
     /* If the LXC domain is suspended we send all processes a SIGKILL
      * and thaw them. Upon wakeup the process sees the pending signal
      * and dies immediately. It is guaranteed that priv->cgroup != NULL
-     * here because the domain has aleady been suspended using the
+     * here because the domain has already been suspended using the
      * freezer cgroup.
      */
     if (reason == VIR_DOMAIN_SHUTOFF_DESTROYED &&
@@ -891,41 +877,42 @@ int virLXCProcessStop(virLXCDriverPtr driver,
                            _("Some processes refused to die"));
             return -1;
         }
-    } else if (vm->pid > 0) {
+    } else if (vm->pid != 0) {
         /* If cgroup doesn't exist, just try cleaning up the
          * libvirt_lxc process */
         if (virProcessKillPainfully(vm->pid, true) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Processes %d refused to die"), (int)vm->pid);
+                           _("Processes %1$d refused to die"), (int)vm->pid);
             return -1;
         }
     }
 
  cleanup:
-    virLXCProcessCleanup(driver, vm, reason);
+    virLXCProcessCleanup(driver, vm, reason, cleanupFlags);
 
     return 0;
 }
 
 
-static virCommandPtr
-virLXCProcessBuildControllerCmd(virLXCDriverPtr driver,
-                                virDomainObjPtr vm,
+static virCommand *
+virLXCProcessBuildControllerCmd(virLXCDriver *driver,
+                                virDomainObj *vm,
                                 char **veths,
                                 int *ttyFDs,
                                 size_t nttyFDs,
                                 int *nsInheritFDs,
                                 int *files,
                                 size_t nfiles,
-                                int handshakefd,
+                                int handshakefdW,
+                                int handshakefdR,
                                 int * const logfd,
                                 const char *pidfile)
 {
     size_t i;
     g_autofree char *filterstr = NULL;
     g_autofree char *outputstr = NULL;
-    virCommandPtr cmd;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
+    g_autoptr(virCommand) cmd = NULL;
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
 
     cmd = virCommandNew(vm->def->emulator);
 
@@ -937,21 +924,14 @@ virLXCProcessBuildControllerCmd(virLXCDriverPtr driver,
 
     if (virLogGetNbFilters() > 0) {
         filterstr = virLogGetFilters();
-        if (!filterstr) {
-            virReportOOMError();
-            goto error;
-        }
 
         virCommandAddEnvPair(cmd, "LIBVIRT_LOG_FILTERS", filterstr);
     }
 
     if (cfg->log_libvirtd) {
         if (virLogGetNbOutputs() > 0) {
-            outputstr = virLogGetOutputs();
-            if (!outputstr) {
-                virReportOOMError();
-                goto error;
-            }
+            if (!(outputstr = virLogGetOutputs()))
+                return NULL;
 
             virCommandAddEnvPair(cmd, "LIBVIRT_LOG_OUTPUTS", outputstr);
         }
@@ -987,13 +967,14 @@ virLXCProcessBuildControllerCmd(virLXCDriverPtr driver,
     virCommandAddArgPair(cmd, "--security",
                          virSecurityManagerGetModel(driver->securityManager));
 
-    virCommandAddArg(cmd, "--handshake");
-    virCommandAddArgFormat(cmd, "%d", handshakefd);
+    virCommandAddArg(cmd, "--handshakefds");
+    virCommandAddArgFormat(cmd, "%d:%d", handshakefdR, handshakefdW);
 
     for (i = 0; veths && veths[i]; i++)
         virCommandAddArgList(cmd, "--veth", veths[i], NULL);
 
-    virCommandPassFD(cmd, handshakefd, 0);
+    virCommandPassFD(cmd, handshakefdW, 0);
+    virCommandPassFD(cmd, handshakefdR, 0);
     virCommandDaemonize(cmd);
     virCommandSetPidFile(cmd, pidfile);
     virCommandSetOutputFD(cmd, logfd);
@@ -1002,13 +983,7 @@ virLXCProcessBuildControllerCmd(virLXCDriverPtr driver,
      * write the live domain status XML with the PID */
     virCommandRequireHandshake(cmd);
 
- cleanup:
-    virObjectUnref(cfg);
-    return cmd;
- error:
-    virCommandFree(cmd);
-    cmd = NULL;
-    goto cleanup;
+    return g_steal_pointer(&cmd);
 }
 
 
@@ -1027,7 +1002,7 @@ virLXCProcessIgnorableLogLine(const char *str)
 }
 
 static int
-virLXCProcessReadLogOutputData(virDomainObjPtr vm,
+virLXCProcessReadLogOutputData(virDomainObj *vm,
                                int fd,
                                char *buf,
                                size_t buflen)
@@ -1035,6 +1010,7 @@ virLXCProcessReadLogOutputData(virDomainObjPtr vm,
     int retries = 10;
     int got = 0;
     char *filter_next = buf;
+    bool filtered;
 
     buf[0] = '\0';
 
@@ -1043,7 +1019,7 @@ virLXCProcessReadLogOutputData(virDomainObjPtr vm,
         bool isdead = false;
         char *eol;
 
-        if (vm->pid <= 0 ||
+        if (vm->pid == 0 ||
             (kill(vm->pid, 0) == -1 && errno == ESRCH))
             isdead = true;
 
@@ -1060,11 +1036,13 @@ virLXCProcessReadLogOutputData(virDomainObjPtr vm,
         buf[got] = '\0';
 
         /* Filter out debug messages from intermediate libvirt process */
+        filtered = false;
         while ((eol = strchr(filter_next, '\n'))) {
             *eol = '\0';
             if (virLXCProcessIgnorableLogLine(filter_next)) {
                 memmove(filter_next, eol + 1, got - (eol - buf));
                 got -= eol + 1 - filter_next;
+                filtered = true;
             } else {
                 filter_next = eol + 1;
                 *eol = '\n';
@@ -1073,10 +1051,13 @@ virLXCProcessReadLogOutputData(virDomainObjPtr vm,
 
         if (got == buflen-1) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Out of space while reading log output: %s"),
+                           _("Out of space while reading log output: %1$s"),
                            buf);
             return -1;
         }
+
+        if (filtered)
+            continue;
 
         if (isdead)
             return got;
@@ -1086,7 +1067,7 @@ virLXCProcessReadLogOutputData(virDomainObjPtr vm,
     }
 
     virReportError(VIR_ERR_INTERNAL_ERROR,
-                   _("Timed out while reading log output: %s"),
+                   _("Timed out while reading log output: %1$s"),
                    buf);
 
     return -1;
@@ -1094,44 +1075,79 @@ virLXCProcessReadLogOutputData(virDomainObjPtr vm,
 
 
 static int
-virLXCProcessReadLogOutput(virDomainObjPtr vm,
+virLXCProcessReadLogOutput(virDomainObj *vm,
                            char *logfile,
                            off_t pos,
                            char *buf,
                            size_t buflen)
 {
-    int fd = -1;
-    int ret;
+    VIR_AUTOCLOSE fd = -1;
 
     if ((fd = open(logfile, O_RDONLY)) < 0) {
         virReportSystemError(errno,
-                             _("Unable to open log file %s"),
+                             _("Unable to open log file %1$s"),
                              logfile);
         return -1;
     }
 
     if (lseek(fd, pos, SEEK_SET) < 0) {
         virReportSystemError(errno,
-                             _("Unable to seek log file %s to %llu"),
+                             _("Unable to seek log file %1$s to %2$llu"),
                              logfile, (unsigned long long)pos);
-        VIR_FORCE_CLOSE(fd);
         return -1;
     }
 
-    ret = virLXCProcessReadLogOutputData(vm,
-                                         fd,
-                                         buf,
-                                         buflen);
+    return virLXCProcessReadLogOutputData(vm, fd, buf, buflen);
+}
 
-    VIR_FORCE_CLOSE(fd);
-    return ret;
+
+/**
+ * virLXCProcessReportStartupLogError:
+ * @vm: domain object
+ * @logfile: path to the VM logfile
+ * @pos: position in @logfile to look for errors
+ *
+ * Looks for the error message from the LXC container process.
+ * Returns:
+ * -1: - When reading of error message failed. Reports appropriate error
+ *     - When successfully read a non-empty error message. Reports an error with
+ *       the following message
+ *          'guest failed to start: ' with the error from the log appended
+ *
+ *  0: - When reading the error was successful but the error log was empty.
+ */
+static int
+virLXCProcessReportStartupLogError(virDomainObj *vm,
+                                   char *logfile,
+                                   off_t pos)
+{
+    size_t buflen = 1024;
+    g_autofree char *errbuf = g_new0(char, buflen);
+    char *p;
+    int rc;
+
+    if ((rc = virLXCProcessReadLogOutput(vm, logfile, pos, errbuf, buflen)) < 0)
+        return -1;
+
+    if (rc == 0)
+        return 0;
+
+    /* strip last newline */
+    if ((p = strrchr(errbuf, '\n')) &&
+        p[1] == '\0')
+        *p = '\0';
+
+    virReportError(VIR_ERR_INTERNAL_ERROR,
+                   _("guest failed to start: %1$s"), errbuf);
+
+    return -1;
 }
 
 
 static int
-virLXCProcessEnsureRootFS(virDomainObjPtr vm)
+virLXCProcessEnsureRootFS(virDomainObj *vm)
 {
-    virDomainFSDefPtr root = virDomainGetFilesystemForTarget(vm->def, "/");
+    virDomainFSDef *root = virDomainGetFilesystemForTarget(vm->def, "/");
 
     if (root)
         return 0;
@@ -1159,21 +1175,19 @@ virLXCProcessEnsureRootFS(virDomainObjPtr vm)
 
 /**
  * virLXCProcessStart:
- * @conn: pointer to connection
  * @driver: pointer to driver structure
  * @vm: pointer to virtual machine structure
- * @autoDestroy: mark the domain for auto destruction
+ * @autoDestroyConn: mark the domain for auto destruction for the passed connection object
  * @reason: reason for switching vm to running state
  *
  * Starts a vm
  *
  * Returns 0 on success or -1 in case of error
  */
-int virLXCProcessStart(virConnectPtr conn,
-                       virLXCDriverPtr  driver,
-                       virDomainObjPtr vm,
+int virLXCProcessStart(virLXCDriver * driver,
+                       virDomainObj *vm,
                        unsigned int nfiles, int *files,
-                       bool autoDestroy,
+                       virConnectPtr autoDestroyConn,
                        virDomainRunningReason reason)
 {
     int rc = -1, r;
@@ -1182,46 +1196,42 @@ int virLXCProcessStart(virConnectPtr conn,
     size_t i;
     g_autofree char *logfile = NULL;
     int logfd = -1;
-    VIR_AUTOSTRINGLIST veths = NULL;
-    int handshakefds[2] = { -1, -1 };
+    g_auto(GStrv) veths = NULL;
+    int handshakefds[4] = { -1, -1, -1, -1 }; /* two pipes */
     off_t pos = -1;
-    char ebuf[1024];
     g_autofree char *timestamp = NULL;
     int nsInheritFDs[VIR_LXC_DOMAIN_NAMESPACE_LAST];
-    virCommandPtr cmd = NULL;
-    virLXCDomainObjPrivatePtr priv = vm->privateData;
-    virCapsPtr caps = NULL;
+    g_autoptr(virCommand) cmd = NULL;
+    virLXCDomainObjPrivate *priv = vm->privateData;
+    g_autoptr(virCaps) caps = NULL;
     virErrorPtr err = NULL;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
-    virCgroupPtr selfcgroup;
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
+    g_autoptr(virCgroup) selfcgroup = NULL;
     int status;
     g_autofree char *pidfile = NULL;
+    unsigned int stopFlags = 0;
 
     if (virCgroupNewSelf(&selfcgroup) < 0)
         return -1;
 
     if (!virCgroupHasController(selfcgroup,
                                 VIR_CGROUP_CONTROLLER_CPUACCT)) {
-        virCgroupFree(&selfcgroup);
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unable to find 'cpuacct' cgroups controller mount"));
         return -1;
     }
     if (!virCgroupHasController(selfcgroup,
                                 VIR_CGROUP_CONTROLLER_DEVICES)) {
-        virCgroupFree(&selfcgroup);
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unable to find 'devices' cgroups controller mount"));
         return -1;
     }
     if (!virCgroupHasController(selfcgroup,
                                 VIR_CGROUP_CONTROLLER_MEMORY)) {
-        virCgroupFree(&selfcgroup);
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unable to find 'memory' cgroups controller mount"));
         return -1;
     }
-    virCgroupFree(&selfcgroup);
 
     if (vm->def->nconsoles == 0) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -1237,20 +1247,18 @@ int virLXCProcessStart(virConnectPtr conn,
         }
     }
 
-    if (virFileMakePath(cfg->logDir) < 0) {
+    if (g_mkdir_with_parents(cfg->logDir, 0777) < 0) {
         virReportSystemError(errno,
-                             _("Cannot create log directory '%s'"),
+                             _("Cannot create log directory '%1$s'"),
                              cfg->logDir);
         return -1;
     }
 
-    if (!vm->def->resource) {
-        virDomainResourceDefPtr res = g_new0(virDomainResourceDef, 1);
+    if (!vm->def->resource)
+        vm->def->resource = g_new0(virDomainResourceDef, 1);
 
-        res->partition = g_strdup("/machine");
-
-        vm->def->resource = res;
-    }
+    if (!vm->def->resource->partition)
+        vm->def->resource->partition = g_strdup("/machine");
 
     logfile = g_strdup_printf("%s/%s.log", cfg->logDir, vm->def->name);
 
@@ -1267,6 +1275,7 @@ int virLXCProcessStart(virConnectPtr conn,
     VIR_DEBUG("Setting current domain def as transient");
     if (virDomainObjSetDefTransient(driver->xmlopt, vm, NULL) < 0)
         goto cleanup;
+    stopFlags |= VIR_LXC_PROCESS_CLEANUP_REMOVE_TRANSIENT;
 
     /* Run an early hook to set-up missing devices */
     if (virHookPresent(VIR_HOOK_DRIVER_LXC)) {
@@ -1314,11 +1323,13 @@ int virLXCProcessStart(virConnectPtr conn,
         goto cleanup;
     }
     virDomainAuditSecurityLabel(vm, true);
+    stopFlags |= VIR_LXC_PROCESS_CLEANUP_RELEASE_SECLABEL;
 
     VIR_DEBUG("Setting domain security labels");
     if (virSecurityManagerSetAllLabel(driver->securityManager,
                                       vm->def, NULL, false, false) < 0)
         goto cleanup;
+    stopFlags |= VIR_LXC_PROCESS_CLEANUP_RESTORE_SECLABEL;
 
     VIR_DEBUG("Setting up consoles");
     for (i = 0; i < vm->def->nconsoles; i++) {
@@ -1349,12 +1360,13 @@ int virLXCProcessStart(virConnectPtr conn,
     if ((logfd = open(logfile, O_WRONLY | O_APPEND | O_CREAT,
              S_IRUSR|S_IWUSR)) < 0) {
         virReportSystemError(errno,
-                             _("Failed to open '%s'"),
+                             _("Failed to open '%1$s'"),
                              logfile);
         goto cleanup;
     }
 
-    if (virPipe(handshakefds) < 0)
+    if (virPipe(&handshakefds[0]) < 0 ||
+        virPipe(&handshakefds[2]) < 0)
         goto cleanup;
 
     if (!(cmd = virLXCProcessBuildControllerCmd(driver,
@@ -1364,6 +1376,7 @@ int virLXCProcessStart(virConnectPtr conn,
                                                 nsInheritFDs,
                                                 files, nfiles,
                                                 handshakefds[1],
+                                                handshakefds[2],
                                                 &logfd,
                                                 pidfile)))
         goto cleanup;
@@ -1402,28 +1415,28 @@ int virLXCProcessStart(virConnectPtr conn,
         goto cleanup;
 
     if (status != 0) {
-        if (virLXCProcessReadLogOutput(vm, logfile, pos, ebuf,
-                                       sizeof(ebuf)) <= 0) {
-            if (WIFEXITED(status))
-                g_snprintf(ebuf, sizeof(ebuf), _("unexpected exit status %d"),
+        if (virLXCProcessReportStartupLogError(vm, logfile, pos) < 0)
+            goto cleanup;
+
+        /* In case there isn't an error in the logs report one based on the exit status */
+        if (WIFEXITED(status)) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("guest failed to start: unexpected exit status %1$d"),
                            WEXITSTATUS(status));
-            else
-                g_snprintf(ebuf, sizeof(ebuf), "%s", _("terminated abnormally"));
+        } else {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("guest failed to start: terminated abnormally"));
         }
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("guest failed to start: %s"), ebuf);
         goto cleanup;
     }
 
     /* It has started running, so get its pid */
     if ((r = virPidFileReadPath(pidfile, &vm->pid)) < 0) {
-        if (virLXCProcessReadLogOutput(vm, logfile, pos, ebuf, sizeof(ebuf)) > 0)
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("guest failed to start: %s"), ebuf);
-        else
-            virReportSystemError(-r,
-                                 _("Failed to read pid file %s"),
-                                 pidfile);
+        if (virLXCProcessReportStartupLogError(vm, logfile, pos) < 0)
+            goto cleanup;
+
+        /* In case there isn't an error in the logs report that we failed to read the pidfile */
+        virReportSystemError(-r, _("Failed to read pid file %1$s"), pidfile);
         goto cleanup;
     }
 
@@ -1433,7 +1446,8 @@ int virLXCProcessStart(virConnectPtr conn,
     virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, reason);
     priv->doneStopEvent = false;
 
-    if (VIR_CLOSE(handshakefds[1]) < 0) {
+    if (VIR_CLOSE(handshakefds[1]) < 0 ||
+        VIR_CLOSE(handshakefds[2]) < 0) {
         virReportSystemError(errno, "%s", _("could not close handshake fd"));
         goto cleanup;
     }
@@ -1453,14 +1467,9 @@ int virLXCProcessStart(virConnectPtr conn,
     if (g_atomic_int_add(&driver->nactive, 1) == 0 && driver->inhibitCallback)
         driver->inhibitCallback(true, driver->inhibitOpaque);
 
+    /* The first synchronization point is when the controller creates CGroups. */
     if (lxcContainerWaitForContinue(handshakefds[0]) < 0) {
-        char out[1024];
-
-        if (!(virLXCProcessReadLogOutput(vm, logfile, pos, out, 1024) < 0)) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("guest failed to start: %s"), out);
-        }
-
+        virLXCProcessReportStartupLogError(vm, logfile, pos);
         goto cleanup;
     }
 
@@ -1479,8 +1488,21 @@ int virLXCProcessStart(virConnectPtr conn,
 
     if (!priv->cgroup) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("No valid cgroup for machine %s"),
+                       _("No valid cgroup for machine %1$s"),
                        vm->def->name);
+        goto cleanup;
+    }
+
+    if (lxcContainerSendContinue(handshakefds[3]) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Failed to send continue signal to controller"));
+        goto cleanup;
+    }
+
+    /* The second synchronization point is when the controller finished
+     * creating the container. */
+    if (lxcContainerWaitForContinue(handshakefds[0]) < 0) {
+        virLXCProcessReportStartupLogError(vm, logfile, pos);
         goto cleanup;
     }
 
@@ -1489,18 +1511,12 @@ int virLXCProcessStart(virConnectPtr conn,
         /* Intentionally overwrite the real monitor error message,
          * since a better one is almost always found in the logs
          */
-        if (virLXCProcessReadLogOutput(vm, logfile, pos, ebuf, sizeof(ebuf)) > 0) {
-            virResetLastError();
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("guest failed to start: %s"), ebuf);
-        }
+        virLXCProcessReportStartupLogError(vm, logfile, pos);
         goto cleanup;
     }
 
-    if (autoDestroy &&
-        virCloseCallbacksSet(driver->closeCallbacks, vm,
-                             conn, lxcProcessAutoDestroy) < 0)
-        goto cleanup;
+    if (autoDestroyConn)
+        virCloseCallbacksDomainAdd(vm, autoDestroyConn, lxcProcessAutoDestroy);
 
     /* We don't need the temporary NIC names anymore, clear them */
     virLXCProcessCleanInterfaces(vm->def);
@@ -1527,112 +1543,114 @@ int virLXCProcessStart(virConnectPtr conn,
     }
     if (rc != 0) {
         virErrorPreserveLast(&err);
-        virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_FAILED);
+        if (virDomainObjIsActive(vm)) {
+            virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_FAILED, 0);
+        } else {
+            /* virLXCProcessStop() is NOP if the container is not active.
+             * If there was a failure whilst creating it, cleanup manually. */
+            virLXCProcessCleanup(driver, vm, VIR_DOMAIN_SHUTOFF_FAILED, stopFlags);
+        }
     }
-    virCommandFree(cmd);
     for (i = 0; i < nttyFDs; i++)
         VIR_FORCE_CLOSE(ttyFDs[i]);
-    VIR_FORCE_CLOSE(handshakefds[0]);
-    VIR_FORCE_CLOSE(handshakefds[1]);
-    virObjectUnref(cfg);
-    virObjectUnref(caps);
+    for (i = 0; i < G_N_ELEMENTS(handshakefds); i++)
+        VIR_FORCE_CLOSE(handshakefds[i]);
 
     virErrorRestore(&err);
 
     return rc;
 }
 
-struct virLXCProcessAutostartData {
-    virLXCDriverPtr driver;
-    virConnectPtr conn;
-};
 
 static int
-virLXCProcessAutostartDomain(virDomainObjPtr vm,
-                             void *opaque)
+virLXCProcessAutostartDomain(virDomainObj *vm,
+                             void *opaque G_GNUC_UNUSED)
 {
-    const struct virLXCProcessAutostartData *data = opaque;
-    int ret = 0;
+    VIR_LOCK_GUARD lock = virObjectLockGuard(vm);
+    virLXCDomainObjPrivate *priv = vm->privateData;
+    virObjectEvent *event;
+    int rc = 0;
 
-    virObjectLock(vm);
-    if (vm->autostart &&
-        !virDomainObjIsActive(vm)) {
-        ret = virLXCProcessStart(data->conn, data->driver, vm,
-                                 0, NULL, false,
-                                 VIR_DOMAIN_RUNNING_BOOTED);
-        virDomainAuditStart(vm, "booted", ret >= 0);
-        if (ret < 0) {
-            VIR_ERROR(_("Failed to autostart VM '%s': %s"),
-                      vm->def->name,
-                      virGetLastErrorMessage());
-        } else {
-            virObjectEventPtr event =
-                virDomainEventLifecycleNewFromObj(vm,
-                                         VIR_DOMAIN_EVENT_STARTED,
-                                         VIR_DOMAIN_EVENT_STARTED_BOOTED);
-            virObjectEventStateQueue(data->driver->domainEventState, event);
-        }
+    if (!vm->autostart ||
+        virDomainObjIsActive(vm))
+        return 0;
+
+    rc = virLXCProcessStart(priv->driver, vm, 0, NULL, NULL, VIR_DOMAIN_RUNNING_BOOTED);
+    virDomainAuditStart(vm, "booted", rc >= 0);
+
+    if (rc < 0) {
+        VIR_ERROR(_("Failed to autostart VM '%1$s': %2$s"),
+                  vm->def->name,
+                  virGetLastErrorMessage());
+        return -1;
     }
-    virObjectUnlock(vm);
-    return ret;
+
+    event = virDomainEventLifecycleNewFromObj(vm,
+                                              VIR_DOMAIN_EVENT_STARTED,
+                                              VIR_DOMAIN_EVENT_STARTED_BOOTED);
+    virObjectEventStateQueue(priv->driver->domainEventState, event);
+
+    return 0;
 }
 
 
 void
-virLXCProcessAutostartAll(virLXCDriverPtr driver)
+virLXCProcessAutostartAll(virLXCDriver *driver)
 {
-    /* XXX: Figure out a better way todo this. The domain
-     * startup code needs a connection handle in order
-     * to lookup the bridge associated with a virtual
-     * network
-     */
-    virConnectPtr conn = virConnectOpen("lxc:///system");
-    /* Ignoring NULL conn which is mostly harmless here */
-
-    struct virLXCProcessAutostartData data = { driver, conn };
-
-    virDomainObjListForEach(driver->domains, false,
-                            virLXCProcessAutostartDomain,
-                            &data);
-
-    virObjectUnref(conn);
+    virDomainObjListForEach(driver->domains, false, virLXCProcessAutostartDomain, NULL);
 }
 
 
 static void
-virLXCProcessReconnectNotifyNets(virDomainDefPtr def)
+virLXCProcessReconnectNotifyNets(virDomainDef *def)
 {
     size_t i;
-    virConnectPtr conn = NULL;
+    g_autoptr(virConnect) conn = NULL;
 
     for (i = 0; i < def->nnets; i++) {
-        virDomainNetDefPtr net = def->nets[i];
-        /* keep others from trying to use the macvtap device name, but
-         * don't return error if this happens, since that causes the
-         * domain to be unceremoniously killed, which would be *very*
-         * impolite.
+        virDomainNetDef *net = def->nets[i];
+
+        /* type='bridge|network|ethernet' interfaces may be using an
+         * autogenerated netdev name, so we should update the counter
+         * for autogenerated names to skip past this one.
          */
-        if (virDomainNetGetActualType(net) == VIR_DOMAIN_NET_TYPE_DIRECT)
-           ignore_value(virNetDevMacVLanReserveName(net->ifname, false));
-
-        if (net->type == VIR_DOMAIN_NET_TYPE_NETWORK) {
-            if (!conn && !(conn = virGetConnectNetwork()))
-                continue;
-            virDomainNetNotifyActualDevice(conn, def, net);
+        switch (virDomainNetGetActualType(net)) {
+        case VIR_DOMAIN_NET_TYPE_BRIDGE:
+        case VIR_DOMAIN_NET_TYPE_NETWORK:
+        case VIR_DOMAIN_NET_TYPE_ETHERNET:
+            virNetDevReserveName(net->ifname);
+            break;
+        case VIR_DOMAIN_NET_TYPE_DIRECT:
+        case VIR_DOMAIN_NET_TYPE_USER:
+        case VIR_DOMAIN_NET_TYPE_VHOSTUSER:
+        case VIR_DOMAIN_NET_TYPE_SERVER:
+        case VIR_DOMAIN_NET_TYPE_CLIENT:
+        case VIR_DOMAIN_NET_TYPE_MCAST:
+        case VIR_DOMAIN_NET_TYPE_INTERNAL:
+        case VIR_DOMAIN_NET_TYPE_HOSTDEV:
+        case VIR_DOMAIN_NET_TYPE_UDP:
+        case VIR_DOMAIN_NET_TYPE_VDPA:
+        case VIR_DOMAIN_NET_TYPE_NULL:
+        case VIR_DOMAIN_NET_TYPE_VDS:
+        case VIR_DOMAIN_NET_TYPE_LAST:
+            break;
         }
-    }
 
-    virObjectUnref(conn);
+        if (net->type == VIR_DOMAIN_NET_TYPE_NETWORK && !conn)
+            conn = virGetConnectNetwork();
+
+        virDomainNetNotifyActualDevice(conn, def, net);
+    }
 }
 
 
 static int
-virLXCProcessReconnectDomain(virDomainObjPtr vm,
+virLXCProcessReconnectDomain(virDomainObj *vm,
                              void *opaque)
 {
-    virLXCDriverPtr driver = opaque;
-    virLXCDomainObjPrivatePtr priv;
-    virLXCDriverConfigPtr cfg = virLXCDriverGetConfig(driver);
+    virLXCDriver *driver = opaque;
+    virLXCDomainObjPrivate *priv;
+    g_autoptr(virLXCDriverConfig) cfg = virLXCDriverGetConfig(driver);
     int ret = -1;
 
     virObjectLock(vm);
@@ -1661,7 +1679,7 @@ virLXCProcessReconnectDomain(virDomainObjPtr vm,
 
         if (!priv->cgroup) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("No valid cgroup for machine %s"),
+                           _("No valid cgroup for machine %1$s"),
                            vm->def->name);
             goto error;
         }
@@ -1695,19 +1713,18 @@ virLXCProcessReconnectDomain(virDomainObjPtr vm,
 
     ret = 0;
  cleanup:
-    virObjectUnref(cfg);
     virObjectUnlock(vm);
     return ret;
 
  error:
-    virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_FAILED);
+    virLXCProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_FAILED, 0);
     virDomainAuditStop(vm, "failed");
     goto cleanup;
 }
 
 
-int virLXCProcessReconnectAll(virLXCDriverPtr driver,
-                              virDomainObjListPtr doms)
+int virLXCProcessReconnectAll(virLXCDriver *driver,
+                              virDomainObjList *doms)
 {
     virDomainObjListForEach(doms, false, virLXCProcessReconnectDomain, driver);
     return 0;

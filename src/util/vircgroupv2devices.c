@@ -17,23 +17,23 @@
  */
 #include <config.h>
 
-#if HAVE_DECL_BPF_CGROUP_DEVICE
+#if __linux__
 # include <fcntl.h>
 # include <linux/bpf.h>
 # include <sys/stat.h>
 # include <sys/syscall.h>
 # include <sys/types.h>
-#endif /* !HAVE_DECL_BPF_CGROUP_DEVICE */
+#endif /* __linux__ */
 
 #include "internal.h"
 
 #define LIBVIRT_VIRCGROUPPRIV_H_ALLOW
 #include "vircgrouppriv.h"
 
-#include "viralloc.h"
 #include "virbpf.h"
 #include "vircgroup.h"
 #include "vircgroupv2devices.h"
+#include "virerror.h"
 #include "virfile.h"
 #include "virlog.h"
 
@@ -41,9 +41,9 @@ VIR_LOG_INIT("util.cgroup");
 
 #define VIR_FROM_THIS VIR_FROM_CGROUP
 
-#if HAVE_DECL_BPF_CGROUP_DEVICE
+#ifdef __linux__
 bool
-virCgroupV2DevicesAvailable(virCgroupPtr group)
+virCgroupV2DevicesAvailable(virCgroup *group)
 {
     VIR_AUTOCLOSE cgroupfd = -1;
     unsigned int progCnt = 0;
@@ -275,7 +275,7 @@ virCgroupV2DevicesLoadProg(int mapfd)
 
 
 static int
-virCgroupV2DevicesAttachProg(virCgroupPtr group,
+virCgroupV2DevicesAttachProg(virCgroup *group,
                              int mapfd,
                              size_t max)
 {
@@ -297,7 +297,7 @@ virCgroupV2DevicesAttachProg(virCgroupPtr group,
 
     cgroupfd = open(path, O_RDONLY);
     if (cgroupfd < 0) {
-        virReportSystemError(errno, _("unable to open '%s'"), path);
+        virReportSystemError(errno, _("unable to open '%1$s'"), path);
         goto cleanup;
     }
 
@@ -342,7 +342,7 @@ virCgroupV2DevicesCountMapEntries(int mapfd)
         prevKey = key;
     }
 
-    if (rc < 0)
+    if (rc < 0 && errno != ENOENT)
         return -1;
 
     return ret;
@@ -352,7 +352,7 @@ virCgroupV2DevicesCountMapEntries(int mapfd)
 # define MAX_PROG_IDS 10
 
 int
-virCgroupV2DevicesDetectProg(virCgroupPtr group)
+virCgroupV2DevicesDetectProg(virCgroup *group)
 {
     g_autofree char *path = NULL;
     VIR_AUTOCLOSE cgroupfd = -1;
@@ -375,7 +375,7 @@ virCgroupV2DevicesDetectProg(virCgroupPtr group)
 
     cgroupfd = open(path, O_RDONLY);
     if (cgroupfd < 0) {
-        virReportSystemError(errno, _("unable to open '%s'"), path);
+        virReportSystemError(errno, _("unable to open '%1$s'"), path);
         return -1;
     }
 
@@ -442,9 +442,15 @@ virCgroupV2DevicesCreateMap(size_t size)
                                 sizeof(uint32_t), size);
 
     if (mapfd < 0) {
-        virReportSystemError(errno, "%s",
-                             _("failed to initialize device BPF map"));
-        return -1;
+        if (errno == EPERM) {
+            virReportSystemError(errno, "%s",
+                                 _("failed to initialize device BPF map; locked memory limit for libvirtd probably needs to be raised"));
+            return -1;
+        } else {
+            virReportSystemError(errno, "%s",
+                                 _("failed to initialize device BPF map"));
+            return -1;
+        }
     }
 
     return mapfd;
@@ -497,7 +503,7 @@ virCgroupV2DevicesReallocMap(int mapfd,
 
 
 int
-virCgroupV2DevicesCreateProg(virCgroupPtr group)
+virCgroupV2DevicesCreateProg(virCgroup *group)
 {
     int mapfd = -1;
 
@@ -514,7 +520,7 @@ virCgroupV2DevicesCreateProg(virCgroupPtr group)
 
 
 int
-virCgroupV2DevicesPrepareProg(virCgroupPtr group)
+virCgroupV2DevicesPrepareProg(virCgroup *group)
 {
     if (virCgroupV2DevicesDetectProg(group) < 0)
         return -1;
@@ -539,18 +545,12 @@ virCgroupV2DevicesPrepareProg(virCgroupPtr group)
 
 
 int
-virCgroupV2DevicesRemoveProg(virCgroupPtr group)
+virCgroupV2DevicesCloseProg(virCgroup *group)
 {
-    if (virCgroupV2DevicesDetectProg(group) < 0)
-        return -1;
-
-    if (group->unified.devices.progfd <= 0 && group->unified.devices.mapfd <= 0)
-        return 0;
-
-    if (group->unified.devices.mapfd >= 0)
+    if (group->unified.devices.mapfd > 0)
         VIR_FORCE_CLOSE(group->unified.devices.mapfd);
 
-    if (group->unified.devices.progfd >= 0)
+    if (group->unified.devices.progfd > 0)
         VIR_FORCE_CLOSE(group->unified.devices.progfd);
 
     return 0;
@@ -581,46 +581,43 @@ virCgroupV2DevicesGetPerms(int perms,
 
     return ret;
 }
-#else /* !HAVE_DECL_BPF_CGROUP_DEVICE */
+#else /* !__linux__ */
 bool
-virCgroupV2DevicesAvailable(virCgroupPtr group G_GNUC_UNUSED)
+virCgroupV2DevicesAvailable(virCgroup *group G_GNUC_UNUSED)
 {
     return false;
 }
 
 
 int
-virCgroupV2DevicesDetectProg(virCgroupPtr group G_GNUC_UNUSED)
+virCgroupV2DevicesDetectProg(virCgroup *group G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
-                         _("cgroups v2 BPF devices not supported "
-                           "with this kernel"));
+                         _("cgroups v2 BPF devices not supported with this kernel"));
     return -1;
 }
 
 
 int
-virCgroupV2DevicesCreateProg(virCgroupPtr group G_GNUC_UNUSED)
+virCgroupV2DevicesCreateProg(virCgroup *group G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
-                         _("cgroups v2 BPF devices not supported "
-                           "with this kernel"));
+                         _("cgroups v2 BPF devices not supported with this kernel"));
     return -1;
 }
 
 
 int
-virCgroupV2DevicesPrepareProg(virCgroupPtr group G_GNUC_UNUSED)
+virCgroupV2DevicesPrepareProg(virCgroup *group G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
-                         _("cgroups v2 BPF devices not supported "
-                           "with this kernel"));
+                         _("cgroups v2 BPF devices not supported with this kernel"));
     return -1;
 }
 
 
 int
-virCgroupV2DevicesRemoveProg(virCgroupPtr group G_GNUC_UNUSED)
+virCgroupV2DevicesCloseProg(virCgroup *group G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -632,7 +629,7 @@ virCgroupV2DevicesGetPerms(int perms G_GNUC_UNUSED,
 {
     return 0;
 }
-#endif /* !HAVE_DECL_BPF_CGROUP_DEVICE */
+#endif /* !__linux__ */
 
 
 uint64_t

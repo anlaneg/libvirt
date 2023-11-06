@@ -31,7 +31,6 @@
 #include "remote_protocol.h"
 #include "remote_driver.h"
 #include "util/virnetdevopenvswitch.h"
-#include "virstring.h"
 #include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_CONF
@@ -40,7 +39,7 @@ VIR_LOG_INIT("daemon.libvirtd-config");
 
 
 static int
-remoteConfigGetAuth(virConfPtr conf,
+remoteConfigGetAuth(virConf *conf,
                     const char *filename,
                     const char *key,
                     int *auth)
@@ -64,7 +63,7 @@ remoteConfigGetAuth(virConfPtr conf,
         *auth = VIR_NET_SERVER_SERVICE_AUTH_POLKIT;
     } else {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("%s: %s: unsupported auth %s"),
+                       _("%1$s: %2$s: unsupported auth %3$s"),
                        filename, key, authstr);
         VIR_FREE(authstr);
         return -1;
@@ -75,7 +74,7 @@ remoteConfigGetAuth(virConfPtr conf,
 }
 
 /*取daemon配置文件路径*/
-int
+void
 daemonConfigFilePath(bool privileged, char **configfile)
 {
     if (privileged) {
@@ -87,8 +86,6 @@ daemonConfigFilePath(bool privileged, char **configfile)
 
         *configfile = g_strdup_printf("%s/%s.conf", configdir, DAEMON_NAME);
     }
-
-    return 0;
 }
 
 struct daemonConfig*
@@ -96,8 +93,7 @@ daemonConfigNew(bool privileged G_GNUC_UNUSED)
 {
     struct daemonConfig *data;
 
-    if (VIR_ALLOC(data) < 0)
-        return NULL;
+    data = g_new0(struct daemonConfig, 1);
 
 #ifdef WITH_IP
 # ifdef LIBVIRTD
@@ -136,6 +132,10 @@ daemonConfigNew(bool privileged G_GNUC_UNUSED)
 # endif
     data->auth_tls = REMOTE_AUTH_NONE;
 #endif /* ! WITH_IP */
+
+#if WITH_IP
+    data->tcp_min_ssf = 56; /* good enough for kerberos */
+#endif
 
     data->min_workers = 5;
     data->max_workers = 20;
@@ -176,60 +176,62 @@ daemonConfigFree(struct daemonConfig *data)
         return;
 
 #ifdef WITH_IP
-    VIR_FREE(data->listen_addr);
-    VIR_FREE(data->tls_port);
-    VIR_FREE(data->tcp_port);
+    g_free(data->listen_addr);
+    g_free(data->tls_port);
+    g_free(data->tcp_port);
 #endif /* ! WITH_IP */
 
     tmp = data->access_drivers;
     while (tmp && *tmp) {
-        VIR_FREE(*tmp);
+        g_free(*tmp);
         tmp++;
     }
-    VIR_FREE(data->access_drivers);
+    g_free(data->access_drivers);
 
-    VIR_FREE(data->unix_sock_admin_perms);
-    VIR_FREE(data->unix_sock_ro_perms);
-    VIR_FREE(data->unix_sock_rw_perms);
-    VIR_FREE(data->unix_sock_group);
-    VIR_FREE(data->unix_sock_dir);
+    g_free(data->unix_sock_admin_perms);
+    g_free(data->unix_sock_ro_perms);
+    g_free(data->unix_sock_rw_perms);
+    g_free(data->unix_sock_group);
+    g_free(data->unix_sock_dir);
 
     tmp = data->sasl_allowed_username_list;
     while (tmp && *tmp) {
-        VIR_FREE(*tmp);
+        g_free(*tmp);
         tmp++;
     }
-    VIR_FREE(data->sasl_allowed_username_list);
+    g_free(data->sasl_allowed_username_list);
 
 #ifdef WITH_IP
     tmp = data->tls_allowed_dn_list;
     while (tmp && *tmp) {
-        VIR_FREE(*tmp);
+        g_free(*tmp);
         tmp++;
     }
-    VIR_FREE(data->tls_allowed_dn_list);
+    g_free(data->tls_allowed_dn_list);
 
-    VIR_FREE(data->tls_priority);
+    g_free(data->tls_priority);
 
-    VIR_FREE(data->key_file);
-    VIR_FREE(data->ca_file);
-    VIR_FREE(data->cert_file);
-    VIR_FREE(data->crl_file);
+    g_free(data->key_file);
+    g_free(data->ca_file);
+    g_free(data->cert_file);
+    g_free(data->crl_file);
 #endif /* ! WITH_IP */
 
-    VIR_FREE(data->host_uuid);
-    VIR_FREE(data->host_uuid_source);
-    VIR_FREE(data->log_filters);
-    VIR_FREE(data->log_outputs);
+    g_free(data->host_uuid);
+    g_free(data->host_uuid_source);
+    g_free(data->log_filters);
+    g_free(data->log_outputs);
 
-    VIR_FREE(data);
+    g_free(data);
 }
 
 static int
 daemonConfigLoadOptions(struct daemonConfig *data,
                         const char *filename,
-                        virConfPtr conf)
+                        virConf *conf)
 {
+    int rc G_GNUC_UNUSED;
+
 #ifdef WITH_IP
     if (virConfGetValueBool(conf, "listen_tcp", &data->listen_tcp) < 0)
         return -1;
@@ -301,6 +303,16 @@ daemonConfigLoadOptions(struct daemonConfig *data,
 
     if (virConfGetValueString(conf, "tls_priority", &data->tls_priority) < 0)
         return -1;
+
+    if ((rc = virConfGetValueUInt(conf, "tcp_min_ssf", &data->tcp_min_ssf)) < 0) {
+        return -1;
+    } else if (rc > 0 && data->tcp_min_ssf < SSF_WARNING_LEVEL) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("minimum SSF levels lower than %1$d are not supported"),
+                       SSF_WARNING_LEVEL);
+        return -1;
+    }
+
 #endif /* ! WITH_IP */
 
     if (virConfGetValueStringList(conf, "sasl_allowed_username_list", false,

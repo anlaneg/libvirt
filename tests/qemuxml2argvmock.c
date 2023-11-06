@@ -18,25 +18,23 @@
 
 #include <config.h>
 
+#define LIBVIRT_VIRIDENTITYPRIV_H_ALLOW
+
 #include "internal.h"
 #include "viralloc.h"
 #include "vircommand.h"
-#include "vircrypto.h"
+#include "viridentitypriv.h"
 #include "virmock.h"
 #include "virnetdev.h"
+#include "virnetdevbandwidth.h"
 #include "virnetdevip.h"
 #include "virnetdevtap.h"
 #include "virnetdevopenvswitch.h"
-#include "virnuma.h"
-#include "virrandom.h"
-#include "virscsi.h"
 #include "virscsivhost.h"
-#include "virstring.h"
 #include "virtpm.h"
 #include "virutil.h"
 #include "qemu/qemu_interface.h"
 #include "qemu/qemu_command.h"
-#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -57,55 +55,13 @@ GDateTime *g_date_time_new_now_local(void)
     return g_date_time_new_from_unix_local(1234567890);
 }
 
-bool
-virNumaIsAvailable(void)
-{
-    return true;
-}
-
-int
-virNumaGetMaxNode(void)
-{
-    return 7;
-}
-
-/* We shouldn't need to mock virNumaNodeIsAvailable() and *definitely* not
- * virNumaNodesetIsAvailable(), but it seems to be the only way to get
- * mocking to work with Clang on FreeBSD, so keep these duplicates around
- * until we figure out a cleaner solution */
-bool
-virNumaNodeIsAvailable(int node)
-{
-    return node >= 0 && node <= virNumaGetMaxNode();
-}
-
-bool
-virNumaNodesetIsAvailable(virBitmapPtr nodeset)
-{
-    ssize_t bit = -1;
-
-    if (!nodeset)
-        return true;
-
-    while ((bit = virBitmapNextSetBit(nodeset, bit)) >= 0) {
-        if (virNumaNodeIsAvailable(bit))
-            continue;
-
-        return false;
-    }
-
-    return true;
-}
 
 char *
 virTPMCreateCancelPath(const char *devpath)
 {
-    char *path;
     (void)devpath;
 
-    path = g_strdup("/sys/class/misc/tpm0/device/cancel");
-
-    return path;
+    return g_strdup("/sys/class/misc/tpm0/device/cancel");
 }
 
 /**
@@ -118,6 +74,14 @@ virMemoryMaxValue(bool capped G_GNUC_UNUSED)
     return LLONG_MAX;
 }
 
+int
+virSCSIVHostOpenVhostSCSI(int *vhostfd)
+{
+    *vhostfd = STDERR_FILENO + 1;
+
+    return 0;
+}
+
 char *
 virSCSIDeviceGetSgName(const char *sysfs_prefix G_GNUC_UNUSED,
                        const char *adapter G_GNUC_UNUSED,
@@ -125,18 +89,7 @@ virSCSIDeviceGetSgName(const char *sysfs_prefix G_GNUC_UNUSED,
                        unsigned int target G_GNUC_UNUSED,
                        unsigned long long unit G_GNUC_UNUSED)
 {
-    char *ret;
-
-    ret = g_strdup("sg0");
-    return ret;
-}
-
-int
-virSCSIVHostOpenVhostSCSI(int *vhostfd)
-{
-    *vhostfd = STDERR_FILENO + 1;
-
-    return 0;
+    return g_strdup_printf("sg0");
 }
 
 int
@@ -203,12 +156,12 @@ virHostGetDRMRenderNode(void)
     return g_strdup("/dev/dri/foo");
 }
 
-static void (*real_virCommandPassFD)(virCommandPtr cmd, int fd, unsigned int flags);
+static void (*real_virCommandPassFD)(virCommand *cmd, int fd, unsigned int flags);
 
-static const int testCommandPassSafeFDs[] = { 1730, 1731 };
+static const int testCommandPassSafeFDs[] = { 1730, 1731, 1732 };
 
 void
-virCommandPassFD(virCommandPtr cmd,
+virCommandPassFD(virCommand *cmd,
                  int fd,
                  unsigned int flags)
 {
@@ -227,6 +180,7 @@ virCommandPassFD(virCommandPtr cmd,
 
 int
 virNetDevOpenvswitchGetVhostuserIfname(const char *path G_GNUC_UNUSED,
+                                       bool server G_GNUC_UNUSED,
                                        char **ifname)
 {
     *ifname = g_strdup("vhost-user0");
@@ -234,20 +188,28 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path G_GNUC_UNUSED,
 }
 
 int
-qemuInterfaceOpenVhostNet(virDomainDefPtr def G_GNUC_UNUSED,
-                          virDomainNetDefPtr net,
-                          int *vhostfd,
-                          size_t *vhostfdSize)
+qemuInterfaceOpenVhostNet(virDomainObj *vm G_GNUC_UNUSED,
+                          virDomainNetDef *net)
 {
+    qemuDomainNetworkPrivate *netpriv = QEMU_DOMAIN_NETWORK_PRIVATE(net);
+    size_t vhostfdSize = net->driver.virtio.queues;
     size_t i;
 
-    if (!virDomainNetIsVirtioModel(net)) {
-        *vhostfdSize = 0;
+    if (!vhostfdSize)
+         vhostfdSize = 1;
+
+    if (!virDomainNetIsVirtioModel(net))
         return 0;
+
+    for (i = 0; i < vhostfdSize; i++) {
+        g_autofree char *name = g_strdup_printf("vhostfd-%s%zu", net->info.alias, i);
+        int fd = STDERR_FILENO + 42 + i;
+
+        netpriv->vhostfds = g_slist_prepend(netpriv->vhostfds, qemuFDPassDirectNew(name, &fd));
     }
 
-    for (i = 0; i < *vhostfdSize; i++)
-        vhostfd[i] = STDERR_FILENO + 42 + i;
+    netpriv->vhostfds = g_slist_reverse(netpriv->vhostfds);
+
     return 0;
 }
 
@@ -271,7 +233,6 @@ qemuOpenChrChardevUNIXSocket(const virDomainChrSourceDef *dev G_GNUC_UNUSED)
 
 int
 qemuBuildTPMOpenBackendFDs(const char *tpmdev G_GNUC_UNUSED,
-                           const char *cancel_path G_GNUC_UNUSED,
                            int *tpmfd,
                            int *cancelfd)
 {
@@ -282,4 +243,27 @@ qemuBuildTPMOpenBackendFDs(const char *tpmdev G_GNUC_UNUSED,
     *tpmfd = 1730;
     *cancelfd = 1731;
     return 0;
+}
+
+
+int
+virNetDevBandwidthSetRootQDisc(const char *ifname G_GNUC_UNUSED,
+                               const char *qdisc G_GNUC_UNUSED)
+{
+    return 0;
+}
+
+
+int
+qemuVDPAConnect(const char *devicepath G_GNUC_UNUSED)
+{
+    if (fcntl(1732, F_GETFD) != -1)
+        abort();
+    return 1732;
+}
+
+char *
+virIdentityEnsureSystemToken(void)
+{
+    return g_strdup("3de80bcbf22d4833897f1638e01be9b2");
 }

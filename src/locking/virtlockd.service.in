@@ -1,23 +1,20 @@
 [Unit]
-Description=Virtual machine lock manager
-Requires=virtlockd.socket
-Requires=virtlockd-admin.socket
-Before=libvirtd.service
+Description=libvirt locking daemon
 Documentation=man:virtlockd(8)
-Documentation=https://libvirt.org
+Documentation=https://libvirt.org/
+BindsTo=virtlockd.socket
+Wants=virtlockd-admin.socket
+After=virtlockd.socket
+After=virtlockd-admin.socket
 
 [Service]
-EnvironmentFile=-@sysconfdir@/sysconfig/virtlockd
+Type=notify
+Environment=VIRTLOCKD_ARGS=
+EnvironmentFile=-@initconfdir@/virtlockd
 ExecStart=@sbindir@/virtlockd $VIRTLOCKD_ARGS
 ExecReload=/bin/kill -USR1 $MAINPID
-# Loosing the locks is a really bad thing that will
-# cause the machine to be fenced (rebooted), so make
-# sure we discourage OOM killer
-OOMScoreAdjust=-900
-# Needs to allow for max guests * average disks per guest
-# libvirtd.service written to expect 4096 guests, so if we
-# allow for 10 disks per guest, we get:
-LimitNOFILE=40960
 
 [Install]
+WantedBy=multi-user.target
 Also=virtlockd.socket
+Also=virtlockd-admin.socket

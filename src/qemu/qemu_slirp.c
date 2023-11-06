@@ -22,14 +22,11 @@
 #include "qemu_extdevice.h"
 #include "qemu_security.h"
 #include "qemu_slirp.h"
-#include "viralloc.h"
 #include "virenum.h"
 #include "virerror.h"
 #include "virjson.h"
 #include "virlog.h"
 #include "virpidfile.h"
-#include "virstring.h"
-#include "virtime.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -50,7 +47,7 @@ VIR_ENUM_IMPL(qemuSlirpFeature,
 
 
 void
-qemuSlirpFree(qemuSlirpPtr slirp)
+qemuSlirpFree(qemuSlirp *slirp)
 {
     if (!slirp)
         return;
@@ -58,12 +55,12 @@ qemuSlirpFree(qemuSlirpPtr slirp)
     VIR_FORCE_CLOSE(slirp->fd[0]);
     VIR_FORCE_CLOSE(slirp->fd[1]);
     virBitmapFree(slirp->features);
-    VIR_FREE(slirp);
+    g_free(slirp);
 }
 
 
 void
-qemuSlirpSetFeature(qemuSlirpPtr slirp,
+qemuSlirpSetFeature(qemuSlirp *slirp,
                     qemuSlirpFeature feature)
 {
     ignore_value(virBitmapSetBit(slirp->features, feature));
@@ -78,15 +75,12 @@ qemuSlirpHasFeature(const qemuSlirp *slirp,
 }
 
 
-qemuSlirpPtr
+qemuSlirp *
 qemuSlirpNew(void)
 {
-    g_autoptr(qemuSlirp) slirp = NULL;
+    g_autoptr(qemuSlirp) slirp = g_new0(qemuSlirp, 1);
 
-    if (VIR_ALLOC(slirp) < 0 ||
-        !(slirp->features = virBitmapNew(QEMU_SLIRP_FEATURE_LAST)))
-        return NULL;
-
+    slirp->features = virBitmapNew(QEMU_SLIRP_FEATURE_LAST);
     slirp->pid = (pid_t)-1;
     slirp->fd[0] = slirp->fd[1] = -1;
 
@@ -94,23 +88,20 @@ qemuSlirpNew(void)
 }
 
 
-qemuSlirpPtr
+qemuSlirp *
 qemuSlirpNewForHelper(const char *helper)
 {
     g_autoptr(qemuSlirp) slirp = NULL;
     g_autoptr(virCommand) cmd = NULL;
     g_autofree char *output = NULL;
     g_autoptr(virJSONValue) doc = NULL;
-    virJSONValuePtr featuresJSON;
+    virJSONValue *featuresJSON;
     size_t i, nfeatures;
-
-    if (!helper)
-        return NULL;
 
     slirp = qemuSlirpNew();
     if (!slirp) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to allocate slirp for '%s'"), helper);
+                       _("Failed to allocate slirp for '%1$s'"), helper);
         return NULL;
     }
 
@@ -122,14 +113,14 @@ qemuSlirpNewForHelper(const char *helper)
     if (!(doc = virJSONValueFromString(output)) ||
         !(featuresJSON = virJSONValueObjectGetArray(doc, "features"))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unable to parse json capabilities '%s'"),
+                       _("unable to parse json capabilities '%1$s'"),
                        helper);
         return NULL;
     }
 
     nfeatures = virJSONValueArraySize(featuresJSON);
     for (i = 0; i < nfeatures; i++) {
-        virJSONValuePtr item = virJSONValueArrayGet(featuresJSON, i);
+        virJSONValue *item = virJSONValueArrayGet(featuresJSON, i);
         const char *tmpStr = virJSONValueGetString(item);
         int tmp;
 
@@ -146,7 +137,7 @@ qemuSlirpNewForHelper(const char *helper)
 
 
 static char *
-qemuSlirpCreatePidFilename(virQEMUDriverConfigPtr cfg,
+qemuSlirpCreatePidFilename(virQEMUDriverConfig *cfg,
                            const virDomainDef *def,
                            const char *alias)
 {
@@ -162,10 +153,10 @@ qemuSlirpCreatePidFilename(virQEMUDriverConfigPtr cfg,
 }
 
 
-int
-qemuSlirpOpen(qemuSlirpPtr slirp,
-              virQEMUDriverPtr driver,
-              virDomainDefPtr def)
+static int
+qemuSlirpOpen(qemuSlirp *slirp,
+              virQEMUDriver *driver,
+              virDomainDef *def)
 {
     int rc, pair[2] = { -1, -1 };
 
@@ -194,17 +185,8 @@ qemuSlirpOpen(qemuSlirpPtr slirp,
 }
 
 
-int
-qemuSlirpGetFD(qemuSlirpPtr slirp)
-{
-    int fd = slirp->fd[0];
-    slirp->fd[0] = -1;
-    return fd;
-}
-
-
 static char *
-qemuSlirpGetDBusVMStateId(virDomainNetDefPtr net)
+qemuSlirpGetDBusVMStateId(virDomainNetDef *net)
 {
     char macstr[VIR_MAC_STRING_BUFLEN] = "";
 
@@ -214,10 +196,10 @@ qemuSlirpGetDBusVMStateId(virDomainNetDefPtr net)
 
 
 void
-qemuSlirpStop(qemuSlirpPtr slirp,
-              virDomainObjPtr vm,
-              virQEMUDriverPtr driver,
-              virDomainNetDefPtr net)
+qemuSlirpStop(qemuSlirp *slirp,
+              virDomainObj *vm,
+              virQEMUDriver *driver,
+              virDomainNetDef *net)
 {
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autofree char *id = qemuSlirpGetDBusVMStateId(net);
@@ -243,31 +225,33 @@ qemuSlirpStop(qemuSlirpPtr slirp,
 
 
 int
-qemuSlirpSetupCgroup(qemuSlirpPtr slirp,
-                     virCgroupPtr cgroup)
+qemuSlirpSetupCgroup(qemuSlirp *slirp,
+                     virCgroup *cgroup)
 {
     return virCgroupAddProcess(cgroup, slirp->pid);
 }
 
 
 int
-qemuSlirpStart(qemuSlirpPtr slirp,
-               virDomainObjPtr vm,
-               virQEMUDriverPtr driver,
-               virDomainNetDefPtr net,
+qemuSlirpStart(virDomainObj *vm,
+               virDomainNetDef *net,
                bool incoming)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
+    qemuDomainObjPrivate *priv = vm->privateData;
+    virQEMUDriver *driver = priv->driver;
+    qemuDomainNetworkPrivate *netpriv = QEMU_DOMAIN_NETWORK_PRIVATE(net);
+    qemuSlirp *slirp = netpriv->slirp;
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autoptr(virCommand) cmd = NULL;
     g_autofree char *pidfile = NULL;
     size_t i;
     pid_t pid = (pid_t) -1;
     int rc;
-    int exitstatus = 0;
-    int cmdret = 0;
-    VIR_AUTOCLOSE errfd = -1;
     bool killDBusDaemon = false;
+    g_autofree char *fdname = g_strdup_printf("slirpfd-%s", net->info.alias);
+
+    if (!slirp)
+        return 0;
 
     if (incoming &&
         !qemuSlirpHasFeature(slirp, QEMU_SLIRP_FEATURE_MIGRATE)) {
@@ -275,15 +259,16 @@ qemuSlirpStart(qemuSlirpPtr slirp,
                        _("The slirp-helper doesn't support migration"));
     }
 
+    if (qemuSlirpOpen(slirp, driver, vm->def) < 0)
+        return -1;
+
     if (!(pidfile = qemuSlirpCreatePidFilename(cfg, vm->def, net->info.alias)))
         return -1;
 
-    if (!(cmd = virCommandNew(cfg->slirpHelperName)))
-        return -1;
+    cmd = virCommandNew(cfg->slirpHelperName);
 
     virCommandClearCaps(cmd);
     virCommandSetPidFile(cmd, pidfile);
-    virCommandSetErrorFD(cmd, &errfd);
     virCommandDaemonize(cmd);
 
     virCommandAddArgFormat(cmd, "--fd=%d", slirp->fd[1]);
@@ -327,11 +312,8 @@ qemuSlirpStart(qemuSlirpPtr slirp,
         virCommandAddArgFormat(cmd, "--dbus-address=%s", dbus_addr);
 
         if (qemuSlirpHasFeature(slirp, QEMU_SLIRP_FEATURE_MIGRATE)) {
-            if (qemuDBusVMStateAdd(vm, id) < 0) {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Failed to register slirp migration"));
-                goto error;
-            }
+            qemuDBusVMStateAdd(vm, id);
+
             if (incoming)
                 virCommandAddArg(cmd, "--dbus-incoming");
         }
@@ -343,27 +325,20 @@ qemuSlirpStart(qemuSlirpPtr slirp,
     if (qemuExtDeviceLogCommand(driver, vm, cmd, "slirp") < 0)
         goto error;
 
-    if (qemuSecurityCommandRun(driver, vm, cmd, -1, -1, &exitstatus, &cmdret) < 0)
+    if (qemuSecurityCommandRun(driver, vm, cmd, -1, -1, false, NULL) < 0)
         goto error;
-
-    if (cmdret < 0 || exitstatus != 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not start 'slirp'. exitstatus: %d"), exitstatus);
-        goto error;
-    }
 
     rc = virPidFileReadPath(pidfile, &pid);
     if (rc < 0) {
         virReportSystemError(-rc,
-                             _("Unable to read slirp pidfile '%s'"),
+                             _("Unable to read slirp pidfile '%1$s'"),
                              pidfile);
         goto error;
     }
 
     slirp->pid = pid;
 
-    if (priv->cgroup && qemuSlirpSetupCgroup(slirp, priv->cgroup) < 0)
-        goto error;
+    netpriv->slirpfd = qemuFDPassDirectNew(fdname, &slirp->fd[0]);
 
     return 0;
 

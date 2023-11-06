@@ -37,24 +37,20 @@ static int
 testCryptoHash(const void *opaque)
 {
     const struct testCryptoHashData *data = opaque;
-    char *actual = NULL;
-    int ret = -1;
+    g_autofree char *actual = NULL;
 
     if (virCryptoHashString(data->hash, data->input, &actual) < 0) {
         fprintf(stderr, "Failed to generate crypto hash\n");
-        goto cleanup;
+        return -1;
     }
 
     if (STRNEQ_NULLABLE(data->output, actual)) {
         fprintf(stderr, "Expected hash '%s' but got '%s'\n",
                 data->output, NULLSTR(actual));
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 
@@ -70,52 +66,39 @@ static int
 testCryptoEncrypt(const void *opaque)
 {
     const struct testCryptoEncryptData *data = opaque;
-    uint8_t *enckey = NULL;
+    g_autofree uint8_t *enckey = NULL;
     size_t enckeylen = 32;
-    uint8_t *iv = NULL;
+    g_autofree uint8_t *iv = NULL;
     size_t ivlen = 16;
-    uint8_t *ciphertext = NULL;
+    g_autofree uint8_t *ciphertext = NULL;
     size_t ciphertextlen = 0;
-    int ret = -1;
 
-    if (!virCryptoHaveCipher(data->algorithm)) {
-        fprintf(stderr, "cipher algorithm=%d unavailable\n", data->algorithm);
-        return EXIT_AM_SKIP;
-    }
-
-    if (VIR_ALLOC_N(enckey, enckeylen) < 0 ||
-        VIR_ALLOC_N(iv, ivlen) < 0)
-        goto cleanup;
+    enckey = g_new0(uint8_t, enckeylen);
+    iv = g_new0(uint8_t, ivlen);
 
     if (virRandomBytes(enckey, enckeylen) < 0 ||
         virRandomBytes(iv, ivlen) < 0) {
         fprintf(stderr, "Failed to generate random bytes\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virCryptoEncryptData(data->algorithm, enckey, enckeylen, iv, ivlen,
                              data->input, data->inputlen,
                              &ciphertext, &ciphertextlen) < 0)
-        goto cleanup;
+        return -1;
 
     if (data->ciphertextlen != ciphertextlen) {
         fprintf(stderr, "Expected ciphertextlen(%zu) doesn't match (%zu)\n",
                 data->ciphertextlen, ciphertextlen);
-        goto cleanup;
+        return -1;
     }
 
     if (memcmp(data->ciphertext, ciphertext, ciphertextlen)) {
         fprintf(stderr, "Expected ciphertext doesn't match\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(enckey);
-    VIR_FREE(iv);
-    VIR_FREE(ciphertext);
-
-    return ret;
+    return 0;
 }
 
 
@@ -123,7 +106,7 @@ static int
 mymain(void)
 {
     int ret = 0;
-    uint8_t secretdata[8];
+    uint8_t secretdata[8] = "letmein";
     uint8_t expected_ciphertext[16] = {0x48, 0x8e, 0x9, 0xb9,
                                        0x6a, 0xa6, 0x24, 0x5f,
                                        0x1b, 0x8c, 0x3f, 0x48,
@@ -167,10 +150,7 @@ mymain(void)
             ret = -1; \
     } while (0)
 
-    memset(&secretdata, 0, 8);
-    memcpy(&secretdata, "letmein", 7);
-
-    VIR_CRYPTO_ENCRYPT(VIR_CRYPTO_CIPHER_AES256CBC, "aes265cbc",
+    VIR_CRYPTO_ENCRYPT(VIR_CRYPTO_CIPHER_AES256CBC, "aes256cbc",
                        secretdata, 7, expected_ciphertext, 16);
 
 #undef VIR_CRYPTO_ENCRYPT

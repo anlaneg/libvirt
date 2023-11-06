@@ -21,23 +21,23 @@
 #include <config.h>
 
 #include "virsh-completer-nodedev.h"
+#include "virsh-util.h"
 #include "conf/node_device_conf.h"
-#include "viralloc.h"
+#include "conf/domain_conf.h"
 #include "virsh-nodedev.h"
 #include "virsh.h"
-#include "virstring.h"
 
 char **
 virshNodeDeviceNameCompleter(vshControl *ctl,
                              const vshCmd *cmd G_GNUC_UNUSED,
                              unsigned int flags)
 {
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
     virNodeDevicePtr *devs = NULL;
     int ndevs = 0;
     size_t i = 0;
     char **ret = NULL;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -47,8 +47,7 @@ virshNodeDeviceNameCompleter(vshControl *ctl,
     if ((ndevs = virConnectListAllNodeDevices(priv->conn, &devs, flags)) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, ndevs + 1) < 0)
-        goto cleanup;
+    tmp = g_new0(char *, ndevs + 1);
 
     for (i = 0; i < ndevs; i++) {
         const char *name = virNodeDeviceGetName(devs[i]);
@@ -58,10 +57,9 @@ virshNodeDeviceNameCompleter(vshControl *ctl,
 
     ret = g_steal_pointer(&tmp);
 
- cleanup:
     for (i = 0; i < ndevs; i++)
-        virNodeDeviceFree(devs[i]);
-    VIR_FREE(devs);
+        virshNodeDeviceFree(devs[i]);
+    g_free(devs);
     return ret;
 }
 
@@ -72,12 +70,11 @@ virshNodeDeviceEventNameCompleter(vshControl *ctl G_GNUC_UNUSED,
                                   unsigned int flags)
 {
     size_t i = 0;
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
 
     virCheckFlags(0, NULL);
 
-    if (VIR_ALLOC_N(tmp, VIR_NODE_DEVICE_EVENT_ID_LAST + 1) < 0)
-        return NULL;
+    tmp = g_new0(char *, VIR_NODE_DEVICE_EVENT_ID_LAST + 1);
 
     for (i = 0; i < VIR_NODE_DEVICE_EVENT_ID_LAST; i++)
         tmp[i] = g_strdup(virshNodeDeviceEventCallbacks[i].name);
@@ -91,20 +88,28 @@ virshNodeDeviceCapabilityNameCompleter(vshControl *ctl,
                                        const vshCmd *cmd,
                                        unsigned int flags)
 {
-    VIR_AUTOSTRINGLIST tmp = NULL;
+    g_auto(GStrv) tmp = NULL;
     const char *cap_str = NULL;
-    size_t i = 0;
 
     virCheckFlags(0, NULL);
 
     if (vshCommandOptStringQuiet(ctl, cmd, "cap", &cap_str) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(tmp, VIR_NODE_DEV_CAP_LAST + 1) < 0)
-        return NULL;
-
-    for (i = 0; i < VIR_NODE_DEV_CAP_LAST; i++)
-        tmp[i] = g_strdup(virNodeDevCapTypeToString(i));
+    tmp = virshEnumComplete(VIR_NODE_DEV_CAP_LAST,
+                            virNodeDevCapTypeToString);
 
     return virshCommaStringListComplete(cap_str, (const char **)tmp);
+}
+
+
+char **
+virshNodeDevicePCIBackendCompleter(vshControl *ctl G_GNUC_UNUSED,
+                                   const vshCmd *cmd G_GNUC_UNUSED,
+                                   unsigned int flags)
+{
+    virCheckFlags(0, NULL);
+
+    return virshEnumComplete(VIR_DOMAIN_HOSTDEV_PCI_BACKEND_TYPE_LAST,
+                             virDomainHostdevSubsysPCIBackendTypeToString);
 }

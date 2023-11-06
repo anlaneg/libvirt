@@ -63,25 +63,25 @@ static virDomainControllerType vz7ControllerTypes[] = {VIR_DOMAIN_CONTROLLER_TYP
  * vzDomObjFromDomain:
  * @domain: Domain pointer that has to be looked up
  *
- * This function looks up @domain and returns the appropriate virDomainObjPtr
+ * This function looks up @domain and returns the appropriate virDomainObj *
  * that has to be released by calling virDomainObjEndAPI().
  *
  * Returns the domain object with incremented reference counter which is locked
  * on success, NULL otherwise.
  */
-virDomainObjPtr
+virDomainObj *
 vzDomObjFromDomain(virDomainPtr domain)
 {
-    virDomainObjPtr vm;
-    vzConnPtr privconn = domain->conn->privateData;
+    virDomainObj *vm;
+    struct _vzConn *privconn = domain->conn->privateData;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    vzDriverPtr driver = privconn->driver;
+    struct _vzDriver *driver = privconn->driver;
 
     vm = virDomainObjListFindByUUID(driver->domains, domain->uuid);
     if (!vm) {
         virUUIDFormat(domain->uuid, uuidstr);
         virReportError(VIR_ERR_NO_DOMAIN,
-                       _("no domain with matching uuid '%s' (%s)"),
+                       _("no domain with matching uuid '%1$s' (%2$s)"),
                        uuidstr, domain->name);
         return NULL;
     }
@@ -92,7 +92,7 @@ vzDomObjFromDomain(virDomainPtr domain)
 static int
 vzDoCmdRun(char **outbuf, const char *binary, va_list list)
 {
-    virCommandPtr cmd = virCommandNewVAList(binary, list);
+    g_autoptr(virCommand) cmd = virCommandNewVAList(binary, list);
     int ret = -1;
 
     if (outbuf)
@@ -104,7 +104,6 @@ vzDoCmdRun(char **outbuf, const char *binary, va_list list)
     ret = 0;
 
  cleanup:
-    virCommandFree(cmd);
     if (ret && outbuf)
         VIR_FREE(*outbuf);
     return ret;
@@ -132,7 +131,7 @@ vzGetOutput(const char *binary, ...)
 }
 
 static void
-vzInitCaps(unsigned long vzVersion, vzCapabilitiesPtr vzCaps)
+vzInitCaps(unsigned long vzVersion, struct _vzCapabilities *vzCaps)
 {
     if (vzVersion < VIRTUOZZO_VER_7) {
         vzCaps->ctDiskFormat = VIR_STORAGE_FILE_PLOOP;
@@ -150,22 +149,24 @@ vzInitCaps(unsigned long vzVersion, vzCapabilitiesPtr vzCaps)
 }
 
 int
-vzInitVersion(vzDriverPtr driver)
+vzInitVersion(struct _vzDriver *driver)
 {
-    char *output, *sVer, *tmp;
+    g_autofree char *output = NULL;
+    char *sVer, *tmp;
     const char *searchStr = "prlsrvctl version ";
+    unsigned long long version;
     int ret = -1;
 
     output = vzGetOutput(PRLSRVCTL, "--help", NULL);
 
     if (!output) {
         vzParseError();
-        goto cleanup;
+        return -1;
     }
 
     if (!(sVer = strstr(output, searchStr))) {
         vzParseError();
-        goto cleanup;
+        return -1;
     }
 
     sVer = sVer + strlen(searchStr);
@@ -174,46 +175,45 @@ vzInitVersion(vzDriverPtr driver)
      * In libvirt we handle only first two numbers. */
     if (!(tmp = strchr(sVer, '.'))) {
         vzParseError();
-        goto cleanup;
+        return -1;
     }
 
     if (!(tmp = strchr(tmp + 1, '.'))) {
         vzParseError();
-        goto cleanup;
+        return -1;
     }
 
     tmp[0] = '\0';
-    if (virParseVersionString(sVer, &(driver->vzVersion), true) < 0) {
+    if (virStringParseVersion(&version, sVer, true) < 0) {
         vzParseError();
-        goto cleanup;
+        return -1;
     }
 
-    vzInitCaps(driver->vzVersion, &driver->vzCaps);
-    ret = 0;
+    driver->vzVersion = version;
 
- cleanup:
-    VIR_FREE(output);
-    return ret;
+    vzInitCaps(driver->vzVersion, &driver->vzCaps);
+
+    return 0;
 }
 
 static int
-vzCheckDiskAddressDriveUnsupportedParams(virDomainDiskDefPtr disk)
+vzCheckDiskAddressDriveUnsupportedParams(virDomainDiskDef *disk)
 {
-    virDomainDeviceDriveAddressPtr drive = &disk->info.addr.drive;
+    virDomainDeviceDriveAddress *drive = &disk->info.addr.drive;
     int devIdx, busIdx;
 
     if (drive->controller > 0) {
         /* We have only one controller of each type */
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Invalid drive address of disk %s, vz driver "
-                         "supports only one controller."), disk->dst);
+                       _("Invalid drive address of disk %1$s, vz driver supports only one controller."),
+                       disk->dst);
         return -1;
     }
 
     if (drive->target > 0) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Invalid drive address of disk %s, vz driver "
-                         "supports only target 0."), disk->dst);
+                       _("Invalid drive address of disk %1$s, vz driver supports only target 0."),
+                       disk->dst);
         return -1;
     }
 
@@ -221,8 +221,7 @@ vzCheckDiskAddressDriveUnsupportedParams(virDomainDiskDefPtr disk)
     case VIR_DOMAIN_DISK_BUS_IDE:
         if (drive->unit > 1) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Invalid drive address of disk %s, vz driver "
-                             "supports only units 0-1 for IDE bus."),
+                           _("Invalid drive address of disk %1$s, vz driver supports only units 0-1 for IDE bus."),
                            disk->dst);
             return -1;
         }
@@ -231,12 +230,19 @@ vzCheckDiskAddressDriveUnsupportedParams(virDomainDiskDefPtr disk)
     case VIR_DOMAIN_DISK_BUS_SATA:
         if (drive->bus > 0) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Invalid drive address of disk %s, vz driver "
-                             "supports only bus 0 for SATA and SCSI bus."),
+                           _("Invalid drive address of disk %1$s, vz driver supports only bus 0 for SATA and SCSI bus."),
                            disk->dst);
             return -1;
         }
         break;
+    case VIR_DOMAIN_DISK_BUS_FDC:
+    case VIR_DOMAIN_DISK_BUS_NONE:
+    case VIR_DOMAIN_DISK_BUS_VIRTIO:
+    case VIR_DOMAIN_DISK_BUS_XEN:
+    case VIR_DOMAIN_DISK_BUS_USB:
+    case VIR_DOMAIN_DISK_BUS_UML:
+    case VIR_DOMAIN_DISK_BUS_SD:
+    case VIR_DOMAIN_DISK_BUS_LAST:
     default:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("Specified disk bus is not supported by vz driver."));
@@ -245,15 +251,14 @@ vzCheckDiskAddressDriveUnsupportedParams(virDomainDiskDefPtr disk)
 
     if (virDiskNameToBusDeviceIndex(disk, &busIdx, &devIdx) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("cannot convert disk '%s' to bus/device index"),
+                       _("cannot convert disk '%1$s' to bus/device index"),
                        disk->dst);
         return -1;
     }
 
     if (busIdx != drive->bus || devIdx != drive->unit) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Invalid drive address of disk %s, vz driver "
-                         "does not support non default name mappings."),
+                       _("Invalid drive address of disk %1$s, vz driver does not support non default name mappings."),
                        disk->dst);
         return -1;
     }
@@ -262,22 +267,21 @@ vzCheckDiskAddressDriveUnsupportedParams(virDomainDiskDefPtr disk)
 }
 
 static int
-vzCheckDiskUnsupportedParams(virDomainDiskDefPtr disk)
+vzCheckDiskUnsupportedParams(virDomainDiskDef *disk)
 {
     if (disk->device != VIR_DOMAIN_DISK_DEVICE_DISK &&
         disk->device != VIR_DOMAIN_DISK_DEVICE_CDROM) {
 
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Only hard disks and cdroms are supported "
-                         "by vz driver."));
+                       _("Only hard disks and cdroms are supported by vz driver."));
         return -1;
     }
 
     if (disk->blockio.logical_block_size ||
-        disk->blockio.physical_block_size) {
+        disk->blockio.physical_block_size ||
+        disk->blockio.discard_granularity) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting disk block sizes is not "
-                         "supported by vz driver."));
+                       _("Setting disk block sizes is not supported by vz driver."));
         return -1;
     }
 
@@ -289,84 +293,78 @@ vzCheckDiskUnsupportedParams(virDomainDiskDefPtr disk)
         disk->blkdeviotune.write_iops_sec) {
 
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting disk io limits is not "
-                         "supported by vz driver yet."));
+                       _("Setting disk io limits is not supported by vz driver yet."));
         return -1;
     }
 
     if (disk->serial && disk->device != VIR_DOMAIN_DISK_DEVICE_DISK) {
-        VIR_INFO("%s", _("Setting disk serial number is "
-                         "supported only for disk devices."));
+        VIR_INFO("%s", _("Setting disk serial number is supported only for disk devices."));
     }
 
     if (disk->wwn) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting disk wwn id is not "
-                         "supported by vz driver."));
+                       _("Setting disk wwn id is not supported by vz driver."));
         return -1;
     }
 
     if (disk->vendor) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting disk vendor is not "
-                         "supported by vz driver."));
+                       _("Setting disk vendor is not supported by vz driver."));
         return -1;
     }
 
     if (disk->product) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting disk product id is not "
-                         "supported by vz driver."));
+                       _("Setting disk product id is not supported by vz driver."));
         return -1;
     }
 
     if (disk->error_policy != VIR_DOMAIN_DISK_ERROR_POLICY_DEFAULT) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting disk error policy is not "
-                         "supported by vz driver."));
+                       _("Setting disk error policy is not supported by vz driver."));
         return -1;
     }
 
     if (disk->iomode != VIR_DOMAIN_DISK_IO_DEFAULT &&
         disk->iomode != VIR_DOMAIN_DISK_IO_NATIVE) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Only native iomode is "
-                         "supported by vz driver."));
+                       _("Only native iomode is supported by vz driver."));
         return -1;
     }
 
     if (disk->copy_on_read) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Disk copy_on_read is not "
-                         "supported by vz driver."));
+                       _("Disk copy_on_read is not supported by vz driver."));
+        return -1;
+    }
+
+    if (disk->discard_no_unref) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("Disk discard_no_unref is not supported by vz driver."));
         return -1;
     }
 
     if (disk->startupPolicy != VIR_DOMAIN_STARTUP_POLICY_DEFAULT) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting up disk startup policy is not "
-                         "supported by vz driver."));
+                       _("Setting up disk startup policy is not supported by vz driver."));
         return -1;
     }
 
     if (disk->transient) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Transient disks are not "
-                         "supported by vz driver."));
+                       _("Transient disks are not supported by vz driver."));
         return -1;
     }
 
     if (disk->discard) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting up disk discard parameter is not "
-                         "supported by vz driver."));
+                       _("Setting up disk discard parameter is not supported by vz driver."));
         return -1;
     }
 
     if (disk->iothread) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Setting up disk io thread # is not "
-                         "supported by vz driver."));
+                       _("Setting up disk io thread # is not supported by vz driver."));
         return -1;
     }
 
@@ -374,8 +372,7 @@ vzCheckDiskUnsupportedParams(virDomainDiskDefPtr disk)
         disk->src->type != VIR_STORAGE_TYPE_BLOCK) {
 
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("Only disk and block storage types are "
-                         "supported by vz driver."));
+                       _("Only disk and block storage types are supported by vz driver."));
         return -1;
 
     }
@@ -388,8 +385,8 @@ vzCheckDiskUnsupportedParams(virDomainDiskDefPtr disk)
 
 int
 vzCheckUnsupportedDisk(const virDomainDef *def,
-                       virDomainDiskDefPtr disk,
-                       vzCapabilitiesPtr vzCaps)
+                       virDomainDiskDef *disk,
+                       struct _vzCapabilities *vzCaps)
 {
     size_t i;
     virStorageFileFormat diskFormat;
@@ -413,7 +410,7 @@ vzCheckUnsupportedDisk(const virDomainDef *def,
     if (virDomainDiskGetFormat(disk) != VIR_STORAGE_FILE_NONE &&
         virDomainDiskGetFormat(disk) != diskFormat) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Unsupported format of disk %s"),
+                       _("Unsupported format of disk %1$s"),
                        disk->src->path);
         return -1;
     }
@@ -425,7 +422,7 @@ vzCheckUnsupportedDisk(const virDomainDef *def,
 
     if (vzCaps->diskBuses[i] == VIR_DOMAIN_DISK_BUS_LAST) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Unsupported disk bus type %s"),
+                       _("Unsupported disk bus type %1$s"),
                        virDomainDiskBusTypeToString(disk->bus));
         return -1;
     }
@@ -434,10 +431,10 @@ vzCheckUnsupportedDisk(const virDomainDef *def,
 }
 
 int
-vzCheckUnsupportedControllers(const virDomainDef *def, vzCapabilitiesPtr vzCaps)
+vzCheckUnsupportedControllers(const virDomainDef *def, struct _vzCapabilities *vzCaps)
 {
     size_t i, j;
-    virDomainControllerDefPtr controller;
+    virDomainControllerDef *controller;
 
     for (i = 0; i < def->ncontrollers; i++) {
         controller = def->controllers[i];
@@ -449,7 +446,7 @@ vzCheckUnsupportedControllers(const virDomainDef *def, vzCapabilitiesPtr vzCaps)
 
         if (vzCaps->controllerTypes[j] == VIR_DOMAIN_CONTROLLER_TYPE_LAST) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Unsupported controller type %s"),
+                           _("Unsupported controller type %1$s"),
                            virDomainControllerTypeToString(controller->type));
             return -1;
         }
@@ -460,7 +457,7 @@ vzCheckUnsupportedControllers(const virDomainDef *def, vzCapabilitiesPtr vzCaps)
             controller->model != vzCaps->scsiControllerModel) {
 
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("Unsupported SCSI controller model %s"),
+                               _("Unsupported SCSI controller model %1$s"),
                                virDomainControllerModelSCSITypeToString(controller->model));
                 return -1;
         }
@@ -468,7 +465,7 @@ vzCheckUnsupportedControllers(const virDomainDef *def, vzCapabilitiesPtr vzCaps)
     return 0;
 }
 
-int vzGetDefaultSCSIModel(vzDriverPtr driver,
+int vzGetDefaultSCSIModel(struct _vzDriver *driver,
                           PRL_CLUSTERED_DEVICE_SUBTYPE *scsiModel)
 {
     switch ((int)driver->vzCaps.scsiControllerModel) {
@@ -480,7 +477,7 @@ int vzGetDefaultSCSIModel(vzDriverPtr driver,
         break;
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unknown SCSI controller model %s"),
+                       _("Unknown SCSI controller model %1$s"),
                        virDomainControllerModelSCSITypeToString(
                            driver->vzCaps.scsiControllerModel));
         return -1;
@@ -488,56 +485,49 @@ int vzGetDefaultSCSIModel(vzDriverPtr driver,
     return 0;
 }
 
-int vzCheckUnsupportedGraphics(virDomainGraphicsDefPtr gr)
+int vzCheckUnsupportedGraphics(virDomainGraphicsDef *gr)
 {
     if (gr->type != VIR_DOMAIN_GRAPHICS_TYPE_VNC) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("vz driver supports only "
-                         "VNC graphics."));
+                       _("vz driver supports only VNC graphics."));
         return -1;
     }
 
     if (gr->data.vnc.websocket != 0) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("vz driver doesn't support "
-                         "websockets for VNC graphics."));
+                       _("vz driver doesn't support websockets for VNC graphics."));
         return -1;
     }
 
     if (gr->data.vnc.keymap != 0 &&
         STRNEQ(gr->data.vnc.keymap, "en-us")) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("vz driver supports only "
-                         "\"en-us\" keymap for VNC graphics."));
+                       _("vz driver supports only \"en-us\" keymap for VNC graphics."));
         return -1;
     }
 
     if (gr->data.vnc.sharePolicy == VIR_DOMAIN_GRAPHICS_VNC_SHARE_ALLOW_EXCLUSIVE) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("vz driver doesn't support "
-                         "exclusive share policy for VNC graphics."));
+                       _("vz driver doesn't support exclusive share policy for VNC graphics."));
         return -1;
     }
 
     if (gr->data.vnc.auth.connected == VIR_DOMAIN_GRAPHICS_AUTH_CONNECTED_FAIL ||
         gr->data.vnc.auth.connected == VIR_DOMAIN_GRAPHICS_AUTH_CONNECTED_KEEP) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("vz driver doesn't support "
-                         "given action in case of password change."));
+                       _("vz driver doesn't support given action in case of password change."));
         return -1;
     }
 
     if (gr->data.vnc.auth.expires) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("vz driver doesn't support "
-                         "setting password expire time."));
+                       _("vz driver doesn't support setting password expire time."));
         return -1;
     }
 
     if (gr->nListens > 1) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("vz driver doesn't support more than "
-                         "one listening VNC server per domain"));
+                       _("vz driver doesn't support more than one listening VNC server per domain"));
         return -1;
     }
 
@@ -554,10 +544,9 @@ int vzCheckUnsupportedGraphics(virDomainGraphicsDefPtr gr)
 void*
 vzDomObjAlloc(void *opaque G_GNUC_UNUSED)
 {
-    vzDomObjPtr pdom = NULL;
+    struct vzDomObj *pdom = NULL;
 
-    if (VIR_ALLOC(pdom) < 0)
-        return NULL;
+    pdom = g_new0(struct vzDomObj, 1);
 
     if (virCondInit(&pdom->job.cond) < 0)
         goto error;
@@ -575,7 +564,7 @@ vzDomObjAlloc(void *opaque G_GNUC_UNUSED)
 void
 vzDomObjFree(void* p)
 {
-    vzDomObjPtr pdom = p;
+    struct vzDomObj *pdom = p;
 
     if (!pdom)
         return;
@@ -583,15 +572,15 @@ vzDomObjFree(void* p)
     PrlHandle_Free(pdom->sdkdom);
     PrlHandle_Free(pdom->stats);
     virCondDestroy(&pdom->job.cond);
-    VIR_FREE(pdom);
+    g_free(pdom);
 };
 
 #define VZ_JOB_WAIT_TIME (1000 * 30)
 
 int
-vzDomainObjBeginJob(virDomainObjPtr dom)
+vzDomainObjBeginJob(virDomainObj *dom)
 {
-    vzDomObjPtr pdom = dom->privateData;
+    struct vzDomObj *pdom = dom->privateData;
     unsigned long long now;
     unsigned long long then;
 
@@ -625,9 +614,9 @@ vzDomainObjBeginJob(virDomainObjPtr dom)
 }
 
 void
-vzDomainObjEndJob(virDomainObjPtr dom)
+vzDomainObjEndJob(virDomainObj *dom)
 {
-    vzDomObjPtr pdom = dom->privateData;
+    struct vzDomObj *pdom = dom->privateData;
 
     pdom->job.active = false;
     pdom->job.cancelled = false;
@@ -635,7 +624,7 @@ vzDomainObjEndJob(virDomainObjPtr dom)
 }
 
 int
-vzDomainJobUpdateTime(vzDomainJobObjPtr job)
+vzDomainJobUpdateTime(struct _vzDomainJobObj *job)
 {
     unsigned long long now;
 

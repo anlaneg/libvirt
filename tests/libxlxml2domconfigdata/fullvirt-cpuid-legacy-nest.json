@@ -11,7 +11,7 @@
         ],
         "max_memkb": 592896,
         "target_memkb": 403456,
-        "shadow_memkb": 5656,
+        "shadow_memkb": 1234,
         "cpuid": [
             {
                 "leaf": 1,
@@ -21,10 +21,10 @@
         ],
         "sched_params": {
         },
+        "apic": "True",
+        "acpi": "True",
         "type.hvm": {
             "pae": "True",
-            "apic": "True",
-            "acpi": "True",
             "nested_hvm": "False",
             "nographic": "True",
             "vga": {

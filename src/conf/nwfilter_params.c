@@ -25,9 +25,7 @@
 
 #include "viralloc.h"
 #include "virerror.h"
-#include "datatypes.h"
 #include "nwfilter_params.h"
-#include "domain_conf.h"
 #include "virlog.h"
 #include "virstring.h"
 
@@ -36,12 +34,12 @@
 VIR_LOG_INIT("conf.nwfilter_params");
 
 static bool isValidVarValue(const char *value);
-static void virNWFilterVarAccessSetIntIterId(virNWFilterVarAccessPtr,
+static void virNWFilterVarAccessSetIntIterId(virNWFilterVarAccess *,
                                              unsigned int);
 static unsigned int virNWFilterVarAccessGetIntIterId(const virNWFilterVarAccess *);
 
 void
-virNWFilterVarValueFree(virNWFilterVarValuePtr val)
+virNWFilterVarValueFree(virNWFilterVarValue *val)
 {
     size_t i;
 
@@ -50,28 +48,27 @@ virNWFilterVarValueFree(virNWFilterVarValuePtr val)
 
     switch (val->valType) {
     case NWFILTER_VALUE_TYPE_SIMPLE:
-        VIR_FREE(val->u.simple.value);
+        g_free(val->u.simple.value);
         break;
     case NWFILTER_VALUE_TYPE_ARRAY:
         for (i = 0; i < val->u.array.nValues; i++)
-            VIR_FREE(val->u.array.values[i]);
-        VIR_FREE(val->u.array.values);
+            g_free(val->u.array.values[i]);
+        g_free(val->u.array.values);
         break;
     case NWFILTER_VALUE_TYPE_LAST:
         break;
     }
-    VIR_FREE(val);
+    g_free(val);
 }
 
-virNWFilterVarValuePtr
+virNWFilterVarValue *
 virNWFilterVarValueCopy(const virNWFilterVarValue *val)
 {
-    virNWFilterVarValuePtr res;
+    virNWFilterVarValue *res;
     size_t i;
     char *str;
 
-    if (VIR_ALLOC(res) < 0)
-        return NULL;
+    res = g_new0(virNWFilterVarValue, 1);
     res->valType = val->valType;
 
     switch (res->valType) {
@@ -79,8 +76,7 @@ virNWFilterVarValueCopy(const virNWFilterVarValue *val)
         res->u.simple.value = g_strdup(val->u.simple.value);
         break;
     case NWFILTER_VALUE_TYPE_ARRAY:
-        if (VIR_ALLOC_N(res->u.array.values, val->u.array.nValues) < 0)
-            goto err_exit;
+        res->u.array.values = g_new0(char *, val->u.array.nValues);
         res->u.array.nValues = val->u.array.nValues;
         for (i = 0; i < val->u.array.nValues; i++) {
             str = g_strdup(val->u.array.values[i]);
@@ -92,16 +88,12 @@ virNWFilterVarValueCopy(const virNWFilterVarValue *val)
     }
 
     return res;
-
- err_exit:
-    virNWFilterVarValueFree(res);
-    return NULL;
 }
 
-virNWFilterVarValuePtr
+virNWFilterVarValue *
 virNWFilterVarValueCreateSimple(char *value)
 {
-    virNWFilterVarValuePtr val;
+    virNWFilterVarValue *val;
 
     if (!isValidVarValue(value)) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
@@ -109,8 +101,7 @@ virNWFilterVarValueCreateSimple(char *value)
         return NULL;
     }
 
-    if (VIR_ALLOC(val) < 0)
-        return NULL;
+    val = g_new0(virNWFilterVarValue, 1);
 
     val->valType = NWFILTER_VALUE_TYPE_SIMPLE;
     val->u.simple.value = value;
@@ -118,11 +109,11 @@ virNWFilterVarValueCreateSimple(char *value)
     return val;
 }
 
-virNWFilterVarValuePtr
+virNWFilterVarValue *
 virNWFilterVarValueCreateSimpleCopyValue(const char *value)
 {
     char *val;
-    virNWFilterVarValuePtr ret;
+    virNWFilterVarValue *ret;
 
     val = g_strdup(value);
     ret = virNWFilterVarValueCreateSimple(val);
@@ -169,10 +160,8 @@ virNWFilterVarValueGetCardinality(const virNWFilterVarValue *val)
     switch (val->valType) {
     case NWFILTER_VALUE_TYPE_SIMPLE:
         return 1;
-        break;
     case NWFILTER_VALUE_TYPE_ARRAY:
         return val->u.array.nValues;
-        break;
     case NWFILTER_VALUE_TYPE_LAST:
         return 0;
     }
@@ -212,7 +201,7 @@ virNWFilterVarValueEqual(const virNWFilterVarValue *a,
 }
 
 int
-virNWFilterVarValueAddValue(virNWFilterVarValuePtr val, char *value)
+virNWFilterVarValueAddValue(virNWFilterVarValue *val, char *value)
 {
     char *tmp;
     int rc = -1;
@@ -221,10 +210,7 @@ virNWFilterVarValueAddValue(virNWFilterVarValuePtr val, char *value)
     case NWFILTER_VALUE_TYPE_SIMPLE:
         /* switch to array */
         tmp = val->u.simple.value;
-        if (VIR_ALLOC_N(val->u.array.values, 2) < 0) {
-            val->u.simple.value = tmp;
-            return -1;
-        }
+        val->u.array.values = g_new0(char *, 2);
         val->valType = NWFILTER_VALUE_TYPE_ARRAY;
         val->u.array.nValues = 2;
         val->u.array.values[0] = tmp;
@@ -233,9 +219,7 @@ virNWFilterVarValueAddValue(virNWFilterVarValuePtr val, char *value)
         break;
 
     case NWFILTER_VALUE_TYPE_ARRAY:
-        if (VIR_EXPAND_N(val->u.array.values,
-                         val->u.array.nValues, 1) < 0)
-            return -1;
+        VIR_EXPAND_N(val->u.array.values, val->u.array.nValues, 1);
         val->u.array.values[val->u.array.nValues - 1] = value;
         rc = 0;
         break;
@@ -249,7 +233,7 @@ virNWFilterVarValueAddValue(virNWFilterVarValuePtr val, char *value)
 
 
 int
-virNWFilterVarValueAddValueCopy(virNWFilterVarValuePtr val, const char *value)
+virNWFilterVarValueAddValueCopy(virNWFilterVarValue *val, const char *value)
 {
     char *valdup;
     valdup = g_strdup(value);
@@ -262,7 +246,7 @@ virNWFilterVarValueAddValueCopy(virNWFilterVarValuePtr val, const char *value)
 
 
 static int
-virNWFilterVarValueDelNthValue(virNWFilterVarValuePtr val, unsigned int pos)
+virNWFilterVarValueDelNthValue(virNWFilterVarValue *val, unsigned int pos)
 {
     switch (val->valType) {
     case NWFILTER_VALUE_TYPE_SIMPLE:
@@ -284,7 +268,7 @@ virNWFilterVarValueDelNthValue(virNWFilterVarValuePtr val, unsigned int pos)
 }
 
 int
-virNWFilterVarValueDelValue(virNWFilterVarValuePtr val, const char *value)
+virNWFilterVarValueDelValue(virNWFilterVarValue *val, const char *value)
 {
     size_t i;
 
@@ -306,7 +290,7 @@ virNWFilterVarValueDelValue(virNWFilterVarValuePtr val, const char *value)
 }
 
 void
-virNWFilterVarCombIterFree(virNWFilterVarCombIterPtr ci)
+virNWFilterVarCombIterFree(virNWFilterVarCombIter *ci)
 {
     size_t i;
 
@@ -314,13 +298,15 @@ virNWFilterVarCombIterFree(virNWFilterVarCombIterPtr ci)
         return;
 
     for (i = 0; i < ci->nIter; i++)
-        VIR_FREE(ci->iter[i].varNames);
+        g_free(ci->iter[i].varNames);
 
-    VIR_FREE(ci);
+    g_free(ci->iter);
+
+    g_free(ci);
 }
 
 static int
-virNWFilterVarCombIterGetIndexByIterId(virNWFilterVarCombIterPtr ci,
+virNWFilterVarCombIterGetIndexByIterId(virNWFilterVarCombIter *ci,
                                        unsigned int iterId)
 {
     size_t i;
@@ -333,7 +319,7 @@ virNWFilterVarCombIterGetIndexByIterId(virNWFilterVarCombIterPtr ci,
 }
 
 static void
-virNWFilterVarCombIterEntryInit(virNWFilterVarCombIterEntryPtr cie,
+virNWFilterVarCombIterEntryInit(virNWFilterVarCombIterEntry *cie,
                                 unsigned int iterId)
 {
     memset(cie, 0, sizeof(*cie));
@@ -341,18 +327,18 @@ virNWFilterVarCombIterEntryInit(virNWFilterVarCombIterEntryPtr cie,
 }
 
 static int
-virNWFilterVarCombIterAddVariable(virNWFilterVarCombIterEntryPtr cie,
-                                  virHashTablePtr hash,
+virNWFilterVarCombIterAddVariable(virNWFilterVarCombIterEntry *cie,
+                                  GHashTable *hash,
                                   const virNWFilterVarAccess *varAccess)
 {
-    virNWFilterVarValuePtr varValue;
+    virNWFilterVarValue *varValue;
     unsigned int maxValue = 0, minValue = 0;
     const char *varName = virNWFilterVarAccessGetVarName(varAccess);
 
     varValue = virHashLookup(hash, varName);
     if (varValue == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not find value for variable '%s'"),
+                       _("Could not find value for variable '%1$s'"),
                        varName);
         return -1;
     }
@@ -376,17 +362,13 @@ virNWFilterVarCombIterAddVariable(virNWFilterVarCombIterEntryPtr cie,
         cie->curValue = minValue;
     } else {
         if (cie->maxValue != maxValue) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Cardinality of list items must be "
-                             "the same for processing them in "
-                             "parallel"));
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("Cardinality of list items must be the same for processing them in parallel"));
             return -1;
         }
     }
 
-    if (VIR_EXPAND_N(cie->varNames, cie->nVarNames, 1) < 0)
-        return -1;
-
+    VIR_EXPAND_N(cie->varNames, cie->nVarNames, 1);
     cie->varNames[cie->nVarNames - 1] = varName;
 
     return 0;
@@ -408,11 +390,12 @@ virNWFilterVarCombIterAddVariable(virNWFilterVarCombIterEntryPtr cie,
  * skip them since this pair has already been encountered in the 1st iteration
  */
 static bool
-virNWFilterVarCombIterEntryAreUniqueEntries(virNWFilterVarCombIterEntryPtr cie,
-                                            virHashTablePtr hash)
+virNWFilterVarCombIterEntryAreUniqueEntries(virNWFilterVarCombIterEntry *cie,
+                                            GHashTable *hash)
 {
     size_t i, j;
-    virNWFilterVarValuePtr varValue, tmp;
+    virNWFilterVarValue *varValue;
+    virNWFilterVarValue *tmp;
     const char *value;
 
     varValue = virHashLookup(hash, cie->varNames[0]);
@@ -424,8 +407,8 @@ virNWFilterVarCombIterEntryAreUniqueEntries(virNWFilterVarCombIterEntryPtr cie,
 
     value = virNWFilterVarValueGetNthValue(varValue, cie->curValue);
     if (!value) {
-        VIR_ERROR(_("Lookup of value at index %u resulted in a NULL "
-                  "pointer"), cie->curValue);
+        VIR_ERROR(_("Lookup of value at index %1$u resulted in a NULL pointer"),
+                  cie->curValue);
         return true;
     }
 
@@ -466,19 +449,19 @@ virNWFilterVarCombIterEntryAreUniqueEntries(virNWFilterVarCombIterEntryPtr cie,
  * which then would cause all combinations of the items of the two lists to
  * be created.
  */
-virNWFilterVarCombIterPtr
-virNWFilterVarCombIterCreate(virHashTablePtr hash,
-                             virNWFilterVarAccessPtr *varAccess,
+virNWFilterVarCombIter *
+virNWFilterVarCombIterCreate(GHashTable *hash,
+                             virNWFilterVarAccess **varAccess,
                              size_t nVarAccess)
 {
-    virNWFilterVarCombIterPtr res;
+    virNWFilterVarCombIter *res;
     size_t i;
     unsigned int iterId;
     int iterIndex = -1;
     unsigned int nextIntIterId = VIR_NWFILTER_MAX_ITERID + 1;
 
-    if (VIR_ALLOC_VAR(res, virNWFilterVarCombIterEntry, 1 + nVarAccess) < 0)
-        return NULL;
+    res = g_new0(virNWFilterVarCombIter, 1);
+    res->iter = g_new0(virNWFilterVarCombIterEntry, nVarAccess + 1);
 
     res->hashTable = hash;
 
@@ -523,8 +506,8 @@ virNWFilterVarCombIterCreate(virHashTablePtr hash,
     return NULL;
 }
 
-virNWFilterVarCombIterPtr
-virNWFilterVarCombIterNext(virNWFilterVarCombIterPtr ci)
+virNWFilterVarCombIter *
+virNWFilterVarCombIterNext(virNWFilterVarCombIter *ci)
 {
     size_t i;
 
@@ -548,14 +531,14 @@ virNWFilterVarCombIterNext(virNWFilterVarCombIterPtr ci)
 }
 
 const char *
-virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
+virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIter *ci,
                                   const virNWFilterVarAccess *vap)
 {
     size_t i;
     unsigned int iterId;
     bool found = false;
     const char *res = NULL;
-    virNWFilterVarValuePtr value;
+    virNWFilterVarValue *value;
     int iterIndex = -1;
     const char *varName = virNWFilterVarAccessGetVarName(vap);
 
@@ -565,8 +548,8 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
         iterIndex = virNWFilterVarCombIterGetIndexByIterId(ci, iterId);
         if (iterIndex < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not get iterator index for "
-                             "iterator ID %u"), iterId);
+                           _("Could not get iterator index for iterator ID %1$u"),
+                           iterId);
             return NULL;
         }
         break;
@@ -575,8 +558,8 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
         iterIndex = virNWFilterVarCombIterGetIndexByIterId(ci, iterId);
         if (iterIndex < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not get iterator index for "
-                             "(internal) iterator ID %u"), iterId);
+                           _("Could not get iterator index for (internal) iterator ID %1$u"),
+                           iterId);
             return NULL;
         }
         break;
@@ -593,7 +576,7 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
 
     if (!found) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not find variable '%s' in iterator"),
+                       _("Could not find variable '%1$s' in iterator"),
                        varName);
         return NULL;
     }
@@ -601,7 +584,7 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
     value = virHashLookup(ci->hashTable, varName);
     if (!value) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not find value for variable '%s'"),
+                       _("Could not find value for variable '%1$s'"),
                        varName);
         return NULL;
     }
@@ -609,8 +592,7 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
     res = virNWFilterVarValueGetNthValue(value, ci->iter[iterIndex].curValue);
     if (!res) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not get nth (%u) value of "
-                         "variable '%s'"),
+                       _("Could not get nth (%1$u) value of variable '%2$s'"),
                        ci->iter[iterIndex].curValue, varName);
         return NULL;
     }
@@ -618,35 +600,29 @@ virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
     return res;
 }
 
-static void
-hashDataFree(void *payload)
+void
+virNWFilterVarValueHashFree(void *payload)
 {
     virNWFilterVarValueFree(payload);
 }
 
 
-virHashTablePtr
-virNWFilterHashTableCreate(int n)
-{
-    return virHashCreate(n, hashDataFree);
-}
-
 struct addToTableStruct {
-    virHashTablePtr target;
+    GHashTable *target;
     int errOccurred;
 };
 
 
 static int
-addToTable(void *payload, const void *name, void *data)
+addToTable(void *payload, const char *name, void *data)
 {
     struct addToTableStruct *atts = (struct addToTableStruct *)data;
-    virNWFilterVarValuePtr val;
+    virNWFilterVarValue *val;
 
     if (atts->errOccurred)
         return 0;
 
-    val = virNWFilterVarValueCopy((virNWFilterVarValuePtr)payload);
+    val = virNWFilterVarValueCopy((virNWFilterVarValue *)payload);
     if (!val) {
         atts->errOccurred = 1;
         return 0;
@@ -662,8 +638,8 @@ addToTable(void *payload, const void *name, void *data)
 
 
 int
-virNWFilterHashTablePutAll(virHashTablePtr src,
-                           virHashTablePtr dest)
+virNWFilterHashTablePutAll(GHashTable *src,
+                           GHashTable *dest)
 {
     struct addToTableStruct atts = {
         .target = dest,
@@ -689,8 +665,8 @@ virNWFilterVarValueCompare(const void *a, const void *b)
 }
 
 bool
-virNWFilterHashTableEqual(virHashTablePtr a,
-                          virHashTablePtr b)
+virNWFilterHashTableEqual(GHashTable *a,
+                          GHashTable *b)
 {
     return virHashEqual(a, b, virNWFilterVarValueCompare);
 }
@@ -708,135 +684,91 @@ isValidVarValue(const char *value)
     return (value[strspn(value, VALID_VARVALUE)] == 0) && (strlen(value) != 0);
 }
 
-static virNWFilterVarValuePtr
+static virNWFilterVarValue *
 virNWFilterParseVarValue(const char *val)
 {
     return virNWFilterVarValueCreateSimpleCopyValue(val);
 }
 
-virHashTablePtr
+GHashTable *
 virNWFilterParseParamAttributes(xmlNodePtr cur)
 {
-    char *nam, *val;
-    virNWFilterVarValuePtr value;
+    g_autoptr(GHashTable) table = virHashNew(virNWFilterVarValueHashFree);
 
-    virHashTablePtr table = virNWFilterHashTableCreate(0);
-    if (!table)
-        return NULL;
+    for (cur = xmlFirstElementChild(cur); cur != NULL;
+         cur = xmlNextElementSibling(cur)) {
+        if (virXMLNodeNameEqual(cur, "parameter")) {
+            g_autofree char *nam = virXMLPropString(cur, "name");
+            g_autofree char *val = virXMLPropString(cur, "value");
+            g_autoptr(virNWFilterVarValue) value = NULL;
 
-    cur = cur->children;
-
-    while (cur != NULL) {
-        if (cur->type == XML_ELEMENT_NODE) {
-            if (virXMLNodeNameEqual(cur, "parameter")) {
-                nam = virXMLPropString(cur, "name");
-                val = virXMLPropString(cur, "value");
-                value = NULL;
-                if (nam != NULL && val != NULL) {
-                    if (!isValidVarName(nam))
-                        goto skip_entry;
-                    if (!isValidVarValue(val))
-                        goto skip_entry;
-                    value = virHashLookup(table, nam);
-                    if (value) {
-                        /* add value to existing value -> list */
-                        if (virNWFilterVarValueAddValue(value, val) < 0) {
-                            value = NULL;
-                            goto err_exit;
-                        }
-                        val = NULL;
-                    } else {
-                        value = virNWFilterParseVarValue(val);
-                        if (!value)
-                            goto skip_entry;
-                        if (virHashUpdateEntry(table, nam, value) < 0)
-                            goto err_exit;
-                    }
-                    value = NULL;
-                }
- skip_entry:
-                virNWFilterVarValueFree(value);
-                VIR_FREE(nam);
-                VIR_FREE(val);
+            if (nam == NULL || !isValidVarName(nam) ||
+                val == NULL || !isValidVarValue(val)) {
+                continue;
             }
+
+            if ((value = virHashLookup(table, nam))) {
+                /* add value to existing value -> list */
+                if (virNWFilterVarValueAddValue(g_steal_pointer(&value), val) < 0)
+                    return NULL;
+                val = NULL;
+            } else if ((value = virNWFilterParseVarValue(val))) {
+                if (virHashUpdateEntry(table, nam, value) < 0)
+                    return NULL;
+            }
+            value = NULL;
         }
-        cur = cur->next;
     }
-    return table;
 
- err_exit:
-    VIR_FREE(nam);
-    VIR_FREE(val);
-    virNWFilterVarValueFree(value);
-    virHashFree(table);
-    return NULL;
+    return g_steal_pointer(&table);
 }
 
-
-static int
-virNWFilterFormatParameterNameSorter(const virHashKeyValuePair *a,
-                                     const virHashKeyValuePair *b)
-{
-    return strcmp(a->key, b->key);
-}
 
 int
-virNWFilterFormatParamAttributes(virBufferPtr buf,
-                                 virHashTablePtr table,
+virNWFilterFormatParamAttributes(virBuffer *buf,
+                                 GHashTable *table,
                                  const char *filterref)
 {
-    virHashKeyValuePairPtr items;
-    size_t i, j;
-    int card, numKeys;
+    g_auto(virBuffer) attrBuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) childBuf = VIR_BUFFER_INIT_CHILD(buf);
+    g_autofree virHashKeyValuePair *items = NULL;
+    size_t i;
+    size_t nitems;
 
-    numKeys = virHashSize(table);
-
-    if (numKeys < 0) {
+    if (!(items = virHashGetItems(table, &nitems, true))) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing filter parameter table"));
         return -1;
     }
 
-    items = virHashGetItems(table,
-                            virNWFilterFormatParameterNameSorter);
-    if (!items)
-        return -1;
+    virBufferAsprintf(&attrBuf, " filter='%s'", filterref);
 
-    virBufferAsprintf(buf, "<filterref filter='%s'", filterref);
-    if (numKeys) {
-        virBufferAddLit(buf, ">\n");
-        virBufferAdjustIndent(buf, 2);
-        for (i = 0; i < numKeys; i++) {
-            const virNWFilterVarValue *value = items[i].value;
+    for (i = 0; i < nitems; i++) {
+        const virNWFilterVarValue *value = items[i].value;
+        size_t npar = virNWFilterVarValueGetCardinality(value);
+        size_t j;
 
-            card = virNWFilterVarValueGetCardinality(value);
+        for (j = 0; j < npar; j++)
+            virBufferAsprintf(&childBuf,
+                              "<parameter name='%s' value='%s'/>\n",
+                              (const char *)items[i].key,
+                              virNWFilterVarValueGetNthValue(value, j));
 
-            for (j = 0; j < card; j++)
-                virBufferAsprintf(buf,
-                                  "<parameter name='%s' value='%s'/>\n",
-                                  (const char *)items[i].key,
-                                  virNWFilterVarValueGetNthValue(value, j));
-
-        }
-        virBufferAdjustIndent(buf, -2);
-        virBufferAddLit(buf, "</filterref>\n");
-    } else {
-        virBufferAddLit(buf, "/>\n");
     }
 
-    VIR_FREE(items);
+    virXMLFormatElement(buf, "filterref", &attrBuf, &childBuf);
 
     return 0;
 }
 
 void
-virNWFilterVarAccessFree(virNWFilterVarAccessPtr varAccess)
+virNWFilterVarAccessFree(virNWFilterVarAccess *varAccess)
 {
     if (!varAccess)
         return;
 
-    VIR_FREE(varAccess->varName);
-    VIR_FREE(varAccess);
+    g_free(varAccess->varName);
+    g_free(varAccess);
 }
 
 bool
@@ -853,10 +785,8 @@ virNWFilterVarAccessEqual(const virNWFilterVarAccess *a,
     case VIR_NWFILTER_VAR_ACCESS_ELEMENT:
         return (a->u.index.idx == b->u.index.idx &&
                 a->u.index.intIterId == b->u.index.intIterId);
-        break;
     case VIR_NWFILTER_VAR_ACCESS_ITERATOR:
         return a->u.iterId == b->u.iterId;
-        break;
     case VIR_NWFILTER_VAR_ACCESS_LAST:
         break;
     }
@@ -867,15 +797,14 @@ virNWFilterVarAccessEqual(const virNWFilterVarAccess *a,
  * Parse a variable access like
  * IP, IP[@2], IP[3]
  */
-virNWFilterVarAccessPtr
+virNWFilterVarAccess *
 virNWFilterVarAccessParse(const char *varAccess)
 {
     size_t idx, varNameLen;
-    virNWFilterVarAccessPtr dest;
+    virNWFilterVarAccess *dest;
     const char *input = varAccess;
 
-    if (VIR_ALLOC(dest) < 0)
-        return NULL;
+    dest = g_new0(virNWFilterVarAccess, 1);
 
     idx = strspn(input, VALID_VARNAME);
 
@@ -934,8 +863,8 @@ virNWFilterVarAccessParse(const char *varAccess)
         case VIR_NWFILTER_VAR_ACCESS_ITERATOR:
             if (result > VIR_NWFILTER_MAX_ITERID) {
                 virReportError(VIR_ERR_INVALID_ARG,
-                               _("Iterator ID exceeds maximum ID "
-                                 "of %u"), VIR_NWFILTER_MAX_ITERID);
+                               _("Iterator ID exceeds maximum ID of %1$u"),
+                               VIR_NWFILTER_MAX_ITERID);
                 goto err_exit;
             }
             dest->u.iterId = result;
@@ -957,7 +886,7 @@ virNWFilterVarAccessParse(const char *varAccess)
 }
 
 void
-virNWFilterVarAccessPrint(virNWFilterVarAccessPtr vap, virBufferPtr buf)
+virNWFilterVarAccessPrint(virNWFilterVarAccess *vap, virBuffer *buf)
 {
     virBufferAdd(buf, vap->varName, -1);
     switch (vap->accessType) {
@@ -998,7 +927,7 @@ virNWFilterVarAccessGetIndex(const virNWFilterVarAccess *vap)
 }
 
 static void
-virNWFilterVarAccessSetIntIterId(virNWFilterVarAccessPtr vap,
+virNWFilterVarAccessSetIntIterId(virNWFilterVarAccess *vap,
                                  unsigned int intIterId)
 {
     vap->u.index.intIterId = intIterId;
@@ -1012,12 +941,12 @@ virNWFilterVarAccessGetIntIterId(const virNWFilterVarAccess *vap)
 
 bool
 virNWFilterVarAccessIsAvailable(const virNWFilterVarAccess *varAccess,
-                                const virHashTable *hash)
+                                GHashTable *hash)
 {
     const char *varName = virNWFilterVarAccessGetVarName(varAccess);
     const char *res;
     unsigned int idx;
-    virNWFilterVarValuePtr varValue;
+    virNWFilterVarValue *varValue;
 
     varValue = virHashLookup(hash, varName);
     if (!varValue)

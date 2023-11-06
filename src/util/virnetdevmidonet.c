@@ -20,7 +20,6 @@
 
 #include "virnetdevmidonet.h"
 #include "vircommand.h"
-#include "viralloc.h"
 #include "virerror.h"
 #include "viruuid.h"
 
@@ -39,27 +38,23 @@ int
 virNetDevMidonetBindPort(const char *ifname,
                          const virNetDevVPortProfile *virtualport)
 {
-    int ret = -1;
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     char virtportuuid[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(virtualport->interfaceID, virtportuuid);
 
-    cmd = virCommandNew(MMCTL);
+    cmd = virCommandNew(MM_CTL);
 
     virCommandAddArgList(cmd, "--bind-port", virtportuuid, ifname, NULL);
 
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to bind port %s to the virtual port %s"),
+                       _("Unable to bind port %1$s to the virtual port %2$s"),
                        ifname, virtportuuid);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 
 /**
@@ -73,24 +68,20 @@ virNetDevMidonetBindPort(const char *ifname,
 int
 virNetDevMidonetUnbindPort(const virNetDevVPortProfile *virtualport)
 {
-    int ret = -1;
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
     char virtportuuid[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(virtualport->interfaceID, virtportuuid);
 
-    cmd = virCommandNew(MMCTL);
+    cmd = virCommandNew(MM_CTL);
     virCommandAddArgList(cmd, "--unbind-port", virtportuuid, NULL);
 
     if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to unbind the virtual port %s from Midonet"),
+                       _("Unable to unbind the virtual port %1$s from Midonet"),
                        virtportuuid);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }

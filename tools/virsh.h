@@ -20,13 +20,9 @@
 
 #pragma once
 
-#include <stdarg.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 #include "internal.h"
-#include "virerror.h"
-#include "virthread.h"
 #include "virpolkit.h"
 #include "vsh.h"
 #include "virsh-completer.h"
@@ -43,6 +39,7 @@
 #define VIRSH_CMD_GRP_CHECKPOINT       "Checkpoint"
 #define VIRSH_CMD_GRP_DOM_MANAGEMENT   "Domain Management"
 #define VIRSH_CMD_GRP_DOM_MONITORING   "Domain Monitoring"
+#define VIRSH_CMD_GRP_DOM_EVENTS       "Domain Events"
 #define VIRSH_CMD_GRP_STORAGE_POOL     "Storage Pool"
 #define VIRSH_CMD_GRP_STORAGE_VOL      "Storage Volume"
 #define VIRSH_CMD_GRP_NETWORK          "Networking"
@@ -97,10 +94,15 @@
      .help = _helpstr \
     }
 
+/* Use this only for files which are existing and used locally by virsh */
 #define VIRSH_COMMON_OPT_FILE(_helpstr) \
+    VIRSH_COMMON_OPT_FILE_FULL(_helpstr, true)
+
+#define VIRSH_COMMON_OPT_FILE_FULL(_helpstr, required) \
     {.name = "file", \
-     .type = VSH_OT_DATA, \
-     .flags = VSH_OFLAG_REQ, \
+     .type = required ? VSH_OT_DATA : VSH_OT_STRING, \
+     .flags = required ? VSH_OFLAG_REQ : VSH_OFLAG_NONE, \
+     .completer = virshCompletePathLocalExisting, \
      .help = _helpstr \
     }
 
@@ -130,7 +132,6 @@
     VIRSH_COMMON_OPT_DOMAIN_OT_ARGV(N_("domain name, id or uuid"), cflags)
 
 typedef struct _virshControl virshControl;
-typedef virshControl *virshControlPtr;
 
 typedef struct _virshCtrlData virshCtrlData;
 

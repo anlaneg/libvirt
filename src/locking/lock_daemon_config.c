@@ -23,12 +23,8 @@
 
 #include "lock_daemon_config.h"
 #include "virconf.h"
-#include "viralloc.h"
-#include "virerror.h"
 #include "virlog.h"
-#include "rpc/virnetdaemon.h"
 #include "configmake.h"
-#include "virstring.h"
 #include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_CONF
@@ -52,13 +48,12 @@ virLockDaemonConfigFilePath(bool privileged, char **configfile)
 }
 
 
-virLockDaemonConfigPtr
+virLockDaemonConfig *
 virLockDaemonConfigNew(bool privileged G_GNUC_UNUSED)
 {
-    virLockDaemonConfigPtr data;
+    virLockDaemonConfig *data;
 
-    if (VIR_ALLOC(data) < 0)
-        return NULL;
+    data = g_new0(virLockDaemonConfig, 1);
 
     data->max_clients = 1024;
     data->admin_max_clients = 5000;
@@ -67,20 +62,20 @@ virLockDaemonConfigNew(bool privileged G_GNUC_UNUSED)
 }
 
 void
-virLockDaemonConfigFree(virLockDaemonConfigPtr data)
+virLockDaemonConfigFree(virLockDaemonConfig *data)
 {
     if (!data)
         return;
 
-    VIR_FREE(data->log_filters);
-    VIR_FREE(data->log_outputs);
+    g_free(data->log_filters);
+    g_free(data->log_outputs);
 
-    VIR_FREE(data);
+    g_free(data);
 }
 
 static int
-virLockDaemonConfigLoadOptions(virLockDaemonConfigPtr data,
-                               virConfPtr conf)
+virLockDaemonConfigLoadOptions(virLockDaemonConfig *data,
+                               virConf *conf)
 {
     if (virConfGetValueUInt(conf, "log_level", &data->log_level) < 0)
         return -1;
@@ -101,7 +96,7 @@ virLockDaemonConfigLoadOptions(virLockDaemonConfigPtr data,
  * Only used in the remote case, hence the name.
  */
 int
-virLockDaemonConfigLoadFile(virLockDaemonConfigPtr data,
+virLockDaemonConfigLoadFile(virLockDaemonConfig *data,
                             const char *filename,
                             bool allow_missing)
 {

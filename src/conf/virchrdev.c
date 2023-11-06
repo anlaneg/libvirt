@@ -35,7 +35,6 @@
 #include "virlog.h"
 #include "virerror.h"
 #include "virfile.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -45,13 +44,12 @@ VIR_LOG_INIT("conf.chrdev");
  * open in a given domain */
 struct _virChrdevs {
     virMutex lock;
-    virHashTablePtr hash;
+    GHashTable *hash;
 };
 
 typedef struct _virChrdevStreamInfo virChrdevStreamInfo;
-typedef virChrdevStreamInfo *virChrdevStreamInfoPtr;
 struct _virChrdevStreamInfo {
-    virChrdevsPtr devs;
+    virChrdevs *devs;
     char *path;
 };
 
@@ -117,8 +115,7 @@ static int virChrdevLockFileCreate(const char *dev)
     if (virPidFileReadPathIfAlive(path, &pid, NULL) == 0 && pid >= 0) {
         /* the process exists, the lockfile is valid */
         virReportError(VIR_ERR_OPERATION_FAILED,
-                       _("Requested device '%s' is locked by "
-                         "lock file '%s' held by process %lld"),
+                       _("Requested device '%1$s' is locked by lock file '%2$s' held by process %3$lld"),
                        dev, path, (long long) pid);
         return -1;
     } else {
@@ -128,7 +125,7 @@ static int virChrdevLockFileCreate(const char *dev)
     /* lockfile doesn't (shouldn't) exist */
 
     /* ensure correct format according to filesystem hierarchy standard */
-    /* http://www.pathname.com/fhs/pub/fhs-2.3.html#VARLOCKLOCKFILES */
+    /* https://www.pathname.com/fhs/pub/fhs-2.3.html#VARLOCKLOCKFILES */
     pidStr = g_strdup_printf("%10lld\n", (long long)getpid());
 
     /* create the lock file */
@@ -144,8 +141,7 @@ static int virChrdevLockFileCreate(const char *dev)
             return 0;
         }
         virReportSystemError(errno,
-                             _("Couldn't create lock file for "
-                               "device '%s' in path '%s'"),
+                             _("Couldn't create lock file for device '%1$s' in path '%2$s'"),
                              dev, path);
         return -1;
     }
@@ -153,8 +149,7 @@ static int virChrdevLockFileCreate(const char *dev)
     /* write the pid to the file */
     if (safewrite(lockfd, pidStr, strlen(pidStr)) < 0) {
         virReportSystemError(errno,
-                             _("Couldn't write to lock file for "
-                               "device '%s' in path '%s'"),
+                             _("Couldn't write to lock file for device '%1$s' in path '%2$s'"),
                              dev, path);
         unlink(path);
         return -1;
@@ -221,10 +216,10 @@ static void virChrdevHashEntryFree(void *data)
  */
 static void virChrdevFDStreamCloseCbFree(void *opaque)
 {
-    virChrdevStreamInfoPtr priv = opaque;
+    virChrdevStreamInfo *priv = opaque;
 
-    VIR_FREE(priv->path);
-    VIR_FREE(priv);
+    g_free(priv->path);
+    g_free(priv);
 }
 
 /**
@@ -237,13 +232,11 @@ static void virChrdevFDStreamCloseCbFree(void *opaque)
 static void virChrdevFDStreamCloseCb(virStreamPtr st G_GNUC_UNUSED,
                                       void *opaque)
 {
-    virChrdevStreamInfoPtr priv = opaque;
-    virMutexLock(&priv->devs->lock);
+    virChrdevStreamInfo *priv = opaque;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&priv->devs->lock);
 
     /* remove entry from hash */
     virHashRemoveEntry(priv->devs->hash, priv->path);
-
-    virMutexUnlock(&priv->devs->lock);
 }
 
 /**
@@ -252,11 +245,10 @@ static void virChrdevFDStreamCloseCb(virStreamPtr st G_GNUC_UNUSED,
  *
  * Returns pointer to the allocated structure or NULL on error
  */
-virChrdevsPtr virChrdevAlloc(void)
+virChrdevs *virChrdevAlloc(void)
 {
-    virChrdevsPtr devs;
-    if (VIR_ALLOC(devs) < 0)
-        return NULL;
+    virChrdevs *devs;
+    devs = g_new0(virChrdevs, 1);
 
     if (virMutexInit(&devs->lock) < 0) {
         virReportSystemError(errno, "%s",
@@ -267,20 +259,16 @@ virChrdevsPtr virChrdevAlloc(void)
 
     /* there will hardly be any devices most of the time, the hash
      * does not have to be huge */
-    if (!(devs->hash = virHashCreate(3, virChrdevHashEntryFree)))
-        goto error;
+    devs->hash = virHashNew(virChrdevHashEntryFree);
 
     return devs;
- error:
-    virChrdevFree(devs);
-    return NULL;
 }
 
 /**
  * Helper to clear stream callbacks when freeing the hash
  */
 static int virChrdevFreeClearCallbacks(void *payload,
-                                       const void *name G_GNUC_UNUSED,
+                                       const char *name G_GNUC_UNUSED,
                                        void *data G_GNUC_UNUSED)
 {
     virChrdevHashEntry *ent = payload;
@@ -294,18 +282,18 @@ static int virChrdevFreeClearCallbacks(void *payload,
  *
  * @devs Pointer to the private structure.
  */
-void virChrdevFree(virChrdevsPtr devs)
+void virChrdevFree(virChrdevs *devs)
 {
     if (!devs)
         return;
 
-    virMutexLock(&devs->lock);
-    virHashForEach(devs->hash, virChrdevFreeClearCallbacks, NULL);
-    virHashFree(devs->hash);
-    virMutexUnlock(&devs->lock);
+    VIR_WITH_MUTEX_LOCK_GUARD(&devs->lock) {
+        virHashForEachSafe(devs->hash, virChrdevFreeClearCallbacks, NULL);
+        g_clear_pointer(&devs->hash, g_hash_table_unref);
+    }
     virMutexDestroy(&devs->lock);
 
-    VIR_FREE(devs);
+    g_free(devs);
 }
 
 /**
@@ -324,12 +312,12 @@ void virChrdevFree(virChrdevsPtr devs)
  * corresponding lock file is created (if configured). Returns -1 on
  * error and 1 if the device stream is open and busy.
  */
-int virChrdevOpen(virChrdevsPtr devs,
-                  virDomainChrSourceDefPtr source,
+int virChrdevOpen(virChrdevs *devs,
+                  virDomainChrSourceDef *source,
                   virStreamPtr st,
                   bool force)
 {
-    virChrdevStreamInfoPtr cbdata = NULL;
+    virChrdevStreamInfo *cbdata = NULL;
     virChrdevHashEntry *ent;
     char *path;
     int ret;
@@ -349,7 +337,7 @@ int virChrdevOpen(virChrdevsPtr devs,
         break;
     default:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Unsupported device type '%s'"),
+                       _("Unsupported device type '%1$s'"),
                        virDomainChrTypeToString(source->type));
         return -1;
     }
@@ -388,11 +376,8 @@ int virChrdevOpen(virChrdevsPtr devs,
         return -1;
     }
 
-    if (VIR_ALLOC(cbdata) < 0)
-        goto error;
-
-    if (VIR_ALLOC(ent) < 0)
-        goto error;
+    cbdata = g_new0(virChrdevStreamInfo, 1);
+    ent = g_new0(virChrdevHashEntry, 1);
 
     ent->st = st;
     ent->dev = g_strdup(path);
@@ -417,7 +402,7 @@ int virChrdevOpen(virChrdevsPtr devs,
         break;
     default:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Unsupported device type '%s'"),
+                       _("Unsupported device type '%1$s'"),
                        virDomainChrTypeToString(source->type));
         goto error;
     }

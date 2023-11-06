@@ -27,10 +27,7 @@
 
 #include "internal.h"
 #include "testutils.h"
-#include "viralloc.h"
 #include "virlog.h"
-#include "virerror.h"
-#include "virfile.h"
 #include "security/security_manager.h"
 #include "virstring.h"
 
@@ -39,7 +36,7 @@
 VIR_LOG_INIT("tests.securityselinuxtest");
 
 struct testSELinuxGenLabelData {
-    virSecurityManagerPtr mgr;
+    virSecurityManager *mgr;
 
     const char *pidcon;
 
@@ -59,23 +56,21 @@ struct testSELinuxGenLabelData {
     int catMax;
 };
 
-static virDomainDefPtr
+static virDomainDef *
 testBuildDomainDef(bool dynamic,
                    const char *label,
                    const char *baselabel)
 {
-    virDomainDefPtr def;
-    virSecurityLabelDefPtr secdef = NULL;
+    g_autoptr(virDomainDef) def = NULL;
+    virSecurityLabelDef *secdef = NULL;
 
-    if (!(def = virDomainDefNew()))
+    if (!(def = virDomainDefNew(NULL)))
         goto error;
 
     def->virtType = VIR_DOMAIN_VIRT_KVM;
-    if (VIR_ALLOC_N(def->seclabels, 1) < 0)
-        goto error;
+    def->seclabels = g_new0(virSecurityLabelDef *, 1);
 
-    if (VIR_ALLOC(secdef) < 0)
-        goto error;
+    secdef = g_new0(virSecurityLabelDef, 1);
 
     secdef->model = g_strdup("selinux");
 
@@ -88,10 +83,9 @@ testBuildDomainDef(bool dynamic,
 
     def->seclabels[0] = secdef;
     def->nseclabels++;
-    return def;
+    return g_steal_pointer(&def);
 
  error:
-    virDomainDefFree(def);
     virSecurityLabelDefFree(secdef);
     return NULL;
 }
@@ -213,11 +207,11 @@ testSELinuxGenLabel(const void *opaque)
 {
     const struct testSELinuxGenLabelData *data = opaque;
     int ret = -1;
-    virDomainDefPtr def;
+    g_autoptr(virDomainDef) def = NULL;
     context_t con = NULL;
     context_t imgcon = NULL;
 
-    if (setcon_raw((security_context_t)data->pidcon) < 0) {
+    if (setcon_raw(data->pidcon) < 0) {
         perror("Cannot set process security context");
         return -1;
     }
@@ -257,7 +251,6 @@ testSELinuxGenLabel(const void *opaque)
  cleanup:
     context_free(con);
     context_free(imgcon);
-    virDomainDefFree(def);
     return ret;
 }
 
@@ -267,7 +260,7 @@ static int
 mymain(void)
 {
     int ret = 0;
-    virSecurityManagerPtr mgr;
+    virSecurityManager *mgr;
 
     if (!(mgr = virSecurityManagerNew("selinux", "QEMU",
                                       VIR_SECURITY_MANAGER_DEFAULT_CONFINED |
@@ -339,4 +332,4 @@ mymain(void)
     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/libsecurityselinuxhelper.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/libsecurityselinuxhelper.so")

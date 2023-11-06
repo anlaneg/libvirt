@@ -70,8 +70,18 @@ typedef virNetworkPtr
                           const char *xmlDesc);
 
 typedef virNetworkPtr
+(*virDrvNetworkCreateXMLFlags)(virConnectPtr conn,
+                               const char *xmlDesc,
+                               unsigned int flags);
+
+typedef virNetworkPtr
 (*virDrvNetworkDefineXML)(virConnectPtr conn,
                           const char *xml);
+
+typedef virNetworkPtr
+(*virDrvNetworkDefineXMLFlags)(virConnectPtr conn,
+                               const char *xml,
+                               unsigned int flags);
 
 typedef int
 (*virDrvNetworkUndefine)(virNetworkPtr network);
@@ -151,8 +161,21 @@ typedef int
                              virNetworkPortPtr **ports,
                              unsigned int flags);
 
+typedef int
+(*virDrvNetworkSetMetadata)(virNetworkPtr network,
+                            int type,
+                            const char *metadata,
+                            const char *key,
+                            const char *uri,
+                            unsigned int flags);
+
+typedef char *
+(*virDrvNetworkGetMetadata)(virNetworkPtr network,
+                            int type,
+                            const char *uri,
+                            unsigned int flags);
+
 typedef struct _virNetworkDriver virNetworkDriver;
-typedef virNetworkDriver *virNetworkDriverPtr;
 
 /**
  * _virNetworkDriver:
@@ -175,8 +198,10 @@ struct _virNetworkDriver {
     virDrvNetworkLookupByName networkLookupByName;
     /*通过xml内容创建network*/
     virDrvNetworkCreateXML networkCreateXML;
+    virDrvNetworkCreateXMLFlags networkCreateXMLFlags;
     /*通过xml内容定义network*/
     virDrvNetworkDefineXML networkDefineXML;
+    virDrvNetworkDefineXMLFlags networkDefineXMLFlags;
     virDrvNetworkUndefine networkUndefine;
     virDrvNetworkUpdate networkUpdate;
     virDrvNetworkCreate networkCreate;
@@ -197,4 +222,6 @@ struct _virNetworkDriver {
     virDrvNetworkPortGetParameters networkPortGetParameters;
     virDrvNetworkPortDelete networkPortDelete;
     virDrvNetworkListAllPorts networkListAllPorts;
+    virDrvNetworkSetMetadata networkSetMetadata;
+    virDrvNetworkGetMetadata networkGetMetadata;
 };

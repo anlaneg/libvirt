@@ -5,7 +5,7 @@
   <currentMemory unit='KiB'>219136</currentMemory>
   <vcpu placement='static'>1</vcpu>
   <os>
-    <type arch='i686' machine='pc'>hvm</type>
+    <type arch='x86_64' machine='pc'>hvm</type>
     <boot dev='hd'/>
   </os>
   <clock offset='utc'/>
@@ -13,7 +13,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i386</emulator>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <disk type='network' device='disk'>
       <driver name='qemu' type='raw'/>
       <source protocol='nbd'>
@@ -48,6 +48,14 @@
         <host transport='unix' socket='/var/run/nbdsock'/>
       </source>
       <target dev='vde' bus='virtio'/>
+    </disk>
+    <disk type='network' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source protocol='nbd' name='foo'>
+        <host name='example.org' port='6000'/>
+        <reconnect delay='10'/>
+      </source>
+      <target dev='vdf' bus='virtio'/>
     </disk>
     <controller type='usb' index='0'/>
     <controller type='ide' index='0'/>

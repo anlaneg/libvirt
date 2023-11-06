@@ -45,7 +45,9 @@ int
 main(int argc, char **argv)
 {
     virThread thread;
-    virQEMUCapsPtr caps;
+    virQEMUCaps *caps;
+    virArch host;
+    virArch guest;
     const char *mock = VIR_TEST_MOCK("qemucapsprobe");
 
     if (!virFileIsExecutable(mock)) {
@@ -77,8 +79,20 @@ main(int argc, char **argv)
         return EXIT_FAILURE;
 
     if (!(caps = virQEMUCapsNewForBinaryInternal(VIR_ARCH_NONE, argv[1], "/tmp",
-                                                 -1, -1, NULL, 0, NULL)))
+                                                 -1, -1, NULL, 0, NULL, NULL)))
         return EXIT_FAILURE;
+
+    host = virArchFromHost();
+    guest = virQEMUCapsGetArch(caps);
+
+    if (host != guest) {
+        fprintf(stderr,
+                "WARNING: guest architecture '%s' does not match host '%s'.\n"
+                "WARNING: When generating capabilities for the libvirt test\n"
+                "WARNING: suite, it is strongly desired to generate capabilities\n"
+                "WARNING: on the native host to capture KVM related features.\n",
+                virArchToString(guest), virArchToString(host));
+    }
 
     virObjectUnref(caps);
 

@@ -25,23 +25,66 @@
 #include <unistd.h>
 
 #include "virfile.h"
-#include "virstring.h"
 #include "virgettext.h"
+#include "viridentity.h"
+#include "virthread.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
+static GMutex eventLock;
+static bool eventPreventQuitFlag;
 static bool eventQuitFlag;
 static int eventQuitFD = -1;
 static virDomainPtr dom;
 
+/* Runs in event loop thread context */
 static void *
 qemuShimEventLoop(void *opaque G_GNUC_UNUSED)
 {
-    while (!eventQuitFlag)
+    bool quit = false;
+    while (!quit) {
+        g_mutex_lock(&eventLock);
+        if (eventQuitFlag && !eventPreventQuitFlag) {
+            quit = true;
+            if (dom) {
+                virDomainDestroy(dom);
+            }
+        }
+        g_mutex_unlock(&eventLock);
         virEventRunDefaultImpl();
+    }
 
     return NULL;
 }
+
+/* Runs in any thread context */
+static bool
+qemuShimEventLoopPreventQuit(void)
+{
+    bool quitting;
+    g_mutex_lock(&eventLock);
+    quitting = eventQuitFlag;
+    if (!quitting)
+        eventPreventQuitFlag = true;
+    g_mutex_unlock(&eventLock);
+    return quitting;
+}
+
+/* Runs in any thread context */
+static bool
+qemuShimEventLoopAllowQuit(void)
+{
+    bool quitting;
+    g_mutex_lock(&eventLock);
+    eventPreventQuitFlag = false;
+    /* kick the event loop thread again immediately */
+    quitting = eventQuitFlag;
+    if (quitting)
+        ignore_value(safewrite(eventQuitFD, "c", 1));
+    g_mutex_unlock(&eventLock);
+    return quitting;
+}
+
 
 /* Runs in event loop thread context */
 static void
@@ -52,7 +95,9 @@ qemuShimEventLoopStop(int watch G_GNUC_UNUSED,
 {
     char c;
     ignore_value(read(fd, &c, 1));
+    g_mutex_lock(&eventLock);
     eventQuitFlag = true;
+    g_mutex_unlock(&eventLock);
 }
 
 /* Runs in event loop thread context */
@@ -63,8 +108,11 @@ qemuShimDomShutdown(virConnectPtr econn G_GNUC_UNUSED,
                     int detail G_GNUC_UNUSED,
                     void *opaque G_GNUC_UNUSED)
 {
-    if (event == VIR_DOMAIN_EVENT_STOPPED)
+    if (event == VIR_DOMAIN_EVENT_STOPPED) {
+        g_mutex_lock(&eventLock);
         eventQuitFlag = true;
+        g_mutex_unlock(&eventLock);
+    }
 
     return 0;
 }
@@ -86,13 +134,15 @@ qemuShimQuench(void *userData G_GNUC_UNUSED,
 
 int main(int argc, char **argv)
 {
+    g_autoptr(virIdentity) sysident = NULL;
     GThread *eventLoopThread = NULL;
     virConnectPtr conn = NULL;
     virConnectPtr sconn = NULL;
     g_autofree char *xml = NULL;
     g_autofree char *uri = NULL;
     g_autofree char *suri = NULL;
-    char *root = NULL;
+    const char *root = NULL;
+    g_autofree char *escaped = NULL;
     bool tmproot = false;
     int ret = 1;
     g_autoptr(GError) error = NULL;
@@ -109,11 +159,12 @@ int main(int argc, char **argv)
         { 0 }
     };
     int quitfd[2] = {-1, -1};
+    bool quitting;
     long long start = g_get_monotonic_time();
 
 #define deltams() ((long long)g_get_monotonic_time() - start)
 
-    ctx = g_option_context_new("- run a standalone QEMU process");
+    ctx = g_option_context_new("GUEST-XML-FILE - run a standalone QEMU process");
     g_option_context_add_main_entries(ctx, entries, PACKAGE);
     if (!g_option_context_parse(ctx, &argc, &argv, &error)) {
         g_printerr("%s: option parsing failed: %s\n",
@@ -128,8 +179,8 @@ int main(int argc, char **argv)
     }
 
     if (verbose)
-        g_printerr("%s: %lld: initializing libvirt\n",
-                   argv[0], deltams());
+        g_printerr("%s: %lld: initializing libvirt %llu\n",
+                   argv[0], deltams(), virThreadSelfID());
 
     if (virInitialize() < 0) {
         g_printerr("%s: cannot initialize libvirt\n", argv[0]);
@@ -141,6 +192,9 @@ int main(int argc, char **argv)
     }
 
     virSetErrorFunc(NULL, qemuShimQuench);
+
+    sysident = virIdentityGetSystem();
+    virIdentitySetCurrent(sysident);
 
     if (verbose)
         g_printerr("%s: %lld: initializing signal handlers\n",
@@ -160,12 +214,27 @@ int main(int argc, char **argv)
         }
         tmproot = true;
 
-        if (chmod(root, 0755) < 0) {
-            g_printerr("%s: cannot chown temporary dir: %s\n",
+    } else {
+        if (!g_path_is_absolute(root)) {
+            g_printerr("%s: the root directory must be an absolute path\n",
+                       argv[0]);
+            goto cleanup;
+        }
+
+        if (g_mkdir_with_parents(root, 0755) < 0) {
+            g_printerr("%s: cannot create dir: %s\n",
                        argv[0], g_strerror(errno));
             goto cleanup;
         }
     }
+
+    if (chmod(root, 0755) < 0) {
+        g_printerr("%s: cannot chmod temporary dir: %s\n",
+                   argv[0], g_strerror(errno));
+        goto cleanup;
+    }
+
+    escaped = g_uri_escape_string(root, NULL, true);
 
     virFileActivateDirOverrideForProg(argv[0]);
 
@@ -193,7 +262,7 @@ int main(int argc, char **argv)
     eventLoopThread = g_thread_new("event-loop", qemuShimEventLoop, NULL);
 
     if (secrets && *secrets) {
-        suri = g_strdup_printf("secret:///embed?root=%s", root);
+        suri = g_strdup_printf("secret:///embed?root=%s", escaped);
 
         if (verbose)
             g_printerr("%s: %lld: opening %s\n",
@@ -254,7 +323,7 @@ int main(int argc, char **argv)
         }
     }
 
-    uri = g_strdup_printf("qemu:///embed?root=%s", root);
+    uri = g_strdup_printf("qemu:///embed?root=%s", escaped);
 
     if (verbose)
         g_printerr("%s: %lld: opening %s\n",
@@ -277,7 +346,7 @@ int main(int argc, char **argv)
     }
 
     if (verbose)
-        g_printerr("%s: %lld: starting guest %s\n",
+        g_printerr("%s: %lld: fetching guest config %s\n",
                    argv[0], deltams(), argv[1]);
 
     if (!g_file_get_contents(argv[1], &xml, NULL, &error)) {
@@ -286,7 +355,24 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
+    if (verbose)
+        g_printerr("%s: %lld: starting guest %s\n",
+                   argv[0], deltams(), argv[1]);
+
+    /*
+     * If the user issues a ctrl-C at this time, we need to
+     * let the virDomainCreateXML call complete, so that we
+     * can then clean up the guest correctly. We must also
+     * ensure that the event loop doesn't quit yet, because
+     * it might be needed to complete VM startup & shutdown
+     * during the cleanup.
+     */
+    quitting = qemuShimEventLoopPreventQuit();
+    if (quitting)
+        goto cleanup;
     dom = virDomainCreateXML(conn, xml, 0);
+    quitting = qemuShimEventLoopAllowQuit();
+
     if (!dom) {
         g_printerr("%s: cannot start VM: %s\n",
                    argv[0], virGetLastErrorMessage());
@@ -295,6 +381,8 @@ int main(int argc, char **argv)
     if (verbose)
         g_printerr("%s: %lld: guest running, Ctrl-C to stop now\n",
                    argv[0], deltams());
+    if (quitting)
+        goto cleanup;
 
     if (debug) {
         g_autofree char *newxml = NULL;

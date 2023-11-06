@@ -23,249 +23,300 @@
 #include "qemu_conf.h"
 #include "qemu_domain.h"
 
-#include "virhash.h"
 #include "virjson.h"
 #include "viruri.h"
 
+void
+qemuBlockStorageSourceSetStorageNodename(virStorageSource *src,
+                                         char *nodename);
+
+void
+qemuBlockStorageSourceSetFormatNodename(virStorageSource *src,
+                                        char *nodename);
+
+const char *
+qemuBlockStorageSourceGetEffectiveStorageNodename(virStorageSource *src);
+
+const char *
+qemuBlockStorageSourceGetStorageNodename(virStorageSource *src);
+
+const char *
+qemuBlockStorageSourceGetFormatNodename(virStorageSource *src);
+
+const char *
+qemuBlockStorageSourceGetEffectiveNodename(virStorageSource *src);
+
+
 typedef struct qemuBlockNodeNameBackingChainData qemuBlockNodeNameBackingChainData;
-typedef qemuBlockNodeNameBackingChainData *qemuBlockNodeNameBackingChainDataPtr;
 struct qemuBlockNodeNameBackingChainData {
     char *qemufilename; /* name of the image from qemu */
     char *nodeformat;   /* node name of the format layer */
     char *nodestorage;  /* node name of the storage backing the format node */
 
-    qemuBlockNodeNameBackingChainDataPtr backing;
+    qemuBlockNodeNameBackingChainData *backing;
 
     /* for testing purposes */
     char *drvformat;
     char *drvstorage;
 };
 
-virHashTablePtr
-qemuBlockNodeNameGetBackingChain(virJSONValuePtr namednodesdata,
-                                 virJSONValuePtr blockstats);
-
-int
-qemuBlockNodeNamesDetect(virQEMUDriverPtr driver,
-                         virDomainObjPtr vm,
-                         qemuDomainAsyncJob asyncJob);
-
-virHashTablePtr
-qemuBlockGetNodeData(virJSONValuePtr data);
-
 bool
-qemuBlockStorageSourceSupportsConcurrentAccess(virStorageSourcePtr src);
+qemuBlockStorageSourceSupportsConcurrentAccess(virStorageSource *src);
 
-virJSONValuePtr
-qemuBlockStorageSourceGetBackendProps(virStorageSourcePtr src,
-                                      bool legacy,
-                                      bool onlytarget,
-                                      bool autoreadonly);
+typedef enum {
+    QEMU_BLOCK_STORAGE_SOURCE_BACKEND_PROPS_LEGACY = 1 << 0,
+    QEMU_BLOCK_STORAGE_SOURCE_BACKEND_PROPS_TARGET_ONLY = 1 << 1,
+    QEMU_BLOCK_STORAGE_SOURCE_BACKEND_PROPS_EFFECTIVE_NODE = 1 << 2,
+} qemuBlockStorageSourceBackendPropsFlags;
 
-virURIPtr
-qemuBlockStorageSourceGetURI(virStorageSourcePtr src);
+virJSONValue *
+qemuBlockStorageSourceGetBackendProps(virStorageSource *src,
+                                      unsigned int flags);
 
-virJSONValuePtr
-qemuBlockStorageSourceGetBlockdevProps(virStorageSourcePtr src,
-                                       virStorageSourcePtr backingStore);
+virURI *
+qemuBlockStorageSourceGetURI(virStorageSource *src);
 
-virJSONValuePtr
-qemuBlockStorageGetCopyOnReadProps(virDomainDiskDefPtr disk);
+virJSONValue *
+qemuBlockStorageSourceGetFormatProps(virStorageSource *src,
+                                     virStorageSource *backingStore);
+
+virJSONValue *
+qemuBlockStorageGetCopyOnReadProps(virDomainDiskDef *disk);
 
 typedef struct qemuBlockStorageSourceAttachData qemuBlockStorageSourceAttachData;
-typedef qemuBlockStorageSourceAttachData *qemuBlockStorageSourceAttachDataPtr;
 struct qemuBlockStorageSourceAttachData {
-    virJSONValuePtr prmgrProps;
+    virJSONValue *prmgrProps;
     char *prmgrAlias;
 
-    virJSONValuePtr storageProps;
+    virJSONValue *storageProps;
     const char *storageNodeName;
     bool storageAttached;
 
-    virJSONValuePtr storageSliceProps;
+    virJSONValue *storageSliceProps;
     const char *storageSliceNodeName;
     bool storageSliceAttached;
 
-    virJSONValuePtr formatProps;
+    virJSONValue *formatProps;
     const char *formatNodeName;
     bool formatAttached;
 
     char *driveCmd;
-    char *driveAlias;
-    bool driveAdded;
 
-    virJSONValuePtr authsecretProps;
+    virDomainChrSourceDef *chardevDef;
+    char *chardevAlias;
+    bool chardevAdded;
+
+    virJSONValue *authsecretProps;
     char *authsecretAlias;
 
-    virJSONValuePtr encryptsecretProps;
-    char *encryptsecretAlias;
+    size_t encryptsecretCount;
+    virJSONValue **encryptsecretProps;
+    char **encryptsecretAlias;
 
-    virJSONValuePtr httpcookiesecretProps;
+    virJSONValue *httpcookiesecretProps;
     char *httpcookiesecretAlias;
 
-    virJSONValuePtr tlsProps;
+    virJSONValue *tlsProps;
     char *tlsAlias;
+    virJSONValue *tlsKeySecretProps;
+    char *tlsKeySecretAlias;
+
+    qemuFDPass *fdpass;
 };
 
 
 void
-qemuBlockStorageSourceAttachDataFree(qemuBlockStorageSourceAttachDataPtr data);
+qemuBlockStorageSourceAttachDataFree(qemuBlockStorageSourceAttachData *data);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuBlockStorageSourceAttachData,
                         qemuBlockStorageSourceAttachDataFree);
 
-qemuBlockStorageSourceAttachDataPtr
-qemuBlockStorageSourceAttachPrepareBlockdev(virStorageSourcePtr src,
-                                            virStorageSourcePtr backingStore,
-                                            bool autoreadonly);
+qemuBlockStorageSourceAttachData *
+qemuBlockStorageSourceAttachPrepareBlockdev(virStorageSource *src,
+                                            virStorageSource *backingStore);
 
-qemuBlockStorageSourceAttachDataPtr
-qemuBlockStorageSourceDetachPrepare(virStorageSourcePtr src,
-                                    char *driveAlias);
+qemuBlockStorageSourceAttachData *
+qemuBlockStorageSourceDetachPrepare(virStorageSource *src);
 
 int
-qemuBlockStorageSourceAttachApply(qemuMonitorPtr mon,
-                                  qemuBlockStorageSourceAttachDataPtr data);
+qemuBlockStorageSourceAttachApply(qemuMonitor *mon,
+                                  qemuBlockStorageSourceAttachData *data);
 
 void
-qemuBlockStorageSourceAttachRollback(qemuMonitorPtr mon,
-                                     qemuBlockStorageSourceAttachDataPtr data);
+qemuBlockStorageSourceAttachRollback(qemuMonitor *mon,
+                                     qemuBlockStorageSourceAttachData *data);
 
 int
-qemuBlockStorageSourceDetachOneBlockdev(virQEMUDriverPtr driver,
-                                        virDomainObjPtr vm,
-                                        qemuDomainAsyncJob asyncJob,
-                                        virStorageSourcePtr src);
+qemuBlockStorageSourceDetachOneBlockdev(virDomainObj *vm,
+                                        virDomainAsyncJob asyncJob,
+                                        virStorageSource *src);
 
 struct _qemuBlockStorageSourceChainData {
-    qemuBlockStorageSourceAttachDataPtr *srcdata;
+    qemuBlockStorageSourceAttachData **srcdata;
     size_t nsrcdata;
+
+    virJSONValue *copyOnReadProps;
+    char *copyOnReadNodename;
+    bool copyOnReadAttached;
 };
 
 typedef struct _qemuBlockStorageSourceChainData qemuBlockStorageSourceChainData;
-typedef qemuBlockStorageSourceChainData *qemuBlockStorageSourceChainDataPtr;
 
 void
-qemuBlockStorageSourceChainDataFree(qemuBlockStorageSourceChainDataPtr data);
+qemuBlockStorageSourceChainDataFree(qemuBlockStorageSourceChainData *data);
 
-qemuBlockStorageSourceChainDataPtr
-qemuBlockStorageSourceChainDetachPrepareBlockdev(virStorageSourcePtr src);
-qemuBlockStorageSourceChainDataPtr
-qemuBlockStorageSourceChainDetachPrepareDrive(virStorageSourcePtr src,
-                                              char *driveAlias);
+qemuBlockStorageSourceChainData *
+qemuBlockStorageSourceChainDetachPrepareBlockdev(virStorageSource *src);
+qemuBlockStorageSourceChainData *
+qemuBlockStorageSourceChainDetachPrepareChardev(char *chardevAlias);
 
 int
-qemuBlockStorageSourceChainAttach(qemuMonitorPtr mon,
-                                  qemuBlockStorageSourceChainDataPtr data);
+qemuBlockStorageSourceChainAttach(qemuMonitor *mon,
+                                  qemuBlockStorageSourceChainData *data);
 
 void
-qemuBlockStorageSourceChainDetach(qemuMonitorPtr mon,
-                                  qemuBlockStorageSourceChainDataPtr data);
+qemuBlockStorageSourceChainDetach(qemuMonitor *mon,
+                                  qemuBlockStorageSourceChainData *data);
 
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuBlockStorageSourceChainData,
                         qemuBlockStorageSourceChainDataFree);
 
 int
-qemuBlockSnapshotAddLegacy(virJSONValuePtr actions,
-                           virDomainDiskDefPtr disk,
-                           virStorageSourcePtr newsrc,
-                           bool reuse);
-
-int
-qemuBlockSnapshotAddBlockdev(virJSONValuePtr actions,
-                             virDomainDiskDefPtr disk,
-                             virStorageSourcePtr newsrc);
+qemuBlockSnapshotAddBlockdev(virJSONValue *actions,
+                             virDomainDiskDef *disk,
+                             virStorageSource *newsrc);
 
 char *
-qemuBlockGetBackingStoreString(virStorageSourcePtr src,
+qemuBlockGetBackingStoreString(virStorageSource *src,
                                bool pretty)
     ATTRIBUTE_NONNULL(1);
 
 int
-qemuBlockStorageSourceCreateGetFormatProps(virStorageSourcePtr src,
-                                           virStorageSourcePtr backing,
-                                           virJSONValuePtr *props)
+qemuBlockStorageSourceCreateGetFormatProps(virStorageSource *src,
+                                           virStorageSource *backing,
+                                           virJSONValue **props)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3) G_GNUC_WARN_UNUSED_RESULT;
 
 int
-qemuBlockStorageSourceCreateGetStorageProps(virStorageSourcePtr src,
-                                            virJSONValuePtr *props)
+qemuBlockStorageSourceCreateGetStorageProps(virStorageSource *src,
+                                            virJSONValue **props)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 int
-qemuBlockStorageSourceCreate(virDomainObjPtr vm,
-                             virStorageSourcePtr src,
-                             virStorageSourcePtr backingStore,
-                             virStorageSourcePtr chain,
-                             qemuBlockStorageSourceAttachDataPtr data,
-                             qemuDomainAsyncJob asyncJob);
+qemuBlockStorageSourceCreate(virDomainObj *vm,
+                             virStorageSource *src,
+                             virStorageSource *backingStore,
+                             virStorageSource *chain,
+                             qemuBlockStorageSourceAttachData *data,
+                             virDomainAsyncJob asyncJob);
 
 int
-qemuBlockStorageSourceCreateDetectSize(virHashTablePtr blockNamedNodeData,
-                                       virStorageSourcePtr src,
-                                       virStorageSourcePtr templ);
+qemuBlockStorageSourceCreateDetectSize(GHashTable *blockNamedNodeData,
+                                       virStorageSource *src,
+                                       virStorageSource *templ);
 
 int
-qemuBlockRemoveImageMetadata(virQEMUDriverPtr driver,
-                             virDomainObjPtr vm,
+qemuBlockRemoveImageMetadata(virQEMUDriver *driver,
+                             virDomainObj *vm,
                              const char *diskTarget,
-                             virStorageSourcePtr src);
+                             virStorageSource *src);
 
-qemuBlockNamedNodeDataBitmapPtr
-qemuBlockNamedNodeDataGetBitmapByName(virHashTablePtr blockNamedNodeData,
-                                      virStorageSourcePtr src,
+qemuBlockNamedNodeDataBitmap *
+qemuBlockNamedNodeDataGetBitmapByName(GHashTable *blockNamedNodeData,
+                                      virStorageSource *src,
                                       const char *bitmap);
 
-virHashTablePtr
-qemuBlockGetNamedNodeData(virDomainObjPtr vm,
-                          qemuDomainAsyncJob asyncJob);
+GHashTable *
+qemuBlockGetNamedNodeData(virDomainObj *vm,
+                          virDomainAsyncJob asyncJob);
 
 int
-qemuBlockGetBitmapMergeActions(virStorageSourcePtr topsrc,
-                               virStorageSourcePtr basesrc,
-                               virStorageSourcePtr target,
+qemuBlockGetBitmapMergeActions(virStorageSource *topsrc,
+                               virStorageSource *basesrc,
+                               virStorageSource *target,
                                const char *bitmapname,
                                const char *dstbitmapname,
-                               virStorageSourcePtr writebitmapsrc,
-                               virJSONValuePtr *actions,
-                               virHashTablePtr blockNamedNodeData);
+                               virStorageSource *writebitmapsrc,
+                               virJSONValue **actions,
+                               GHashTable *blockNamedNodeData);
 
 bool
-qemuBlockBitmapChainIsValid(virStorageSourcePtr src,
+qemuBlockBitmapChainIsValid(virStorageSource *src,
                             const char *bitmapname,
-                            virHashTablePtr blockNamedNodeData);
+                            GHashTable *blockNamedNodeData);
 
 int
-qemuBlockBitmapsHandleBlockcopy(virStorageSourcePtr src,
-                                virStorageSourcePtr mirror,
-                                virHashTablePtr blockNamedNodeData,
+qemuBlockBitmapsHandleBlockcopy(virStorageSource *src,
+                                virStorageSource *mirror,
+                                GHashTable *blockNamedNodeData,
                                 bool shallow,
-                                virJSONValuePtr *actions);
+                                virJSONValue **actions);
 
 int
-qemuBlockBitmapsHandleCommitFinish(virStorageSourcePtr topsrc,
-                                   virStorageSourcePtr basesrc,
+qemuBlockBitmapsHandleCommitFinish(virStorageSource *topsrc,
+                                   virStorageSource *basesrc,
                                    bool active,
-                                   virHashTablePtr blockNamedNodeData,
-                                   virJSONValuePtr *actions);
+                                   GHashTable *blockNamedNodeData,
+                                   virJSONValue **actions);
+
+/* only for use in qemumonitorjsontest */
+int
+qemuBlockReopenFormatMon(qemuMonitor *mon,
+                         virStorageSource *src);
 
 int
-qemuBlockReopenReadWrite(virDomainObjPtr vm,
-                         virStorageSourcePtr src,
-                         qemuDomainAsyncJob asyncJob);
+qemuBlockReopenReadWrite(virDomainObj *vm,
+                         virStorageSource *src,
+                         virDomainAsyncJob asyncJob);
 int
-qemuBlockReopenReadOnly(virDomainObjPtr vm,
-                        virStorageSourcePtr src,
-                        qemuDomainAsyncJob asyncJob);
+qemuBlockReopenReadOnly(virDomainObj *vm,
+                        virStorageSource *src,
+                        virDomainAsyncJob asyncJob);
 
 bool
 qemuBlockStorageSourceNeedsStorageSliceLayer(const virStorageSource *src);
 
 char *
-qemuBlockStorageSourceGetCookieString(virStorageSourcePtr src);
+qemuBlockStorageSourceGetCookieString(virStorageSource *src);
 
 int
-qemuBlockUpdateRelativeBacking(virDomainObjPtr vm,
-                               virStorageSourcePtr src,
-                               virStorageSourcePtr topsrc);
+qemuBlockUpdateRelativeBacking(virDomainObj *vm,
+                               virStorageSource *src,
+                               virStorageSource *topsrc);
+
+virJSONValue *
+qemuBlockExportGetNBDProps(const char *nodename,
+                           const char *exportname,
+                           bool writable,
+                           const char **bitmaps);
+
+
+int
+qemuBlockExportAddNBD(virDomainObj *vm,
+                      virStorageSource *src,
+                      const char *exportname,
+                      bool writable,
+                      const char *bitmap);
+
+qemuBlockJobData *
+qemuBlockCommit(virDomainObj *vm,
+                virDomainDiskDef *disk,
+                virStorageSource *baseSource,
+                virStorageSource *topSource,
+                virStorageSource *top_parent,
+                unsigned long long bandwidth,
+                virDomainAsyncJob asyncJob,
+                virTristateBool autofinalize,
+                unsigned int flags);
+
+int
+qemuBlockPivot(virDomainObj *vm,
+               qemuBlockJobData *job,
+               virDomainAsyncJob asyncJob,
+               virDomainDiskDef *disk);
+
+int
+qemuBlockFinalize(virDomainObj *vm,
+                  qemuBlockJobData *job,
+                  virDomainAsyncJob asyncJob);

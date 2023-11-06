@@ -28,14 +28,20 @@
 # include <xenstore.h>
 # include <xenctrl.h>
 
-# include "virfile.h"
-# include "virsocket.h"
 # include "libxl/libxl_capabilities.h"
 
 VIR_MOCK_IMPL_RET_VOID(xs_daemon_open,
                        struct xs_handle *)
 {
     VIR_MOCK_REAL_INIT(xs_daemon_open);
+    return (void*)0x1;
+}
+
+VIR_MOCK_IMPL_RET_ARGS(xs_open,
+                       struct xs_handle *,
+                       unsigned long, flags)
+{
+    VIR_MOCK_REAL_INIT(xs_open);
     return (void*)0x1;
 }
 
@@ -54,9 +60,7 @@ VIR_MOCK_IMPL_RET_ARGS(libxl_get_version_info,
                        const libxl_version_info*,
                        libxl_ctx *, ctx)
 {
-    static libxl_version_info info;
-
-    memset(&info, 0, sizeof(info));
+    static libxl_version_info info = { 0 };
 
     /* silence gcc warning about unused function */
     if (0)
@@ -64,10 +68,30 @@ VIR_MOCK_IMPL_RET_ARGS(libxl_get_version_info,
     return &info;
 }
 
+VIR_MOCK_IMPL_RET_ARGS(libxl_get_physinfo,
+                       int,
+                       libxl_ctx *, ctx,
+                       libxl_physinfo *, physinfo)
+{
+    memset(physinfo, 0, sizeof(*physinfo));
+    physinfo->nr_nodes = 6;
+
+    /* silence gcc warning about unused function */
+    if (0)
+        real_libxl_get_physinfo(ctx, physinfo);
+
+    return 0;
+}
+
 VIR_MOCK_STUB_RET_ARGS(libxl_get_free_memory,
                        int, 0,
                        libxl_ctx *, ctx,
-                       uint32_t *, memkb);
+# if LIBXL_API_VERSION < 0x040800
+                       uint32_t *,
+# else
+                       uint64_t *,
+# endif
+                       memkb);
 
 VIR_MOCK_STUB_RET_ARGS(xc_interface_close,
                        int, 0,
@@ -89,11 +113,25 @@ VIR_MOCK_STUB_RET_ARGS(xc_sharing_used_frames,
 VIR_MOCK_STUB_VOID_ARGS(xs_daemon_close,
                         struct xs_handle *, handle)
 
+VIR_MOCK_STUB_VOID_ARGS(xs_close,
+                        struct xs_handle *, xsh)
+
 VIR_MOCK_STUB_RET_ARGS(bind,
                        int, 0,
                        int, sockfd,
                        const struct sockaddr *, addr,
                        socklen_t, addrlen)
+
+VIR_MOCK_IMPL_RET_ARGS(libxl_get_required_shadow_memory,
+                       unsigned long,
+                       unsigned long, maxmem_kb,
+                       unsigned int, smp_cpus)
+{
+    /* silence gcc warning about unused function */
+    if (0)
+        real_libxl_get_required_shadow_memory(maxmem_kb, smp_cpus);
+    return 1234;
+}
 
 VIR_MOCK_IMPL_RET_ARGS(__xstat, int,
                        int, ver,

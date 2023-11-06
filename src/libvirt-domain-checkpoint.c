@@ -35,6 +35,8 @@ VIR_LOG_INIT("libvirt.domain-checkpoint");
  *
  * Returns a pointer to the name or NULL, the string need not be deallocated
  * as its lifetime will be the same as the checkpoint object.
+ *
+ * Since: 5.6.0
  */
 const char *
 virDomainCheckpointGetName(virDomainCheckpointPtr checkpoint)
@@ -58,6 +60,8 @@ virDomainCheckpointGetName(virDomainCheckpointPtr checkpoint)
  * call.
  *
  * Returns the domain or NULL.
+ *
+ * Since: 5.6.0
  */
 virDomainPtr
 virDomainCheckpointGetDomain(virDomainCheckpointPtr checkpoint)
@@ -81,6 +85,8 @@ virDomainCheckpointGetDomain(virDomainCheckpointPtr checkpoint)
  * call.
  *
  * Returns the connection or NULL.
+ *
+ * Since: 5.6.0
  */
 virConnectPtr
 virDomainCheckpointGetConnect(virDomainCheckpointPtr checkpoint)
@@ -108,7 +114,7 @@ virDomainCheckpointGetConnect(virDomainCheckpointPtr checkpoint)
  * kicking off a backup job with virDomainBackupBegin(); however, it
  * is also possible to start a checkpoint without a backup.
  *
- * See <a href="formatcheckpoint.html#CheckpointAttributes">Checkpoint XML</a>
+ * See https://libvirt.org/formatcheckpoint.html#checkpoint-xml
  * for more details on @xmlDesc. In particular, some hypervisors may require
  * particular disk formats, such as qcow2, in order to support this
  * command; where @xmlDesc can be used to limit the checkpoint to a working
@@ -125,14 +131,32 @@ virDomainCheckpointGetConnect(virDomainCheckpointPtr checkpoint)
  * has a way to resupply correct defaults).  Not all hypervisors support
  * this flag.
  *
+ * If @flags includes VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE_VALIDATE along with
+ * VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE the state of the metadata related
+ * to the disk state of the redefined checkpoint is validated. Note that
+ * hypervisors may require that the @domain is running to perform validation.
+ *
  * If @flags includes VIR_DOMAIN_CHECKPOINT_CREATE_QUIESCE, then the
  * libvirt will attempt to use guest agent to freeze and thaw all file
  * systems in use within domain OS. However, if the guest agent is not
  * present, an error is thrown. This flag is incompatible with
  * VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE.
  *
+ * Note: A checkpoint represents point in time after which blocks changed by
+ * the hypervisor are tracked. The tracking of changed blocks notes only whether
+ * a block was modified, but does not preserve the old contents.
+ * The main purpose of checkpoints is to enable incremental backups. But for a
+ * checkpoint to be useful for this purpose, a backup must be performed at the
+ * same time as the checkpoint is created.
+ * This is done via the virDomainBackupBegin API, which also allows to create a
+ * checkpoint at the same time. Creating checkpoints with
+ * virDomainCheckpointCreateXML is generally only useful for re-creating the
+ * libvirt metadata.
+ *
  * Returns an (opaque) new virDomainCheckpointPtr on success or NULL
  * on failure.
+ *
+ * Since: 5.6.0
  */
 virDomainCheckpointPtr
 virDomainCheckpointCreateXML(virDomainPtr domain,
@@ -154,6 +178,10 @@ virDomainCheckpointCreateXML(virDomainPtr domain,
     VIR_EXCLUSIVE_FLAGS_GOTO(VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE,
                              VIR_DOMAIN_CHECKPOINT_CREATE_QUIESCE,
                              error);
+
+    VIR_REQUIRE_FLAG_GOTO(VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE_VALIDATE,
+                          VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE,
+                          error);
 
     if (conn->driver->domainCheckpointCreateXML) {
         virDomainCheckpointPtr ret;
@@ -191,10 +219,15 @@ virDomainCheckpointCreateXML(virDomainPtr domain,
  * VIR_DOMAIN_CHECKPOINT_XML_SIZE, each <disk> listing adds an additional
  * attribute that shows an estimate of the current size in bytes that
  * have been dirtied between the time the checkpoint was created and the
- * current point in time.
+ * current point in time. Note that updating the size may be expensive and
+ * data will be inaccurate once guest OS writes to the disk. Also note that
+ * hypervisors may require that the domain associated with @checkpoint is
+ * running when VIR_DOMAIN_CHECKPOINT_XML_SIZE is used.
  *
  * Returns a 0 terminated UTF-8 encoded XML instance or NULL in case
  * of error. The caller must free() the returned value.
+ *
+ * Since: 5.6.0
  */
 char *
 virDomainCheckpointGetXMLDesc(virDomainCheckpointPtr checkpoint,
@@ -236,7 +269,7 @@ virDomainCheckpointGetXMLDesc(virDomainCheckpointPtr checkpoint,
  * @checkpoints: pointer to variable to store the array containing checkpoint
  *               object, or NULL if the list is not required (just returns
  *               number of checkpoints)
- * @flags: bitwise-OR of supported virDomainCheckpoinListFlags
+ * @flags: bitwise-OR of supported virDomainCheckpointListFlags
  *
  * Collect the list of domain checkpoints for the given domain and allocate
  * an array to store those objects.
@@ -269,6 +302,8 @@ virDomainCheckpointGetXMLDesc(virDomainCheckpointPtr checkpoint,
  * included in the return count, to make iteration easier.  The caller is
  * responsible for calling virDomainCheckpointFree() on each array element,
  * then calling free() on @checkpoints.
+ *
+ * Since: 5.6.0
  */
 int
 virDomainListAllCheckpoints(virDomainPtr domain,
@@ -336,6 +371,8 @@ virDomainListAllCheckpoints(virDomainPtr domain,
  * in the return count, to make iteration easier.  The caller is responsible
  * for calling virDomainCheckpointFree() on each array element, then calling
  * free() on @children.
+ *
+ * Since: 5.6.0
  */
 int
 virDomainCheckpointListAllChildren(virDomainCheckpointPtr checkpoint,
@@ -382,6 +419,8 @@ virDomainCheckpointListAllChildren(virDomainCheckpointPtr checkpoint,
  * Returns a domain checkpoint object or NULL in case of failure.  If the
  * domain checkpoint cannot be found, then the VIR_ERR_NO_DOMAIN_CHECKPOINT
  * error is raised.
+ *
+ * Since: 5.6.0
  */
 virDomainCheckpointPtr
 virDomainCheckpointLookupByName(virDomainPtr domain,
@@ -428,6 +467,8 @@ virDomainCheckpointLookupByName(virDomainPtr domain,
  * Returns a domain checkpoint object or NULL in case of failure.  If the
  * given checkpoint is a root (no parent), then the VIR_ERR_NO_DOMAIN_CHECKPOINT
  * error is raised.
+ *
+ * Since: 5.6.0
  */
 virDomainCheckpointPtr
 virDomainCheckpointGetParent(virDomainCheckpointPtr checkpoint,
@@ -481,6 +522,8 @@ virDomainCheckpointGetParent(virDomainCheckpointPtr checkpoint,
  * silently ignored.
  *
  * Returns 0 on success, -1 on error.
+ *
+ * Since: 5.6.0
  */
 int
 virDomainCheckpointDelete(virDomainCheckpointPtr checkpoint,
@@ -531,6 +574,8 @@ virDomainCheckpointDelete(virDomainCheckpointPtr checkpoint,
  * increment the reference count.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 5.6.0
  */
 int
 virDomainCheckpointRef(virDomainCheckpointPtr checkpoint)
@@ -554,6 +599,8 @@ virDomainCheckpointRef(virDomainCheckpointPtr checkpoint)
  * The data structure is freed and should not be used thereafter.
  *
  * Returns 0 in case of success and -1 in case of failure.
+ *
+ * Since: 5.6.0
  */
 int
 virDomainCheckpointFree(virDomainCheckpointPtr checkpoint)

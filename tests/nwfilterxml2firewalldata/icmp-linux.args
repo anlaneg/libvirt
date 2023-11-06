@@ -1,4 +1,5 @@
 iptables \
+-w \
 -A FJ-vnet0 \
 -p icmp \
 -m mac \
@@ -7,10 +8,11 @@ iptables \
 -m dscp \
 --dscp 2 \
 --icmp-type 12/11 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
 -j RETURN
 iptables \
+-w \
 -A HJ-vnet0 \
 -p icmp \
 -m mac \
@@ -19,10 +21,11 @@ iptables \
 -m dscp \
 --dscp 2 \
 --icmp-type 12/11 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
 -j RETURN
 iptables \
+-w \
 -A FP-vnet0 \
 -p icmp \
 -m mac \
@@ -31,6 +34,6 @@ iptables \
 -m dscp \
 --dscp 33 \
 --icmp-type 255/255 \
--m state \
---state NEW,ESTABLISHED \
+-m conntrack \
+--ctstate NEW,ESTABLISHED \
 -j ACCEPT

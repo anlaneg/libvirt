@@ -28,11 +28,8 @@
 #include <gnutls/crypto.h>
 
 #include "virrandom.h"
-#include "virthread.h"
 #include "virerror.h"
-#include "virfile.h"
 #include "virlog.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -89,11 +86,10 @@ double virRandom(void)
  */
 uint32_t virRandomInt(uint32_t max)
 {
-    if ((max & (max - 1)) == 0)
+    if (VIR_IS_POW2(max))
         return virRandomBits(__builtin_ffs(max) - 1);
 
-    double val = virRandom();
-    return val * max;
+    return virRandom() * max;
 }
 
 
@@ -115,7 +111,7 @@ virRandomBytes(unsigned char *buf,
 
     if ((rv = gnutls_rnd(GNUTLS_RND_RANDOM, buf, buflen)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("failed to generate byte stream: %s"),
+                       _("failed to generate byte stream: %1$s"),
                        gnutls_strerror(rv));
         return -1;
     }
@@ -128,6 +124,7 @@ virRandomBytes(unsigned char *buf,
 #define VMWARE_OUI "000569"
 #define MICROSOFT_OUI "0050f2"
 #define XEN_OUI "00163e"
+#define TEST_DRIVER_OUI "100000"
 
 
 int
@@ -142,7 +139,13 @@ virRandomGenerateWWN(char **wwn,
         return -1;
     }
 
-    if (STREQ(virt_type, "QEMU")) {
+    /* In case of split daemon we don't really see the hypervisor
+     * driver that just re-routed the nodedev driver API. There
+     * might not be any hypervisor driver even. Yet, we have to
+     * pick OUI. Pick "QEMU". */
+
+    if (STREQ(virt_type, "QEMU") ||
+        STREQ(virt_type, "nodedev")) {
         oui = QUMRANET_OUI;
     } else if (STREQ(virt_type, "Xen") ||
                STREQ(virt_type, "xenlight")) {
@@ -152,13 +155,32 @@ virRandomGenerateWWN(char **wwn,
         oui = VMWARE_OUI;
     } else if (STREQ(virt_type, "HYPER-V")) {
         oui = MICROSOFT_OUI;
+    } else if (STREQ(virt_type, "TEST")) {
+        oui = TEST_DRIVER_OUI;
     } else {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unsupported virt type"));
         return -1;
     }
 
-    *wwn = g_strdup_printf("5" "%s%09llx", oui,
-                           (unsigned long long)virRandomBits(36));
+    *wwn = g_strdup_printf("5%s%09" PRIx64, oui, virRandomBits(36));
     return 0;
+}
+
+char *virRandomToken(size_t len)
+{
+    g_autofree unsigned char *data = g_new0(unsigned char, len);
+    g_autofree char *token = g_new0(char, (len * 2) + 1);
+    static const char hex[] = "0123456789abcdef";
+    size_t i;
+
+    if (virRandomBytes(data, len) < 0)
+        return NULL;
+
+    for (i = 0; i < len; i++) {
+        token[(i*2)] = hex[data[i] & 0xf];
+        token[(i*2)+1] = hex[(data[i] >> 4) & 0xf];
+    }
+
+    return g_steal_pointer(&token);
 }

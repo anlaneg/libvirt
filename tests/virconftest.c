@@ -23,7 +23,6 @@
 
 #include <unistd.h>
 #include "virconf.h"
-#include "viralloc.h"
 #include "testutils.h"
 
 
@@ -32,40 +31,30 @@
 static int testConfRoundTrip(const void *opaque)
 {
     const char *name = opaque;
-    int ret = -1;
     g_autoptr(virConf) conf = NULL;
     int len = 10000;
-    char *buffer = NULL;
-    char *srcfile = NULL;
-    char *dstfile = NULL;
+    g_autofree char *buffer = NULL;
+    g_autofree char *srcfile = NULL;
+    g_autofree char *dstfile = NULL;
 
     srcfile = g_strdup_printf("%s/virconfdata/%s.conf", abs_srcdir, name);
     dstfile = g_strdup_printf("%s/virconfdata/%s.out", abs_srcdir, name);
 
-    if (VIR_ALLOC_N_QUIET(buffer, len) < 0) {
-        fprintf(stderr, "out of memory\n");
-        goto cleanup;
-    }
+    buffer = g_new0(char, len);
     conf = virConfReadFile(srcfile, 0);
     if (conf == NULL) {
         fprintf(stderr, "Failed to process %s\n", srcfile);
-        goto cleanup;
+        return -1;
     }
-    ret = virConfWriteMem(buffer, &len, conf);
-    if (ret < 0) {
+    if (virConfWriteMem(buffer, &len, conf) < 0) {
         fprintf(stderr, "Failed to serialize %s back\n", srcfile);
-        goto cleanup;
+        return -1;
     }
 
     if (virTestCompareToFile(buffer, dstfile) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    VIR_FREE(srcfile);
-    VIR_FREE(dstfile);
-    VIR_FREE(buffer);
-    return ret;
+    return 0;
 }
 
 
@@ -77,60 +66,56 @@ static int testConfMemoryNoNewline(const void *opaque G_GNUC_UNUSED)
         "uint = 12345";
 
     g_autoptr(virConf) conf = virConfReadString(srcdata, 0);
-    int ret = -1;
-    virConfValuePtr val;
+    virConfValue *val;
     unsigned long long llvalue;
-    char *str = NULL;
+    g_autofree char *str = NULL;
     int uintvalue;
 
     if (!conf)
         return -1;
 
     if (!(val = virConfGetValue(conf, "ullong")))
-        goto cleanup;
+        return -1;
 
     if (val->type != VIR_CONF_STRING)
-        goto cleanup;
+        return -1;
 
     if (virStrToLong_ull(val->str, NULL, 10, &llvalue) < 0)
-        goto cleanup;
+        return -1;
 
     if (llvalue != 123456789) {
         fprintf(stderr, "Expected '123' got '%llu'\n", llvalue);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueType(conf, "string") !=
         VIR_CONF_STRING) {
         fprintf(stderr, "expected a string for 'string'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueString(conf, "string", &str) < 0)
-        goto cleanup;
+        return -1;
 
     if (STRNEQ_NULLABLE(str, "foo")) {
         fprintf(stderr, "Expected 'foo' got '%s'\n", str);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueType(conf, "uint") != VIR_CONF_ULLONG) {
         fprintf(stderr, "expected an unsigned long for 'uint'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueInt(conf, "uint", &uintvalue) < 0)
-        goto cleanup;
+        return -1;
 
     if (uintvalue != 12345) {
         fprintf(stderr, "Expected 12345 got %ud\n", uintvalue);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(str);
-    return ret;
+    return 0;
 }
 
 
@@ -349,9 +334,8 @@ static int testConfParseString(const void *opaque G_GNUC_UNUSED)
         "int = 6963472309248\n" \
         "string = \"foo\"\n";
 
-    int ret = -1;
     g_autoptr(virConf) conf = virConfReadString(srcdata, 0);
-    char *str = NULL;
+    g_autofree char *str = NULL;
 
     if (!conf)
         return -1;
@@ -359,26 +343,23 @@ static int testConfParseString(const void *opaque G_GNUC_UNUSED)
     if (virConfGetValueType(conf, "string") !=
         VIR_CONF_STRING) {
         fprintf(stderr, "expected a string for 'string'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueString(conf, "string", &str) < 0)
-        goto cleanup;
+        return -1;
 
     if (STRNEQ_NULLABLE(str, "foo")) {
         fprintf(stderr, "Expected 'foo' got '%s'\n", str);
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueString(conf, "int", &str) != -1) {
         fprintf(stderr, "Expected error for 'int'\n");
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(str);
-    return ret;
+    return 0;
 }
 
 
@@ -388,9 +369,8 @@ static int testConfParseStringList(const void *opaque G_GNUC_UNUSED)
         "string_list = [\"foo\", \"bar\"]\n" \
         "string = \"foo\"\n";
 
-    int ret = -1;
     g_autoptr(virConf) conf = virConfReadString(srcdata, 0);
-    char **str = NULL;
+    g_auto(GStrv) str = NULL;
 
     if (!conf)
         return -1;
@@ -398,51 +378,47 @@ static int testConfParseStringList(const void *opaque G_GNUC_UNUSED)
     if (virConfGetValueType(conf, "string_list") !=
         VIR_CONF_LIST) {
         fprintf(stderr, "expected a list for 'string_list'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueStringList(conf, "string_list", false, &str) < 0)
-        goto cleanup;
+        return -1;
 
-    if (virStringListLength((const char *const*)str) != 2) {
+    if (!str || g_strv_length(str) != 2) {
         fprintf(stderr, "expected a 2 element list\n");
-        goto cleanup;
+        return -1;
     }
 
     if (STRNEQ_NULLABLE(str[0], "foo")) {
         fprintf(stderr, "Expected 'foo' got '%s'\n", str[0]);
-        goto cleanup;
+        return -1;
     }
 
     if (STRNEQ_NULLABLE(str[1], "bar")) {
         fprintf(stderr, "Expected 'bar' got '%s'\n", str[1]);
-        goto cleanup;
+        return -1;
     }
 
 
     if (virConfGetValueStringList(conf, "string", false, &str) != -1) {
         fprintf(stderr, "Expected error for 'string'\n");
-        goto cleanup;
+        return -1;
     }
 
     if (virConfGetValueStringList(conf, "string", true, &str) < 0)
-        goto cleanup;
+        return -1;
 
-    if (virStringListLength((const char *const*)str) != 1) {
+    if (!str || g_strv_length(str) != 1) {
         fprintf(stderr, "expected a 1 element list\n");
-        goto cleanup;
+        return -1;
     }
 
     if (STRNEQ_NULLABLE(str[0], "foo")) {
         fprintf(stderr, "Expected 'foo' got '%s'\n", str[0]);
-        goto cleanup;
+        return -1;
     }
 
-
-    ret = 0;
- cleanup:
-    virStringListFree(str);
-    return ret;
+    return 0;
 }
 
 
@@ -475,7 +451,7 @@ mymain(void)
     if (virTestRun("string-list", testConfParseStringList, NULL) < 0)
         ret = -1;
 
-    return ret;
+    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 

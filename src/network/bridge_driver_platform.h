@@ -21,52 +21,17 @@
 
 #pragma once
 
-#include "internal.h"
-#include "virthread.h"
-#include "virdnsmasq.h"
-#include "virnetworkobj.h"
-#include "object_event.h"
+#include "network_conf.h"
+#include "bridge_driver_conf.h"
 
-/* Main driver state */
-struct _virNetworkDriverState {
-    virMutex lock;
+void networkPreReloadFirewallRules(virNetworkDriverState *driver,
+                                   bool startup,
+                                   bool force);
 
-    /* Read-only */
-    bool privileged;
-
-    /* pid file FD, ensures two copies of the driver can't use the same root */
-    int lockFD;
-
-    /* Immutable pointer, self-locking APIs */
-    virNetworkObjListPtr networks;
-
-    /* Immutable pointers, Immutable objects */
-    char *networkConfigDir;/*网络配置目录路径*/
-    char *networkAutostartDir;/*autostart目录路径*/
-    char *stateDir;
-    char *pidDir;
-    char *dnsmasqStateDir;/*dnsmasq状态目录路径*/
-    char *radvdStateDir;
-
-    /* Require lock to get a reference on the object,
-     * lockless access thereafter
-     */
-    dnsmasqCapsPtr dnsmasqCaps;
-
-    /* Immutable pointer, self-locking APIs */
-    virObjectEventStatePtr networkEventState;
-
-    virNetworkXMLOptionPtr xmlopt;
-};
-
-typedef struct _virNetworkDriverState virNetworkDriverState;
-typedef virNetworkDriverState *virNetworkDriverStatePtr;
-
-void networkPreReloadFirewallRules(virNetworkDriverStatePtr driver, bool startup, bool force);
 void networkPostReloadFirewallRules(bool startup);
 
-int networkCheckRouteCollision(virNetworkDefPtr def);
+int networkCheckRouteCollision(virNetworkDef *def);
 
-int networkAddFirewallRules(virNetworkDefPtr def);
+int networkAddFirewallRules(virNetworkDef *def);
 
-void networkRemoveFirewallRules(virNetworkDefPtr def);
+void networkRemoveFirewallRules(virNetworkDef *def);

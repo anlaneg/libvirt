@@ -37,6 +37,7 @@
 
 #include "security_driver.h"
 #include "security_apparmor.h"
+#include "storage_source.h"
 #include "domain_conf.h"
 #include "virxml.h"
 #include "viruuid.h"
@@ -62,9 +63,9 @@ typedef struct {
                                  * 'r'   replace
                                  * 'R'   remove */
     char *files;                /* list of files */
-    virDomainDefPtr def;        /* VM definition */
-    virCapsPtr caps;            /* VM capabilities */
-    virDomainXMLOptionPtr xmlopt; /* XML parser data */
+    virDomainDef *def;        /* VM definition */
+    virCaps *caps;            /* VM capabilities */
+    virDomainXMLOption *xmlopt; /* XML parser data */
     char *virtType;                  /* type of hypervisor (eg qemu, xen, lxc) */
     char *os;                   /* type of os (eg hvm, xen, exe) */
     virArch arch;               /* machine architecture */
@@ -78,7 +79,7 @@ vahDeinit(vahControl * ctl)
     if (ctl == NULL)
         return -1;
 
-    VIR_FREE(ctl->def);
+    virDomainDefFree(ctl->def);
     virObjectUnref(ctl->caps);
     virObjectUnref(ctl->xmlopt);
     VIR_FREE(ctl->files);
@@ -95,11 +96,11 @@ vahDeinit(vahControl * ctl)
 static void
 vah_usage(void)
 {
-    printf(_("\n%s mode [options] [extra file] [< def.xml]\n\n"
+    printf(_("\n%1$s mode [options] [extra file] [< def.xml]\n\n"
             "  Modes:\n"
             "    -a | --add                     load profile\n"
             "    -c | --create                  create profile from template\n"
-            "    -D | --delete                  unload and delete profile\n"
+            "    -D | --delete                  unload profile and delete generated rules\n"
             "    -r | --replace                 reload profile\n"
             "    -R | --remove                  unload profile\n"
             "  Options:\n"
@@ -111,15 +112,14 @@ vah_usage(void)
             "    -F | --append-file <file>      append file to an existing profile\n"
             "\n"), progname);
 
-    puts(_("This command is intended to be used by libvirtd "
-           "and not used directly.\n"));
+    puts(_("This command is intended to be used by libvirtd and not used directly.\n"));
     return;
 }
 
 static void
 vah_error(vahControl * ctl, int doexit, const char *str)
 {
-    fprintf(stderr, _("%s: error: %s%c"), progname, str, '\n');
+    fprintf(stderr, _("%1$s: error: %2$s%3$c"), progname, str, '\n');
 
     if (doexit) {
         if (ctl != NULL)
@@ -131,13 +131,13 @@ vah_error(vahControl * ctl, int doexit, const char *str)
 static void
 vah_warning(const char *str)
 {
-    fprintf(stderr, _("%s: warning: %s%c"), progname, str, '\n');
+    fprintf(stderr, _("%1$s: warning: %2$s%3$c"), progname, str, '\n');
 }
 
 static void
 vah_info(const char *str)
 {
-    fprintf(stderr, _("%s:\n%s%c"), progname, str, '\n');
+    fprintf(stderr, _("%1$s:\n%2$s%3$c"), progname, str, '\n');
 }
 
 /*
@@ -475,11 +475,14 @@ valid_path(const char *path, const bool readonly)
         "/initrd",
         "/initrd.img",
         "/usr/share/edk2/",
-        "/usr/share/OVMF/",              /* for OVMF images */
-        "/usr/share/ovmf/",              /* for OVMF images */
-        "/usr/share/AAVMF/",             /* for AAVMF images */
-        "/usr/share/qemu-efi/",          /* for AAVMF images */
-        "/usr/share/qemu-efi-aarch64/"   /* for AAVMF images */
+        "/usr/share/OVMF/",                  /* for OVMF images */
+        "/usr/share/ovmf/",                  /* for OVMF images */
+        "/usr/share/AAVMF/",                 /* for AAVMF images */
+        "/usr/share/qemu-efi/",              /* for AAVMF images */
+        "/usr/share/qemu-efi-aarch64/",      /* for AAVMF images */
+        "/usr/share/qemu/",                  /* SUSE path for OVMF and AAVMF images */
+        "/usr/lib/u-boot/",                  /* u-boot loaders for qemu */
+        "/usr/lib/riscv64-linux-gnu/opensbi" /* RISC-V SBI implementation */
     };
     /* override the above with these */
     const char * const override[] = {
@@ -561,39 +564,33 @@ verify_xpath_context(xmlXPathContextPtr ctxt)
  * ctl->os
  * ctl->arch
  *
- * These are suitable for setting up a virCapsPtr
+ * These are suitable for setting up a virCaps *
  */
 static int
 caps_mockup(vahControl * ctl, const char *xmlStr)
 {
-    int rc = -1;
-    xmlDocPtr xml = NULL;
-    xmlXPathContextPtr ctxt = NULL;
+    g_autoptr(xmlDoc) xml = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
     char *arch;
 
-    if (!(xml = virXMLParseStringCtxt(xmlStr, _("(domain_definition)"),
-                                      &ctxt))) {
-        goto cleanup;
-    }
-
-    if (!virXMLNodeNameEqual(ctxt->node, "domain")) {
-        vah_error(NULL, 0, _("unexpected root element, expecting <domain>"));
-        goto cleanup;
+    if (!(xml = virXMLParse(NULL, xmlStr, _("(domain_definition)"),
+                            "domain", &ctxt, NULL, false))) {
+        return -1;
     }
 
     /* Quick sanity check for some required elements */
     if (verify_xpath_context(ctxt) != 0)
-        goto cleanup;
+        return -1;
 
     ctl->virtType = virXPathString("string(./@type)", ctxt);
     if (!ctl->virtType) {
         vah_error(ctl, 0, _("domain type is not defined"));
-        goto cleanup;
+        return -1;
     }
     ctl->os = virXPathString("string(./os/type[1])", ctxt);
     if (!ctl->os) {
         vah_error(ctl, 0, _("os.type is not defined"));
-        goto cleanup;
+        return -1;
     }
     arch = virXPathString("string(./os/type[1]/@arch)", ctxt);
     if (!arch) {
@@ -603,27 +600,22 @@ caps_mockup(vahControl * ctl, const char *xmlStr)
         VIR_FREE(arch);
     }
 
-    rc = 0;
-
- cleanup:
-    xmlFreeDoc(xml);
-    xmlXPathFreeContext(ctxt);
-
-    return rc;
+    return 0;
 }
 
 virDomainDefParserConfig virAAHelperDomainDefParserConfig = {
     .features = VIR_DOMAIN_DEF_FEATURE_MEMORY_HOTPLUG |
                 VIR_DOMAIN_DEF_FEATURE_OFFLINE_VCPUPIN |
                 VIR_DOMAIN_DEF_FEATURE_INDIVIDUAL_VCPUS |
-                VIR_DOMAIN_DEF_FEATURE_NET_MODEL_STRING,
+                VIR_DOMAIN_DEF_FEATURE_NET_MODEL_STRING |
+                VIR_DOMAIN_DEF_FEATURE_DISK_FD,
 };
 
 static int
 get_definition(vahControl * ctl, const char *xmlStr)
 {
     int ostype, virtType;
-    virCapsGuestPtr guest;  /* this is freed when caps is freed */
+    virCapsGuest *guest;  /* this is freed when caps is freed */
 
     /*
      * mock up some capabilities. We don't currently use these explicitly,
@@ -638,7 +630,7 @@ get_definition(vahControl * ctl, const char *xmlStr)
     }
 
     if (!(ctl->xmlopt = virDomainXMLOptionNew(&virAAHelperDomainDefParserConfig,
-                                              NULL, NULL, NULL, NULL))) {
+                                              NULL, NULL, NULL, NULL, NULL))) {
         vah_error(ctl, 0, _("Failed to create XML config object"));
         return -1;
     }
@@ -648,36 +640,22 @@ get_definition(vahControl * ctl, const char *xmlStr)
         return -1;
     }
 
-    if ((guest = virCapabilitiesAddGuest(ctl->caps,
-                                         ostype,
-                                         ctl->arch,
-                                         NULL,
-                                         NULL,
-                                         0,
-                                         NULL)) == NULL) {
-        vah_error(ctl, 0, _("could not allocate memory"));
-        return -1;
-    }
+    guest = virCapabilitiesAddGuest(ctl->caps, ostype, ctl->arch,
+                                    NULL, NULL, 0, NULL);
 
     if ((virtType = virDomainVirtTypeFromString(ctl->virtType)) < 0) {
         vah_error(ctl, 0, _("unknown virtualization type"));
         return -1;
     }
 
-    if (virCapabilitiesAddGuestDomain(guest,
-                                      virtType,
-                                      NULL,
-                                      NULL,
-                                      0,
-                                      NULL) == NULL) {
-        vah_error(ctl, 0, _("could not allocate memory"));
-        return -1;
-    }
+    virCapabilitiesAddGuestDomain(guest, virtType,
+                                  NULL, NULL, 0, NULL);
 
     ctl->def = virDomainDefParseString(xmlStr,
                                        ctl->xmlopt, NULL,
                                        VIR_DOMAIN_DEF_PARSE_SKIP_SECLABEL |
-                                       VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+                                       VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE |
+                                       VIR_DOMAIN_DEF_PARSE_VOLUME_TRANSLATED);
 
     if (ctl->def == NULL) {
         vah_error(ctl, 0, _("could not parse XML"));
@@ -702,7 +680,7 @@ get_definition(vahControl * ctl, const char *xmlStr)
   * read with no explicit deny rule.
   */
 static int
-vah_add_path(virBufferPtr buf, const char *path, const char *perms, bool recursive)
+vah_add_path(virBuffer *buf, const char *path, const char *perms, bool recursive)
 {
     char *tmp = NULL;
     int rc = -1;
@@ -801,13 +779,13 @@ vah_add_path(virBufferPtr buf, const char *path, const char *perms, bool recursi
 }
 
 static int
-vah_add_file(virBufferPtr buf, const char *path, const char *perms)
+vah_add_file(virBuffer *buf, const char *path, const char *perms)
 {
     return vah_add_path(buf, path, perms, false);
 }
 
 static int
-vah_add_file_chardev(virBufferPtr buf,
+vah_add_file_chardev(virBuffer *buf,
                      const char *path,
                      const char *perms,
                      const int type)
@@ -845,25 +823,25 @@ vah_add_file_chardev(virBufferPtr buf,
 }
 
 static int
-file_iterate_hostdev_cb(virUSBDevicePtr dev G_GNUC_UNUSED,
+file_iterate_hostdev_cb(virUSBDevice *dev G_GNUC_UNUSED,
                         const char *file, void *opaque)
 {
-    virBufferPtr buf = opaque;
+    virBuffer *buf = opaque;
     return vah_add_file(buf, file, "rw");
 }
 
 static int
-file_iterate_pci_cb(virPCIDevicePtr dev G_GNUC_UNUSED,
+file_iterate_pci_cb(virPCIDevice *dev G_GNUC_UNUSED,
                     const char *file, void *opaque)
 {
-    virBufferPtr buf = opaque;
+    virBuffer *buf = opaque;
     return vah_add_file(buf, file, "rw");
 }
 
 static int
-add_file_path(virStorageSourcePtr src,
+add_file_path(virStorageSource *src,
               size_t depth,
-              virBufferPtr buf)
+              virBuffer *buf)
 {
     int ret;
 
@@ -888,11 +866,11 @@ add_file_path(virStorageSourcePtr src,
 
 
 static int
-storage_source_add_files(virStorageSourcePtr src,
-                         virBufferPtr buf,
+storage_source_add_files(virStorageSource *src,
+                         virBuffer *buf,
                          size_t depth)
 {
-    virStorageSourcePtr tmp;
+    virStorageSource *tmp;
 
     for (tmp = src; virStorageSourceIsBacking(tmp); tmp = tmp->backingStore) {
         if (add_file_path(tmp, depth, buf) < 0)
@@ -907,7 +885,7 @@ storage_source_add_files(virStorageSourcePtr src,
 static int
 get_files(vahControl * ctl)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     int rc = -1;
     size_t i;
     char *uuid;
@@ -930,15 +908,18 @@ get_files(vahControl * ctl)
 #endif
 
     for (i = 0; i < ctl->def->ndisks; i++) {
-        virDomainDiskDefPtr disk = ctl->def->disks[i];
+        virDomainDiskDef *disk = ctl->def->disks[i];
 
-        if (!virDomainDiskGetSource(disk))
+        if (virStorageSourceIsEmpty(disk->src))
             continue;
         /* XXX - if we knew the qemu user:group here we could send it in
          *        so that the open could be re-tried as that user:group.
+         *
+         * The maximum depth is limited to 200 layers similarly to the qemu
+         * implementation.
          */
-        if (!virStorageSourceHasBacking(disk->src))
-            virStorageFileGetMetadata(disk->src, -1, -1, false);
+        if (!disk->src->backingStore)
+            virStorageSourceGetMetadata(disk->src, -1, -1, 200, false);
 
          /* XXX should handle open errors more careful than just ignoring them.
          */
@@ -1024,12 +1005,13 @@ get_files(vahControl * ctl)
         if (vah_add_file(&buf, ctl->def->os.loader->path, "rk") != 0)
             goto cleanup;
 
-    if (ctl->def->os.loader && ctl->def->os.loader->nvram)
-        if (vah_add_file(&buf, ctl->def->os.loader->nvram, "rwk") != 0)
+    if (ctl->def->os.loader && ctl->def->os.loader->nvram) {
+        if (storage_source_add_files(ctl->def->os.loader->nvram, &buf, 0) < 0)
             goto cleanup;
+    }
 
     for (i = 0; i < ctl->def->ngraphics; i++) {
-        virDomainGraphicsDefPtr graphics = ctl->def->graphics[i];
+        virDomainGraphicsDef *graphics = ctl->def->graphics[i];
         size_t n;
         const char *rendernode = virDomainGraphicsGetRenderNode(graphics);
 
@@ -1066,11 +1048,15 @@ get_files(vahControl * ctl)
 
     for (i = 0; i < ctl->def->nhostdevs; i++)
         if (ctl->def->hostdevs[i]) {
-            virDomainHostdevDefPtr dev = ctl->def->hostdevs[i];
-            virDomainHostdevSubsysUSBPtr usbsrc = &dev->source.subsys.u.usb;
+            virDomainHostdevDef *dev = ctl->def->hostdevs[i];
+            virDomainHostdevSubsysUSB *usbsrc = &dev->source.subsys.u.usb;
+
+            if (dev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS)
+                continue;
+
             switch (dev->source.subsys.type) {
             case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
-                virUSBDevicePtr usb =
+                virUSBDevice *usb =
                     virUSBDeviceNew(usbsrc->bus, usbsrc->device, NULL);
 
                 if (usb == NULL)
@@ -1087,8 +1073,8 @@ get_files(vahControl * ctl)
             }
 
             case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV: {
-                virDomainHostdevSubsysMediatedDevPtr mdevsrc = &dev->source.subsys.u.mdev;
-                switch ((virMediatedDeviceModelType) mdevsrc->model) {
+                virDomainHostdevSubsysMediatedDev *mdevsrc = &dev->source.subsys.u.mdev;
+                switch (mdevsrc->model) {
                     case VIR_MDEV_MODEL_TYPE_VFIO_PCI:
                     case VIR_MDEV_MODEL_TYPE_VFIO_AP:
                     case VIR_MDEV_MODEL_TYPE_VFIO_CCW:
@@ -1104,11 +1090,7 @@ get_files(vahControl * ctl)
             }
 
             case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI: {
-                virPCIDevicePtr pci = virPCIDeviceNew(
-                           dev->source.subsys.u.pci.addr.domain,
-                           dev->source.subsys.u.pci.addr.bus,
-                           dev->source.subsys.u.pci.addr.slot,
-                           dev->source.subsys.u.pci.addr.function);
+                virPCIDevice *pci = virPCIDeviceNew(&dev->source.subsys.u.pci.addr);
 
                 virDomainHostdevSubsysPCIBackendType backend = dev->source.subsys.u.pci.backend;
                 if (backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO ||
@@ -1125,6 +1107,9 @@ get_files(vahControl * ctl)
                 break;
             }
 
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI:
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST:
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_LAST:
             default:
                 rc = 0;
                 break;
@@ -1137,19 +1122,20 @@ get_files(vahControl * ctl)
                 (ctl->def->fss[i]->fsdriver == VIR_DOMAIN_FS_DRIVER_TYPE_PATH ||
                  ctl->def->fss[i]->fsdriver == VIR_DOMAIN_FS_DRIVER_TYPE_DEFAULT) &&
                 ctl->def->fss[i]->src) {
-            virDomainFSDefPtr fs = ctl->def->fss[i];
+            virDomainFSDef *fs = ctl->def->fss[i];
 
             /* We don't need to add deny rw rules for readonly mounts,
              * this can only lead to troubles when mounting / readonly.
              */
-            if (vah_add_path(&buf, fs->src->path, fs->readonly ? "R" : "rw", true) != 0)
+            if (vah_add_path(&buf, fs->src->path, fs->readonly ? "R" : "rwl", true) != 0)
                 goto cleanup;
         }
     }
 
     for (i = 0; i < ctl->def->ninputs; i++) {
         if (ctl->def->inputs[i] &&
-                ctl->def->inputs[i]->type == VIR_DOMAIN_INPUT_TYPE_PASSTHROUGH) {
+                (ctl->def->inputs[i]->type == VIR_DOMAIN_INPUT_TYPE_PASSTHROUGH ||
+                 ctl->def->inputs[i]->type == VIR_DOMAIN_INPUT_TYPE_EVDEV)) {
             if (vah_add_file(&buf, ctl->def->inputs[i]->source.evdev, "rw") != 0)
                 goto cleanup;
         }
@@ -1159,7 +1145,7 @@ get_files(vahControl * ctl)
         if (ctl->def->nets[i] &&
                 ctl->def->nets[i]->type == VIR_DOMAIN_NET_TYPE_VHOSTUSER &&
                 ctl->def->nets[i]->data.vhostuser) {
-            virDomainChrSourceDefPtr vhu = ctl->def->nets[i]->data.vhostuser;
+            virDomainChrSourceDef *vhu = ctl->def->nets[i]->data.vhostuser;
 
             if (vah_add_file_chardev(&buf, vhu->data.nix.path, "rw",
                        vhu->type) != 0)
@@ -1168,10 +1154,23 @@ get_files(vahControl * ctl)
     }
 
     for (i = 0; i < ctl->def->nmems; i++) {
-        if (ctl->def->mems[i] &&
-                ctl->def->mems[i]->model == VIR_DOMAIN_MEMORY_MODEL_NVDIMM) {
-            if (vah_add_file(&buf, ctl->def->mems[i]->nvdimmPath, "rw") != 0)
+        virDomainMemoryDef *mem = ctl->def->mems[i];
+
+        switch (mem->model) {
+        case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
+            if (vah_add_file(&buf, mem->source.nvdimm.path, "rw") != 0)
                 goto cleanup;
+            break;
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
+            if (vah_add_file(&buf, mem->source.virtio_pmem.path, "rw") != 0)
+                goto cleanup;
+            break;
+        case VIR_DOMAIN_MEMORY_MODEL_DIMM:
+        case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_MEM:
+        case VIR_DOMAIN_MEMORY_MODEL_SGX_EPC:
+        case VIR_DOMAIN_MEMORY_MODEL_NONE:
+        case VIR_DOMAIN_MEMORY_MODEL_LAST:
+            break;
         }
     }
 
@@ -1179,7 +1178,7 @@ get_files(vahControl * ctl)
         size_t j;
 
         for (j = 0; j < ctl->def->sysinfo[i]->nfw_cfgs; j++) {
-            virSysinfoFWCfgDefPtr f = &ctl->def->sysinfo[i]->fw_cfgs[j];
+            virSysinfoFWCfgDef *f = &ctl->def->sysinfo[i]->fw_cfgs[j];
 
             if (f->file &&
                 vah_add_file(&buf, f->file, "r") != 0)
@@ -1193,8 +1192,8 @@ get_files(vahControl * ctl)
          * When the server path is enabled, use it - otherwise fallback to
          * model dependent defaults. */
         if (shmem->server.enabled &&
-            shmem->server.chr.data.nix.path) {
-                if (vah_add_file(&buf, shmem->server.chr.data.nix.path,
+            shmem->server.chr->data.nix.path) {
+                if (vah_add_file(&buf, shmem->server.chr->data.nix.path,
                         "rw") != 0)
                     goto cleanup;
         } else {
@@ -1208,6 +1207,10 @@ get_files(vahControl * ctl)
                  /* until exposed, recreate qemuDomainPrepareShmemChardev */
                 mem_path = g_strdup_printf("/var/lib/libvirt/shmem-%s-sock",
                                shmem->name);
+                break;
+            case VIR_DOMAIN_SHMEM_MODEL_LAST:
+                virReportEnumRangeError(virDomainShmemModel,
+                                        shmem->model);
                 break;
             }
             if (mem_path != NULL) {
@@ -1228,7 +1231,7 @@ get_files(vahControl * ctl)
 
             shortName = virDomainDefGetShortName(ctl->def);
 
-            switch (ctl->def->tpms[i]->version) {
+            switch (ctl->def->tpms[i]->data.emulator.version) {
             case VIR_DOMAIN_TPM_VERSION_1_2:
                 tpmpath = "tpm1.2";
                 break;
@@ -1245,8 +1248,11 @@ get_files(vahControl * ctl)
                 "  \"%s/libvirt/qemu/swtpm/%s-swtpm.sock\" rw,\n",
                 RUNSTATEDIR, shortName);
             /* Paths for swtpm to use: give it access to its state
-             * directory, log, and PID files.
+             * directory (state files and fsync on dir), log, and PID files.
              */
+            virBufferAsprintf(&buf,
+                "  \"%s/lib/libvirt/swtpm/%s/%s/\" r,\n",
+                LOCALSTATEDIR, uuidstr, tpmpath);
             virBufferAsprintf(&buf,
                 "  \"%s/lib/libvirt/swtpm/%s/%s/**\" rwk,\n",
                 LOCALSTATEDIR, uuidstr, tpmpath);
@@ -1262,7 +1268,7 @@ get_files(vahControl * ctl)
     }
 
     for (i = 0; i < ctl->def->nsmartcards; i++) {
-        virDomainSmartcardDefPtr sc = ctl->def->smartcards[i];
+        virDomainSmartcardDef *sc = ctl->def->smartcards[i];
         virDomainSmartcardType sc_type = sc->type;
         char *sc_db = (char *)VIR_DOMAIN_SMARTCARD_DEFAULT_DATABASE;
         if (sc->data.cert.database)
@@ -1296,9 +1302,9 @@ get_files(vahControl * ctl)
 
     if (ctl->def->virtType == VIR_DOMAIN_VIRT_KVM) {
         for (i = 0; i < ctl->def->nnets; i++) {
-            virDomainNetDefPtr net = ctl->def->nets[i];
+            virDomainNetDef *net = ctl->def->nets[i];
             if (net && virDomainNetGetModelString(net)) {
-                if (net->driver.virtio.name == VIR_DOMAIN_NET_BACKEND_TYPE_QEMU)
+                if (net->driver.virtio.name == VIR_DOMAIN_NET_DRIVER_TYPE_QEMU)
                     continue;
                 if (!virDomainNetIsVirtioModel(net))
                     continue;
@@ -1330,7 +1336,7 @@ get_files(vahControl * ctl)
         virBufferAddLit(&buf, "  \"/dev/nvidiactl\" rw,\n");
         virBufferAddLit(&buf, "  # Probe DRI device attributes\n");
         virBufferAddLit(&buf, "  \"/dev/dri/\" r,\n");
-        virBufferAddLit(&buf, "  \"/sys/devices/**/{uevent,vendor,device,subsystem_vendor,subsystem_device}\" r,\n");
+        virBufferAddLit(&buf, "  \"/sys/devices/**/{uevent,vendor,device,subsystem_vendor,subsystem_device,config,revision}\" r,\n");
         virBufferAddLit(&buf, "  # dri libs will trigger that, but t is not requited and DAC would deny it anyway\n");
         virBufferAddLit(&buf, "  deny \"/var/lib/libvirt/.cache/\" w,\n");
     }
@@ -1353,17 +1359,17 @@ vahParseArgv(vahControl * ctl, int argc, char **argv)
 {
     int arg, idx = 0;
     struct option opt[] = {
-        {"add", 0, 0, 'a'},
-        {"create", 0, 0, 'c'},
-        {"dryrun", 0, 0, 'd'},
-        {"delete", 0, 0, 'D'},
-        {"add-file", 0, 0, 'f'},
-        {"append-file", 0, 0, 'F'},
-        {"help", 0, 0, 'h'},
-        {"replace", 0, 0, 'r'},
-        {"remove", 0, 0, 'R'},
-        {"uuid", 1, 0, 'u'},
-        {0, 0, 0, 0}
+        { "add", 0, 0, 'a' },
+        { "create", 0, 0, 'c' },
+        { "dryrun", 0, 0, 'd' },
+        { "delete", 0, 0, 'D' },
+        { "add-file", 0, 0, 'f' },
+        { "append-file", 0, 0, 'F' },
+        { "help", 0, 0, 'h' },
+        { "replace", 0, 0, 'r' },
+        { "remove", 0, 0, 'R' },
+        { "uuid", 1, 0, 'u' },
+        { 0, 0, 0, 0 },
     };
 
     while ((arg = getopt_long(argc, argv, "acdDhrRH:b:u:p:f:F:", opt,
@@ -1447,22 +1453,25 @@ vahParseArgv(vahControl * ctl, int argc, char **argv)
 int
 main(int argc, char **argv)
 {
-    vahControl _ctl, *ctl = &_ctl;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    vahControl _ctl = { 0 };
+    vahControl *ctl = &_ctl;
     int rc = -1;
     char *profile = NULL;
     char *include_file = NULL;
+    off_t size;
+    bool purged = 0;
 
     if (virGettextInitialize() < 0 ||
         virErrorInitialize() < 0) {
-        fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
+        fprintf(stderr, _("%1$s: initialization failed\n"), argv[0]);
         exit(EXIT_FAILURE);
     }
 
     virFileActivateDirOverrideForProg(argv[0]);
 
     /* Initialize the log system */
-    virLogSetFromEnv();
+    if (virLogSetFromEnv() < 0)
+        exit(EXIT_FAILURE);
 
     /* clear the environment */
     environ = NULL;
@@ -1478,8 +1487,6 @@ main(int argc, char **argv)
     else
         progname++;
 
-    memset(ctl, 0, sizeof(vahControl));
-
     if (vahParseArgv(ctl, argc, argv) != 0)
         vah_error(ctl, 1, _("could not parse arguments"));
 
@@ -1490,16 +1497,31 @@ main(int argc, char **argv)
         rc = parserLoad(ctl->uuid);
     } else if (ctl->cmd == 'R' || ctl->cmd == 'D') {
         rc = parserRemove(ctl->uuid);
-        if (ctl->cmd == 'D') {
+        if (ctl->cmd == 'D')
             unlink(include_file);
-            unlink(profile);
-        }
     } else if (ctl->cmd == 'c' || ctl->cmd == 'r') {
         char *included_files = NULL;
+        g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
         if (ctl->cmd == 'c' && virFileExists(profile))
             vah_error(ctl, 1, _("profile exists"));
 
+        /*
+         * Rare cases can leave corrupted empty files behind breaking
+         * the guest. An empty file is never correct as virt-aa-helper
+         * would at least add the basic rules, therefore clean this up
+         * for a proper refresh.
+         */
+        if (virFileExists(profile)) {
+                size = virFileLength(profile, -1);
+                if (size == 0) {
+                        vah_warning(_("Profile of 0 size detected, will attempt to remove it"));
+                        if ((rc = parserRemove(ctl->uuid)) != 0)
+                                vah_error(ctl, 1, _("could not remove profile"));
+                        unlink(profile);
+                        purged = true;
+                }
+        }
         if (ctl->append && ctl->newfile) {
             if (vah_add_file(&buf, ctl->newfile, "rwk") != 0)
                 goto cleanup;
@@ -1539,7 +1561,7 @@ main(int argc, char **argv)
 
 
         /* create the profile from TEMPLATE */
-        if (ctl->cmd == 'c') {
+        if (ctl->cmd == 'c' || purged) {
             char *tmp = NULL;
             tmp = g_strdup_printf("  #include <libvirt/%s.files>\n", ctl->uuid);
 

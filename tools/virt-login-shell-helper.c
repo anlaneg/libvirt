@@ -21,7 +21,6 @@
 
 #include <getopt.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <unistd.h>
 
 #include "internal.h"
@@ -39,7 +38,7 @@
 
 static const char *conf_file = SYSCONFDIR "/libvirt/virt-login-shell.conf";
 
-static int virLoginShellAllowedUser(virConfPtr conf,
+static int virLoginShellAllowedUser(virConf *conf,
                                     const char *name,
                                     gid_t *groups,
                                     size_t ngroups)
@@ -47,7 +46,8 @@ static int virLoginShellAllowedUser(virConfPtr conf,
     int ret = -1;
     size_t i;
     char *gname = NULL;
-    char **users = NULL, **entries;
+    g_auto(GStrv) users = NULL;
+    char **entries;
 
     if (virConfGetValueStringList(conf, "allowed_users", false, &users) < 0)
         goto cleanup;
@@ -80,16 +80,15 @@ static int virLoginShellAllowedUser(virConfPtr conf,
         }
     }
     virReportSystemError(EPERM,
-                         _("%s not matched against 'allowed_users' in %s"),
+                         _("%1$s not matched against 'allowed_users' in %2$s"),
                          name, conf_file);
  cleanup:
     VIR_FREE(gname);
-    virStringListFree(users);
     return ret;
 }
 
 
-static int virLoginShellGetShellArgv(virConfPtr conf,
+static int virLoginShellGetShellArgv(virConf *conf,
                                      char ***shargv,
                                      size_t *shargvlen)
 {
@@ -99,12 +98,11 @@ static int virLoginShellGetShellArgv(virConfPtr conf,
         return -1;
 
     if (rv == 0) {
-        if (VIR_ALLOC_N(*shargv, 2) < 0)
-            return -1;
+        *shargv = g_new0(char *, 2);
         (*shargv)[0] = g_strdup("/bin/sh");
         *shargvlen = 1;
     } else {
-        *shargvlen = virStringListLength((const char *const *)shargv);
+        *shargvlen = g_strv_length(*shargv);
     }
     return 0;
 }
@@ -120,7 +118,7 @@ usage(void)
     fprintf(stdout,
             _("\n"
               "Usage:\n"
-              "  %s [option]\n\n"
+              "  %1$s [option]\n\n"
               "Options:\n"
               "  -h | --help            Display program help\n"
               "  -V | --version         Display program version\n"
@@ -158,7 +156,7 @@ main(int argc, char **argv)
     uid_t uid;
     gid_t gid;
     char *name = NULL;
-    char **shargv = NULL;
+    g_auto(GStrv) shargv = NULL;
     size_t shargvlen = 0;
     char *shcmd = NULL;
     virSecurityModelPtr secmodel = NULL;
@@ -181,9 +179,9 @@ main(int argc, char **argv)
     bool autoshell = false;
 
     struct option opt[] = {
-        {"help", no_argument, NULL, 'h'},
-        {"version", optional_argument, NULL, 'V'},
-        {NULL, 0, NULL, 0}
+        { "help", no_argument, NULL, 'h' },
+        { "version", optional_argument, NULL, 'V' },
+        { NULL, 0, NULL, 0 },
     };
     if (virInitialize() < 0) {
         fprintf(stderr, _("Failed to initialize libvirt error handling"));
@@ -198,12 +196,12 @@ main(int argc, char **argv)
         return ret;
 
     if (geteuid() != 0) {
-        fprintf(stderr, _("%s: must be run as root\n"), argv[0]);
+        fprintf(stderr, _("%1$s: must be run as root\n"), argv[0]);
         return ret;
     }
 
     if (getuid() != 0) {
-        fprintf(stderr, _("%s: must not be run setuid root\n"), argv[0]);
+        fprintf(stderr, _("%1$s: must not be run setuid root\n"), argv[0]);
         return ret;
     }
 
@@ -229,13 +227,13 @@ main(int argc, char **argv)
     }
 
     if (optind != (argc - 2)) {
-        virReportSystemError(EINVAL, _("%s expects UID and GID parameters"), progname);
+        virReportSystemError(EINVAL, _("%1$s expects UID and GID parameters"), progname);
         goto cleanup;
     }
 
     if (virStrToLong_ull(argv[optind], NULL, 10, &uidval) < 0 ||
         ((uid_t)uidval) != uidval) {
-        virReportSystemError(EINVAL, _("%s cannot parse UID '%s'"),
+        virReportSystemError(EINVAL, _("%1$s cannot parse UID '%2$s'"),
                              progname, argv[optind]);
         goto cleanup;
     }
@@ -243,7 +241,7 @@ main(int argc, char **argv)
     optind++;
     if (virStrToLong_ull(argv[optind], NULL, 10, &gidval) < 0 ||
         ((gid_t)gidval) != gidval) {
-        virReportSystemError(EINVAL, _("%s cannot parse GID '%s'"),
+        virReportSystemError(EINVAL, _("%1$s cannot parse GID '%2$s'"),
                              progname, argv[optind]);
         goto cleanup;
     }
@@ -287,7 +285,7 @@ main(int argc, char **argv)
         last_error = virGetLastError();
         if (last_error->code != VIR_ERR_OPERATION_INVALID) {
             virReportSystemError(last_error->code,
-                                 _("Can't create %s container: %s"),
+                                 _("Can't create %1$s container: %2$s"),
                                  name, last_error->message);
             goto cleanup;
         }
@@ -302,10 +300,8 @@ main(int argc, char **argv)
 
     if ((nfdlist = virDomainLxcOpenNamespace(dom, &fdlist, 0)) < 0)
         goto cleanup;
-    if (VIR_ALLOC(secmodel) < 0)
-        goto cleanup;
-    if (VIR_ALLOC(seclabel) < 0)
-        goto cleanup;
+    secmodel = g_new0(virSecurityModel, 1);
+    seclabel = g_new0(virSecurityLabel, 1);
     if (virNodeGetSecurityModel(conn, secmodel) < 0)
         goto cleanup;
     if (virDomainGetSecurityLabel(dom, seclabel) < 0)
@@ -322,27 +318,23 @@ main(int argc, char **argv)
     if (virSetUIDGID(uid, gid, groups, ngroups) < 0)
         goto cleanup;
     if (chdir(homedir) < 0) {
-        virReportSystemError(errno, _("Unable to chdir(%s)"), homedir);
+        virReportSystemError(errno, _("Unable to chdir(%1$s)"), homedir);
         goto cleanup;
     }
 
     if (autoshell) {
         tmp = virGetUserShell(uid);
         if (tmp) {
-            virStringListFree(shargv);
+            g_strfreev(shargv);
             shargvlen = 1;
-            if (VIR_ALLOC_N(shargv[0], shargvlen + 1) < 0) {
-                VIR_FREE(tmp);
-                goto cleanup;
-            }
+            shargv = g_new0(char *, shargvlen + 1);
             shargv[0] = tmp;
             shargv[1] = NULL;
         }
     }
 
     if (cmdstr) {
-        if (VIR_REALLOC_N(shargv, shargvlen + 3) < 0)
-            goto cleanup;
+        VIR_REALLOC_N(shargv, shargvlen + 3);
         shargv[shargvlen++] = g_strdup("-c");
         shargv[shargvlen++] = g_strdup(cmdstr);
         shargv[shargvlen] = NULL;
@@ -353,9 +345,9 @@ main(int argc, char **argv)
      * a leading '-' to indicate it is a login shell
      */
     shcmd = shargv[0];
-    if (shcmd[0] != '/') {
+    if (!g_path_is_absolute(shcmd)) {
         virReportSystemError(errno,
-                             _("Shell '%s' should have absolute path"),
+                             _("Shell '%1$s' should have absolute path"),
                              shcmd);
         goto cleanup;
     }
@@ -390,7 +382,7 @@ main(int argc, char **argv)
             g_setenv("TERM", term, TRUE);
 
         if (execv(shcmd, (char *const*) shargv) < 0) {
-            virReportSystemError(errno, _("Unable to exec shell %s"),
+            virReportSystemError(errno, _("Unable to exec shell %1$s"),
                                  shcmd);
             virDispatchError(NULL);
             return errno == ENOENT ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
@@ -410,7 +402,6 @@ main(int argc, char **argv)
         virDomainFree(dom);
     if (conn)
         virConnectClose(conn);
-    virStringListFree(shargv);
     VIR_FREE(shcmd);
     VIR_FREE(term);
     VIR_FREE(name);

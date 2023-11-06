@@ -18,7 +18,12 @@
 
 #include <config.h>
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#define LIBVIRT_VIRPCIVPDPRIV_H_ALLOW
+
+#include "virpcivpdpriv.h"
+
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
+# define VIR_MOCK_LOOKUP_MAIN
 # include "virmock.h"
 # include <unistd.h>
 # include <fcntl.h>
@@ -26,7 +31,6 @@
 # include <stdarg.h>
 # include <dirent.h>
 # include "viralloc.h"
-# include "virstring.h"
 # include "virfile.h"
 
 static int (*real_access)(const char *path, int mode);
@@ -120,7 +124,14 @@ struct pciDeviceAddress {
     unsigned int device;
     unsigned int function;
 };
-# define ADDR_STR_FMT "%04x:%02x:%02x.%d"
+# define ADDR_STR_FMT "%04x:%02x:%02x.%u"
+
+struct pciVPD {
+    /* PCI VPD contents (binary, may contain NULLs), NULL if not present. */
+    const char *data;
+    /* VPD length in bytes. */
+    size_t vpd_len;
+};
 
 struct pciDevice {
     struct pciDeviceAddress addr;
@@ -130,6 +141,7 @@ struct pciDevice {
     int iommuGroup;
     const char *physfn;
     struct pciDriver *driver;   /* Driver attached. NULL if attached to no driver */
+    struct pciVPD vpd;
 };
 
 struct fdCallback {
@@ -176,7 +188,7 @@ make_file(const char *path,
           const char *value,
           ssize_t len)
 {
-    int fd = -1;
+    VIR_AUTOCLOSE fd = -1;
     g_autofree char *filepath = NULL;
     if (value && len == -1)
         len = strlen(value);
@@ -188,8 +200,6 @@ make_file(const char *path,
 
     if (value && safewrite(fd, value, len) != len)
         ABORT("Unable to write: %s", filepath);
-
-    VIR_FORCE_CLOSE(fd);
 }
 
 static void
@@ -200,7 +210,7 @@ make_dir(const char *path,
 
     dirpath = g_strdup_printf("%s/%s", path, name);
 
-    if (virFileMakePath(dirpath) < 0)
+    if (g_mkdir_with_parents(dirpath, 0777) < 0)
         ABORT("Unable to create: %s", dirpath);
 }
 
@@ -232,7 +242,7 @@ pci_read_file(const char *path,
     if ((fd = real_open(newpath, O_RDWR)) < 0)
         goto cleanup;
 
-    bzero(buf, buf_size);
+    memset(buf, 0, buf_size);
     if (saferead(fd, buf, buf_size - 1) < 0) {
         STDERR("Unable to read from %s", newpath);
         goto cleanup;
@@ -305,11 +315,7 @@ add_fd(int fd, const char *path)
               fd, path, cb.fd, cb.path);
     }
 
-    if (VIR_REALLOC_N_QUIET(callbacks, nCallbacks + 1) < 0) {
-        errno = ENOMEM;
-        return -1;
-    }
-
+    callbacks = g_renew(struct fdCallback, callbacks, nCallbacks + 1);
     callbacks[nCallbacks].path = g_strdup(path);
     callbacks[nCallbacks++].fd = fd;
 
@@ -344,12 +350,8 @@ remove_fd(int fd)
 static char *
 pci_address_format(struct pciDeviceAddress const *addr)
 {
-    char *ret;
-
-    ret = g_strdup_printf(ADDR_STR_FMT,
-                          addr->domain, addr->bus,
-                          addr->device, addr->function);
-    return ret;
+    return g_strdup_printf(ADDR_STR_FMT, addr->domain, addr->bus,
+                           addr->device, addr->function);
 }
 
 static int
@@ -408,7 +410,7 @@ pci_device_create_iommu(const struct pciDevice *dev,
     iommuPath = g_strdup_printf("%s/sys/kernel/iommu_groups/%d/devices/",
                                 fakerootdir, dev->iommuGroup);
 
-    if (virFileMakePath(iommuPath) < 0)
+    if (g_mkdir_with_parents(iommuPath, 0777) < 0)
         ABORT("Unable to create: %s", iommuPath);
 
     if (g_snprintf(tmp, sizeof(tmp),
@@ -427,15 +429,11 @@ pci_device_create_iommu(const struct pciDevice *dev,
             return;
     }
 
-    if (VIR_ALLOC_QUIET(iommuGroup) < 0)
-        ABORT_OOM();
-
+    iommuGroup = g_new0(struct pciIommuGroup, 1);
     iommuGroup->iommu = dev->iommuGroup;
     iommuGroup->nDevicesBoundToVFIO = 0; /* No device bound to VFIO by default */
 
-    if (VIR_APPEND_ELEMENT_QUIET(pciIommuGroups, npciIommuGroups,
-                                 iommuGroup) < 0)
-        ABORT_OOM();
+    VIR_APPEND_ELEMENT(pciIommuGroups, npciIommuGroups, iommuGroup);
 }
 
 
@@ -469,8 +467,7 @@ pci_device_new_from_stub(const struct pciDevice *data)
         c = strchr(c, ':');
     }
 
-    if (VIR_ALLOC_QUIET(dev) < 0)
-        ABORT_OOM();
+    dev = g_new0(struct pciDevice, 1);
 
     configSrc = g_strdup_printf("%s/virpcitestdata/%s.config", abs_srcdir, id);
 
@@ -479,7 +476,7 @@ pci_device_new_from_stub(const struct pciDevice *data)
     if (!(devpath = pci_device_get_path(dev, NULL, true)))
         ABORT_OOM();
 
-    if (virFileMakePath(devpath) < 0)
+    if (g_mkdir_with_parents(devpath, 0777) < 0)
         ABORT("Unable to create: %s", devpath);
 
     if (stat(configSrc, &sb) == 0)
@@ -547,11 +544,13 @@ pci_device_new_from_stub(const struct pciDevice *data)
         make_symlink(devpath, "physfn", tmp);
     }
 
+    if (dev->vpd.data && dev->vpd.vpd_len)
+        make_file(devpath, "vpd", dev->vpd.data, dev->vpd.vpd_len);
+
     if (pci_device_autobind(dev) < 0)
         ABORT("Unable to bind: %s", devid);
 
-    if (VIR_APPEND_ELEMENT_QUIET(pciDevices, nPCIDevices, dev) < 0)
-        ABORT_OOM();
+    VIR_APPEND_ELEMENT(pciDevices, nPCIDevices, dev);
 }
 
 static struct pciDevice *
@@ -694,13 +693,12 @@ pci_driver_new(const char *name, ...)
     int vendor, device;
     g_autofree char *driverpath = NULL;
 
-    if (VIR_ALLOC_QUIET(driver) < 0)
-        ABORT_OOM();
+    driver = g_new0(struct pciDriver, 1);
     driver->name = g_strdup(name);
     if (!(driverpath = pci_driver_get_path(driver, NULL, true)))
         ABORT_OOM();
 
-    if (virFileMakePath(driverpath) < 0)
+    if (g_mkdir_with_parents(driverpath, 0777) < 0)
         ABORT("Unable to create: %s", driverpath);
 
     va_start(args, name);
@@ -709,12 +707,12 @@ pci_driver_new(const char *name, ...)
         if ((device = va_arg(args, int)) == -1)
             ABORT("Invalid vendor device pair for driver %s", name);
 
-        if (VIR_REALLOC_N_QUIET(driver->vendor, driver->len + 1) < 0 ||
-            VIR_REALLOC_N_QUIET(driver->device, driver->len + 1) < 0)
-            ABORT_OOM();
-
+        driver->vendor = g_renew(int, driver->vendor, driver->len + 1);
         driver->vendor[driver->len] = vendor;
+
+        driver->device = g_renew(int, driver->device, driver->len + 1);
         driver->device[driver->len] = device;
+
         driver->len++;
     }
 
@@ -723,8 +721,7 @@ pci_driver_new(const char *name, ...)
     make_file(driverpath, "bind", NULL, -1);
     make_file(driverpath, "unbind", NULL, -1);
 
-    if (VIR_APPEND_ELEMENT_QUIET(pciDrivers, nPCIDrivers, driver) < 0)
-        ABORT_OOM();
+    VIR_APPEND_ELEMENT(pciDrivers, nPCIDrivers, driver);
 }
 
 static struct pciDriver *
@@ -943,7 +940,11 @@ init_syms(void)
     VIR_MOCK_REAL_INIT(__open_2);
 # endif /* ! __GLIBC__ */
     VIR_MOCK_REAL_INIT(close);
+# if defined(__APPLE__) && defined(__x86_64__)
+    VIR_MOCK_REAL_INIT_ALIASED(opendir, "opendir$INODE64");
+# else
     VIR_MOCK_REAL_INIT(opendir);
+# endif
     VIR_MOCK_REAL_INIT(virFileCanonicalizePath);
 }
 
@@ -951,13 +952,27 @@ static void
 init_env(void)
 {
     g_autofree char *tmp = NULL;
+    const char fullVPDExampleData[] = {
+        PCI_VPD_LARGE_RESOURCE_FLAG | PCI_VPD_STRING_RESOURCE_FLAG, 0x08, 0x00,
+        't', 'e', 's', 't', 'n', 'a', 'm', 'e',
+        PCI_VPD_LARGE_RESOURCE_FLAG | PCI_VPD_READ_ONLY_LARGE_RESOURCE_FLAG, 0x16, 0x00,
+        'P', 'N', 0x02, '4', '2',
+        'E', 'C', 0x04, '4', '2', '4', '2',
+        'V', 'A', 0x02, 'E', 'X',
+        'R', 'V', 0x02, 0x31, 0x00,
+        PCI_VPD_RESOURCE_END_VAL
+    };
+    struct pciVPD exampleVPD = {
+        .data = fullVPDExampleData,
+        .vpd_len = G_N_ELEMENTS(fullVPDExampleData),
+    };
 
     if (!(fakerootdir = getenv("LIBVIRT_FAKE_ROOT_DIR")))
         ABORT("Missing LIBVIRT_FAKE_ROOT_DIR env variable\n");
 
     tmp = g_strdup_printf("%s%s", fakerootdir, SYSFS_PCI_PREFIX);
 
-    if (virFileMakePath(tmp) < 0)
+    if (g_mkdir_with_parents(tmp, 0777) < 0)
         ABORT("Unable to create: %s", tmp);
 
     make_dir(tmp, "devices");
@@ -968,7 +983,7 @@ init_env(void)
     VIR_FREE(tmp);
     tmp = g_strdup_printf("%s/dev/vfio", fakerootdir);
 
-    if (virFileMakePath(tmp) < 0)
+    if (g_mkdir_with_parents(tmp, 0777) < 0)
         ABORT("Unable to create: %s", tmp);
 
     make_file(tmp, "vfio", NULL, -1);
@@ -1017,6 +1032,8 @@ init_env(void)
 
     MAKE_PCI_DEVICE("0000:01:00.0", 0x1cc1, 0x8201, 14, .klass = 0x010802);
     MAKE_PCI_DEVICE("0000:02:00.0", 0x1cc1, 0x8201, 15, .klass = 0x010802);
+
+    MAKE_PCI_DEVICE("0000:03:00.0", 0x15b3, 0xa2d6, 16, .vpd = exampleVPD);
 }
 
 
@@ -1086,7 +1103,7 @@ open(const char *path, int flags, ...)
 
 # ifdef __GLIBC__
 /* in some cases this function may not be present in headers, so we need
- * a declaration to silence the complier */
+ * a declaration to silence the compiler */
 int
 __open_2(const char *path, int flags);
 
@@ -1131,6 +1148,8 @@ opendir(const char *path)
 int
 close(int fd)
 {
+    init_syms();
+
     if (remove_fd(fd) < 0)
         return -1;
     return real_close(fd);

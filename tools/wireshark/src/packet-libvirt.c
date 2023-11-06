@@ -18,13 +18,10 @@
  */
 #include <config.h>
 
-#include <wireshark/config.h>
 #include <wireshark/epan/proto.h>
 #include <wireshark/epan/packet.h>
 #include <wireshark/epan/dissectors/packet-tcp.h>
-#ifdef HAVE_RPC_TYPES_H
-# include <rpc/types.h>
-#endif
+#include <rpc/types.h>
 #include <rpc/xdr.h>
 #include "packet-libvirt.h"
 #include "internal.h"
@@ -75,17 +72,21 @@ static gint ett_libvirt_stream_hole = -1;
         } \
     }
 
-XDR_PRIMITIVE_DISSECTOR(int,     gint32,  int)
-XDR_PRIMITIVE_DISSECTOR(u_int,   guint32, uint)
-XDR_PRIMITIVE_DISSECTOR(short,   gint16,  int)
-XDR_PRIMITIVE_DISSECTOR(u_short, guint16, uint)
-XDR_PRIMITIVE_DISSECTOR(char,    gchar,   int)
-XDR_PRIMITIVE_DISSECTOR(u_char,  guchar,  uint)
-XDR_PRIMITIVE_DISSECTOR(hyper,   gint64,  int64)
-XDR_PRIMITIVE_DISSECTOR(u_hyper, guint64, uint64)
-XDR_PRIMITIVE_DISSECTOR(float,   gfloat,  float)
-XDR_PRIMITIVE_DISSECTOR(double,  gdouble, double)
-XDR_PRIMITIVE_DISSECTOR(bool,    bool_t,  boolean)
+VIR_WARNINGS_NO_UNUSED_FUNCTION
+
+XDR_PRIMITIVE_DISSECTOR(int,     gint32,   int)
+XDR_PRIMITIVE_DISSECTOR(u_int,   guint32,  uint)
+XDR_PRIMITIVE_DISSECTOR(short,   gint16,   int)
+XDR_PRIMITIVE_DISSECTOR(u_short, guint16,  uint)
+XDR_PRIMITIVE_DISSECTOR(char,    gchar,    int)
+XDR_PRIMITIVE_DISSECTOR(u_char,  guchar,   uint)
+XDR_PRIMITIVE_DISSECTOR(hyper,   quad_t,   int64)
+XDR_PRIMITIVE_DISSECTOR(u_hyper, u_quad_t, uint64)
+XDR_PRIMITIVE_DISSECTOR(float,   gfloat,   float)
+XDR_PRIMITIVE_DISSECTOR(double,  gdouble,  double)
+XDR_PRIMITIVE_DISSECTOR(bool,    bool_t,   boolean)
+
+VIR_WARNINGS_RESET
 
 typedef gboolean (*vir_xdr_dissector_t)(tvbuff_t *tvb, proto_tree *tree, XDR *xdrs, int hf);
 
@@ -157,24 +158,6 @@ dissect_xdr_string(tvbuff_t *tvb, proto_tree *tree, XDR *xdrs, int hf,
     }
 }
 
-static const gchar *
-format_xdr_bytes(guint8 *bytes, guint32 length)
-{
-    gchar *buf;
-    guint32 i;
-
-    if (length == 0)
-        return "";
-    buf = wmem_alloc(wmem_packet_scope(), length*2 + 1);
-    for (i = 0; i < length; i++) {
-        /* We know that buf has enough size to contain
-           2 * length + '\0' characters. */
-        g_snprintf(buf, 2*(length - i) + 1, "%02x", bytes[i]);
-        buf += 2;
-    }
-    return buf - length*2;
-}
-
 static gboolean
 dissect_xdr_opaque(tvbuff_t *tvb, proto_tree *tree, XDR *xdrs, int hf,
                    guint32 size)
@@ -186,8 +169,10 @@ dissect_xdr_opaque(tvbuff_t *tvb, proto_tree *tree, XDR *xdrs, int hf,
     val = g_malloc(size);
     start = xdr_getpos(xdrs);
     if ((rc = xdr_opaque(xdrs, (caddr_t)val, size))) {
-        proto_tree_add_bytes_format_value(tree, hf, tvb, start, xdr_getpos(xdrs) - start,
-                                          NULL, "%s", format_xdr_bytes(val, size));
+        gint len = xdr_getpos(xdrs) - start;
+        const char *s = tvb_bytes_to_str(wmem_packet_scope(), tvb, start, len);
+
+        proto_tree_add_bytes_format_value(tree, hf, tvb, start, len, NULL, "%s", s);
     } else {
         proto_tree_add_item(tree, hf_libvirt_unknown, tvb, start, -1, ENC_NA);
     }
@@ -206,10 +191,10 @@ dissect_xdr_bytes(tvbuff_t *tvb, proto_tree *tree, XDR *xdrs, int hf,
 
     start = xdr_getpos(xdrs);
     if (xdr_bytes(xdrs, (char **)&val, &length, maxlen)) {
-        proto_tree_add_bytes_format_value(tree, hf, tvb, start, xdr_getpos(xdrs) - start,
-                                          NULL, "%s", format_xdr_bytes(val, length));
-        /* Seems I can't call xdr_free() for this case.
-           It will raises SEGV by referencing out of bounds call stack */
+        gint len = xdr_getpos(xdrs) - start;
+        const char *s = tvb_bytes_to_str(wmem_packet_scope(), tvb, start, len);
+
+        proto_tree_add_bytes_format_value(tree, hf, tvb, start, len, NULL, "%s", s);
         free(val);
         return TRUE;
     } else {
@@ -345,7 +330,9 @@ dissect_libvirt_num_of_fds(tvbuff_t *tvb, proto_tree *tree)
 }
 
 static void
-dissect_libvirt_fds(tvbuff_t *tvb, gint start, gint32 nfds)
+dissect_libvirt_fds(tvbuff_t *tvb G_GNUC_UNUSED,
+                    gint start G_GNUC_UNUSED,
+                    gint32 nfds G_GNUC_UNUSED)
 {
     /* TODO: NOP for now */
 }
@@ -420,8 +407,14 @@ dissect_libvirt_payload(tvbuff_t *tvb, proto_tree *tree,
         return; /* No payload */
 
     if (status == VIR_NET_OK) {
-        vir_xdr_dissector_t xd = find_payload_dissector(proc, type, get_program_data(prog, VIR_PROGRAM_DISSECTORS),
-                                                        *(gsize *)get_program_data(prog, VIR_PROGRAM_DISSECTORS_LEN));
+        const vir_dissector_index_t *pds = get_program_data(prog, VIR_PROGRAM_DISSECTORS);
+        const gsize *len = get_program_data(prog, VIR_PROGRAM_DISSECTORS_LEN);
+        vir_xdr_dissector_t xd;
+
+        if (!len)
+            goto unknown;
+
+        xd = find_payload_dissector(proc, type, pds, *len);
         if (xd == NULL)
             goto unknown;
         dissect_libvirt_payload_xdr_data(tvb, tree, payload_length, status, xd);

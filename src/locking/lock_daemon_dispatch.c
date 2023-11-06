@@ -23,7 +23,6 @@
 #include "rpc/virnetdaemon.h"
 #include "rpc/virnetserverclient.h"
 #include "virlog.h"
-#include "virstring.h"
 #include "lock_daemon.h"
 #include "lock_protocol.h"
 #include "virerror.h"
@@ -36,20 +35,20 @@ VIR_LOG_INIT("locking.lock_daemon_dispatch");
 #include "lock_daemon_dispatch_stubs.h"
 
 static int
-virLockSpaceProtocolDispatchAcquireResource(virNetServerPtr server G_GNUC_UNUSED,
-                                            virNetServerClientPtr client,
-                                            virNetMessagePtr msg G_GNUC_UNUSED,
-                                            virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchAcquireResource(virNetServer *server G_GNUC_UNUSED,
+                                            virNetServerClient *client,
+                                            virNetMessage *msg G_GNUC_UNUSED,
+                                            struct virNetMessageError *rerr,
                                             virLockSpaceProtocolAcquireResourceArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     unsigned int newFlags;
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(VIR_LOCK_SPACE_PROTOCOL_ACQUIRE_RESOURCE_SHARED |
                       VIR_LOCK_SPACE_PROTOCOL_ACQUIRE_RESOURCE_AUTOCREATE, cleanup);
@@ -68,7 +67,7 @@ virLockSpaceProtocolDispatchAcquireResource(virNetServerPtr server G_GNUC_UNUSED
 
     if (!(lockspace = virLockDaemonFindLockSpace(lockDaemon, args->path))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Lockspace for path %s does not exist"),
+                       _("Lockspace for path %1$s does not exist"),
                        args->path);
         goto cleanup;
     }
@@ -90,25 +89,25 @@ virLockSpaceProtocolDispatchAcquireResource(virNetServerPtr server G_GNUC_UNUSED
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchCreateResource(virNetServerPtr server G_GNUC_UNUSED,
-                                           virNetServerClientPtr client,
-                                           virNetMessagePtr msg G_GNUC_UNUSED,
-                                           virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchCreateResource(virNetServer *server G_GNUC_UNUSED,
+                                           virNetServerClient *client,
+                                           virNetMessage *msg G_GNUC_UNUSED,
+                                           struct virNetMessageError *rerr,
                                            virLockSpaceProtocolCreateResourceArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(0, cleanup);
 
@@ -126,7 +125,7 @@ virLockSpaceProtocolDispatchCreateResource(virNetServerPtr server G_GNUC_UNUSED,
 
     if (!(lockspace = virLockDaemonFindLockSpace(lockDaemon, args->path))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Lockspace for path %s does not exist"),
+                       _("Lockspace for path %1$s does not exist"),
                        args->path);
         goto cleanup;
     }
@@ -139,25 +138,25 @@ virLockSpaceProtocolDispatchCreateResource(virNetServerPtr server G_GNUC_UNUSED,
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchDeleteResource(virNetServerPtr server G_GNUC_UNUSED,
-                                           virNetServerClientPtr client,
-                                           virNetMessagePtr msg G_GNUC_UNUSED,
-                                           virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchDeleteResource(virNetServer *server G_GNUC_UNUSED,
+                                           virNetServerClient *client,
+                                           virNetMessage *msg G_GNUC_UNUSED,
+                                           struct virNetMessageError *rerr,
                                            virLockSpaceProtocolDeleteResourceArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(0, cleanup);
 
@@ -175,7 +174,7 @@ virLockSpaceProtocolDispatchDeleteResource(virNetServerPtr server G_GNUC_UNUSED,
 
     if (!(lockspace = virLockDaemonFindLockSpace(lockDaemon, args->path))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Lockspace for path %s does not exist"),
+                       _("Lockspace for path %1$s does not exist"),
                        args->path);
         goto cleanup;
     }
@@ -188,25 +187,25 @@ virLockSpaceProtocolDispatchDeleteResource(virNetServerPtr server G_GNUC_UNUSED,
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchNew(virNetServerPtr server G_GNUC_UNUSED,
-                                virNetServerClientPtr client,
-                                virNetMessagePtr msg G_GNUC_UNUSED,
-                                virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchNew(virNetServer *server G_GNUC_UNUSED,
+                                virNetServerClient *client,
+                                virNetMessage *msg G_GNUC_UNUSED,
+                                struct virNetMessageError *rerr,
                                 virLockSpaceProtocolNewArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(0, cleanup);
 
@@ -230,7 +229,7 @@ virLockSpaceProtocolDispatchNew(virNetServerPtr server G_GNUC_UNUSED,
 
     if (virLockDaemonFindLockSpace(lockDaemon, args->path) != NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Lockspace for path %s already exists"),
+                       _("Lockspace for path %1$s already exists"),
                        args->path);
         goto cleanup;
     }
@@ -244,24 +243,24 @@ virLockSpaceProtocolDispatchNew(virNetServerPtr server G_GNUC_UNUSED,
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchRegister(virNetServerPtr server G_GNUC_UNUSED,
-                                     virNetServerClientPtr client,
-                                     virNetMessagePtr msg G_GNUC_UNUSED,
-                                     virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchRegister(virNetServer *server G_GNUC_UNUSED,
+                                     virNetServerClient *client,
+                                     virNetMessage *msg G_GNUC_UNUSED,
+                                     struct virNetMessageError *rerr,
                                      virLockSpaceProtocolRegisterArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(0, cleanup);
 
@@ -289,25 +288,25 @@ virLockSpaceProtocolDispatchRegister(virNetServerPtr server G_GNUC_UNUSED,
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchReleaseResource(virNetServerPtr server G_GNUC_UNUSED,
-                                            virNetServerClientPtr client,
-                                            virNetMessagePtr msg G_GNUC_UNUSED,
-                                            virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchReleaseResource(virNetServer *server G_GNUC_UNUSED,
+                                            virNetServerClient *client,
+                                            virNetMessage *msg G_GNUC_UNUSED,
+                                            struct virNetMessageError *rerr,
                                             virLockSpaceProtocolReleaseResourceArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(0, cleanup);
 
@@ -325,7 +324,7 @@ virLockSpaceProtocolDispatchReleaseResource(virNetServerPtr server G_GNUC_UNUSED
 
     if (!(lockspace = virLockDaemonFindLockSpace(lockDaemon, args->path))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Lockspace for path %s does not exist"),
+                       _("Lockspace for path %1$s does not exist"),
                        args->path);
         goto cleanup;
     }
@@ -340,24 +339,24 @@ virLockSpaceProtocolDispatchReleaseResource(virNetServerPtr server G_GNUC_UNUSED
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchRestrict(virNetServerPtr server G_GNUC_UNUSED,
-                                     virNetServerClientPtr client,
-                                     virNetMessagePtr msg G_GNUC_UNUSED,
-                                     virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchRestrict(virNetServer *server G_GNUC_UNUSED,
+                                     virNetServerClient *client,
+                                     virNetMessage *msg G_GNUC_UNUSED,
+                                     struct virNetMessageError *rerr,
                                      virLockSpaceProtocolRestrictArgs *args)
 {
     int rv = -1;
     unsigned int flags = args->flags;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     virCheckFlagsGoto(0, cleanup);
 
@@ -379,24 +378,24 @@ virLockSpaceProtocolDispatchRestrict(virNetServerPtr server G_GNUC_UNUSED,
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }
 
 
 static int
-virLockSpaceProtocolDispatchCreateLockSpace(virNetServerPtr server G_GNUC_UNUSED,
-                                            virNetServerClientPtr client,
-                                            virNetMessagePtr msg G_GNUC_UNUSED,
-                                            virNetMessageErrorPtr rerr,
+virLockSpaceProtocolDispatchCreateLockSpace(virNetServer *server G_GNUC_UNUSED,
+                                            virNetServerClient *client,
+                                            virNetMessage *msg G_GNUC_UNUSED,
+                                            struct virNetMessageError *rerr,
                                             virLockSpaceProtocolCreateLockSpaceArgs *args)
 {
     int rv = -1;
-    virLockDaemonClientPtr priv =
+    virLockDaemonClient *priv =
         virNetServerClientGetPrivateData(client);
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
 
-    virMutexLock(&priv->lock);
+    g_mutex_lock(&priv->lock);
 
     if (priv->restricted) {
         virReportError(VIR_ERR_OPERATION_DENIED, "%s",
@@ -405,9 +404,8 @@ virLockSpaceProtocolDispatchCreateLockSpace(virNetServerPtr server G_GNUC_UNUSED
     }
 
     if (virLockDaemonFindLockSpace(lockDaemon, args->path) != NULL) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       _("Lockspace for path %s already exists"),
-                       args->path);
+        VIR_DEBUG("Lockspace for path %s already exists", args->path);
+        rv = 0;
         goto cleanup;
     }
 
@@ -424,6 +422,6 @@ virLockSpaceProtocolDispatchCreateLockSpace(virNetServerPtr server G_GNUC_UNUSED
  cleanup:
     if (rv < 0)
         virNetMessageSaveError(rerr);
-    virMutexUnlock(&priv->lock);
+    g_mutex_unlock(&priv->lock);
     return rv;
 }

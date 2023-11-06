@@ -8,31 +8,13 @@
 .#*
 *~
 
-# autotools related ignores
-!/m4/virt-*.m4
-*.cov
-/AUTHORS
-/INSTALL
-/aclocal.m4
-/autom4te.cache
-/build-aux/compile
-/build-aux/config.guess
-/build-aux/config.sub
-/build-aux/depcomp
-/build-aux/install-sh
-/build-aux/ltmain.sh
-/build-aux/missing
-/build-aux/test-driver
-/config.h.in
-/config.log
-/configure
-/m4/*
-Makefile.in
-
 # git related ignores
 *.rej
 *.orig
 .git-module-status
+
+# python related ignores
+__pycache__/
 
 # libvirt related ignores
 /build/
@@ -41,3 +23,7 @@ tags
 .cproject
 .project
 .settings/
+
+# clangd related ignores
+.clangd
+compile_commands.json

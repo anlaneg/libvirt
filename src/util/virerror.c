@@ -27,7 +27,7 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "virthread.h"
-#include "virstring.h"
+#include "virbuffer.h"
 
 #define LIBVIRT_VIRERRORPRIV_H_ALLOW
 #include "virerrorpriv.h"
@@ -145,6 +145,7 @@ VIR_ENUM_IMPL(virErrorDomain,
 
               "TPM", /* 70 */
               "BPF",
+              "Cloud-Hypervisor Driver",
 );
 
 
@@ -159,7 +160,7 @@ virLastErrFreeData(void *data)
     if (!err)
         return;
     virResetError(err);
-    VIR_FREE(err);
+    g_free(err);
 }
 
 
@@ -224,14 +225,8 @@ virCopyError(virErrorPtr from,
 virErrorPtr
 virErrorCopyNew(virErrorPtr err)
 {
-    virErrorPtr ret;
-
-    if (VIR_ALLOC_QUIET(ret) < 0)
-        return NULL;
-
-    if (virCopyError(err, ret) < 0)
-        VIR_FREE(ret);
-
+    virErrorPtr ret = g_new0(virError, 1);
+    virCopyError(err, ret);
     return ret;
 }
 
@@ -242,10 +237,9 @@ virLastErrorObject(void)
     virErrorPtr err;
     err = virThreadLocalGet(&virLastErr);
     if (!err) {
-        if (VIR_ALLOC_QUIET(err) < 0)
-            return NULL;
+        err = g_new0(virError, 1);
         if (virThreadLocalSet(&virLastErr, err) < 0)
-            VIR_FREE(err);
+            g_clear_pointer(&err, g_free);
     }
     return err;
 }
@@ -260,6 +254,8 @@ virLastErrorObject(void)
  * threads can safely access this concurrently.
  *
  * Returns a pointer to the last error or NULL if none occurred.
+ *
+ * Since: 0.1.0
  */
 virErrorPtr
 virGetLastError(void)
@@ -277,6 +273,8 @@ virGetLastError(void)
  * Get the most recent error code (enum virErrorNumber).
  *
  * Returns the most recent error code, or VIR_ERR_OK if none is set.
+ *
+ * Since: 4.5.0
  */
 int
 virGetLastErrorCode(void)
@@ -295,6 +293,8 @@ virGetLastErrorCode(void)
  *
  * Returns a numerical value of the most recent error's origin, or VIR_FROM_NONE
  * if none is set.
+ *
+ * Since: 4.5.0
  */
 int
 virGetLastErrorDomain(void)
@@ -313,6 +313,8 @@ virGetLastErrorDomain(void)
  *
  * Returns the most recent error message string in this
  * thread, or a generic message if none is set
+ *
+ * Since: 1.0.6
  */
 const char *
 virGetLastErrorMessage(void)
@@ -367,6 +369,8 @@ virSetError(virErrorPtr newerr)
  * One will need to free the result with virResetError()
  *
  * Returns error code or -1 in case of parameter error.
+ *
+ * Since: 0.1.0
  */
 int
 virCopyLastError(virErrorPtr to)
@@ -398,6 +402,8 @@ virCopyLastError(virErrorPtr to)
  * Returns a pointer to the copied error or NULL if allocation failed.
  * It is the caller's responsibility to free the error with
  * virFreeError().
+ *
+ * Since: 0.6.1
  */
 virErrorPtr
 virSaveLastError(void)
@@ -405,8 +411,7 @@ virSaveLastError(void)
     virErrorPtr to;
     int saved_errno = errno;
 
-    if (VIR_ALLOC_QUIET(to) < 0)
-        return NULL;
+    to = g_new0(virError, 1);
 
     virCopyLastError(to);
     errno = saved_errno;
@@ -452,8 +457,7 @@ virErrorRestore(virErrorPtr *savederr)
         return;
 
     virSetError(*savederr);
-    virFreeError(*savederr);
-    *savederr = NULL;
+    g_clear_pointer(savederr, virFreeError);
     errno = saved_errno;
 }
 
@@ -463,6 +467,8 @@ virErrorRestore(virErrorPtr *savederr)
  * @err: pointer to the virError to clean up
  *
  * Reset the error being pointed to
+ *
+ * Since: 0.1.0
  */
 void
 virResetError(virErrorPtr err)
@@ -481,12 +487,14 @@ virResetError(virErrorPtr err)
  * @err: error to free
  *
  * Resets and frees the given error.
+ *
+ * Since: 0.6.1
  */
 void
 virFreeError(virErrorPtr err)
 {
     virResetError(err);
-    VIR_FREE(err);
+    g_free(err);
 }
 
 /**
@@ -497,6 +505,8 @@ virFreeError(virErrorPtr err)
  * The error object is kept in thread local storage, so separate
  * threads can safely access this concurrently, only resetting
  * their own error object.
+ *
+ * Since: 0.1.0
  */
 void
 virResetLastError(void)
@@ -527,6 +537,8 @@ virResetLastError(void)
  * remains for backwards compatibility.
  *
  * Returns a pointer to the last error or NULL if none occurred.
+ *
+ * Since: 0.1.0
  */
 virErrorPtr
 virConnGetLastError(virConnectPtr conn)
@@ -561,6 +573,8 @@ virConnGetLastError(virConnectPtr conn)
  *
  * Returns 0 if no error was found and the error code otherwise and -1 in case
  *         of parameter error.
+ *
+ * Since: 0.1.0
  */
 int
 virConnCopyLastError(virConnectPtr conn, virErrorPtr to)
@@ -587,6 +601,8 @@ virConnCopyLastError(virConnectPtr conn, virErrorPtr to)
  * threads can safely access this concurrently.
  *
  * Reset the last error caught on that connection
+ *
+ * Since: 0.1.0
  */
 void
 virConnResetLastError(virConnectPtr conn)
@@ -606,6 +622,8 @@ virConnResetLastError(virConnectPtr conn)
  * Set a library global error handling function, if @handler is NULL,
  * it will reset to default printing on stderr. The error raised there
  * are those for which no handler at the connection level could caught.
+ *
+ * Since: 0.1.0
  */
 void
 virSetErrorFunc(void *userData, virErrorFunc handler)
@@ -623,6 +641,8 @@ virSetErrorFunc(void *userData, virErrorFunc handler)
  * Set a connection error handling function, if @handler is NULL
  * it will reset to default which is to pass error back to the global
  * library handler.
+ *
+ * Since: 0.1.0
  */
 void
 virConnSetErrorFunc(virConnectPtr conn, void *userData,
@@ -641,6 +661,8 @@ virConnSetErrorFunc(virConnectPtr conn, void *userData,
  * @err: pointer to the error.
  *
  * Default routine reporting an error to stderr.
+ *
+ * Since: 0.1.0
  */
 void
 virDefaultErrorFunc(virErrorPtr err)
@@ -754,14 +776,81 @@ void virRaiseErrorLog(const char *filename,
      * hate & thus disable that too. If the daemon has set
      * a priority filter though, we should always forward
      * all errors to the logging code.
+     * Similarly when debug priority is the default we want to log the error.
      */
     if (virLogGetNbOutputs() > 0 ||
-        virErrorLogPriorityFilter)
+        virErrorLogPriorityFilter ||
+        virLogGetDefaultPriority() == VIR_LOG_DEBUG)
         virLogMessage(&virLogSelf,
                       priority,
                       filename, linenr, funcname,
                       meta, "%s", err->message);
 }
+
+
+/**
+ * virRaiseErrorInternal:
+ *
+ * Internal helper to assign and raise error. Note that @msgarg, @str1arg,
+ * @str2arg and @str3arg if non-NULL must be heap-allocated strings and are
+ * stolen and freed by this function.
+ */
+static void
+virRaiseErrorInternal(const char *filename,
+                      const char *funcname,
+                      size_t linenr,
+                      int domain,
+                      int code,
+                      virErrorLevel level,
+                      char *msgarg,
+                      char *str1arg,
+                      char *str2arg,
+                      char *str3arg,
+                      int int1,
+                      int int2)
+{
+    g_autofree char *msg = msgarg;
+    g_autofree char *str1 = str1arg;
+    g_autofree char *str2 = str2arg;
+    g_autofree char *str3 = str3arg;
+    virErrorPtr to;
+    virLogMetadata meta[] = {
+        { .key = "LIBVIRT_DOMAIN", .s = NULL, .iv = domain },
+        { .key = "LIBVIRT_CODE", .s = NULL, .iv = code },
+        { .key = NULL },
+    };
+
+    /*
+     * All errors are recorded in thread local storage
+     * For compatibility, public API calls will copy them
+     * to the per-connection error object when necessary
+     */
+    if (!(to = virLastErrorObject()))
+        return;
+
+    virResetError(to);
+
+    if (code == VIR_ERR_OK)
+        return;
+
+    if (!msg)
+        msg = g_strdup(_("No error message provided"));
+
+    /* Deliberately not setting conn, dom & net fields since
+     * they are utterly unsafe. */
+    to->domain = domain;
+    to->code = code;
+    to->message = g_steal_pointer(&msg);
+    to->level = level;
+    to->str1 = g_steal_pointer(&str1);
+    to->str2 = g_steal_pointer(&str2);
+    to->str3 = g_steal_pointer(&str3);
+    to->int1 = int1;
+    to->int2 = int2;
+
+    virRaiseErrorLog(filename, funcname, linenr, to, meta);
+}
+
 
 /**
  * virRaiseErrorFull:
@@ -797,63 +886,20 @@ virRaiseErrorFull(const char *filename,
                   const char *fmt, ...)
 {
     int save_errno = errno;
-    virErrorPtr to;
-    char *str;
-    virLogMetadata meta[] = {
-        { .key = "LIBVIRT_DOMAIN", .s = NULL, .iv = domain },
-        { .key = "LIBVIRT_CODE", .s = NULL, .iv = code },
-        { .key = NULL },
-    };
+    char *msg = NULL;
 
-    /*
-     * All errors are recorded in thread local storage
-     * For compatibility, public API calls will copy them
-     * to the per-connection error object when necessary
-     */
-    to = virLastErrorObject();
-    if (!to) {
-        errno = save_errno;
-        return; /* Hit OOM allocating thread error object, sod all we can do now */
-    }
-
-    virResetError(to);
-
-    if (code == VIR_ERR_OK) {
-        errno = save_errno;
-        return;
-    }
-
-    /*
-     * formats the message; drop message on OOM situations
-     */
-    if (fmt == NULL) {
-        str = g_strdup(_("No error message provided"));
-    } else {
+    if (fmt) {
         va_list ap;
+
         va_start(ap, fmt);
-        str = g_strdup_vprintf(fmt, ap);
+        msg = g_strdup_vprintf(fmt, ap);
         va_end(ap);
     }
 
-    /*
-     * Save the information about the error
-     */
-    /*
-     * Deliberately not setting conn, dom & net fields since
-     * they're utterly unsafe
-     */
-    to->domain = domain;
-    to->code = code;
-    to->message = str;
-    to->level = level;
-    to->str1 = g_strdup(str1);
-    to->str2 = g_strdup(str2);
-    to->str3 = g_strdup(str3);
-    to->int1 = int1;
-    to->int2 = int2;
-
-    virRaiseErrorLog(filename, funcname, linenr,
-                     to, meta);
+    virRaiseErrorInternal(filename, funcname, linenr,
+                          domain, code, level,
+                          msg, g_strdup(str1), g_strdup(str2), g_strdup(str3),
+                          int1, int2);
 
     errno = save_errno;
 }
@@ -914,115 +960,115 @@ static const virErrorMsgTuple virErrorMsgStrings[] = {
     [VIR_ERR_OK] = { NULL, NULL },
     [VIR_ERR_INTERNAL_ERROR] = {
         N_("internal error"),
-        N_("internal error: %s") },
+        N_("internal error: %1$s") },
     [VIR_ERR_NO_MEMORY] = {
         N_("out of memory"),
-        N_("out of memory: %s") },
+        N_("out of memory: %1$s") },
     [VIR_ERR_NO_SUPPORT] = {
         N_("this function is not supported by the connection driver"),
-        N_("this function is not supported by the connection driver: %s") },
+        N_("this function is not supported by the connection driver: %1$s") },
     [VIR_ERR_UNKNOWN_HOST] = {
         N_("unknown host"),
-        N_("unknown host %s") },
+        N_("unknown host %1$s") },
     [VIR_ERR_NO_CONNECT] = {
         N_("no connection driver available"),
-        N_("no connection driver available for %s") },
+        N_("no connection driver available for %1$s") },
     [VIR_ERR_INVALID_CONN] = {
         N_("invalid connection pointer in"),
-        N_("invalid connection pointer in %s") },
+        N_("invalid connection pointer in %1$s") },
     [VIR_ERR_INVALID_DOMAIN] = {
         N_("invalid domain pointer in"),
-        N_("invalid domain pointer in %s") },
+        N_("invalid domain pointer in %1$s") },
     [VIR_ERR_INVALID_ARG] = {
         N_("invalid argument"),
-        N_("invalid argument: %s") },
+        N_("invalid argument: %1$s") },
     [VIR_ERR_OPERATION_FAILED] = {
         N_("operation failed"),
-        N_("operation failed: %s") },
+        N_("operation failed: %1$s") },
     [VIR_ERR_GET_FAILED] = {
         N_("GET operation failed"),
-        N_("GET operation failed: %s") },
+        N_("GET operation failed: %1$s") },
     [VIR_ERR_POST_FAILED] = {
         N_("POST operation failed"),
-        N_("POST operation failed: %s") },
+        N_("POST operation failed: %1$s") },
     [VIR_ERR_HTTP_ERROR] = {
         N_("got unknown HTTP error code"),
-        N_("got unknown HTTP error code %s") },
+        N_("got unknown HTTP error code %1$s") },
     [VIR_ERR_SEXPR_SERIAL] = {
         N_("failed to serialize S-Expr"),
-        N_("failed to serialize S-Expr: %s") },
+        N_("failed to serialize S-Expr: %1$s") },
     [VIR_ERR_NO_XEN] = {
         N_("could not use Xen hypervisor entry"),
-        N_("could not use Xen hypervisor entry %s") },
+        N_("could not use Xen hypervisor entry %1$s") },
     [VIR_ERR_XEN_CALL] = {
         N_("failed Xen syscall"),
-        N_("failed Xen syscall %s") },
+        N_("failed Xen syscall %1$s") },
     [VIR_ERR_OS_TYPE] = {
         N_("unknown OS type"),
-        N_("unknown OS type %s") },
+        N_("unknown OS type %1$s") },
     [VIR_ERR_NO_KERNEL] = {
         N_("missing kernel information"),
-        N_("missing kernel information: %s") },
+        N_("missing kernel information: %1$s") },
     [VIR_ERR_NO_ROOT] = {
         N_("missing root device information"),
-        N_("missing root device information in %s") },
+        N_("missing root device information in %1$s") },
     [VIR_ERR_NO_SOURCE] = {
         N_("missing source information for device"),
-        N_("missing source information for device %s") },
+        N_("missing source information for device %1$s") },
     [VIR_ERR_NO_TARGET] = {
         N_("missing target information for device"),
-        N_("missing target information for device %s") },
+        N_("missing target information for device %1$s") },
     [VIR_ERR_NO_NAME] = {
         N_("missing name information"),
-        N_("missing name information in %s") },
+        N_("missing name information in %1$s") },
     [VIR_ERR_NO_OS] = {
         N_("missing operating system information"),
-        N_("missing operating system information for %s") },
+        N_("missing operating system information for %1$s") },
     [VIR_ERR_NO_DEVICE] = {
         N_("missing devices information"),
-        N_("missing devices information for %s") },
+        N_("missing devices information for %1$s") },
     [VIR_ERR_NO_XENSTORE] = {
         N_("could not connect to Xen Store"),
-        N_("could not connect to Xen Store %s") },
+        N_("could not connect to Xen Store %1$s") },
     [VIR_ERR_DRIVER_FULL] = {
         N_("too many drivers registered"),
-        N_("too many drivers registered in %s") },
+        N_("too many drivers registered in %1$s") },
     [VIR_ERR_CALL_FAILED] = {
         N_("library call failed"),
-        N_("library call failed: %s") },
+        N_("library call failed: %1$s") },
     [VIR_ERR_XML_ERROR] = {
         N_("XML description is invalid or not well formed"),
-        N_("XML error: %s") },
+        N_("XML error: %1$s") },
     [VIR_ERR_DOM_EXIST] = {
         N_("this domain exists already"),
-        N_("domain %s exists already") },
+        N_("domain %1$s exists already") },
     [VIR_ERR_OPERATION_DENIED] = {
         N_("operation forbidden for read only access"),
-        N_("operation forbidden: %s") },
+        N_("operation forbidden: %1$s") },
     [VIR_ERR_OPEN_FAILED] = {
         N_("failed to open configuration file"),
-        N_("failed to open configuration file %s") },
+        N_("failed to open configuration file %1$s") },
     [VIR_ERR_READ_FAILED] = {
         N_("failed to read configuration file"),
-        N_("failed to read configuration file %s") },
+        N_("failed to read configuration file %1$s") },
     [VIR_ERR_PARSE_FAILED] = {
         N_("failed to parse configuration file"),
-        N_("failed to parse configuration file %s") },
+        N_("failed to parse configuration file %1$s") },
     [VIR_ERR_CONF_SYNTAX] = {
         N_("configuration file syntax error"),
-        N_("configuration file syntax error: %s") },
+        N_("configuration file syntax error: %1$s") },
     [VIR_ERR_WRITE_FAILED] = {
         N_("failed to write configuration file"),
-        N_("failed to write configuration file: %s") },
+        N_("failed to write configuration file: %1$s") },
     [VIR_ERR_XML_DETAIL] = {
         N_("parser error"),
         "%s" },
     [VIR_ERR_INVALID_NETWORK] = {
         N_("invalid network pointer in"),
-        N_("invalid network pointer in %s") },
+        N_("invalid network pointer in %1$s") },
     [VIR_ERR_NETWORK_EXIST] = {
         N_("this network exists already"),
-        N_("network %s exists already") },
+        N_("network %1$s exists already") },
     [VIR_ERR_SYSTEM_ERROR] = {
         N_("system call error"),
         "%s" },
@@ -1034,208 +1080,217 @@ static const virErrorMsgTuple virErrorMsgStrings[] = {
         "%s" },
     [VIR_WAR_NO_NETWORK] = {
         N_("Failed to find the network"),
-        N_("Failed to find the network: %s") },
+        N_("Failed to find the network: %1$s") },
     [VIR_ERR_NO_DOMAIN] = {
         N_("Domain not found"),
-        N_("Domain not found: %s") },
+        N_("Domain not found: %1$s") },
     [VIR_ERR_NO_NETWORK] = {
         N_("Network not found"),
-        N_("Network not found: %s") },
+        N_("Network not found: %1$s") },
     [VIR_ERR_INVALID_MAC] = {
         N_("invalid MAC address"),
-        N_("invalid MAC address: %s") },
+        N_("invalid MAC address: %1$s") },
     [VIR_ERR_AUTH_FAILED] = {
         N_("authentication failed"),
-        N_("authentication failed: %s") },
+        N_("authentication failed: %1$s") },
     [VIR_ERR_INVALID_STORAGE_POOL] = {
         N_("invalid storage pool pointer in"),
-        N_("invalid storage pool pointer in %s") },
+        N_("invalid storage pool pointer in %1$s") },
     [VIR_ERR_INVALID_STORAGE_VOL] = {
         N_("invalid storage volume pointer in"),
-        N_("invalid storage volume pointer in %s") },
+        N_("invalid storage volume pointer in %1$s") },
     [VIR_WAR_NO_STORAGE] = {
         N_("Failed to find a storage driver"),
-        N_("Failed to find a storage driver: %s") },
+        N_("Failed to find a storage driver: %1$s") },
     [VIR_ERR_NO_STORAGE_POOL] = {
         N_("Storage pool not found"),
-        N_("Storage pool not found: %s") },
+        N_("Storage pool not found: %1$s") },
     [VIR_ERR_NO_STORAGE_VOL] = {
         N_("Storage volume not found"),
-        N_("Storage volume not found: %s") },
+        N_("Storage volume not found: %1$s") },
     [VIR_WAR_NO_NODE] = {
         N_("Failed to find a node driver"),
-        N_("Failed to find a node driver: %s") },
+        N_("Failed to find a node driver: %1$s") },
     [VIR_ERR_INVALID_NODE_DEVICE] = {
         N_("invalid node device pointer"),
-        N_("invalid node device pointer in %s") },
+        N_("invalid node device pointer in %1$s") },
     [VIR_ERR_NO_NODE_DEVICE] = {
         N_("Node device not found"),
-        N_("Node device not found: %s") },
+        N_("Node device not found: %1$s") },
     [VIR_ERR_NO_SECURITY_MODEL] = {
         N_("Security model not found"),
-        N_("Security model not found: %s") },
+        N_("Security model not found: %1$s") },
     [VIR_ERR_OPERATION_INVALID] = {
         N_("Requested operation is not valid"),
-        N_("Requested operation is not valid: %s") },
+        N_("Requested operation is not valid: %1$s") },
     [VIR_WAR_NO_INTERFACE] = {
         N_("Failed to find the interface"),
-        N_("Failed to find the interface: %s") },
+        N_("Failed to find the interface: %1$s") },
     [VIR_ERR_NO_INTERFACE] = {
         N_("Interface not found"),
-        N_("Interface not found: %s") },
+        N_("Interface not found: %1$s") },
     [VIR_ERR_INVALID_INTERFACE] = {
         N_("invalid interface pointer in"),
-        N_("invalid interface pointer in %s") },
+        N_("invalid interface pointer in %1$s") },
     [VIR_ERR_MULTIPLE_INTERFACES] = {
         N_("multiple matching interfaces found"),
-        N_("multiple matching interfaces found: %s") },
+        N_("multiple matching interfaces found: %1$s") },
     [VIR_WAR_NO_NWFILTER] = {
         N_("Failed to start the nwfilter driver"),
-        N_("Failed to start the nwfilter driver: %s") },
+        N_("Failed to start the nwfilter driver: %1$s") },
     [VIR_ERR_INVALID_NWFILTER] = {
         N_("Invalid network filter"),
-        N_("Invalid network filter: %s") },
+        N_("Invalid network filter: %1$s") },
     [VIR_ERR_NO_NWFILTER] = {
         N_("Network filter not found"),
-        N_("Network filter not found: %s") },
+        N_("Network filter not found: %1$s") },
     [VIR_ERR_BUILD_FIREWALL] = {
         N_("Error while building firewall"),
-        N_("Error while building firewall: %s") },
+        N_("Error while building firewall: %1$s") },
     [VIR_WAR_NO_SECRET] = {
         N_("Failed to find a secret storage driver"),
-        N_("Failed to find a secret storage driver: %s") },
+        N_("Failed to find a secret storage driver: %1$s") },
     [VIR_ERR_INVALID_SECRET] = {
         N_("Invalid secret"),
-        N_("Invalid secret: %s") },
+        N_("Invalid secret: %1$s") },
     [VIR_ERR_NO_SECRET] = {
         N_("Secret not found"),
-        N_("Secret not found: %s") },
+        N_("Secret not found: %1$s") },
     [VIR_ERR_CONFIG_UNSUPPORTED] = {
         N_("unsupported configuration"),
-        N_("unsupported configuration: %s") },
+        N_("unsupported configuration: %1$s") },
     [VIR_ERR_OPERATION_TIMEOUT] = {
         N_("Timed out during operation"),
-        N_("Timed out during operation: %s") },
+        N_("Timed out during operation: %1$s") },
     [VIR_ERR_MIGRATE_PERSIST_FAILED] = {
         N_("Failed to make domain persistent after migration"),
-        N_("Failed to make domain persistent after migration: %s") },
+        N_("Failed to make domain persistent after migration: %1$s") },
     [VIR_ERR_HOOK_SCRIPT_FAILED] = {
         N_("Hook script execution failed"),
-        N_("Hook script execution failed: %s") },
+        N_("Hook script execution failed: %1$s") },
     [VIR_ERR_INVALID_DOMAIN_SNAPSHOT] = {
         N_("Invalid domain snapshot"),
-        N_("Invalid domain snapshot: %s") },
+        N_("Invalid domain snapshot: %1$s") },
     [VIR_ERR_NO_DOMAIN_SNAPSHOT] = {
         N_("Domain snapshot not found"),
-        N_("Domain snapshot not found: %s") },
+        N_("Domain snapshot not found: %1$s") },
     [VIR_ERR_INVALID_STREAM] = {
         N_("invalid stream pointer"),
-        N_("invalid stream pointer in %s") },
+        N_("invalid stream pointer in %1$s") },
     [VIR_ERR_ARGUMENT_UNSUPPORTED] = {
         N_("argument unsupported"),
-        N_("argument unsupported: %s") },
+        N_("argument unsupported: %1$s") },
     [VIR_ERR_STORAGE_PROBE_FAILED] = {
         N_("Storage pool probe failed"),
-        N_("Storage pool probe failed: %s") },
+        N_("Storage pool probe failed: %1$s") },
     [VIR_ERR_STORAGE_POOL_BUILT] = {
         N_("Storage pool already built"),
-        N_("Storage pool already built: %s") },
+        N_("Storage pool already built: %1$s") },
     [VIR_ERR_SNAPSHOT_REVERT_RISKY] = {
         N_("revert requires force"),
-        N_("revert requires force: %s") },
+        N_("revert requires force: %1$s") },
     [VIR_ERR_OPERATION_ABORTED] = {
         N_("operation aborted"),
-        N_("operation aborted: %s") },
+        N_("operation aborted: %1$s") },
     [VIR_ERR_AUTH_CANCELLED] = {
         N_("authentication cancelled"),
-        N_("authentication cancelled: %s") },
+        N_("authentication cancelled: %1$s") },
     [VIR_ERR_NO_DOMAIN_METADATA] = {
         N_("metadata not found"),
-        N_("metadata not found: %s") },
+        N_("metadata not found: %1$s") },
     [VIR_ERR_MIGRATE_UNSAFE] = {
         N_("Unsafe migration"),
-        N_("Unsafe migration: %s") },
+        N_("Unsafe migration: %1$s") },
     [VIR_ERR_OVERFLOW] = {
         N_("numerical overflow"),
-        N_("numerical overflow: %s") },
+        N_("numerical overflow: %1$s") },
     [VIR_ERR_BLOCK_COPY_ACTIVE] = {
         N_("block copy still active"),
-        N_("block copy still active: %s") },
+        N_("block copy still active: %1$s") },
     [VIR_ERR_OPERATION_UNSUPPORTED] = {
         N_("Operation not supported"),
-        N_("Operation not supported: %s") },
+        N_("Operation not supported: %1$s") },
     [VIR_ERR_SSH] = {
         N_("SSH transport error"),
-        N_("SSH transport error: %s") },
+        N_("SSH transport error: %1$s") },
     [VIR_ERR_AGENT_UNRESPONSIVE] = {
         N_("Guest agent is not responding"),
-        N_("Guest agent is not responding: %s") },
+        N_("Guest agent is not responding: %1$s") },
     [VIR_ERR_RESOURCE_BUSY] = {
         N_("resource busy"),
-        N_("resource busy: %s") },
+        N_("resource busy: %1$s") },
     [VIR_ERR_ACCESS_DENIED] = {
         N_("access denied"),
-        N_("access denied: %s") },
+        N_("access denied: %1$s") },
     [VIR_ERR_DBUS_SERVICE] = {
         N_("error from service"),
-        N_("error from service: %s") },
+        N_("error from service: %1$s") },
     [VIR_ERR_STORAGE_VOL_EXIST] = {
         N_("this storage volume exists already"),
-        N_("storage volume %s exists already") },
+        N_("storage volume %1$s exists already") },
     [VIR_ERR_CPU_INCOMPATIBLE] = {
         N_("the CPU is incompatible with host CPU"),
-        N_("the CPU is incompatible with host CPU: %s") },
+        N_("the CPU is incompatible with host CPU: %1$s") },
     [VIR_ERR_XML_INVALID_SCHEMA] = {
         N_("XML document failed to validate against schema"),
-        N_("XML document failed to validate against schema: %s") },
+        N_("XML document failed to validate against schema: %1$s") },
     [VIR_ERR_MIGRATE_FINISH_OK] = {
         N_("migration successfully aborted"),
-        N_("migration successfully aborted: %s") },
+        N_("migration successfully aborted: %1$s") },
     [VIR_ERR_AUTH_UNAVAILABLE] = {
         N_("authentication unavailable"),
-        N_("authentication unavailable: %s") },
+        N_("authentication unavailable: %1$s") },
     [VIR_ERR_NO_SERVER] = {
         N_("Server not found"),
-        N_("Server not found: %s") },
+        N_("Server not found: %1$s") },
     [VIR_ERR_NO_CLIENT] = {
         N_("Client not found"),
-        N_("Client not found: %s") },
+        N_("Client not found: %1$s") },
     [VIR_ERR_AGENT_UNSYNCED] = {
         N_("guest agent replied with wrong id to guest-sync command"),
-        N_("guest agent replied with wrong id to guest-sync command: %s") },
+        N_("guest agent replied with wrong id to guest-sync command: %1$s") },
     [VIR_ERR_LIBSSH] = {
         N_("libssh transport error"),
-        N_("libssh transport error: %s") },
+        N_("libssh transport error: %1$s") },
     [VIR_ERR_DEVICE_MISSING] = {
         N_("device not found"),
-        N_("device not found: %s") },
+        N_("device not found: %1$s") },
     [VIR_ERR_INVALID_NWFILTER_BINDING] = {
         N_("Invalid network filter binding"),
-        N_("Invalid network filter binding: %s") },
+        N_("Invalid network filter binding: %1$s") },
     [VIR_ERR_NO_NWFILTER_BINDING] = {
         N_("Network filter binding not found"),
-        N_("Network filter binding not found: %s") },
+        N_("Network filter binding not found: %1$s") },
     [VIR_ERR_INVALID_DOMAIN_CHECKPOINT] = {
         N_("Invalid domain checkpoint"),
-        N_("Invalid domain checkpoint: %s") },
+        N_("Invalid domain checkpoint: %1$s") },
     [VIR_ERR_NO_DOMAIN_CHECKPOINT] = {
         N_("Domain checkpoint not found"),
-        N_("Domain checkpoint not found: %s") },
+        N_("Domain checkpoint not found: %1$s") },
     [VIR_ERR_NO_DOMAIN_BACKUP] = {
         N_("Domain backup job id not found"),
-        N_("Domain backup job id not found: %s") },
+        N_("Domain backup job id not found: %1$s") },
     [VIR_ERR_INVALID_NETWORK_PORT] = {
         N_("Invalid network port pointer"),
-        N_("Invalid network port pointer: %s") },
+        N_("Invalid network port pointer: %1$s") },
     [VIR_ERR_NETWORK_PORT_EXIST] = {
         N_("this network port exists already"),
-        N_("network port %s exists already") },
+        N_("network port %1$s exists already") },
     [VIR_ERR_NO_NETWORK_PORT] = {
         N_("network port not found"),
-        N_("network port not found: %s") },
+        N_("network port not found: %1$s") },
     [VIR_ERR_NO_HOSTNAME] = {
         N_("no hostname found"),
-        N_("no hostname found: %s") },
+        N_("no hostname found: %1$s") },
+    [VIR_ERR_CHECKPOINT_INCONSISTENT] = {
+        N_("checkpoint inconsistent"),
+        N_("checkpoint inconsistent: %1$s") },
+    [VIR_ERR_MULTIPLE_DOMAINS] = {
+        N_("multiple matching domains found"),
+        N_("multiple matching domains found: %1$s") },
+    [VIR_ERR_NO_NETWORK_METADATA] = {
+        N_("metadata not found"),
+        N_("metadata not found: %1$s") },
 };
 
 G_STATIC_ASSERT(G_N_ELEMENTS(virErrorMsgStrings) == VIR_ERR_NUMBER_LAST);
@@ -1288,23 +1343,31 @@ void virReportErrorHelper(int domcode,
                           const char *fmt, ...)
 {
     int save_errno = errno;
-    va_list args;
-    char errorMessage[VIR_ERROR_MAX_LENGTH];
-    const char *virerr;
+    char *detail = NULL;
+    char *errormsg = NULL;
+    char *fullmsg = NULL;
 
     if (fmt) {
+        va_list args;
+
         va_start(args, fmt);
-        g_vsnprintf(errorMessage, sizeof(errorMessage)-1, fmt, args);
+        detail = g_strdup_vprintf(fmt, args);
         va_end(args);
-    } else {
-        errorMessage[0] = '\0';
     }
 
-    virerr = virErrorMsg(errorcode, (errorMessage[0] ? errorMessage : NULL));
-    virRaiseErrorFull(filename, funcname, linenr,
-                      domcode, errorcode, VIR_ERR_ERROR,
-                      virerr, errorMessage, NULL,
-                      -1, -1, virerr, errorMessage);
+    errormsg = g_strdup(virErrorMsg(errorcode, detail));
+
+    if (errormsg) {
+        if (detail)
+            fullmsg = g_strdup_printf(errormsg, detail);
+        else
+            fullmsg = g_strdup(errormsg);
+    }
+
+    virRaiseErrorInternal(filename, funcname, linenr,
+                          domcode, errorcode, VIR_ERR_ERROR,
+                          fullmsg, errormsg, detail, NULL, -1, -1);
+
     errno = save_errno;
 }
 
@@ -1328,60 +1391,33 @@ void virReportSystemErrorFull(int domcode,
                               const char *fmt, ...)
 {
     int save_errno = errno;
-    char msgDetailBuf[VIR_ERROR_MAX_LENGTH];
-
-    const char *errnoDetail = g_strerror(theerrno);
-    const char *msg = virErrorMsg(VIR_ERR_SYSTEM_ERROR, fmt);
-    const char *msgDetail = NULL;
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    char *detail = NULL;
+    char *errormsg = NULL;
+    char *fullmsg = NULL;
 
     if (fmt) {
         va_list args;
-        int n;
 
         va_start(args, fmt);
-        n = g_vsnprintf(msgDetailBuf, sizeof(msgDetailBuf), fmt, args);
+        virBufferVasprintf(&buf, fmt, args);
         va_end(args);
 
-        size_t len = strlen(errnoDetail);
-        if (0 <= n && n + 2 + len < sizeof(msgDetailBuf)) {
-          strcpy(msgDetailBuf + n, ": ");
-          n += 2;
-          strcpy(msgDetailBuf + n, errnoDetail);
-          msgDetail = msgDetailBuf;
-        }
+        virBufferAddLit(&buf, ": ");
     }
 
-    if (!msgDetail)
-        msgDetail = errnoDetail;
+    virBufferAdd(&buf, g_strerror(theerrno), -1);
 
-    virRaiseErrorFull(filename, funcname, linenr,
-                      domcode, VIR_ERR_SYSTEM_ERROR, VIR_ERR_ERROR,
-                      msg, msgDetail, NULL, theerrno, -1, msg, msgDetail);
+    detail = virBufferContentAndReset(&buf);
+    errormsg = g_strdup(virErrorMsg(VIR_ERR_SYSTEM_ERROR, detail));
+    fullmsg = g_strdup_printf(errormsg, detail);
+
+    virRaiseErrorInternal(filename, funcname, linenr,
+                          domcode, VIR_ERR_SYSTEM_ERROR, VIR_ERR_ERROR,
+                          fullmsg, errormsg, detail, NULL, theerrno, -1);
     errno = save_errno;
 }
 
-/**
- * virReportOOMErrorFull:
- * @domcode: the virErrorDomain indicating where it's coming from
- * @filename: filename where error was raised
- * @funcname: function name where error was raised
- * @linenr: line number where error was raised
- *
- * Convenience internal routine called when an out of memory error is
- * detected
- */
-void virReportOOMErrorFull(int domcode,
-                           const char *filename,
-                           const char *funcname,
-                           size_t linenr)
-{
-    const char *virerr;
-
-    virerr = virErrorMsg(VIR_ERR_NO_MEMORY, NULL);
-    virRaiseErrorFull(filename, funcname, linenr,
-                      domcode, VIR_ERR_NO_MEMORY, VIR_ERR_ERROR,
-                      virerr, NULL, NULL, -1, -1, virerr, NULL);
-}
 
 /**
  * virSetErrorLogPriorityFunc:

@@ -24,22 +24,20 @@
 #include "admin_protocol.h"
 
 typedef struct _remoteAdminPriv remoteAdminPriv;
-typedef remoteAdminPriv *remoteAdminPrivPtr;
-
 struct _remoteAdminPriv {
     virObjectLockable parent;
 
     int counter;
-    virNetClientPtr client;
-    virNetClientProgramPtr program;
+    virNetClient *client;
+    virNetClientProgram *program;
 };
 
-static virClassPtr remoteAdminPrivClass;
+static virClass *remoteAdminPrivClass;
 
 static void
 remoteAdminPrivDispose(void *opaque)
 {
-    remoteAdminPrivPtr priv = opaque;
+    remoteAdminPriv *priv = opaque;
 
     virObjectUnref(priv->program);
     virObjectUnref(priv->client);
@@ -77,7 +75,7 @@ make_nonnull_client(admin_nonnull_client *client_dst,
 
 static int
 callFull(virAdmConnectPtr conn G_GNUC_UNUSED,
-         remoteAdminPrivPtr priv,
+         remoteAdminPriv *priv,
          int *fdin,
          size_t fdinlen,
          int **fdout,
@@ -87,9 +85,9 @@ callFull(virAdmConnectPtr conn G_GNUC_UNUSED,
          xdrproc_t ret_filter, char *ret)
 {
     int rv;
-    virNetClientProgramPtr prog = priv->program;
+    virNetClientProgram *prog = priv->program;
     int counter = priv->counter++;
-    virNetClientPtr client = priv->client;
+    virNetClient *client = priv->client;
 
     /* Unlock, so that if we get any async events/stream data
      * while processing the RPC, we don't deadlock when our
@@ -130,13 +128,12 @@ call(virAdmConnectPtr conn,
 #include "admin_client.h"
 
 static void
-remoteAdminClientCloseFunc(virNetClientPtr client G_GNUC_UNUSED,
+remoteAdminClientCloseFunc(virNetClient *client G_GNUC_UNUSED,
                            int reason,
                            void *opaque)
 {
-    virAdmConnectCloseCallbackDataPtr cbdata = opaque;
-
-    virObjectLock(cbdata);
+    virAdmConnectCloseCallbackData *cbdata = opaque;
+    VIR_LOCK_GUARD lock = virObjectLockGuard(cbdata);
 
     if (cbdata->callback) {
         VIR_DEBUG("Triggering connection close callback %p reason=%d, opaque=%p",
@@ -144,17 +141,14 @@ remoteAdminClientCloseFunc(virNetClientPtr client G_GNUC_UNUSED,
         cbdata->callback(cbdata->conn, reason, cbdata->opaque);
         virAdmConnectCloseCallbackDataReset(cbdata);
     }
-    virObjectUnlock(cbdata);
 }
 
 static int
 remoteAdminConnectOpen(virAdmConnectPtr conn, unsigned int flags)
 {
-    int rv = -1;
-    remoteAdminPrivPtr priv = conn->privateData;
+    remoteAdminPriv *priv = conn->privateData;
     admin_connect_open_args args;
-
-    virObjectLock(priv);
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags & ~VIR_CONNECT_NO_ALIASES;
 
@@ -167,44 +161,32 @@ remoteAdminConnectOpen(virAdmConnectPtr conn, unsigned int flags)
     virObjectRef(conn->closeCallback);
     virNetClientSetCloseCallback(priv->client, remoteAdminClientCloseFunc,
                                  conn->closeCallback,
-                                 virObjectFreeCallback);
+                                 virObjectUnref);
 
     if (call(conn, 0, ADMIN_PROC_CONNECT_OPEN,
              (xdrproc_t)xdr_admin_connect_open_args, (char *)&args,
-             (xdrproc_t)xdr_void, (char *)NULL) == -1) {
-        goto done;
-    }
+             (xdrproc_t)xdr_void, (char *)NULL) == -1)
+        return -1;
 
-    rv = 0;
-
- done:
-    virObjectUnlock(priv);
-    return rv;
+    return 0;
 }
 
 static int
 remoteAdminConnectClose(virAdmConnectPtr conn)
 {
-    int rv = -1;
-    remoteAdminPrivPtr priv = conn->privateData;
-
-    virObjectLock(priv);
+    remoteAdminPriv *priv = conn->privateData;
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     if (call(conn, 0, ADMIN_PROC_CONNECT_CLOSE,
              (xdrproc_t)xdr_void, (char *)NULL,
-             (xdrproc_t)xdr_void, (char *)NULL) == -1) {
-        goto done;
-    }
+             (xdrproc_t)xdr_void, (char *)NULL) == -1)
+        return -1;
 
     virNetClientSetCloseCallback(priv->client, NULL, conn->closeCallback,
-                                 virObjectFreeCallback);
+                                 virObjectUnref);
     virNetClientClose(priv->client);
 
-    rv = 0;
-
- done:
-    virObjectUnlock(priv);
-    return rv;
+    return 0;
 }
 
 static void
@@ -216,15 +198,15 @@ remoteAdminPrivFree(void *opaque)
     virObjectUnref(conn->privateData);
 }
 
-static remoteAdminPrivPtr
+static remoteAdminPriv *
 remoteAdminPrivNew(const char *sock_path)
 {
-    remoteAdminPrivPtr priv = NULL;
+    remoteAdminPriv *priv = NULL;
 
     if (!(priv = virObjectLockableNew(remoteAdminPrivClass)))
         goto error;
 
-    if (!(priv->client = virNetClientNewUNIX(sock_path, false, NULL)))
+    if (!(priv->client = virNetClientNewUNIX(sock_path, NULL)))
         goto error;
 
     if (!(priv->program = virNetClientProgramNew(ADMIN_PROGRAM,
@@ -247,35 +229,27 @@ remoteAdminServerGetThreadPoolParameters(virAdmServerPtr srv,
                                          int *nparams,
                                          unsigned int flags)
 {
-    int rv = -1;
-    remoteAdminPrivPtr priv = srv->conn->privateData;
+    remoteAdminPriv *priv = srv->conn->privateData;
     admin_server_get_threadpool_parameters_args args;
-    admin_server_get_threadpool_parameters_ret ret;
+    g_auto(admin_server_get_threadpool_parameters_ret) ret = {0};
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags;
     make_nonnull_server(&args.srv, srv);
 
-    memset(&ret, 0, sizeof(ret));
-    virObjectLock(priv);
-
     if (call(srv->conn, 0, ADMIN_PROC_SERVER_GET_THREADPOOL_PARAMETERS,
              (xdrproc_t)xdr_admin_server_get_threadpool_parameters_args, (char *) &args,
              (xdrproc_t)xdr_admin_server_get_threadpool_parameters_ret, (char *) &ret) == -1)
-        goto cleanup;
+        return -1;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX,
                                   params,
                                   nparams) < 0)
-        goto cleanup;
+        return -1;
 
-    rv = 0;
-    xdr_free((xdrproc_t)xdr_admin_server_get_threadpool_parameters_ret, (char *) &ret);
-
- cleanup:
-    virObjectUnlock(priv);
-    return rv;
+    return 0;
 }
 
 static int
@@ -285,17 +259,16 @@ remoteAdminServerSetThreadPoolParameters(virAdmServerPtr srv,
                                          unsigned int flags)
 {
     int rv = -1;
-    remoteAdminPrivPtr priv = srv->conn->privateData;
+    remoteAdminPriv *priv = srv->conn->privateData;
     admin_server_set_threadpool_parameters_args args;
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags;
     make_nonnull_server(&args.srv, srv);
 
-    virObjectLock(priv);
-
     if (virTypedParamsSerialize(params, nparams,
                                 ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 0) < 0)
         goto cleanup;
@@ -308,9 +281,8 @@ remoteAdminServerSetThreadPoolParameters(virAdmServerPtr srv,
 
     rv = 0;
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
-    virObjectUnlock(priv);
     return rv;
 }
 
@@ -320,35 +292,27 @@ remoteAdminClientGetInfo(virAdmClientPtr client,
                          int *nparams,
                          unsigned int flags)
 {
-    int rv = -1;
-    remoteAdminPrivPtr priv = client->srv->conn->privateData;
+    remoteAdminPriv *priv = client->srv->conn->privateData;
     admin_client_get_info_args args;
-    admin_client_get_info_ret ret;
+    g_auto(admin_client_get_info_ret) ret = {0};
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags;
     make_nonnull_client(&args.clnt, client);
 
-    memset(&ret, 0, sizeof(ret));
-    virObjectLock(priv);
-
     if (call(client->srv->conn, 0, ADMIN_PROC_CLIENT_GET_INFO,
              (xdrproc_t)xdr_admin_client_get_info_args, (char *) &args,
              (xdrproc_t)xdr_admin_client_get_info_ret, (char *) &ret) == -1)
-        goto cleanup;
+        return -1;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   ADMIN_CLIENT_INFO_PARAMETERS_MAX,
                                   params,
                                   nparams) < 0)
-        goto cleanup;
+        return -1;
 
-    rv = 0;
-    xdr_free((xdrproc_t)xdr_admin_client_get_info_ret, (char *) &ret);
-
- cleanup:
-    virObjectUnlock(priv);
-    return rv;
+    return 0;
 }
 
 static int
@@ -357,37 +321,29 @@ remoteAdminServerGetClientLimits(virAdmServerPtr srv,
                                  int *nparams,
                                  unsigned int flags)
 {
-    int rv = -1;
     admin_server_get_client_limits_args args;
-    admin_server_get_client_limits_ret ret;
-    remoteAdminPrivPtr priv = srv->conn->privateData;
+    g_auto(admin_server_get_client_limits_ret) ret = {0};
+    remoteAdminPriv *priv = srv->conn->privateData;
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
+
     args.flags = flags;
     make_nonnull_server(&args.srv, srv);
-
-    memset(&ret, 0, sizeof(ret));
-    virObjectLock(priv);
 
     if (call(srv->conn, 0, ADMIN_PROC_SERVER_GET_CLIENT_LIMITS,
              (xdrproc_t) xdr_admin_server_get_client_limits_args,
              (char *) &args,
              (xdrproc_t) xdr_admin_server_get_client_limits_ret,
              (char *) &ret) == -1)
-        goto cleanup;
+        return -1;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   ADMIN_SERVER_CLIENT_LIMITS_MAX,
                                   params,
                                   nparams) < 0)
-        goto cleanup;
+        return -1;
 
-    rv = 0;
-    xdr_free((xdrproc_t) xdr_admin_server_get_client_limits_ret,
-             (char *) &ret);
-
- cleanup:
-    virObjectUnlock(priv);
-    return rv;
+    return 0;
 }
 
 static int
@@ -398,16 +354,15 @@ remoteAdminServerSetClientLimits(virAdmServerPtr srv,
 {
     int rv = -1;
     admin_server_set_client_limits_args args;
-    remoteAdminPrivPtr priv = srv->conn->privateData;
+    remoteAdminPriv *priv = srv->conn->privateData;
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags;
     make_nonnull_server(&args.srv, srv);
 
-    virObjectLock(priv);
-
     if (virTypedParamsSerialize(params, nparams,
                                 ADMIN_SERVER_CLIENT_LIMITS_MAX,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 0) < 0)
         goto cleanup;
@@ -420,9 +375,8 @@ remoteAdminServerSetClientLimits(virAdmServerPtr srv,
 
     rv = 0;
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
-    virObjectUnlock(priv);
     return rv;
 }
 
@@ -431,15 +385,12 @@ remoteAdminConnectGetLoggingOutputs(virAdmConnectPtr conn,
                                     char **outputs,
                                     unsigned int flags)
 {
-    int rv = -1;
-    remoteAdminPrivPtr priv = conn->privateData;
+    remoteAdminPriv *priv = conn->privateData;
     admin_connect_get_logging_outputs_args args;
-    admin_connect_get_logging_outputs_ret ret;
+    g_auto(admin_connect_get_logging_outputs_ret) ret = {0};
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags;
-
-    memset(&ret, 0, sizeof(ret));
-    virObjectLock(priv);
 
     if (call(conn,
              0,
@@ -448,17 +399,12 @@ remoteAdminConnectGetLoggingOutputs(virAdmConnectPtr conn,
              (char *) &args,
              (xdrproc_t) xdr_admin_connect_get_logging_outputs_ret,
              (char *) &ret) == -1)
-        goto done;
+        return -1;
 
     if (outputs)
         *outputs = g_steal_pointer(&ret.outputs);
 
-    rv = ret.noutputs;
-    xdr_free((xdrproc_t) xdr_admin_connect_get_logging_outputs_ret, (char *) &ret);
-
- done:
-    virObjectUnlock(priv);
-    return rv;
+    return ret.noutputs;
 }
 
 static int
@@ -466,15 +412,12 @@ remoteAdminConnectGetLoggingFilters(virAdmConnectPtr conn,
                                     char **filters,
                                     unsigned int flags)
 {
-    int rv = -1;
-    remoteAdminPrivPtr priv = conn->privateData;
+    remoteAdminPriv *priv = conn->privateData;
     admin_connect_get_logging_filters_args args;
-    admin_connect_get_logging_filters_ret ret;
+    g_auto(admin_connect_get_logging_filters_ret) ret = {0};
+    VIR_LOCK_GUARD lock = virObjectLockGuard(priv);
 
     args.flags = flags;
-
-    memset(&ret, 0, sizeof(ret));
-    virObjectLock(priv);
 
     if (call(conn,
              0,
@@ -483,15 +426,10 @@ remoteAdminConnectGetLoggingFilters(virAdmConnectPtr conn,
              (char *) &args,
              (xdrproc_t) xdr_admin_connect_get_logging_filters_ret,
              (char *) &ret) == -1)
-        goto done;
+        return -1;
 
     if (filters)
-        *filters = ret.filters ? *ret.filters : NULL;
+        *filters = ret.filters ? g_steal_pointer(ret.filters) : NULL;
 
-    rv = ret.nfilters;
-    VIR_FREE(ret.filters);
-
- done:
-    virObjectUnlock(priv);
-    return rv;
+    return ret.nfilters;
 }

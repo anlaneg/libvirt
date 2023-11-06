@@ -97,7 +97,7 @@ specification can be used:
  </disk>
 
 This makes libvirt follow the settings as configured in the XML. Note that this
-is supported only when the https://libvirt.org/formatdomaincaps.html#featureBackingStoreInput
+is supported only when the https://libvirt.org/formatdomaincaps.html#backingstoreinput
 capability is present.
 
 An empty ``<backingStore/>`` element signals the end of the chain. Using this
@@ -186,7 +186,7 @@ of the following criteria is met:
 - ``backing file`` is present AND is correct/trusted
 
 Note that the last criterion may require manual inspection and thus should not
-be scripted unless the trust for the image can be expressed programatically.
+be scripted unless the trust for the image can be expressed programmatically.
 
 Also note that the above steps may need to be repeated recursively for any
 subsequent backing images.

@@ -26,8 +26,6 @@
 # include <sys/sysmacros.h>
 # include <stdarg.h>
 # include "testutilslxc.h"
-# include "virstring.h"
-# include "virfile.h"
 # include "viralloc.h"
 # include "vircgroupv2devices.h"
 
@@ -36,14 +34,10 @@ static FILE *(*real_fopen)(const char *path, const char *mode);
 static int (*real_access)(const char *path, int mode);
 static int (*real_mkdir)(const char *path, mode_t mode);
 
-/* Don't make static, since it causes problems with clang
- * when passed as an arg to asprintf()
- * vircgroupmock.c:462:22: error: static variable 'fakesysfsdir' is used in an inline function with external linkage [-Werror,-Wstatic-in-inline]
- */
-char *fakerootdir;
-char *fakesysfscgroupdir;
-const char *fakedevicedir0 = FAKEDEVDIR0;
-const char *fakedevicedir1 = FAKEDEVDIR1;
+static char *fakerootdir;
+static char *fakesysfscgroupdir;
+static const char *fakedevicedir0 = FAKEDEVDIR0;
+static const char *fakedevicedir1 = FAKEDEVDIR1;
 
 
 # define SYSFS_CGROUP_PREFIX "/not/really/sys/fs/cgroup"
@@ -58,7 +52,7 @@ const char *fakedevicedir1 = FAKEDEVDIR1;
  * use /sys/fs/cgroup, because we want to make it easy to
  * detect places where we've not mocked enough syscalls.
  *
- * In any open/acces/mkdir calls we look at path and if
+ * In any open/access/mkdir calls we look at path and if
  * it starts with /not/really/sys/fs/cgroup, we rewrite
  * the path to point at a subdirectory of the temporary
  * directory referred to by LIBVIRT_FAKE_ROOT_DIR env
@@ -83,7 +77,7 @@ static int make_file(const char *path,
     if ((fd = real_open(filepath, O_CREAT|O_WRONLY, 0600)) < 0)
         goto cleanup;
 
-    if (write(fd, value, strlen(value)) != strlen(value))
+    if (write(fd, value, strlen(value)) != strlen(value)) /* sc_avoid_write */
         goto cleanup;
 
     ret = 0;
@@ -323,7 +317,7 @@ static int make_controller(const char *path, mode_t mode)
             unified = true;
         } else if (STREQ(mock, "hybrid")) {
             hybrid = true;
-        } else {
+        } else if (STRNEQ(mock, "legacy")) {
             fprintf(stderr, "invalid mode '%s'\n", mock);
             abort();
         }
@@ -352,7 +346,8 @@ static void init_sysfs(void)
     if (fakerootdir && STREQ(fakerootdir, newfakerootdir))
         return;
 
-    fakerootdir = newfakerootdir;
+    VIR_FREE(fakerootdir);
+    fakerootdir = g_strdup(newfakerootdir);
 
     mock = getenv("VIR_CGROUP_MOCK_MODE");
     if (mock) {
@@ -360,7 +355,7 @@ static void init_sysfs(void)
             unified = true;
         } else if (STREQ(mock, "hybrid")) {
             hybrid = true;
-        } else {
+        } else if (STRNEQ(mock, "legacy")) {
             fprintf(stderr, "invalid mode '%s'\n", mock);
             abort();
         }
@@ -371,7 +366,7 @@ static void init_sysfs(void)
     fakesysfscgroupdir = g_strdup_printf("%s%s",
                                          fakerootdir, SYSFS_CGROUP_PREFIX);
 
-    if (virFileMakePath(fakesysfscgroupdir) < 0) {
+    if (g_mkdir_with_parents(fakesysfscgroupdir, 0777) < 0) {
         fprintf(stderr, "Cannot create %s\n", fakesysfscgroupdir);
         abort();
     }
@@ -467,8 +462,10 @@ int access(const char *path, int mode)
     init_syms();
 
     if (STRPREFIX(path, SYSFS_CGROUP_PREFIX)) {
-        init_sysfs();
         char *newpath;
+
+        init_sysfs();
+
         if (asprintf(&newpath, "%s%s",
                      fakesysfscgroupdir,
                      path + strlen(SYSFS_CGROUP_PREFIX)) < 0) {
@@ -534,8 +531,10 @@ int mkdir(const char *path, mode_t mode)
     init_syms();
 
     if (STRPREFIX(path, SYSFS_CGROUP_PREFIX)) {
-        init_sysfs();
         char *newpath;
+
+        init_sysfs();
+
         if (asprintf(&newpath, "%s%s",
                      fakesysfscgroupdir,
                      path + strlen(SYSFS_CGROUP_PREFIX)) < 0) {
@@ -591,7 +590,7 @@ int open(const char *path, int flags, ...)
 }
 
 bool
-virCgroupV2DevicesAvailable(virCgroupPtr group G_GNUC_UNUSED)
+virCgroupV2DevicesAvailable(virCgroup *group G_GNUC_UNUSED)
 {
     return true;
 }

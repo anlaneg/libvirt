@@ -41,19 +41,19 @@ VIR_LOG_INIT("bhyve.bhyve_monitor");
 struct _bhyveMonitor {
     virObject parent;
 
-    bhyveConnPtr driver;
-    virDomainObjPtr vm;
+    struct _bhyveConn *driver;
+    virDomainObj *vm;
     int kq;
     int watch;
     bool reboot;
 };
 
-static virClassPtr bhyveMonitorClass;
+static virClass *bhyveMonitorClass;
 
 static void
 bhyveMonitorDispose(void *obj)
 {
-    bhyveMonitorPtr mon = obj;
+    bhyveMonitor *mon = obj;
 
     VIR_FORCE_CLOSE(mon->kq);
     virObjectUnref(mon->vm);
@@ -73,7 +73,7 @@ VIR_ONCE_GLOBAL_INIT(bhyveMonitor);
 static void bhyveMonitorIO(int, int, int, void *);
 
 static bool
-bhyveMonitorRegister(bhyveMonitorPtr mon)
+bhyveMonitorRegister(bhyveMonitor *mon)
 {
     virObjectRef(mon);
     mon->watch = virEventAddHandle(mon->kq,
@@ -82,7 +82,7 @@ bhyveMonitorRegister(bhyveMonitorPtr mon)
                                    VIR_EVENT_HANDLE_HANGUP,
                                    bhyveMonitorIO,
                                    mon,
-                                   virObjectFreeCallback);
+                                   virObjectUnref);
     if (mon->watch < 0) {
         VIR_DEBUG("failed to add event handle for mon %p", mon);
         virObjectUnref(mon);
@@ -92,7 +92,7 @@ bhyveMonitorRegister(bhyveMonitorPtr mon)
 }
 
 static void
-bhyveMonitorUnregister(bhyveMonitorPtr mon)
+bhyveMonitorUnregister(bhyveMonitor *mon)
 {
     if (mon->watch < 0)
         return;
@@ -102,7 +102,7 @@ bhyveMonitorUnregister(bhyveMonitorPtr mon)
 }
 
 void
-bhyveMonitorSetReboot(bhyveMonitorPtr mon)
+bhyveMonitorSetReboot(bhyveMonitor *mon)
 {
     mon->reboot = true;
 }
@@ -111,16 +111,16 @@ static void
 bhyveMonitorIO(int watch, int kq, int events G_GNUC_UNUSED, void *opaque)
 {
     const struct timespec zerowait = { 0, 0 };
-    bhyveMonitorPtr mon = opaque;
-    virDomainObjPtr vm = mon->vm;
-    bhyveConnPtr driver = mon->driver;
+    bhyveMonitor *mon = opaque;
+    virDomainObj *vm = mon->vm;
+    struct _bhyveConn *driver = mon->driver;
     const char *name;
     struct kevent kev;
     int rc, status;
 
     if (watch != mon->watch || kq != mon->kq) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("event from unexpected fd %d!=%d / watch %d!=%d"),
+                       _("event from unexpected fd %1$d!=%2$d / watch %3$d!=%4$d"),
                        mon->kq, kq, mon->watch, watch);
         return;
     }
@@ -142,7 +142,7 @@ bhyveMonitorIO(int watch, int kq, int events G_GNUC_UNUSED, void *opaque)
     if (kev.filter == EVFILT_PROC && (kev.fflags & NOTE_EXIT) != 0) {
         if ((pid_t)kev.ident != vm->pid) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("event from unexpected proc %ju!=%ju"),
+                           _("event from unexpected proc %1$ju!=%2$ju"),
                            (uintmax_t)vm->pid, (uintmax_t)kev.ident);
             return;
         }
@@ -151,7 +151,7 @@ bhyveMonitorIO(int watch, int kq, int events G_GNUC_UNUSED, void *opaque)
         status = kev.data;
         if (WIFSIGNALED(status) && WCOREDUMP(status)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Guest %s got signal %d and crashed"),
+                           _("Guest %1$s got signal %2$d and crashed"),
                            name, WTERMSIG(status));
             virBhyveProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_CRASHED);
         } else if (WIFEXITED(status)) {
@@ -172,10 +172,10 @@ bhyveMonitorIO(int watch, int kq, int events G_GNUC_UNUSED, void *opaque)
     }
 }
 
-static bhyveMonitorPtr
-bhyveMonitorOpenImpl(virDomainObjPtr vm, bhyveConnPtr driver)
+static bhyveMonitor *
+bhyveMonitorOpenImpl(virDomainObj *vm, struct _bhyveConn *driver)
 {
-    bhyveMonitorPtr mon;
+    bhyveMonitor *mon;
     struct kevent kev;
 
     if (bhyveMonitorInitialize() < 0)
@@ -217,10 +217,10 @@ bhyveMonitorOpenImpl(virDomainObjPtr vm, bhyveConnPtr driver)
     return NULL;
 }
 
-bhyveMonitorPtr
-bhyveMonitorOpen(virDomainObjPtr vm, bhyveConnPtr driver)
+bhyveMonitor *
+bhyveMonitorOpen(virDomainObj *vm, struct _bhyveConn *driver)
 {
-    bhyveMonitorPtr mon;
+    bhyveMonitor *mon;
 
     virObjectRef(vm);
     mon = bhyveMonitorOpenImpl(vm, driver);
@@ -230,7 +230,7 @@ bhyveMonitorOpen(virDomainObjPtr vm, bhyveConnPtr driver)
 }
 
 void
-bhyveMonitorClose(bhyveMonitorPtr mon)
+bhyveMonitorClose(bhyveMonitor *mon)
 {
     if (mon == NULL)
         return;

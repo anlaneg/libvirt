@@ -21,8 +21,6 @@
 
 #include <config.h>
 
-#include "viralloc.h"
-#include "virstring.h"
 #include "cpu.h"
 
 
@@ -31,8 +29,8 @@
 static const virArch archs[] = { VIR_ARCH_S390, VIR_ARCH_S390X };
 
 static virCPUCompareResult
-virCPUs390Compare(virCPUDefPtr host G_GNUC_UNUSED,
-                  virCPUDefPtr cpu G_GNUC_UNUSED,
+virCPUs390Compare(virCPUDef *host G_GNUC_UNUSED,
+                  virCPUDef *cpu G_GNUC_UNUSED,
                   bool failMessages G_GNUC_UNUSED)
 {
     /* s390 relies on QEMU to perform all runability checking. Return
@@ -42,16 +40,20 @@ virCPUs390Compare(virCPUDefPtr host G_GNUC_UNUSED,
 }
 
 static int
-virCPUs390Update(virCPUDefPtr guest,
-                 const virCPUDef *host)
+virCPUs390Update(virCPUDef *guest,
+                 const virCPUDef *host,
+                 bool relative)
 {
-    g_autoptr(virCPUDef) updated = NULL;
+    g_autoptr(virCPUDef) updated = virCPUDefCopyWithoutModel(guest);
     size_t i;
+
+    if (!relative)
+        return 0;
 
     if (guest->mode == VIR_CPU_MODE_CUSTOM) {
         if (guest->match == VIR_CPU_MATCH_MINIMUM) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("match mode %s not supported"),
+                           _("match mode %1$s not supported"),
                            virCPUMatchTypeToString(guest->match));
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -66,12 +68,8 @@ virCPUs390Update(virCPUDefPtr guest,
         return -1;
     }
 
-    if (!(updated = virCPUDefCopyWithoutModel(guest)))
-        return -1;
-
     updated->mode = VIR_CPU_MODE_CUSTOM;
-    if (virCPUDefCopyModel(updated, host, true) < 0)
-        return -1;
+    virCPUDefCopyModel(updated, host, true);
 
     for (i = 0; i < guest->nfeatures; i++) {
        if (virCPUDefUpdateFeature(updated,
@@ -89,21 +87,30 @@ virCPUs390Update(virCPUDefPtr guest,
 
 
 static int
-virCPUs390ValidateFeatures(virCPUDefPtr cpu)
+virCPUs390ValidateFeatures(virCPUDef *cpu)
 {
     size_t i;
 
     for (i = 0; i < cpu->nfeatures; i++) {
         if (cpu->features[i].policy == VIR_CPU_FEATURE_OPTIONAL) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("only cpu feature policies 'require' and "
-                             "'disable' are supported for %s"),
+                           _("only cpu feature policies 'require' and 'disable' are supported for %1$s"),
                            cpu->features[i].name);
             return -1;
         }
     }
 
     return 0;
+}
+
+
+static const char *
+virCPUs390GetVendorForModel(const char *modelName)
+{
+    if (STRPREFIX(modelName, "z") || STRPREFIX(modelName, "gen"))
+        return "IBM";
+
+    return NULL;
 }
 
 
@@ -117,4 +124,5 @@ struct cpuArchDriver cpuDriverS390 = {
     .baseline   = NULL,
     .update     = virCPUs390Update,
     .validateFeatures = virCPUs390ValidateFeatures,
+    .getVendorForModel = virCPUs390GetVendorForModel,
 };

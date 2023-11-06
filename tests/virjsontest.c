@@ -93,8 +93,7 @@ testJSONFromString(const void *data)
         return -1;
     }
 
-    if (STRNEQ(expectstr, formatted)) {
-        virTestDifference(stderr, expectstr, formatted);
+    if (virTestCompareToString(expectstr, formatted) < 0) {
         return -1;
     }
 
@@ -177,7 +176,7 @@ testJSONLookup(const void *data)
 {
     const struct testInfo *info = data;
     g_autoptr(virJSONValue) json = NULL;
-    virJSONValuePtr value = NULL;
+    virJSONValue *value = NULL;
     g_autofree char *result = NULL;
     int rc;
     int number;
@@ -391,10 +390,10 @@ testJSONEscapeObj(const void *data G_GNUC_UNUSED)
     g_autofree char *result = NULL;
     const char *parsednestedstr;
 
-    if (virJSONValueObjectCreate(&nestjson,
-                                 "s:stringkey", "stringvalue",
-                                 "i:numberkey", 1234,
-                                 "b:booleankey", false, NULL) < 0) {
+    if (virJSONValueObjectAdd(&nestjson,
+                              "s:stringkey", "stringvalue",
+                              "i:numberkey", 1234,
+                              "b:booleankey", false, NULL) < 0) {
         VIR_TEST_VERBOSE("failed to create nested json object");
         return -1;
     }
@@ -404,7 +403,7 @@ testJSONEscapeObj(const void *data G_GNUC_UNUSED)
         return -1;
     }
 
-    if (virJSONValueObjectCreate(&json, "s:test", neststr, NULL) < 0) {
+    if (virJSONValueObjectAdd(&json, "s:test", neststr, NULL) < 0) {
         VIR_TEST_VERBOSE("Failed to create json object");
         return -1;
     }
@@ -424,8 +423,7 @@ testJSONEscapeObj(const void *data G_GNUC_UNUSED)
         return -1;
     }
 
-    if (STRNEQ(parsednestedstr, neststr)) {
-        virTestDifference(stderr, neststr, parsednestedstr);
+    if (virTestCompareToString(neststr, parsednestedstr) < 0) {
         return -1;
     }
 
@@ -441,13 +439,13 @@ testJSONObjectFormatSteal(const void *opaque G_GNUC_UNUSED)
     g_autoptr(virJSONValue) t1 = NULL;
     g_autoptr(virJSONValue) t2 = NULL;
 
-    if (!(a1 = virJSONValueNewString("test")) ||
-        !(a2 = virJSONValueNewString("test"))) {
+    if (!(a1 = virJSONValueNewString(g_strdup("test"))) ||
+        !(a2 = virJSONValueNewString(g_strdup("test")))) {
         VIR_TEST_VERBOSE("Failed to create json object");
     }
 
-    if (virJSONValueObjectCreate(&t1, "a:t", &a1, "s:f", NULL, NULL) != -1) {
-        VIR_TEST_VERBOSE("virJSONValueObjectCreate(t1) should have failed");
+    if (virJSONValueObjectAdd(&t1, "a:t", &a1, "s:f", NULL, NULL) != -1) {
+        VIR_TEST_VERBOSE("virJSONValueObjectAdd(t1) should have failed");
         return -1;
     }
 
@@ -456,8 +454,8 @@ testJSONObjectFormatSteal(const void *opaque G_GNUC_UNUSED)
         return -1;
     }
 
-    if (virJSONValueObjectCreate(&t2, "s:f", NULL, "a:t", &a1, NULL) != -1) {
-        VIR_TEST_VERBOSE("virJSONValueObjectCreate(t2) should have failed");
+    if (virJSONValueObjectAdd(&t2, "s:f", NULL, "a:t", &a1, NULL) != -1) {
+        VIR_TEST_VERBOSE("virJSONValueObjectAdd(t2) should have failed");
         return -1;
     }
 
@@ -555,6 +553,7 @@ mymain(void)
     DO_TEST_PARSE("integer", "1", NULL);
     DO_TEST_PARSE("boolean", "true", NULL);
     DO_TEST_PARSE("null", "null", NULL);
+    DO_TEST_PARSE("[]", "[]", NULL);
 
     DO_TEST_PARSE("escaping symbols", "[\"\\\"\\t\\n\\\\\"]", NULL);
     DO_TEST_PARSE("escaped strings", "[\"{\\\"blurb\\\":\\\"test\\\"}\"]", NULL);

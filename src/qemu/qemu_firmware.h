@@ -26,27 +26,26 @@
 #include "virfirmware.h"
 
 typedef struct _qemuFirmware qemuFirmware;
-typedef qemuFirmware *qemuFirmwarePtr;
 
 void
-qemuFirmwareFree(qemuFirmwarePtr fw);
+qemuFirmwareFree(qemuFirmware *fw);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuFirmware, qemuFirmwareFree);
 
-qemuFirmwarePtr
+qemuFirmware *
 qemuFirmwareParse(const char *path);
 
 char *
-qemuFirmwareFormat(qemuFirmwarePtr fw);
+qemuFirmwareFormat(qemuFirmware *fw);
 
 int
 qemuFirmwareFetchConfigs(char ***firmwares,
                          bool privileged);
 
 int
-qemuFirmwareFillDomain(virQEMUDriverPtr driver,
-                       virDomainDefPtr def,
-                       unsigned int flags);
+qemuFirmwareFillDomain(virQEMUDriver *driver,
+                       virDomainDef *def,
+                       bool abiUpdate);
 
 int
 qemuFirmwareGetSupported(const char *machine,
@@ -54,7 +53,7 @@ qemuFirmwareGetSupported(const char *machine,
                          bool privileged,
                          uint64_t *supported,
                          bool *secure,
-                         virFirmwarePtr **fws,
+                         virFirmware ***fws,
                          size_t *nfws);
 
 G_STATIC_ASSERT(VIR_DOMAIN_OS_DEF_FIRMWARE_LAST <= 64);

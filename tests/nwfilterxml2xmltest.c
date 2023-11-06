@@ -7,12 +7,7 @@
 
 #include "internal.h"
 #include "testutils.h"
-#include "virxml.h"
-#include "virthread.h"
-#include "nwfilter_params.h"
 #include "nwfilter_conf.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -20,33 +15,26 @@ static int
 testCompareXMLToXMLFiles(const char *inxml, const char *outxml,
                          bool expect_error)
 {
-    char *actual = NULL;
-    int ret = -1;
-    virNWFilterDefPtr dev = NULL;
+    g_autofree char *actual = NULL;
+    g_autoptr(virNWFilterDef) def = NULL;
 
     virResetLastError();
 
-    if (!(dev = virNWFilterDefParseFile(inxml))) {
+    if (!(def = virNWFilterDefParse(NULL, inxml, 0))) {
         if (expect_error) {
             virResetLastError();
-            goto done;
+            return 0;
         }
-        goto fail;
+        return -1;
     }
 
-    if (!(actual = virNWFilterDefFormat(dev)))
-        goto fail;
+    if (!(actual = virNWFilterDefFormat(def)))
+        return -1;
 
     if (virTestCompareToFile(actual, outxml) < 0)
-        goto fail;
+        return -1;
 
- done:
-    ret = 0;
-
- fail:
-    VIR_FREE(actual);
-    virNWFilterDefFree(dev);
-    return ret;
+    return 0;
 }
 
 typedef struct test_parms {
@@ -59,16 +47,13 @@ testCompareXMLToXMLHelper(const void *data)
 {
     int result = -1;
     const test_parms *tp = data;
-    char *inxml = NULL;
-    char *outxml = NULL;
+    g_autofree char *inxml = NULL;
+    g_autofree char *outxml = NULL;
 
     inxml = g_strdup_printf("%s/nwfilterxml2xmlin/%s.xml", abs_srcdir, tp->name);
     outxml = g_strdup_printf("%s/nwfilterxml2xmlout/%s.xml", abs_srcdir, tp->name);
 
     result = testCompareXMLToXMLFiles(inxml, outxml, tp->expect_warning);
-
-    VIR_FREE(inxml);
-    VIR_FREE(outxml);
 
     return result;
 }
@@ -89,32 +74,32 @@ mymain(void)
             ret = -1; \
     } while (0)
 
-    DO_TEST("mac-test", true);
-    DO_TEST("vlan-test", true);
+    DO_TEST("mac-test-invalid", true);
+    DO_TEST("vlan-test-invalid", true);
     DO_TEST("stp-test", false);
-    DO_TEST("arp-test", true);
-    DO_TEST("rarp-test", true);
-    DO_TEST("ip-test", true);
-    DO_TEST("ipv6-test", true);
+    DO_TEST("arp-test-invalid", true);
+    DO_TEST("rarp-test-invalid", true);
+    DO_TEST("ip-test-invalid", true);
+    DO_TEST("ipv6-test-invalid", true);
 
-    DO_TEST("tcp-test", true);
-    DO_TEST("udp-test", true);
-    DO_TEST("icmp-test", true);
+    DO_TEST("tcp-test-invalid", true);
+    DO_TEST("udp-test-invalid", true);
+    DO_TEST("icmp-test-invalid", true);
     DO_TEST("igmp-test", false);
-    DO_TEST("sctp-test", true);
+    DO_TEST("sctp-test-invalid", true);
     DO_TEST("udplite-test", false);
     DO_TEST("esp-test", false);
     DO_TEST("ah-test", false);
     DO_TEST("all-test", false);
 
-    DO_TEST("tcp-ipv6-test", true);
-    DO_TEST("udp-ipv6-test", true);
-    DO_TEST("icmpv6-test", true);
-    DO_TEST("sctp-ipv6-test", true);
-    DO_TEST("udplite-ipv6-test", true);
-    DO_TEST("esp-ipv6-test", true);
-    DO_TEST("ah-ipv6-test", true);
-    DO_TEST("all-ipv6-test", true);
+    DO_TEST("tcp-ipv6-test-invalid", true);
+    DO_TEST("udp-ipv6-test-invalid", true);
+    DO_TEST("icmpv6-test-invalid", true);
+    DO_TEST("sctp-ipv6-test-invalid", true);
+    DO_TEST("udplite-ipv6-test-invalid", true);
+    DO_TEST("esp-ipv6-test-invalid", true);
+    DO_TEST("ah-ipv6-test-invalid", true);
+    DO_TEST("all-ipv6-test-invalid", true);
 
     DO_TEST("ref-test", false);
     DO_TEST("ref-rule-test", false);
@@ -125,14 +110,19 @@ mymain(void)
 
     DO_TEST("conntrack-test", false);
 
-    DO_TEST("hex-data-test", true);
+    DO_TEST("hex-data-test-invalid", true);
 
-    DO_TEST("comment-test", true);
+    DO_TEST("comment-test-invalid", true);
 
     DO_TEST("example-1", false);
     DO_TEST("example-2", false);
 
-    DO_TEST("chain_prefixtest1", true); /* derived from arp-test */
+    /* The parser and formatter for nwfilter rules was written in a quirky way.
+     * Validate that it still works. Note that the files don't conform to the
+     * schema */
+    DO_TEST("quirks-invalid", false);
+
+    DO_TEST("chain_prefixtest1-invalid", true); /* derived from arp-test */
 
     DO_TEST("attr-value-test", false);
     DO_TEST("iter-test1", false);

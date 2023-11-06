@@ -33,6 +33,7 @@ typedef enum {
 typedef virDrvStateInitResult
 (*virDrvStateInitialize)(bool privileged,
                          const char *root,
+                         bool monolithic,
                          virStateInhibitCallback callback,
                          void *opaque);
 
@@ -45,9 +46,13 @@ typedef int
 typedef int
 (*virDrvStateStop)(void);
 
-typedef struct _virStateDriver virStateDriver;
-typedef virStateDriver *virStateDriverPtr;
+typedef int
+(*virDrvStateShutdownPrepare)(void);
 
+typedef int
+(*virDrvStateShutdownWait)(void);
+
+typedef struct _virStateDriver virStateDriver;
 struct _virStateDriver {
     const char *name;
     /*标明此driver是否初始化*/
@@ -57,4 +62,6 @@ struct _virStateDriver {
     virDrvStateCleanup stateCleanup;
     virDrvStateReload stateReload;
     virDrvStateStop stateStop;
+    virDrvStateShutdownPrepare stateShutdownPrepare;
+    virDrvStateShutdownWait stateShutdownWait;
 };

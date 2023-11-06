@@ -20,12 +20,12 @@
 
 #include <config.h>
 
+#include "configmake.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virbuffer.h"
+#include "virfile.h"
 #include "cpu_conf.h"
-#include "domain_conf.h"
-#include "virstring.h"
 #include "virlog.h"
 
 #define VIR_FROM_THIS VIR_FROM_CPU
@@ -42,6 +42,7 @@ VIR_ENUM_IMPL(virCPUMode,
               "custom",
               "host-model",
               "host-passthrough",
+              "maximum",
 );
 
 VIR_ENUM_IMPL(virCPUMatch,
@@ -81,16 +82,22 @@ VIR_ENUM_IMPL(virCPUCacheMode,
               "disable",
 );
 
+VIR_ENUM_IMPL(virCPUMaxPhysAddrMode,
+              VIR_CPU_MAX_PHYS_ADDR_MODE_LAST,
+              "emulate",
+              "passthrough",
+);
 
-virCPUDefPtr virCPUDefNew(void)
+
+virCPUDef *virCPUDefNew(void)
 {
-    virCPUDefPtr cpu = g_new0(virCPUDef, 1);
+    virCPUDef *cpu = g_new0(virCPUDef, 1);
     cpu->refs = 1;
     return cpu;
 }
 
 void
-virCPUDefFreeFeatures(virCPUDefPtr def)
+virCPUDefFreeFeatures(virCPUDef *def)
 {
     size_t i;
 
@@ -103,7 +110,7 @@ virCPUDefFreeFeatures(virCPUDefPtr def)
 
 
 void ATTRIBUTE_NONNULL(1)
-virCPUDefFreeModel(virCPUDefPtr def)
+virCPUDefFreeModel(virCPUDef *def)
 {
     VIR_FREE(def->model);
     VIR_FREE(def->vendor);
@@ -112,37 +119,38 @@ virCPUDefFreeModel(virCPUDefPtr def)
 }
 
 void
-virCPUDefRef(virCPUDefPtr def)
+virCPUDefRef(virCPUDef *def)
 {
     g_atomic_int_inc(&def->refs);
 }
 
 void
-virCPUDefFree(virCPUDefPtr def)
+virCPUDefFree(virCPUDef *def)
 {
     if (!def)
         return;
 
     if (g_atomic_int_dec_and_test(&def->refs)) {
         virCPUDefFreeModel(def);
-        VIR_FREE(def->cache);
-        VIR_FREE(def->tsc);
-        VIR_FREE(def);
+        g_free(def->cache);
+        g_free(def->addr);
+        g_free(def->tsc);
+        g_free(def);
     }
 }
 
 
-int ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
-virCPUDefCopyModel(virCPUDefPtr dst,
+void ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
+virCPUDefCopyModel(virCPUDef *dst,
                    const virCPUDef *src,
                    bool resetPolicy)
 {
-    return virCPUDefCopyModelFilter(dst, src, resetPolicy, NULL, NULL);
+    virCPUDefCopyModelFilter(dst, src, resetPolicy, NULL, NULL);
 }
 
 
-int
-virCPUDefCopyModelFilter(virCPUDefPtr dst,
+void
+virCPUDefCopyModelFilter(virCPUDef *dst,
                          const virCPUDef *src,
                          bool resetPolicy,
                          virCPUDefFeatureFilter filter,
@@ -151,9 +159,7 @@ virCPUDefCopyModelFilter(virCPUDefPtr dst,
     size_t i;
     size_t n;
 
-    if (VIR_ALLOC_N(dst->features, src->nfeatures) < 0)
-        return -1;
-
+    dst->features = g_new0(virCPUFeatureDef, src->nfeatures);
     dst->model = g_strdup(src->model);
     dst->vendor = g_strdup(src->vendor);
     dst->vendor_id = g_strdup(src->vendor_id);
@@ -179,8 +185,6 @@ virCPUDefCopyModelFilter(virCPUDefPtr dst,
 
         dst->features[n].name = g_strdup(src->features[i].name);
     }
-
-    return 0;
 }
 
 
@@ -192,8 +196,8 @@ virCPUDefCopyModelFilter(virCPUDefPtr dst,
  * than overwriting it with the values from @src.
  */
 void
-virCPUDefStealModel(virCPUDefPtr dst,
-                    virCPUDefPtr src,
+virCPUDefStealModel(virCPUDef *dst,
+                    virCPUDef *src,
                     bool keepVendor)
 {
     char *vendor = NULL;
@@ -224,13 +228,10 @@ virCPUDefStealModel(virCPUDefPtr dst,
 }
 
 
-virCPUDefPtr
+virCPUDef *
 virCPUDefCopyWithoutModel(const virCPUDef *cpu)
 {
     g_autoptr(virCPUDef) copy = NULL;
-
-    if (!cpu)
-        return NULL;
 
     copy = virCPUDefNew();
     copy->type = cpu->type;
@@ -244,18 +245,22 @@ virCPUDefCopyWithoutModel(const virCPUDef *cpu)
     copy->threads = cpu->threads;
     copy->arch = cpu->arch;
     copy->migratable = cpu->migratable;
+    copy->sigFamily = cpu->sigFamily;
+    copy->sigModel = cpu->sigModel;
+    copy->sigStepping = cpu->sigStepping;
 
     if (cpu->cache) {
-        if (VIR_ALLOC(copy->cache) < 0)
-            return NULL;
-
+        copy->cache = g_new0(virCPUCacheDef, 1);
         *copy->cache = *cpu->cache;
     }
 
-    if (cpu->tsc) {
-        if (VIR_ALLOC(copy->tsc) < 0)
-            return NULL;
+    if (cpu->addr) {
+        copy->addr = g_new0(virCPUMaxPhysAddrDef, 1);
+        *copy->addr = *cpu->addr;
+    }
 
+    if (cpu->tsc) {
+        copy->tsc = g_new0(virHostCPUTscInfo, 1);
         *copy->tsc = *cpu->tsc;
     }
 
@@ -263,16 +268,12 @@ virCPUDefCopyWithoutModel(const virCPUDef *cpu)
 }
 
 
-virCPUDefPtr
+virCPUDef *
 virCPUDefCopy(const virCPUDef *cpu)
 {
-    g_autoptr(virCPUDef) copy = NULL;
+    g_autoptr(virCPUDef) copy = virCPUDefCopyWithoutModel(cpu);
 
-    if (!(copy = virCPUDefCopyWithoutModel(cpu)))
-        return NULL;
-
-    if (virCPUDefCopyModel(copy, cpu, false) < 0)
-        return NULL;
+    virCPUDefCopyModel(copy, cpu, false);
 
     return g_steal_pointer(&copy);
 }
@@ -281,29 +282,52 @@ virCPUDefCopy(const virCPUDef *cpu)
 int
 virCPUDefParseXMLString(const char *xml,
                         virCPUType type,
-                        virCPUDefPtr *cpu)
+                        virCPUDef **cpu,
+                        bool validateXML)
 {
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    int ret = -1;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
 
     if (!xml) {
         virReportError(VIR_ERR_INVALID_ARG, "%s", _("missing CPU definition"));
-        goto cleanup;
+        return -1;
     }
 
     if (!(doc = virXMLParseStringCtxt(xml, _("(CPU_definition)"), &ctxt)))
-        goto cleanup;
+        return -1;
 
-    if (virCPUDefParseXML(ctxt, NULL, type, cpu) < 0)
-        goto cleanup;
+    if (virCPUDefParseXML(ctxt, NULL, type, cpu, validateXML) < 0)
+        return -1;
 
-    ret = 0;
+    return 0;
+}
 
- cleanup:
-    xmlFreeDoc(doc);
-    xmlXPathFreeContext(ctxt);
-    return ret;
+
+static int
+virCPUDefParseXMLCache(virCPUDef *def,
+                       xmlNodePtr node)
+{
+    int rc;
+
+    def->cache = g_new0(virCPUCacheDef, 1);
+
+    if ((rc = virXMLPropInt(node, "level", 10, VIR_XML_PROP_NONNEGATIVE,
+                            &def->cache->level, -1)) < 0)
+        return -1;
+
+    if (rc == 1) {
+        if (def->cache->level < 1 || def->cache->level > 3) {
+            virReportError(VIR_ERR_XML_ERROR, "%s",
+                           _("invalid CPU cache level, must be in range [1,3]"));
+            return -1;
+        }
+    }
+
+    if (virXMLPropEnum(node, "mode", virCPUCacheModeTypeFromString,
+                       VIR_XML_PROP_REQUIRED, &def->cache->mode) < 0)
+        return -1;
+
+    return 0;
 }
 
 
@@ -323,19 +347,23 @@ int
 virCPUDefParseXML(xmlXPathContextPtr ctxt,
                   const char *xpath,
                   virCPUType type,
-                  virCPUDefPtr *cpu)
+                  virCPUDef **cpu,
+                  bool validateXML)
 {
     g_autoptr(virCPUDef) def = NULL;
     g_autofree xmlNodePtr *nodes = NULL;
-    VIR_XPATH_NODE_AUTORESTORE(ctxt);
+    xmlNodePtr topology = NULL;
+    xmlNodePtr maxphysaddrNode = NULL;
+    g_autofree xmlNodePtr *cacheNodes = NULL;
+    ssize_t ncacheNodes = 0;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt)
     int n;
+    int rv;
     size_t i;
     g_autofree char *cpuMode = NULL;
     g_autofree char *fallback = NULL;
     g_autofree char *vendor_id = NULL;
-    g_autofree char *tscScaling = NULL;
-    g_autofree char *migratable = NULL;
-    g_autofree virHostCPUTscInfoPtr tsc = NULL;
+    g_autofree virHostCPUTscInfo *tsc = NULL;
 
     *cpu = NULL;
 
@@ -348,14 +376,25 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
         return -1;
     }
 
+    if (validateXML) {
+        g_autofree char *schemafile = NULL;
+
+        if (!(schemafile = virFileFindResource("cpu.rng",
+                                               abs_top_srcdir "/src/conf/schemas",
+                                               PKGDATADIR "/schemas")))
+            return -1;
+
+        if (virXMLValidateNodeAgainstSchema(schemafile, ctxt->node) < 0)
+            return -1;
+    }
+
     def = virCPUDefNew();
 
     if (type == VIR_CPU_TYPE_AUTO) {
         if (virXPathBoolean("boolean(./arch)", ctxt)) {
             if (virXPathBoolean("boolean(./@match)", ctxt)) {
                 virReportError(VIR_ERR_XML_ERROR, "%s",
-                               _("'arch' element cannot be used inside 'cpu'"
-                                 " element with 'match' attribute'"));
+                               _("'arch' element cannot be used inside 'cpu' element with 'match' attribute'"));
                 return -1;
             }
             def->type = VIR_CPU_TYPE_HOST;
@@ -376,7 +415,7 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
 
             if (def->mode < 0) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("Invalid mode attribute '%s'"),
+                               _("Invalid mode attribute '%1$s'"),
                                cpuMode);
                 return -1;
             }
@@ -388,54 +427,35 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
             def->mode = VIR_CPU_MODE_CUSTOM;
     }
 
-    if ((migratable = virXMLPropString(ctxt->node, "migratable"))) {
-        int val;
-
-        if (def->mode != VIR_CPU_MODE_HOST_PASSTHROUGH) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                           _("Attribute migratable is only allowed for "
-                             "host-passthrough CPU"));
-            return -1;
-        }
-
-        if ((val = virTristateSwitchTypeFromString(migratable)) < 0) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Invalid value in migratable attribute: '%s'"),
-                           migratable);
-            return -1;
-        }
-
-        def->migratable = val;
+    if ((rv = virXMLPropTristateSwitch(ctxt->node, "migratable",
+                                       VIR_XML_PROP_NONE,
+                                       &def->migratable)) < 0) {
+        return -1;
+    } else if (rv > 0 &&
+               def->mode != VIR_CPU_MODE_HOST_PASSTHROUGH &&
+               def->mode != VIR_CPU_MODE_MAXIMUM) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("Attribute migratable is only allowed for 'host-passthrough' / 'maximum' CPU mode"));
+        return -1;
     }
 
     if (def->type == VIR_CPU_TYPE_GUEST) {
-        g_autofree char *match = virXMLPropString(ctxt->node, "match");
-        g_autofree char *check = NULL;
+        if (virXMLPropEnum(ctxt->node, "match",
+                           virCPUMatchTypeFromString,
+                           VIR_XML_PROP_NONE,
+                           &def->match) < 0)
+            return -1;
 
-        if (match) {
-            def->match = virCPUMatchTypeFromString(match);
-            if (def->match < 0) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("Invalid match attribute for CPU "
-                                 "specification"));
-                return -1;
-            }
-        }
-
-        if ((check = virXMLPropString(ctxt->node, "check"))) {
-            int value = virCPUCheckTypeFromString(check);
-            if (value < 0) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("Invalid check attribute for CPU "
-                                 "specification"));
-                return -1;
-            }
-            def->check = value;
-        }
+        if (virXMLPropEnum(ctxt->node, "check", virCPUCheckTypeFromString,
+                           VIR_XML_PROP_NONE, &def->check) < 0)
+            return -1;
     }
 
     if (def->type == VIR_CPU_TYPE_HOST) {
         g_autofree char *arch = virXPathString("string(./arch[1])", ctxt);
+        xmlNodePtr counter_node = NULL;
+        xmlNodePtr signature_node = NULL;
+
         if (!arch) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("Missing CPU architecture"));
@@ -443,7 +463,7 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
         }
         if ((def->arch = virArchFromString(arch)) == VIR_ARCH_NONE) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Unknown architecture %s"), arch);
+                           _("Unknown architecture %1$s"), arch);
             return -1;
         }
 
@@ -455,27 +475,38 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
             return -1;
         }
 
-        if (virXPathBoolean("boolean(./counter[@name='tsc'])", ctxt) > 0) {
-            tsc = g_new0(virHostCPUTscInfo, 1);
-
-            if (virXPathULongLong("string(./counter[@name='tsc']/@frequency)",
-                                  ctxt, &tsc->frequency) < 0) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("Invalid TSC frequency"));
+        if ((signature_node = virXPathNode("./signature[1]", ctxt))) {
+            if (virXMLPropUInt(signature_node, "family", 10,
+                               VIR_XML_PROP_REQUIRED | VIR_XML_PROP_NONZERO,
+                               &def->sigFamily) < 0) {
                 return -1;
             }
 
-            tscScaling = virXPathString("string(./counter[@name='tsc']/@scaling)",
-                                        ctxt);
-            if (tscScaling) {
-                int scaling = virTristateBoolTypeFromString(tscScaling);
-                if (scaling < 0) {
-                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                                   _("Invalid TSC scaling attribute"));
-                    return -1;
-                }
-                tsc->scaling = scaling;
+            if (virXMLPropUInt(signature_node, "model", 10,
+                               VIR_XML_PROP_REQUIRED,
+                               &def->sigModel) < 0) {
+                return -1;
             }
+
+            if (virXMLPropUInt(signature_node, "stepping", 10,
+                               VIR_XML_PROP_REQUIRED,
+                               &def->sigStepping) < 0) {
+                return -1;
+            }
+        }
+
+        if ((counter_node = virXPathNode("./counter[@name='tsc']", ctxt))) {
+            tsc = g_new0(virHostCPUTscInfo, 1);
+
+            if (virXMLPropULongLong(counter_node, "frequency", 10,
+                                    VIR_XML_PROP_REQUIRED,
+                                    &tsc->frequency) < 0)
+                return -1;
+
+            if (virXMLPropTristateBool(counter_node, "scaling",
+                                       VIR_XML_PROP_NONE,
+                                       &tsc->scaling) < 0)
+                return -1;
 
             def->tsc = g_steal_pointer(&tsc);
         }
@@ -489,7 +520,8 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
     }
 
     if (def->type == VIR_CPU_TYPE_GUEST &&
-        def->mode != VIR_CPU_MODE_HOST_PASSTHROUGH) {
+        def->mode != VIR_CPU_MODE_HOST_PASSTHROUGH &&
+        def->mode != VIR_CPU_MODE_MAXIMUM) {
 
         if ((fallback = virXPathString("string(./model[1]/@fallback)", ctxt))) {
             if ((def->fallback = virCPUFallbackTypeFromString(fallback)) < 0) {
@@ -503,7 +535,7 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
                                         ctxt))) {
             if (strlen(vendor_id) != VIR_CPU_VENDOR_ID_LENGTH) {
                 virReportError(VIR_ERR_XML_ERROR,
-                               _("vendor_id must be exactly %d characters long"),
+                               _("vendor_id must be exactly %1$d characters long"),
                                VIR_CPU_VENDOR_ID_LENGTH);
                 return -1;
             }
@@ -526,44 +558,29 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
         return -1;
     }
 
-    if (virXPathNode("./topology[1]", ctxt)) {
-        unsigned long ul;
+    if ((topology = virXPathNode("./topology[1]", ctxt))) {
 
-        if (virXPathULong("string(./topology[1]/@sockets)", ctxt, &ul) < 0) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("Missing 'sockets' attribute in CPU topology"));
+        if (virXMLPropUInt(topology, "sockets", 10,
+                           VIR_XML_PROP_REQUIRED | VIR_XML_PROP_NONZERO,
+                           &def->sockets) < 0) {
             return -1;
         }
-        def->sockets = (unsigned int) ul;
 
-        if (virXPathNode("./topology[1]/@dies", ctxt)) {
-            if (virXPathULong("string(./topology[1]/@dies)", ctxt, &ul) < 0) {
-                virReportError(VIR_ERR_XML_ERROR, "%s",
-                               _("Malformed 'dies' attribute in CPU topology"));
-                return -1;
-            }
-            def->dies = (unsigned int) ul;
-        } else {
-            def->dies = 1;
-        }
-
-        if (virXPathULong("string(./topology[1]/@cores)", ctxt, &ul) < 0) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("Missing 'cores' attribute in CPU topology"));
+        if (virXMLPropUIntDefault(topology, "dies", 10,
+                                  VIR_XML_PROP_NONZERO,
+                                  &def->dies, 1) < 0) {
             return -1;
         }
-        def->cores = (unsigned int) ul;
 
-        if (virXPathULong("string(./topology[1]/@threads)", ctxt, &ul) < 0) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("Missing 'threads' attribute in CPU topology"));
+        if (virXMLPropUInt(topology, "cores", 10,
+                           VIR_XML_PROP_REQUIRED | VIR_XML_PROP_NONZERO,
+                           &def->cores) < 0) {
             return -1;
         }
-        def->threads = (unsigned int) ul;
 
-        if (!def->sockets || !def->cores || !def->threads || !def->dies) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("Invalid CPU topology"));
+        if (virXMLPropUInt(topology, "threads", 10,
+                           VIR_XML_PROP_REQUIRED | VIR_XML_PROP_NONZERO,
+                           &def->threads) < 0) {
             return -1;
         }
     }
@@ -574,15 +591,11 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
     if (n > 0) {
         if (!def->model && def->mode == VIR_CPU_MODE_CUSTOM) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("Non-empty feature list specified without "
-                             "CPU model"));
+                           _("Non-empty feature list specified without CPU model"));
             return -1;
         }
 
-        if (VIR_RESIZE_N(def->features, def->nfeatures_max,
-                         def->nfeatures, n) < 0)
-            return -1;
-
+        VIR_RESIZE_N(def->features, def->nfeatures_max, def->nfeatures, n);
         def->nfeatures = n;
     }
 
@@ -618,7 +631,7 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
         for (j = 0; j < i; j++) {
             if (STREQ(name, def->features[j].name)) {
                 virReportError(VIR_ERR_XML_ERROR,
-                               _("CPU feature '%s' specified more than once"),
+                               _("CPU feature '%1$s' specified more than once"),
                                name);
                 return -1;
             }
@@ -628,35 +641,41 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
         def->features[i].policy = policy;
     }
 
-    if (virXPathInt("count(./cache)", ctxt, &n) < 0) {
-        return -1;
-    } else if (n > 1) {
-        virReportError(VIR_ERR_XML_ERROR, "%s",
-                       _("at most one CPU cache element may be specified"));
-        return -1;
-    } else if (n == 1) {
-        int level = -1;
-        g_autofree char *strmode = NULL;
-        int mode;
-
-        if (virXPathBoolean("boolean(./cache[1]/@level)", ctxt) == 1 &&
-            (virXPathInt("string(./cache[1]/@level)", ctxt, &level) < 0 ||
-             level < 1 || level > 3)) {
+    if ((ncacheNodes = virXPathNodeSet("./cache", ctxt, &cacheNodes)) > 0) {
+        if (ncacheNodes > 1) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("invalid CPU cache level, must be in range [1,3]"));
+                           _("at most one CPU cache element may be specified"));
             return -1;
         }
 
-        if (!(strmode = virXPathString("string(./cache[1]/@mode)", ctxt)) ||
-            (mode = virCPUCacheModeTypeFromString(strmode)) < 0) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("missing or invalid CPU cache mode"));
+        if (virCPUDefParseXMLCache(def, cacheNodes[0]) < 0)
+            return -1;
+    }
+
+    if ((maxphysaddrNode = virXPathNode("./maxphysaddr[1]", ctxt))) {
+        def->addr = g_new0(virCPUMaxPhysAddrDef, 1);
+
+        if (virXMLPropEnum(maxphysaddrNode, "mode",
+                           virCPUMaxPhysAddrModeTypeFromString,
+                           VIR_XML_PROP_REQUIRED,
+                           &def->addr->mode) < 0)
+            return -1;
+
+        if (virXMLPropInt(maxphysaddrNode, "bits", 10,
+                          VIR_XML_PROP_NONNEGATIVE,
+                          &def->addr->bits, -1) < 0)
+            return -1;
+
+        if ((rv = virXMLPropUInt(maxphysaddrNode, "limit", 10,
+                                 VIR_XML_PROP_NONZERO,
+                                 &def->addr->limit)) < 0) {
+            return -1;
+        } else if (rv > 0 && def->addr->mode != VIR_CPU_MAX_PHYS_ADDR_MODE_PASSTHROUGH) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("attribute 'limit' is only supported for maxphysaddr mode 'passthrough'"));
             return -1;
         }
 
-        def->cache = g_new0(virCPUCacheDef, 1);
-        def->cache->level = level;
-        def->cache->mode = mode;
     }
 
     *cpu = g_steal_pointer(&def);
@@ -665,30 +684,25 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
 
 
 char *
-virCPUDefFormat(virCPUDefPtr def,
-                virDomainNumaPtr numa)
+virCPUDefFormat(virCPUDef *def,
+                virDomainNuma *numa)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (virCPUDefFormatBufFull(&buf, def, numa) < 0)
-        goto cleanup;
+        return NULL;
 
     return virBufferContentAndReset(&buf);
-
- cleanup:
-    virBufferFreeAndReset(&buf);
-    return NULL;
 }
 
 
 int
-virCPUDefFormatBufFull(virBufferPtr buf,
-                       virCPUDefPtr def,
-                       virDomainNumaPtr numa)
+virCPUDefFormatBufFull(virBuffer *buf,
+                       virCPUDef *def,
+                       virDomainNuma *numa)
 {
-    int ret = -1;
-    virBuffer attributeBuf = VIR_BUFFER_INITIALIZER;
-    virBuffer childrenBuf = VIR_BUFFER_INIT_CHILD(buf);
+    g_auto(virBuffer) attributeBuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) childrenBuf = VIR_BUFFER_INIT_CHILD(buf);
 
     if (!def)
         return 0;
@@ -701,17 +715,17 @@ virCPUDefFormatBufFull(virBufferPtr buf,
 
         if (!(tmp = virCPUModeTypeToString(def->mode))) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Unexpected CPU mode %d"), def->mode);
-            goto cleanup;
+                           _("Unexpected CPU mode %1$d"), def->mode);
+            return -1;
         }
         virBufferAsprintf(&attributeBuf, " mode='%s'", tmp);
 
         if (def->mode == VIR_CPU_MODE_CUSTOM) {
             if (!(tmp = virCPUMatchTypeToString(def->match))) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Unexpected CPU match policy %d"),
+                               _("Unexpected CPU match policy %1$d"),
                                def->match);
-                goto cleanup;
+                return -1;
             }
             virBufferAsprintf(&attributeBuf, " match='%s'", tmp);
         }
@@ -721,7 +735,9 @@ virCPUDefFormatBufFull(virBufferPtr buf,
                               virCPUCheckTypeToString(def->check));
         }
 
-        if (def->mode == VIR_CPU_MODE_HOST_PASSTHROUGH && def->migratable) {
+        if ((def->mode == VIR_CPU_MODE_HOST_PASSTHROUGH ||
+             def->mode == VIR_CPU_MODE_MAXIMUM) &&
+            def->migratable) {
             virBufferAsprintf(&attributeBuf, " migratable='%s'",
                               virTristateSwitchTypeToString(def->migratable));
         }
@@ -732,37 +748,19 @@ virCPUDefFormatBufFull(virBufferPtr buf,
         virBufferAsprintf(&childrenBuf, "<arch>%s</arch>\n",
                           virArchToString(def->arch));
     if (virCPUDefFormatBuf(&childrenBuf, def) < 0)
-        goto cleanup;
+        return -1;
 
-    if (virDomainNumaDefCPUFormatXML(&childrenBuf, numa) < 0)
-        goto cleanup;
+    if (virDomainNumaDefFormatXML(&childrenBuf, numa) < 0)
+        return -1;
 
-    /* Put it all together */
-    if (virBufferUse(&attributeBuf) || virBufferUse(&childrenBuf)) {
-        virBufferAddLit(buf, "<cpu");
+    virXMLFormatElement(buf, "cpu", &attributeBuf, &childrenBuf);
 
-        if (virBufferUse(&attributeBuf))
-            virBufferAddBuffer(buf, &attributeBuf);
-
-        if (virBufferUse(&childrenBuf)) {
-            virBufferAddLit(buf, ">\n");
-            virBufferAddBuffer(buf, &childrenBuf);
-            virBufferAddLit(buf, "</cpu>\n");
-        } else {
-            virBufferAddLit(buf, "/>\n");
-        }
-    }
-
-    ret = 0;
- cleanup:
-    virBufferFreeAndReset(&attributeBuf);
-    virBufferFreeAndReset(&childrenBuf);
-    return ret;
+    return 0;
 }
 
 int
-virCPUDefFormatBuf(virBufferPtr buf,
-                   virCPUDefPtr def)
+virCPUDefFormatBuf(virBuffer *buf,
+                   virCPUDef *def)
 {
     size_t i;
     bool formatModel;
@@ -788,7 +786,7 @@ virCPUDefFormatBuf(virBufferPtr buf,
             fallback = virCPUFallbackTypeToString(def->fallback);
             if (!fallback) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Unexpected CPU fallback value: %d"),
+                               _("Unexpected CPU fallback value: %1$d"),
                                def->fallback);
                 return -1;
             }
@@ -810,6 +808,14 @@ virCPUDefFormatBuf(virBufferPtr buf,
     if (def->type == VIR_CPU_TYPE_HOST && def->microcodeVersion)
         virBufferAsprintf(buf, "<microcode version='%u'/>\n",
                           def->microcodeVersion);
+
+    if (def->type == VIR_CPU_TYPE_HOST && def->sigFamily) {
+        virBufferAddLit(buf, "<signature");
+        virBufferAsprintf(buf, " family='%u'", def->sigFamily);
+        virBufferAsprintf(buf, " model='%u'", def->sigModel);
+        virBufferAsprintf(buf, " stepping='%u'", def->sigStepping);
+        virBufferAddLit(buf, "/>\n");
+    }
 
     if (def->type == VIR_CPU_TYPE_HOST && def->tsc) {
         virBufferAddLit(buf, "<counter name='tsc'");
@@ -839,8 +845,19 @@ virCPUDefFormatBuf(virBufferPtr buf,
         virBufferAddLit(buf, "/>\n");
     }
 
+    if (def->addr) {
+        virBufferAddLit(buf, "<maxphysaddr ");
+        virBufferAsprintf(buf, "mode='%s'",
+                          virCPUMaxPhysAddrModeTypeToString(def->addr->mode));
+        if (def->addr->bits != -1)
+            virBufferAsprintf(buf, " bits='%d'", def->addr->bits);
+        if (def->addr->limit > 0)
+            virBufferAsprintf(buf, " limit='%d'", def->addr->limit);
+        virBufferAddLit(buf, "/>\n");
+    }
+
     for (i = 0; i < def->nfeatures; i++) {
-        virCPUFeatureDefPtr feature = def->features + i;
+        virCPUFeatureDef *feature = def->features + i;
 
         if (!feature->name) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -854,7 +871,7 @@ virCPUDefFormatBuf(virBufferPtr buf,
             policy = virCPUFeaturePolicyTypeToString(feature->policy);
             if (!policy) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Unexpected CPU feature policy %d"),
+                               _("Unexpected CPU feature policy %1$d"),
                                feature->policy);
                 return -1;
             }
@@ -869,36 +886,44 @@ virCPUDefFormatBuf(virBufferPtr buf,
     return 0;
 }
 
+
+typedef enum {
+    VIR_CPU_ADD_FEATURE_MODE_EXCLUSIVE, /* Fail if feature exists */
+    VIR_CPU_ADD_FEATURE_MODE_UPDATE,    /* Add feature or update policy */
+    VIR_CPU_ADD_FEATURE_MODE_NEW,       /* Add feature if it does not exist */
+} virCPUDefAddFeatureMode;
+
 static int
-virCPUDefUpdateFeatureInternal(virCPUDefPtr def,
-                               const char *name,
-                               int policy,
-                               bool update)
+virCPUDefAddFeatureInternal(virCPUDef *def,
+                            const char *name,
+                            int policy,
+                            virCPUDefAddFeatureMode mode)
 {
-    virCPUFeatureDefPtr feat;
+    virCPUFeatureDef *feat;
 
     if (def->type == VIR_CPU_TYPE_HOST)
         policy = -1;
 
     if ((feat = virCPUDefFindFeature(def, name))) {
-        if (update) {
+        switch (mode) {
+        case VIR_CPU_ADD_FEATURE_MODE_NEW:
+            return 0;
+
+        case VIR_CPU_ADD_FEATURE_MODE_UPDATE:
             feat->policy = policy;
             return 0;
+
+        case VIR_CPU_ADD_FEATURE_MODE_EXCLUSIVE:
+        default:
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("CPU feature '%1$s' specified more than once"),
+                           name);
+            return -1;
         }
-
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("CPU feature '%s' specified more than once"),
-                       name);
-
-        return -1;
     }
 
-    if (VIR_RESIZE_N(def->features, def->nfeatures_max,
-                     def->nfeatures, 1) < 0)
-        return -1;
-
+    VIR_RESIZE_N(def->features, def->nfeatures_max, def->nfeatures, 1);
     def->features[def->nfeatures].name = g_strdup(name);
-
     def->features[def->nfeatures].policy = policy;
     def->nfeatures++;
 
@@ -906,24 +931,36 @@ virCPUDefUpdateFeatureInternal(virCPUDefPtr def,
 }
 
 int
-virCPUDefUpdateFeature(virCPUDefPtr def,
+virCPUDefUpdateFeature(virCPUDef *def,
                        const char *name,
                        int policy)
 {
-    return virCPUDefUpdateFeatureInternal(def, name, policy, true);
+    return virCPUDefAddFeatureInternal(def, name, policy,
+                                       VIR_CPU_ADD_FEATURE_MODE_UPDATE);
 }
 
 int
-virCPUDefAddFeature(virCPUDefPtr def,
+virCPUDefAddFeature(virCPUDef *def,
                     const char *name,
                     int policy)
 {
-    return virCPUDefUpdateFeatureInternal(def, name, policy, false);
+    return virCPUDefAddFeatureInternal(def, name, policy,
+                                       VIR_CPU_ADD_FEATURE_MODE_EXCLUSIVE);
 }
 
 
-virCPUFeatureDefPtr
-virCPUDefFindFeature(virCPUDefPtr def,
+int
+virCPUDefAddFeatureIfMissing(virCPUDef *def,
+                             const char *name,
+                             int policy)
+{
+    return virCPUDefAddFeatureInternal(def, name, policy,
+                                       VIR_CPU_ADD_FEATURE_MODE_NEW);
+}
+
+
+virCPUFeatureDef *
+virCPUDefFindFeature(const virCPUDef *def,
                      const char *name)
 {
     size_t i;
@@ -938,7 +975,7 @@ virCPUDefFindFeature(virCPUDefPtr def,
 
 
 int
-virCPUDefFilterFeatures(virCPUDefPtr cpu,
+virCPUDefFilterFeatures(virCPUDef *cpu,
                         virCPUDefFeatureFilter filter,
                         void *opaque)
 {
@@ -968,33 +1005,33 @@ virCPUDefFilterFeatures(virCPUDefPtr cpu,
  * Returns the number of features matching @filter or -1 on error.
  */
 int
-virCPUDefCheckFeatures(virCPUDefPtr cpu,
+virCPUDefCheckFeatures(virCPUDef *cpu,
                        virCPUDefFeatureFilter filter,
                        void *opaque,
                        char ***features)
 {
-    VIR_AUTOSTRINGLIST list = NULL;
     size_t n = 0;
     size_t i;
 
     *features = NULL;
 
+    if (cpu->nfeatures == 0)
+        return 0;
+
+    *features = g_new0(char *, cpu->nfeatures + 1);
+
     for (i = 0; i < cpu->nfeatures; i++) {
-        if (filter(cpu->features[i].name, cpu->features[i].policy, opaque)) {
-            if (virStringListAdd(&list, cpu->features[i].name) < 0)
-                return -1;
-            n++;
-        }
+        if (filter(cpu->features[i].name, cpu->features[i].policy, opaque))
+            (*features)[n++] = g_strdup(cpu->features[i].name);
     }
 
-    *features = g_steal_pointer(&list);
     return n;
 }
 
 
 bool
-virCPUDefIsEqual(virCPUDefPtr src,
-                 virCPUDefPtr dst,
+virCPUDefIsEqual(virCPUDef *src,
+                 virCPUDef *dst,
                  bool reportError)
 {
     size_t i;
@@ -1012,90 +1049,99 @@ virCPUDefIsEqual(virCPUDefPtr src,
     }
 
     if (src->type != dst->type) {
-        MISMATCH(_("Target CPU type %s does not match source %s"),
+        MISMATCH(_("Target CPU type %1$s does not match source %2$s"),
                  virCPUTypeToString(dst->type),
                  virCPUTypeToString(src->type));
         return false;
     }
 
     if (src->mode != dst->mode) {
-        MISMATCH(_("Target CPU mode %s does not match source %s"),
+        MISMATCH(_("Target CPU mode %1$s does not match source %2$s"),
                  virCPUModeTypeToString(dst->mode),
                  virCPUModeTypeToString(src->mode));
         return false;
     }
 
     if (src->check != dst->check) {
-        MISMATCH(_("Target CPU check %s does not match source %s"),
+        MISMATCH(_("Target CPU check %1$s does not match source %2$s"),
                  virCPUCheckTypeToString(dst->check),
                  virCPUCheckTypeToString(src->check));
         return false;
     }
 
     if (src->arch != dst->arch) {
-        MISMATCH(_("Target CPU arch %s does not match source %s"),
+        MISMATCH(_("Target CPU arch %1$s does not match source %2$s"),
                  virArchToString(dst->arch),
                  virArchToString(src->arch));
         return false;
     }
 
     if (STRNEQ_NULLABLE(src->model, dst->model)) {
-        MISMATCH(_("Target CPU model %s does not match source %s"),
+        MISMATCH(_("Target CPU model %1$s does not match source %2$s"),
                  NULLSTR(dst->model), NULLSTR(src->model));
         return false;
     }
 
     if (STRNEQ_NULLABLE(src->vendor, dst->vendor)) {
-        MISMATCH(_("Target CPU vendor %s does not match source %s"),
+        MISMATCH(_("Target CPU vendor %1$s does not match source %2$s"),
                  NULLSTR(dst->vendor), NULLSTR(src->vendor));
         return false;
     }
 
     if (STRNEQ_NULLABLE(src->vendor_id, dst->vendor_id)) {
-        MISMATCH(_("Target CPU vendor id %s does not match source %s"),
+        MISMATCH(_("Target CPU vendor id %1$s does not match source %2$s"),
                  NULLSTR(dst->vendor_id), NULLSTR(src->vendor_id));
         return false;
     }
 
     if (src->sockets != dst->sockets) {
-        MISMATCH(_("Target CPU sockets %d does not match source %d"),
+        MISMATCH(_("Target CPU sockets %1$d does not match source %2$d"),
                  dst->sockets, src->sockets);
         return false;
     }
 
     if (src->dies != dst->dies) {
-        MISMATCH(_("Target CPU dies %d does not match source %d"),
+        MISMATCH(_("Target CPU dies %1$d does not match source %2$d"),
                  dst->dies, src->dies);
         return false;
     }
 
     if (src->cores != dst->cores) {
-        MISMATCH(_("Target CPU cores %d does not match source %d"),
+        MISMATCH(_("Target CPU cores %1$d does not match source %2$d"),
                  dst->cores, src->cores);
         return false;
     }
 
     if (src->threads != dst->threads) {
-        MISMATCH(_("Target CPU threads %d does not match source %d"),
+        MISMATCH(_("Target CPU threads %1$d does not match source %2$d"),
                  dst->threads, src->threads);
         return false;
     }
 
+    if ((src->addr && !dst->addr) ||
+        (!src->addr && dst->addr) ||
+        (src->addr && dst->addr &&
+         (src->addr->mode != dst->addr->mode ||
+          src->addr->bits != dst->addr->bits))) {
+        MISMATCH("%s", _("Target CPU maxphysaddr does not match source"));
+        return false;
+    }
+
     if (src->nfeatures != dst->nfeatures) {
-        MISMATCH(_("Target CPU feature count %zu does not match source %zu"),
+        MISMATCH(_("Target CPU feature count %1$zu does not match source %2$zu"),
                  dst->nfeatures, src->nfeatures);
         return false;
     }
 
     for (i = 0; i < src->nfeatures; i++) {
         if (STRNEQ(src->features[i].name, dst->features[i].name)) {
-            MISMATCH(_("Target CPU feature %s does not match source %s"),
+            MISMATCH(_("Target CPU feature %1$s does not match source %2$s"),
                      dst->features[i].name, src->features[i].name);
             return false;
         }
 
         if (src->features[i].policy != dst->features[i].policy) {
-            MISMATCH(_("Target CPU feature policy %s does not match source %s"),
+            MISMATCH(_("Target CPU feature policy %1$s does not match source %2$s"),
                      virCPUFeaturePolicyTypeToString(dst->features[i].policy),
                      virCPUFeaturePolicyTypeToString(src->features[i].policy));
             return false;
@@ -1120,14 +1166,12 @@ virCPUDefIsEqual(virCPUDefPtr src,
 /*
  * Parses a list of CPU XMLs into a NULL-terminated list of CPU defs.
  */
-virCPUDefPtr *
+virCPUDef **
 virCPUDefListParse(const char **xmlCPUs,
                    unsigned int ncpus,
                    virCPUType cpuType)
 {
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    virCPUDefPtr *cpus = NULL;
+    virCPUDef **cpus = NULL;
     size_t i;
 
     VIR_DEBUG("xmlCPUs=%p, ncpus=%u", xmlCPUs, ncpus);
@@ -1148,28 +1192,23 @@ virCPUDefListParse(const char **xmlCPUs,
         goto error;
     }
 
-    if (VIR_ALLOC_N(cpus, ncpus + 1))
-        goto error;
+    cpus = g_new0(virCPUDef *, ncpus + 1);
 
     for (i = 0; i < ncpus; i++) {
+        g_autoptr(xmlDoc) doc = NULL;
+        g_autoptr(xmlXPathContext) ctxt = NULL;
+
         if (!(doc = virXMLParseStringCtxt(xmlCPUs[i], _("(CPU_definition)"), &ctxt)))
             goto error;
 
-        if (virCPUDefParseXML(ctxt, NULL, cpuType, &cpus[i]) < 0)
+        if (virCPUDefParseXML(ctxt, NULL, cpuType, &cpus[i], false) < 0)
             goto error;
-
-        xmlXPathFreeContext(ctxt);
-        xmlFreeDoc(doc);
-        ctxt = NULL;
-        doc = NULL;
     }
 
     return cpus;
 
  error:
     virCPUDefListFree(cpus);
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
     return NULL;
 }
 
@@ -1178,9 +1217,9 @@ virCPUDefListParse(const char **xmlCPUs,
  * Frees NULL-terminated list of CPUs created by virCPUDefListParse.
  */
 void
-virCPUDefListFree(virCPUDefPtr *cpus)
+virCPUDefListFree(virCPUDef **cpus)
 {
-    virCPUDefPtr *cpu;
+    virCPUDef **cpu;
 
     if (!cpus)
         return;
@@ -1188,5 +1227,5 @@ virCPUDefListFree(virCPUDefPtr *cpus)
     for (cpu = cpus; *cpu != NULL; cpu++)
         virCPUDefFree(*cpu);
 
-    VIR_FREE(cpus);
+    g_free(cpus);
 }

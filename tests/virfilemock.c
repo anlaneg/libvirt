@@ -21,14 +21,11 @@
 #include <stdio.h>
 #include <mntent.h>
 #include <sys/vfs.h>
-#if HAVE_LINUX_MAGIC_H
+#ifdef __linux__
 # include <linux/magic.h>
 #endif
-#include <assert.h>
 
 #include "virmock.h"
-#include "virstring.h"
-#include "viralloc.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -106,7 +103,7 @@ statfs_mock(const char *mtab,
     FILE *f;
     struct mntent mb;
     char mntbuf[1024];
-    char *canonPath = NULL;
+    g_autofree char *canonPath = NULL;
     int ret = -1;
 
     if (!(f = real_setmntent(mtab, "r"))) {
@@ -159,7 +156,6 @@ statfs_mock(const char *mtab,
     }
 
     endmntent(f);
-    VIR_FREE(canonPath);
     return ret;
 }
 
@@ -186,15 +182,20 @@ realpath(const char *path, char *resolved)
 
     if (getenv("LIBVIRT_MTAB")) {
         const char *p;
-        char *ret;
 
-        assert(resolved == NULL);
-        if ((p = STRSKIP(path, "/some/symlink")))
-            ret = g_strdup_printf("/gluster%s", p);
-        else
-            ret = g_strdup(path);
+        if ((p = STRSKIP(path, "/some/symlink"))) {
+            if (resolved)
+                g_snprintf(resolved, PATH_MAX, "/gluster%s", p);
+            else
+                resolved = g_strdup_printf("/gluster%s", p);
+        } else {
+            if (resolved)
+                g_strlcpy(resolved, path, PATH_MAX);
+            else
+                resolved = g_strdup(path);
+        }
 
-        return ret;
+        return resolved;
     }
 
     return real_realpath(path, resolved);

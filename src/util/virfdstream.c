@@ -39,7 +39,6 @@
 #include "configmake.h"
 #include "virstring.h"
 #include "virtime.h"
-#include "virprocess.h"
 #include "virsocket.h"
 
 #define VIR_FROM_THIS VIR_FROM_STREAMS
@@ -53,9 +52,8 @@ typedef enum {
 } virFDStreamMsgType;
 
 typedef struct _virFDStreamMsg virFDStreamMsg;
-typedef virFDStreamMsg *virFDStreamMsgPtr;
 struct _virFDStreamMsg {
-    virFDStreamMsgPtr next;
+    virFDStreamMsg *next;
 
     virFDStreamMsgType type;
 
@@ -74,7 +72,6 @@ struct _virFDStreamMsg {
 
 /* Tunnelled migration stream support */
 typedef struct virFDStreamData virFDStreamData;
-typedef virFDStreamData *virFDStreamDataPtr;
 struct virFDStreamData {
     virObjectLockable parent;
 
@@ -102,24 +99,24 @@ struct virFDStreamData {
     void *icbOpaque;
 
     /* Thread data */
-    virThreadPtr thread;
+    virThread *thread;
     virCond threadCond;
     virErrorPtr threadErr;
     bool threadQuit;
     bool threadAbort;
     bool threadDoRead;
-    virFDStreamMsgPtr msg;
+    virFDStreamMsg *msg;
 };
 
-static virClassPtr virFDStreamDataClass;
+static virClass *virFDStreamDataClass;
 static __thread bool virFDStreamDataDisposed;
 
-static void virFDStreamMsgQueueFree(virFDStreamMsgPtr *queue);
+static void virFDStreamMsgQueueFree(virFDStreamMsg **queue);
 
 static void
 virFDStreamDataDispose(void *obj)
 {
-    virFDStreamDataPtr fdst = obj;
+    virFDStreamData *fdst = obj;
 
     VIR_DEBUG("obj=%p", fdst);
     virFDStreamDataDisposed = true;
@@ -139,23 +136,23 @@ VIR_ONCE_GLOBAL_INIT(virFDStreamData);
 
 
 static int
-virFDStreamMsgQueuePush(virFDStreamDataPtr fdst,
-                        virFDStreamMsgPtr msg,
+virFDStreamMsgQueuePush(virFDStreamData *fdst,
+                        virFDStreamMsg **msg,
                         int fd,
                         const char *fdname)
 {
-    virFDStreamMsgPtr *tmp = &fdst->msg;
+    virFDStreamMsg **tmp = &fdst->msg;
     char c = '1';
 
     while (*tmp)
         tmp = &(*tmp)->next;
 
-    *tmp = msg;
+    *tmp = g_steal_pointer(msg);
     virCondSignal(&fdst->threadCond);
 
     if (safewrite(fd, &c, sizeof(c)) != sizeof(c)) {
         virReportSystemError(errno,
-                             _("Unable to write to %s"),
+                             _("Unable to write to %1$s"),
                              fdname);
         return -1;
     }
@@ -164,24 +161,23 @@ virFDStreamMsgQueuePush(virFDStreamDataPtr fdst,
 }
 
 
-static virFDStreamMsgPtr
-virFDStreamMsgQueuePop(virFDStreamDataPtr fdst,
+static virFDStreamMsg *
+virFDStreamMsgQueuePop(virFDStreamData *fdst,
                        int fd,
                        const char *fdname)
 {
-    virFDStreamMsgPtr tmp = fdst->msg;
+    virFDStreamMsg *tmp = fdst->msg;
     char c;
 
     if (tmp) {
-        fdst->msg = tmp->next;
-        tmp->next = NULL;
+        fdst->msg = g_steal_pointer(&tmp->next);
     }
 
     virCondSignal(&fdst->threadCond);
 
     if (saferead(fd, &c, sizeof(c)) != sizeof(c)) {
         virReportSystemError(errno,
-                             _("Unable to read from %s"),
+                             _("Unable to read from %1$s"),
                              fdname);
         return NULL;
     }
@@ -191,31 +187,33 @@ virFDStreamMsgQueuePop(virFDStreamDataPtr fdst,
 
 
 static void
-virFDStreamMsgFree(virFDStreamMsgPtr msg)
+virFDStreamMsgFree(virFDStreamMsg *msg)
 {
     if (!msg)
         return;
 
     switch (msg->type) {
     case VIR_FDSTREAM_MSG_TYPE_DATA:
-        VIR_FREE(msg->stream.data.buf);
+        g_free(msg->stream.data.buf);
         break;
     case VIR_FDSTREAM_MSG_TYPE_HOLE:
         /* nada */
         break;
     }
 
-    VIR_FREE(msg);
+    g_free(msg);
 }
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virFDStreamMsg, virFDStreamMsgFree);
 
 
 static void
-virFDStreamMsgQueueFree(virFDStreamMsgPtr *queue)
+virFDStreamMsgQueueFree(virFDStreamMsg **queue)
 {
-    virFDStreamMsgPtr tmp = *queue;
+    virFDStreamMsg *tmp = *queue;
 
     while (tmp) {
-        virFDStreamMsgPtr next = tmp->next;
+        virFDStreamMsg *next = tmp->next;
         virFDStreamMsgFree(tmp);
         tmp = next;
     }
@@ -226,7 +224,7 @@ virFDStreamMsgQueueFree(virFDStreamMsgPtr *queue)
 
 static int virFDStreamRemoveCallback(virStreamPtr stream)
 {
-    virFDStreamDataPtr fdst = stream->privateData;
+    virFDStreamData *fdst = stream->privateData;
     int ret = -1;
 
     if (!fdst) {
@@ -263,7 +261,7 @@ static int virFDStreamRemoveCallback(virStreamPtr stream)
 
 static int virFDStreamUpdateCallback(virStreamPtr stream, int events)
 {
-    virFDStreamDataPtr fdst = stream->privateData;
+    virFDStreamData *fdst = stream->privateData;
     int ret = -1;
 
     if (!fdst) {
@@ -295,7 +293,7 @@ static void virFDStreamEvent(int watch G_GNUC_UNUSED,
                              void *opaque)
 {
     virStreamPtr stream = opaque;
-    virFDStreamDataPtr fdst = stream->privateData;
+    virFDStreamData *fdst = stream->privateData;
     virStreamEventCallback cb;
     void *cbopaque;
     virFreeCallback ff;
@@ -347,7 +345,7 @@ virFDStreamAddCallback(virStreamPtr st,
                        void *opaque,
                        virFreeCallback ff)
 {
-    virFDStreamDataPtr fdst = st->privateData;
+    virFDStreamData *fdst = st->privateData;
     int ret = -1;
 
     if (!fdst) {
@@ -390,12 +388,12 @@ virFDStreamAddCallback(virStreamPtr st,
 
 
 typedef struct _virFDStreamThreadData virFDStreamThreadData;
-typedef virFDStreamThreadData *virFDStreamThreadDataPtr;
 struct _virFDStreamThreadData {
     virStreamPtr st;
     size_t length;
     bool doRead;
     bool sparse;
+    bool isBlock;
     int fdin;
     char *fdinname;
     int fdout;
@@ -404,21 +402,22 @@ struct _virFDStreamThreadData {
 
 
 static void
-virFDStreamThreadDataFree(virFDStreamThreadDataPtr data)
+virFDStreamThreadDataFree(virFDStreamThreadData *data)
 {
     if (!data)
         return;
 
     virObjectUnref(data->st);
-    VIR_FREE(data->fdinname);
-    VIR_FREE(data->fdoutname);
-    VIR_FREE(data);
+    g_free(data->fdinname);
+    g_free(data->fdoutname);
+    g_free(data);
 }
 
 
 static ssize_t
-virFDStreamThreadDoRead(virFDStreamDataPtr fdst,
+virFDStreamThreadDoRead(virFDStreamData *fdst,
                         bool sparse,
+                        bool isBlock,
                         const int fdin,
                         const int fdout,
                         const char *fdinname,
@@ -428,15 +427,27 @@ virFDStreamThreadDoRead(virFDStreamDataPtr fdst,
                         size_t *dataLen,
                         size_t buflen)
 {
-    virFDStreamMsgPtr msg = NULL;
+    g_autoptr(virFDStreamMsg) msg = NULL;
     int inData = 0;
     long long sectionLen = 0;
-    char *buf = NULL;
+    g_autofree char *buf = NULL;
     ssize_t got;
 
     if (sparse && *dataLen == 0) {
-        if (virFileInData(fdin, &inData, &sectionLen) < 0)
-            goto error;
+        if (isBlock) {
+            /* Block devices are always in data section by definition. The
+             * @sectionLen is slightly more tricky. While we could try and get
+             * how much bytes is there left until EOF, we can pretend there is
+             * always X bytes left and let the saferead() below hit EOF (which
+             * is then handled gracefully anyway). Worst case scenario, this
+             * branch is called more than once.
+             * X was chosen to be 1MiB but it has ho special meaning. */
+            inData = 1;
+            sectionLen = 1 * 1024 * 1024;
+        } else {
+            if (virFileInData(fdin, &inData, &sectionLen) < 0)
+                return -1;
+        }
 
         if (length &&
             sectionLen > length - total)
@@ -450,8 +461,7 @@ virFDStreamThreadDoRead(virFDStreamDataPtr fdst,
         buflen > length - total)
         buflen = length - total;
 
-    if (VIR_ALLOC(msg) < 0)
-        goto error;
+    msg = g_new0(virFDStreamMsg, 1);
 
     if (sparse && *dataLen == 0) {
         msg->type = VIR_FDSTREAM_MSG_TYPE_HOLE;
@@ -463,56 +473,48 @@ virFDStreamThreadDoRead(virFDStreamDataPtr fdst,
         if (sectionLen &&
             lseek(fdin, sectionLen, SEEK_CUR) == (off_t) -1) {
             virReportSystemError(errno,
-                                 _("unable to seek in %s"),
+                                 _("unable to seek in %1$s"),
                                  fdinname);
-            goto error;
+            return -1;
         }
     } else {
         if (sparse &&
             buflen > *dataLen)
             buflen = *dataLen;
 
-        if (VIR_ALLOC_N(buf, buflen) < 0)
-            goto error;
+        buf = g_new0(char, buflen);
 
         if ((got = saferead(fdin, buf, buflen)) < 0) {
             virReportSystemError(errno,
-                                 _("Unable to read %s"),
+                                 _("Unable to read %1$s"),
                                  fdinname);
-            goto error;
+            return -1;
         }
 
         msg->type = VIR_FDSTREAM_MSG_TYPE_DATA;
-        msg->stream.data.buf = buf;
+        msg->stream.data.buf = g_steal_pointer(&buf);
         msg->stream.data.len = got;
-        buf = NULL;
         if (sparse)
             *dataLen -= got;
     }
 
-    virFDStreamMsgQueuePush(fdst, msg, fdout, fdoutname);
-    msg = NULL;
+    virFDStreamMsgQueuePush(fdst, &msg, fdout, fdoutname);
 
     return got;
-
- error:
-    VIR_FREE(buf);
-    virFDStreamMsgFree(msg);
-    return -1;
 }
 
 
 static ssize_t
-virFDStreamThreadDoWrite(virFDStreamDataPtr fdst,
+virFDStreamThreadDoWrite(virFDStreamData *fdst,
                          bool sparse,
+                         bool isBlock,
                          const int fdin,
                          const int fdout,
                          const char *fdinname,
                          const char *fdoutname)
 {
     ssize_t got = 0;
-    virFDStreamMsgPtr msg = fdst->msg;
-    off_t off;
+    virFDStreamMsg *msg = fdst->msg;
     bool pop = false;
 
     switch (msg->type) {
@@ -522,7 +524,7 @@ virFDStreamThreadDoWrite(virFDStreamDataPtr fdst,
                         msg->stream.data.len - msg->stream.data.offset);
         if (got < 0) {
             virReportSystemError(errno,
-                                 _("Unable to write %s"),
+                                 _("Unable to write %1$s"),
                                  fdoutname);
             return -1;
         }
@@ -540,19 +542,48 @@ virFDStreamThreadDoWrite(virFDStreamDataPtr fdst,
         }
 
         got = msg->stream.hole.len;
-        off = lseek(fdout, got, SEEK_CUR);
-        if (off == (off_t) -1) {
-            virReportSystemError(errno,
-                                 _("unable to seek in %s"),
-                                 fdoutname);
-            return -1;
-        }
+        if (isBlock) {
+            g_autofree char * buf = NULL;
+            const size_t buflen = 1 * 1024 * 1024; /* 1MiB */
+            size_t toWrite = got;
 
-        if (ftruncate(fdout, off) < 0) {
-            virReportSystemError(errno,
-                                 _("unable to truncate %s"),
-                                 fdoutname);
-            return -1;
+            /* While for files it's enough to lseek() and ftruncate() to create
+             * a hole which would emulate zeroes on read(), for block devices
+             * we have to write zeroes to read() zeroes. And we have to write
+             * @got bytes of zeroes. Do that in smaller chunks though.*/
+
+            buf = g_new0(char, buflen);
+
+            while (toWrite) {
+                size_t count = MIN(toWrite, buflen);
+                ssize_t r;
+
+                if ((r = safewrite(fdout, buf, count)) < 0) {
+                    virReportSystemError(errno,
+                                         _("Unable to write %1$s"),
+                                         fdoutname);
+                    return -1;
+                }
+
+                toWrite -= r;
+            }
+        } else {
+            off_t off;
+
+            off = lseek(fdout, got, SEEK_CUR);
+            if (off == (off_t) -1) {
+                virReportSystemError(errno,
+                                     _("unable to seek in %1$s"),
+                                     fdoutname);
+                return -1;
+            }
+
+            if (ftruncate(fdout, off) < 0) {
+                virReportSystemError(errno,
+                                     _("unable to truncate %1$s"),
+                                     fdoutname);
+                return -1;
+            }
         }
 
         pop = true;
@@ -571,15 +602,16 @@ virFDStreamThreadDoWrite(virFDStreamDataPtr fdst,
 static void
 virFDStreamThread(void *opaque)
 {
-    virFDStreamThreadDataPtr data = opaque;
+    virFDStreamThreadData *data = opaque;
     virStreamPtr st = data->st;
     size_t length = data->length;
     bool sparse = data->sparse;
-    int fdin = data->fdin;
+    bool isBlock = data->isBlock;
+    VIR_AUTOCLOSE fdin = data->fdin;
     char *fdinname = data->fdinname;
-    int fdout = data->fdout;
+    VIR_AUTOCLOSE fdout = data->fdout;
     char *fdoutname = data->fdoutname;
-    virFDStreamDataPtr fdst = st->privateData;
+    virFDStreamData *fdst = st->privateData;
     bool doRead = fdst->threadDoRead;
     size_t buflen = 256 * 1024;
     size_t total = 0;
@@ -611,13 +643,13 @@ virFDStreamThread(void *opaque)
         }
 
         if (doRead)
-            got = virFDStreamThreadDoRead(fdst, sparse,
+            got = virFDStreamThreadDoRead(fdst, sparse, isBlock,
                                           fdin, fdout,
                                           fdinname, fdoutname,
                                           length, total,
                                           &dataLen, buflen);
         else
-            got = virFDStreamThreadDoWrite(fdst, sparse,
+            got = virFDStreamThreadDoWrite(fdst, sparse, isBlock,
                                            fdin, fdout,
                                            fdinname, fdoutname);
 
@@ -637,8 +669,6 @@ virFDStreamThread(void *opaque)
     virObjectUnref(fdst);
     if (virFDStreamDataDisposed)
         st->privateData = NULL;
-    VIR_FORCE_CLOSE(fdin);
-    VIR_FORCE_CLOSE(fdout);
     virFDStreamThreadDataFree(data);
     return;
 
@@ -649,7 +679,7 @@ virFDStreamThread(void *opaque)
 
 
 static int
-virFDStreamJoinWorker(virFDStreamDataPtr fdst,
+virFDStreamJoinWorker(virFDStreamData *fdst,
                       bool streamAbort)
 {
     int ret = -1;
@@ -681,7 +711,7 @@ virFDStreamJoinWorker(virFDStreamDataPtr fdst,
 static int
 virFDStreamCloseInt(virStreamPtr st, bool streamAbort)
 {
-    virFDStreamDataPtr fdst;
+    virFDStreamData *fdst;
     virStreamEventCallback cb;
     void *opaque;
     int ret;
@@ -763,8 +793,8 @@ virFDStreamAbort(virStreamPtr st)
 
 static int virFDStreamWrite(virStreamPtr st, const char *bytes, size_t nbytes)
 {
-    virFDStreamDataPtr fdst = st->privateData;
-    virFDStreamMsgPtr msg = NULL;
+    virFDStreamData *fdst = st->privateData;
+    g_autoptr(virFDStreamMsg) msg = NULL;
     int ret = -1;
 
     if (nbytes > INT_MAX) {
@@ -807,21 +837,19 @@ static int virFDStreamWrite(virStreamPtr st, const char *bytes, size_t nbytes)
             goto cleanup;
         }
 
-        if (VIR_ALLOC(msg) < 0 ||
-            VIR_ALLOC_N(buf, nbytes) < 0)
-            goto cleanup;
+        msg = g_new0(virFDStreamMsg, 1);
+        buf = g_new0(char, nbytes);
 
         memcpy(buf, bytes, nbytes);
         msg->type = VIR_FDSTREAM_MSG_TYPE_DATA;
         msg->stream.data.buf = buf;
         msg->stream.data.len = nbytes;
 
-        virFDStreamMsgQueuePush(fdst, msg, fdst->fd, "pipe");
-        msg = NULL;
+        virFDStreamMsgQueuePush(fdst, &msg, fdst->fd, "pipe");
         ret = nbytes;
     } else {
      retry:
-        ret = write(fdst->fd, bytes, nbytes);
+        ret = write(fdst->fd, bytes, nbytes); /* sc_avoid_write */
         if (ret < 0) {
             VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -842,14 +870,13 @@ static int virFDStreamWrite(virStreamPtr st, const char *bytes, size_t nbytes)
 
  cleanup:
     virObjectUnlock(fdst);
-    virFDStreamMsgFree(msg);
     return ret;
 }
 
 
 static int virFDStreamRead(virStreamPtr st, char *bytes, size_t nbytes)
 {
-    virFDStreamDataPtr fdst = st->privateData;
+    virFDStreamData *fdst = st->privateData;
     int ret = -1;
 
     if (nbytes > INT_MAX) {
@@ -877,7 +904,7 @@ static int virFDStreamRead(virStreamPtr st, char *bytes, size_t nbytes)
     }
 
     if (fdst->thread) {
-        virFDStreamMsgPtr msg = NULL;
+        virFDStreamMsg *msg = NULL;
 
         while (!(msg = fdst->msg)) {
             if (fdst->threadQuit || fdst->threadErr) {
@@ -963,8 +990,8 @@ virFDStreamSendHole(virStreamPtr st,
                     long long length,
                     unsigned int flags)
 {
-    virFDStreamDataPtr fdst = st->privateData;
-    virFDStreamMsgPtr msg = NULL;
+    virFDStreamData *fdst = st->privateData;
+    g_autoptr(virFDStreamMsg) msg = NULL;
     off_t off;
     int ret = -1;
 
@@ -1007,13 +1034,11 @@ virFDStreamSendHole(virStreamPtr st,
 
             virFDStreamMsgQueuePop(fdst, fdst->fd, "pipe");
         } else {
-            if (VIR_ALLOC(msg) < 0)
-                goto cleanup;
+            msg = g_new0(virFDStreamMsg, 1);
 
             msg->type = VIR_FDSTREAM_MSG_TYPE_HOLE;
             msg->stream.hole.len = length;
-            virFDStreamMsgQueuePush(fdst, msg, fdst->fd, "pipe");
-            msg = NULL;
+            virFDStreamMsgQueuePush(fdst, &msg, fdst->fd, "pipe");
         }
     } else {
         off = lseek(fdst->fd, length, SEEK_CUR);
@@ -1033,7 +1058,6 @@ virFDStreamSendHole(virStreamPtr st,
     ret = 0;
  cleanup:
     virObjectUnlock(fdst);
-    virFDStreamMsgFree(msg);
     return ret;
 }
 
@@ -1043,13 +1067,13 @@ virFDStreamInData(virStreamPtr st,
                   int *inData,
                   long long *length)
 {
-    virFDStreamDataPtr fdst = st->privateData;
+    virFDStreamData *fdst = st->privateData;
     int ret = -1;
 
     virObjectLock(fdst);
 
     if (fdst->thread) {
-        virFDStreamMsgPtr msg;
+        virFDStreamMsg *msg;
 
         if (fdst->threadErr)
             goto cleanup;
@@ -1098,10 +1122,10 @@ static virStreamDriver virFDStreamDrv = {
 
 static int virFDStreamOpenInternal(virStreamPtr st,
                                    int fd,
-                                   virFDStreamThreadDataPtr threadData,
+                                   virFDStreamThreadData *threadData,
                                    unsigned long long length)
 {
-    virFDStreamDataPtr fdst;
+    virFDStreamData *fdst;
 
     VIR_DEBUG("st=%p fd=%d threadData=%p length=%llu",
               st, fd, threadData, length);
@@ -1129,8 +1153,7 @@ static int virFDStreamOpenInternal(virStreamPtr st,
 
         /* Create the thread after fdst and st were initialized.
          * The thread worker expects them to be that way. */
-        if (VIR_ALLOC(fdst->thread) < 0)
-            goto error;
+        fdst->thread = g_new0(virThread, 1);
 
         if (virCondInit(&fdst->threadCond) < 0) {
             virReportSystemError(errno, "%s",
@@ -1169,29 +1192,29 @@ int virFDStreamConnectUNIX(virStreamPtr st,
                            const char *path,
                            bool abstract)
 {
-    struct sockaddr_un sa;
+    struct sockaddr_un sa = { 0 };
     virTimeBackOffVar timeout;
+    VIR_AUTOCLOSE fd = -1;
     int ret;
 
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         virReportSystemError(errno, "%s", _("Unable to open UNIX socket"));
-        goto error;
+        return -1;
     }
 
-    memset(&sa, 0, sizeof(sa));
     sa.sun_family = AF_UNIX;
     if (abstract) {
         if (virStrcpy(sa.sun_path+1, path, sizeof(sa.sun_path)-1) < 0)
-            goto error;
+            return -1;
         sa.sun_path[0] = '\0';
     } else {
         if (virStrcpyStatic(sa.sun_path, path) < 0)
-            goto error;
+            return -1;
     }
 
     if (virTimeBackOffStart(&timeout, 1, 3*1000 /* ms */) < 0)
-        goto error;
+        return -1;
     while (virTimeBackOffWait(&timeout)) {
         ret = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
         if (ret == 0)
@@ -1203,16 +1226,14 @@ int virFDStreamConnectUNIX(virStreamPtr st,
             continue;
         }
 
-        goto error;
+        return -1;
     }
 
     if (virFDStreamOpenInternal(st, fd, NULL, 0) < 0)
-        goto error;
-    return 0;
+        return -1;
+    fd = -1;
 
- error:
-    VIR_FORCE_CLOSE(fd);
-    return -1;
+    return 0;
 }
 
 
@@ -1230,7 +1251,7 @@ virFDStreamOpenFileInternal(virStreamPtr st,
     int pipefds[2] = { -1, -1 };
     int tmpfd = -1;
     struct stat sb;
-    virFDStreamThreadDataPtr threadData = NULL;
+    virFDStreamThreadData *threadData = NULL;
 
     VIR_DEBUG("st=%p path=%s oflags=0x%x offset=%llu length=%llu mode=0%o",
               st, path, oflags, offset, length, mode);
@@ -1243,7 +1264,7 @@ virFDStreamOpenFileInternal(virStreamPtr st,
         fd = open(path, oflags);
     if (fd < 0) {
         virReportSystemError(errno,
-                             _("Unable to open stream for '%s'"),
+                             _("Unable to open stream for '%1$s'"),
                              path);
         return -1;
     }
@@ -1251,7 +1272,7 @@ virFDStreamOpenFileInternal(virStreamPtr st,
 
     if (fstat(fd, &sb) < 0) {
         virReportSystemError(errno,
-                             _("Unable to access stream for '%s'"),
+                             _("Unable to access stream for '%1$s'"),
                              path);
         goto error;
     }
@@ -1259,7 +1280,7 @@ virFDStreamOpenFileInternal(virStreamPtr st,
     if (offset &&
         lseek(fd, offset, SEEK_SET) < 0) {
         virReportSystemError(errno,
-                             _("Unable to seek %s to %llu"),
+                             _("Unable to seek %1$s to %2$llu"),
                              path, offset);
         goto error;
     }
@@ -1275,7 +1296,7 @@ virFDStreamOpenFileInternal(virStreamPtr st,
 
         if ((oflags & O_ACCMODE) == O_RDWR) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("%s: Cannot request read and write flags together"),
+                           _("%1$s: Cannot request read and write flags together"),
                            path);
             goto error;
         }
@@ -1283,12 +1304,12 @@ virFDStreamOpenFileInternal(virStreamPtr st,
         if (virPipe(pipefds) < 0)
             goto error;
 
-        if (VIR_ALLOC(threadData) < 0)
-            goto error;
+        threadData = g_new0(virFDStreamThreadData, 1);
 
         threadData->st = virObjectRef(st);
         threadData->length = length;
         threadData->sparse = sparse;
+        threadData->isBlock = !!S_ISBLK(sb.st_mode);
 
         if ((oflags & O_ACCMODE) == O_RDONLY) {
             threadData->fdin = fd;
@@ -1330,7 +1351,7 @@ int virFDStreamOpenFile(virStreamPtr st,
 {
     if (oflags & O_CREAT) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Attempt to create %s without specifying mode"),
+                       _("Attempt to create %1$s without specifying mode"),
                        path);
         return -1;
     }
@@ -1358,7 +1379,7 @@ int virFDStreamOpenPTY(virStreamPtr st,
                        unsigned long long length,
                        int oflags)
 {
-    virFDStreamDataPtr fdst = NULL;
+    virFDStreamData *fdst = NULL;
     struct termios rawattr;
 
     if (virFDStreamOpenFileInternal(st, path,
@@ -1371,7 +1392,7 @@ int virFDStreamOpenPTY(virStreamPtr st,
 
     if (tcgetattr(fdst->fd, &rawattr) < 0) {
         virReportSystemError(errno,
-                             _("unable to get tty attributes: %s"),
+                             _("unable to get tty attributes: %1$s"),
                              path);
         goto cleanup;
     }
@@ -1380,7 +1401,7 @@ int virFDStreamOpenPTY(virStreamPtr st,
 
     if (tcsetattr(fdst->fd, TCSANOW, &rawattr) < 0) {
         virReportSystemError(errno,
-                             _("unable to set tty attributes: %s"),
+                             _("unable to set tty attributes: %1$s"),
                              path);
         goto cleanup;
     }
@@ -1409,7 +1430,7 @@ int virFDStreamSetInternalCloseCb(virStreamPtr st,
                                   void *opaque,
                                   virFDStreamInternalCloseCbFreeOpaque fcb)
 {
-    virFDStreamDataPtr fdst = st->privateData;
+    virFDStreamData *fdst = st->privateData;
 
     virObjectLock(fdst);
 

@@ -28,10 +28,10 @@
 #include "virfile.h"
 #include "virutil.h"
 #include "virsecret.h"
-#include "virstring.h"
 #include "virtime.h"
 #include "vsh-table.h"
 #include "virenum.h"
+#include "virsecureerase.h"
 
 static virSecretPtr
 virshCommandOptSecret(vshControl *ctl, const vshCmd *cmd, const char **name)
@@ -39,7 +39,7 @@ virshCommandOptSecret(vshControl *ctl, const vshCmd *cmd, const char **name)
     virSecretPtr secret = NULL;
     const char *n = NULL;
     const char *optname = "secret";
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, optname, &n) < 0)
         return NULL;
@@ -53,7 +53,7 @@ virshCommandOptSecret(vshControl *ctl, const vshCmd *cmd, const char **name)
     secret = virSecretLookupByUUIDString(priv->conn, n);
 
     if (secret == NULL)
-        vshError(ctl, _("failed to get secret '%s'"), n);
+        vshError(ctl, _("failed to get secret '%1$s'"), n);
 
     return secret;
 }
@@ -73,6 +73,10 @@ static const vshCmdInfo info_secret_define[] = {
 
 static const vshCmdOptDef opts_secret_define[] = {
     VIRSH_COMMON_OPT_FILE(N_("file containing secret attributes in XML")),
+    {.name = "validate",
+     .type = VSH_OT_BOOL,
+     .help = N_("validate the XML against the schema")
+    },
     {.name = NULL}
 };
 
@@ -80,20 +84,24 @@ static bool
 cmdSecretDefine(vshControl *ctl, const vshCmd *cmd)
 {
     const char *from = NULL;
-    char *buffer;
+    g_autofree char *buffer = NULL;
     virSecretPtr res;
     char uuid[VIR_UUID_STRING_BUFLEN];
     bool ret = false;
-    virshControlPtr priv = ctl->privData;
+    unsigned int flags = 0;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
 
+    if (vshCommandOptBool(cmd, "validate"))
+        flags |= VIR_SECRET_DEFINE_VALIDATE;
+
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
-    if (!(res = virSecretDefineXML(priv->conn, buffer, 0))) {
-        vshError(ctl, _("Failed to set attributes from %s"), from);
+    if (!(res = virSecretDefineXML(priv->conn, buffer, flags))) {
+        vshError(ctl, _("Failed to set attributes from %1$s"), from);
         goto cleanup;
     }
 
@@ -102,11 +110,10 @@ cmdSecretDefine(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
     }
 
-    vshPrintExtra(ctl, _("Secret %s created\n"), uuid);
+    vshPrintExtra(ctl, _("Secret %1$s created\n"), uuid);
     ret = true;
 
  cleanup:
-    VIR_FREE(buffer);
     virshSecretFree(res);
     return ret;
 }
@@ -131,6 +138,16 @@ static const vshCmdOptDef opts_secret_dumpxml[] = {
      .help = N_("secret UUID"),
      .completer = virshSecretUUIDCompleter,
     },
+    {.name = "xpath",
+     .type = VSH_OT_STRING,
+     .flags = VSH_OFLAG_REQ_OPT,
+     .completer = virshCompleteEmpty,
+     .help = N_("xpath expression to filter the XML document")
+    },
+    {.name = "wrap",
+     .type = VSH_OT_BOOL,
+     .help = N_("wrap xpath results in an common root element"),
+    },
     {.name = NULL}
 };
 
@@ -139,18 +156,22 @@ cmdSecretDumpXML(vshControl *ctl, const vshCmd *cmd)
 {
     virSecretPtr secret;
     bool ret = false;
-    char *xml;
+    g_autofree char *xml = NULL;
+    bool wrap = vshCommandOptBool(cmd, "wrap");
+    const char *xpath = NULL;
 
     secret = virshCommandOptSecret(ctl, cmd, NULL);
     if (secret == NULL)
         return false;
 
+    if (vshCommandOptStringQuiet(ctl, cmd, "xpath", &xpath) < 0)
+        return false;
+
     xml = virSecretGetXMLDesc(secret, 0);
     if (xml == NULL)
         goto cleanup;
-    vshPrint(ctl, "%s", xml);
-    VIR_FREE(xml);
-    ret = true;
+
+    ret = virshDumpXML(ctl, xml, "secret", xpath, wrap);
 
  cleanup:
     virshSecretFree(secret);
@@ -180,6 +201,7 @@ static const vshCmdOptDef opts_secret_set_value[] = {
     {.name = "file",
      .type = VSH_OT_STRING,
      .flags = VSH_OFLAG_REQ_OPT,
+     .completer = virshCompletePathLocalExisting,
      .help = N_("read secret from file"),
     },
     {.name = "plain",
@@ -192,6 +214,7 @@ static const vshCmdOptDef opts_secret_set_value[] = {
     },
     {.name = "base64",
      .type = VSH_OT_STRING,
+     .completer = virshCompleteEmpty,
      .help = N_("base64-encoded secret value")
     },
     {.name = NULL}
@@ -203,10 +226,8 @@ cmdSecretSetValue(vshControl *ctl, const vshCmd *cmd)
     g_autoptr(virshSecret) secret = NULL;
     const char *base64 = NULL;
     const char *filename = NULL;
-    char *file_buf = NULL;
-    size_t file_len = 0;
-    unsigned char *value;
-    size_t value_size;
+    g_autofree char *secret_val = NULL;
+    size_t secret_len = 0;
     bool plain = vshCommandOptBool(cmd, "plain");
     bool interactive = vshCommandOptBool(cmd, "interactive");
     int res;
@@ -226,49 +247,44 @@ cmdSecretSetValue(vshControl *ctl, const vshCmd *cmd)
     if (vshCommandOptStringReq(ctl, cmd, "file", &filename) < 0)
         return false;
 
-    if (!base64 && !filename && !interactive) {
-        vshError(ctl, _("Input secret value is missing"));
-        return false;
-    }
-
-    /* warn users that the --base64 option passed from command line is wrong */
-    if (base64)
+    if (base64) {
+        /* warn users that the --base64 option passed from command line is wrong */
         vshError(ctl, _("Passing secret value as command-line argument is insecure!"));
-
-    if (filename) {
+        secret_val = g_strdup(base64);
+        secret_len = strlen(secret_val);
+    } else if (filename) {
         ssize_t read_ret;
-        if ((read_ret = virFileReadAll(filename, 1024, &file_buf)) < 0) {
+        if ((read_ret = virFileReadAll(filename, 1024, &secret_val)) < 0) {
             vshSaveLibvirtError();
             return false;
         }
 
-        file_len = read_ret;
-        base64 = file_buf;
-    }
-
-    if (interactive) {
+        secret_len = read_ret;
+    } else if (interactive) {
         vshPrint(ctl, "%s", _("Enter new value for secret:"));
         fflush(stdout);
 
-        if (!(file_buf = virGetPassword())) {
+        if (!(secret_val = virGetPassword())) {
             vshError(ctl, "%s", _("Failed to read secret"));
             return false;
         }
-        file_len = strlen(file_buf);
+        secret_len = strlen(secret_val);
         plain = true;
-    }
-
-    if (plain) {
-        value = g_steal_pointer(&file_buf);
-        value_size = file_len;
-        file_len = 0;
     } else {
-        value = g_base64_decode(base64, &value_size);
+        vshError(ctl, _("Input secret value is missing"));
+        return false;
     }
 
-    res = virSecretSetValue(secret, value, value_size, 0);
-    VIR_DISPOSE_N(value, value_size);
-    VIR_DISPOSE_N(file_buf, file_len);
+    if (!plain) {
+        g_autofree char *tmp = g_steal_pointer(&secret_val);
+        size_t tmp_len = secret_len;
+
+        secret_val = (char *) g_base64_decode(tmp, &secret_len);
+        virSecureErase(tmp, tmp_len);
+    }
+
+    res = virSecretSetValue(secret, (unsigned char *) secret_val, secret_len, 0);
+    virSecureErase(secret_val, secret_len);
 
     if (res != 0) {
         vshError(ctl, "%s", _("Failed to set secret value"));
@@ -309,8 +325,7 @@ static bool
 cmdSecretGetValue(vshControl *ctl, const vshCmd *cmd)
 {
     g_autoptr(virshSecret) secret = NULL;
-    VIR_AUTODISPOSE_STR base64 = NULL;
-    unsigned char *value;
+    g_autofree unsigned char *value = NULL;
     size_t value_size;
     bool plain = vshCommandOptBool(cmd, "plain");
 
@@ -322,17 +337,18 @@ cmdSecretGetValue(vshControl *ctl, const vshCmd *cmd)
 
     if (plain) {
         if (fwrite(value, 1, value_size, stdout) != value_size) {
-            VIR_DISPOSE_N(value, value_size);
+            virSecureErase(value, value_size);
             vshError(ctl, "failed to write secret");
             return false;
         }
     } else {
-        base64 = g_base64_encode(value, value_size);
+        g_autofree char *base64 = g_base64_encode(value, value_size);
 
         vshPrint(ctl, "%s", base64);
+        virSecureEraseString(base64);
     }
 
-    VIR_DISPOSE_N(value, value_size);
+    virSecureErase(value, value_size);
     return true;
 }
 
@@ -371,10 +387,10 @@ cmdSecretUndefine(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (virSecretUndefine(secret) < 0) {
-        vshError(ctl, _("Failed to delete secret %s"), uuid);
+        vshError(ctl, _("Failed to delete secret %1$s"), uuid);
         goto cleanup;
     }
-    vshPrintExtra(ctl, _("Secret %s deleted\n"), uuid);
+    vshPrintExtra(ctl, _("Secret %1$s deleted\n"), uuid);
     ret = true;
 
  cleanup:
@@ -406,10 +422,9 @@ struct virshSecretList {
     virSecretPtr *secrets;
     size_t nsecrets;
 };
-typedef struct virshSecretList *virshSecretListPtr;
 
 static void
-virshSecretListFree(virshSecretListPtr list)
+virshSecretListFree(struct virshSecretList *list)
 {
     size_t i;
 
@@ -417,16 +432,16 @@ virshSecretListFree(virshSecretListPtr list)
         for (i = 0; i < list->nsecrets; i++)
             virshSecretFree(list->secrets[i]);
 
-        VIR_FREE(list->secrets);
+        g_free(list->secrets);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
-static virshSecretListPtr
+static struct virshSecretList *
 virshSecretListCollect(vshControl *ctl,
                        unsigned int flags)
 {
-    virshSecretListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshSecretList *list = g_new0(struct virshSecretList, 1);
     size_t i;
     int ret;
     virSecretPtr secret;
@@ -434,7 +449,7 @@ virshSecretListCollect(vshControl *ctl,
     size_t deleted = 0;
     int nsecrets = 0;
     char **uuids = NULL;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     /* try the list with flags support (0.10.2 and later) */
     if ((ret = virConnectListAllSecrets(priv->conn,
@@ -471,7 +486,7 @@ virshSecretListCollect(vshControl *ctl,
     if (nsecrets == 0)
         return list;
 
-    uuids = vshMalloc(ctl, sizeof(char *) * nsecrets);
+    uuids = g_new0(char *, nsecrets);
 
     nsecrets = virConnectListSecrets(priv->conn, uuids, nsecrets);
     if (nsecrets < 0) {
@@ -479,7 +494,7 @@ virshSecretListCollect(vshControl *ctl,
         goto cleanup;
     }
 
-    list->secrets = vshMalloc(ctl, sizeof(virSecretPtr) * (nsecrets));
+    list->secrets = g_new0(virSecretPtr, nsecrets);
     list->nsecrets = 0;
 
     /* get the secrets */
@@ -512,8 +527,7 @@ virshSecretListCollect(vshControl *ctl,
     }
 
     if (!success) {
-        virshSecretListFree(list);
-        list = NULL;
+        g_clear_pointer(&list, virshSecretListFree);
     }
 
     return list;
@@ -556,10 +570,10 @@ static bool
 cmdSecretList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     size_t i;
-    virshSecretListPtr list = NULL;
+    struct virshSecretList *list = NULL;
     bool ret = false;
     unsigned int flags = 0;
-    vshTablePtr table = NULL;
+    g_autoptr(vshTable) table = NULL;
 
     if (vshCommandOptBool(cmd, "ephemeral"))
         flags |= VIR_CONNECT_LIST_SECRETS_EPHEMERAL;
@@ -585,7 +599,7 @@ cmdSecretList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
         int usageType = virSecretGetUsageType(sec);
         const char *usageStr = virSecretUsageTypeToString(usageType);
         char uuid[VIR_UUID_STRING_BUFLEN];
-        virBuffer buf = VIR_BUFFER_INITIALIZER;
+        g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
         g_autofree char *usage = NULL;
 
         if (virSecretGetUUIDString(sec, uuid) < 0) {
@@ -613,7 +627,6 @@ cmdSecretList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
     ret = true;
 
  cleanup:
-    vshTableFree(table);
     virshSecretListFree(list);
     return ret;
 }
@@ -663,10 +676,10 @@ vshEventLifecyclePrint(virConnectPtr conn G_GNUC_UNUSED,
         if (virTimeStringNowRaw(timestamp) < 0)
             timestamp[0] = '\0';
 
-        vshPrint(data->ctl, _("%s: event 'lifecycle' for secret %s: %s\n"),
+        vshPrint(data->ctl, _("%1$s: event 'lifecycle' for secret %2$s: %3$s\n"),
                  timestamp, uuid, virshSecretEventToString(event));
     } else {
-        vshPrint(data->ctl, _("event 'lifecycle' for secret %s: %s\n"),
+        vshPrint(data->ctl, _("event 'lifecycle' for secret %1$s: %2$s\n"),
                  uuid, virshSecretEventToString(event));
     }
 
@@ -694,12 +707,12 @@ vshEventGenericPrint(virConnectPtr conn G_GNUC_UNUSED,
         if (virTimeStringNowRaw(timestamp) < 0)
             timestamp[0] = '\0';
 
-        vshPrint(data->ctl, _("%s: event '%s' for secret %s\n"),
+        vshPrint(data->ctl, _("%1$s: event '%2$s' for secret %3$s\n"),
                  timestamp,
                  data->cb->name,
                  uuid);
     } else {
-        vshPrint(data->ctl, _("event '%s' for secret %s\n"),
+        vshPrint(data->ctl, _("event '%1$s' for secret %2$s\n"),
                  data->cb->name,
                  uuid);
     }
@@ -766,7 +779,7 @@ cmdSecretEvent(vshControl *ctl, const vshCmd *cmd)
     virshSecretEventData data;
     const char *eventName = NULL;
     int event;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptBool(cmd, "list")) {
         size_t i;
@@ -786,7 +799,7 @@ cmdSecretEvent(vshControl *ctl, const vshCmd *cmd)
         if (STREQ(eventName, virshSecretEventCallbacks[event].name))
             break;
     if (event == VIR_SECRET_EVENT_ID_LAST) {
-        vshError(ctl, _("unknown event type %s"), eventName);
+        vshError(ctl, _("unknown event type %1$s"), eventName);
         return false;
     }
 
@@ -819,7 +832,7 @@ cmdSecretEvent(vshControl *ctl, const vshCmd *cmd)
     default:
         goto cleanup;
     }
-    vshPrint(ctl, _("events received: %d\n"), data.count);
+    vshPrint(ctl, _("events received: %1$d\n"), data.count);
     if (data.count)
         ret = true;
 

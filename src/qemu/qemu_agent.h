@@ -25,29 +25,24 @@
 #include "domain_conf.h"
 
 typedef struct _qemuAgent qemuAgent;
-typedef qemuAgent *qemuAgentPtr;
 
 typedef struct _qemuAgentCallbacks qemuAgentCallbacks;
-typedef qemuAgentCallbacks *qemuAgentCallbacksPtr;
 struct _qemuAgentCallbacks {
-    void (*destroy)(qemuAgentPtr mon,
-                    virDomainObjPtr vm);
-    void (*eofNotify)(qemuAgentPtr mon,
-                      virDomainObjPtr vm);
-    void (*errorNotify)(qemuAgentPtr mon,
-                        virDomainObjPtr vm);
+    void (*eofNotify)(qemuAgent *mon,
+                      virDomainObj *vm);
+    void (*errorNotify)(qemuAgent *mon,
+                        virDomainObj *vm);
 };
 
 
-qemuAgentPtr qemuAgentOpen(virDomainObjPtr vm,
+qemuAgent *qemuAgentOpen(virDomainObj *vm,
                            const virDomainChrSourceDef *config,
                            GMainContext *context,
-                           qemuAgentCallbacksPtr cb,
-                           bool singleSync);
+                           qemuAgentCallbacks *cb);
 
-void qemuAgentClose(qemuAgentPtr mon);
+void qemuAgentClose(qemuAgent *mon);
 
-void qemuAgentNotifyClose(qemuAgentPtr mon);
+void qemuAgentNotifyClose(qemuAgent *mon);
 
 typedef enum {
     QEMU_AGENT_EVENT_NONE = 0,
@@ -56,7 +51,7 @@ typedef enum {
     QEMU_AGENT_EVENT_RESET,
 } qemuAgentEvent;
 
-void qemuAgentNotifyEvent(qemuAgentPtr mon,
+void qemuAgentNotifyEvent(qemuAgent *mon,
                           qemuAgentEvent event);
 
 typedef enum {
@@ -67,9 +62,8 @@ typedef enum {
     QEMU_AGENT_SHUTDOWN_LAST,
 } qemuAgentShutdownMode;
 
-typedef struct _qemuAgentDiskInfo qemuAgentDiskInfo;
-typedef qemuAgentDiskInfo *qemuAgentDiskInfoPtr;
-struct _qemuAgentDiskInfo {
+typedef struct _qemuAgentDiskAddress qemuAgentDiskAddress;
+struct _qemuAgentDiskAddress {
     char *serial;
     virPCIDeviceAddress pci_controller;
     char *bus_type;
@@ -77,10 +71,22 @@ struct _qemuAgentDiskInfo {
     unsigned int target;
     unsigned int unit;
     char *devnode;
+    virCCWDeviceAddress *ccw_addr;
 };
+void qemuAgentDiskAddressFree(qemuAgentDiskAddress *addr);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuAgentDiskAddress, qemuAgentDiskAddressFree);
+
+typedef struct _qemuAgentDiskInfo qemuAgentDiskInfo;
+struct _qemuAgentDiskInfo {
+    char *name;
+    bool partition;
+    char **dependencies;
+    qemuAgentDiskAddress *address;
+    char *alias;
+};
+void qemuAgentDiskInfoFree(qemuAgentDiskInfo *info);
 
 typedef struct _qemuAgentFSInfo qemuAgentFSInfo;
-typedef qemuAgentFSInfo *qemuAgentFSInfoPtr;
 struct _qemuAgentFSInfo {
     char *mountpoint; /* path to mount point */
     char *name;       /* device name in the guest (e.g. "sda1") */
@@ -88,33 +94,32 @@ struct _qemuAgentFSInfo {
     long long total_bytes;
     long long used_bytes;
     size_t ndisks;
-    qemuAgentDiskInfoPtr *disks;
+    qemuAgentDiskAddress **disks;
 };
-void qemuAgentFSInfoFree(qemuAgentFSInfoPtr info);
+void qemuAgentFSInfoFree(qemuAgentFSInfo *info);
 
-int qemuAgentShutdown(qemuAgentPtr mon,
+int qemuAgentShutdown(qemuAgent *mon,
                       qemuAgentShutdownMode mode);
 
-int qemuAgentFSFreeze(qemuAgentPtr mon,
+int qemuAgentFSFreeze(qemuAgent *mon,
                       const char **mountpoints, unsigned int nmountpoints);
-int qemuAgentFSThaw(qemuAgentPtr mon);
-int qemuAgentGetFSInfo(qemuAgentPtr mon,
-                       qemuAgentFSInfoPtr **info,
+int qemuAgentFSThaw(qemuAgent *mon);
+int qemuAgentGetFSInfo(qemuAgent *mon,
+                       qemuAgentFSInfo ***info,
                        bool report_unsupported);
 
-int qemuAgentSuspend(qemuAgentPtr mon,
+int qemuAgentSuspend(qemuAgent *mon,
                      unsigned int target);
 
-int qemuAgentArbitraryCommand(qemuAgentPtr mon,
+int qemuAgentArbitraryCommand(qemuAgent *mon,
                               const char *cmd,
                               char **result,
                               int timeout);
-int qemuAgentFSTrim(qemuAgentPtr mon,
+int qemuAgentFSTrim(qemuAgent *mon,
                     unsigned long long minimum);
 
 
 typedef struct _qemuAgentCPUInfo qemuAgentCPUInfo;
-typedef qemuAgentCPUInfo *qemuAgentCPUInfoPtr;
 struct _qemuAgentCPUInfo {
     unsigned int id;    /* logical cpu ID */
     bool online;        /* true if the CPU is activated */
@@ -123,50 +128,70 @@ struct _qemuAgentCPUInfo {
     bool modified; /* set to true if the vcpu state needs to be changed */
 };
 
-int qemuAgentGetVCPUs(qemuAgentPtr mon, qemuAgentCPUInfoPtr *info);
-int qemuAgentSetVCPUs(qemuAgentPtr mon, qemuAgentCPUInfoPtr cpus, size_t ncpus);
+int qemuAgentGetVCPUs(qemuAgent *mon, qemuAgentCPUInfo **info);
+int qemuAgentSetVCPUs(qemuAgent *mon, qemuAgentCPUInfo *cpus, size_t ncpus);
 int qemuAgentUpdateCPUInfo(unsigned int nvcpus,
-                           qemuAgentCPUInfoPtr cpuinfo,
+                           qemuAgentCPUInfo *cpuinfo,
                            int ncpuinfo);
 
 int
-qemuAgentGetHostname(qemuAgentPtr mon,
+qemuAgentGetHostname(qemuAgent *mon,
                      char **hostname,
                      bool report_unsupported);
 
-int qemuAgentGetTime(qemuAgentPtr mon,
+int qemuAgentGetTime(qemuAgent *mon,
                      long long *seconds,
                      unsigned int *nseconds);
-int qemuAgentSetTime(qemuAgentPtr mon,
+int qemuAgentSetTime(qemuAgent *mon,
                      long long seconds,
                      unsigned int nseconds,
                      bool sync);
 
-int qemuAgentGetInterfaces(qemuAgentPtr mon,
-                           virDomainInterfacePtr **ifaces);
+int qemuAgentGetInterfaces(qemuAgent *mon,
+                           virDomainInterfacePtr **ifaces,
+                           bool report_unsupported);
 
-int qemuAgentSetUserPassword(qemuAgentPtr mon,
+int qemuAgentSetUserPassword(qemuAgent *mon,
                              const char *user,
                              const char *password,
                              bool crypted);
 
-int qemuAgentGetUsers(qemuAgentPtr mon,
+int qemuAgentGetUsers(qemuAgent *mon,
                       virTypedParameterPtr *params,
                       int *nparams,
                       int *maxparams,
                       bool report_unsupported);
 
-int qemuAgentGetOSInfo(qemuAgentPtr mon,
+int qemuAgentGetOSInfo(qemuAgent *mon,
                        virTypedParameterPtr *params,
                        int *nparams,
                        int *maxparams,
                        bool report_unsupported);
 
-int qemuAgentGetTimezone(qemuAgentPtr mon,
+int qemuAgentGetTimezone(qemuAgent *mon,
                          virTypedParameterPtr *params,
                          int *nparams,
                          int *maxparams,
                          bool report_unsupported);
 
-void qemuAgentSetResponseTimeout(qemuAgentPtr mon,
+void qemuAgentSetResponseTimeout(qemuAgent *mon,
                                  int timeout);
+
+int qemuAgentSSHGetAuthorizedKeys(qemuAgent *agent,
+                                  const char *user,
+                                  char ***keys);
+
+int qemuAgentSSHAddAuthorizedKeys(qemuAgent *agent,
+                                  const char *user,
+                                  const char **keys,
+                                  size_t nkeys,
+                                  bool reset);
+
+int qemuAgentSSHRemoveAuthorizedKeys(qemuAgent *agent,
+                                     const char *user,
+                                     const char **keys,
+                                     size_t nkeys);
+
+int qemuAgentGetDisks(qemuAgent *mon,
+                      qemuAgentDiskInfo ***disks,
+                      bool report_unsupported);

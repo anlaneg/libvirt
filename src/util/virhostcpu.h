@@ -28,7 +28,6 @@
 
 
 typedef struct _virHostCPUTscInfo virHostCPUTscInfo;
-typedef virHostCPUTscInfo *virHostCPUTscInfoPtr;
 struct _virHostCPUTscInfo {
     unsigned long long frequency;
     virTristateBool scaling;
@@ -41,10 +40,12 @@ int virHostCPUGetStats(int cpuNum,
                        unsigned int flags);
 
 bool virHostCPUHasBitmap(void);
-virBitmapPtr virHostCPUGetPresentBitmap(void);
-virBitmapPtr virHostCPUGetOnlineBitmap(void);
+virBitmap *virHostCPUGetPresentBitmap(void);
+virBitmap *virHostCPUGetOnlineBitmap(void);
+virBitmap *virHostCPUGetAvailableCPUsBitmap(void);
+
 int virHostCPUGetCount(void);
-int virHostCPUGetThreadsPerSubcore(virArch arch) G_GNUC_NO_INLINE;
+int virHostCPUGetThreadsPerSubcore(virArch arch) G_NO_INLINE;
 
 int virHostCPUGetMap(unsigned char **cpumap,
                      unsigned int *online,
@@ -57,7 +58,8 @@ int virHostCPUGetInfo(virArch hostarch,
                       unsigned int *cores,
                       unsigned int *threads);
 
-int virHostCPUGetKVMMaxVCPUs(void) G_GNUC_NO_INLINE;
+
+int virHostCPUGetKVMMaxVCPUs(void) G_NO_INLINE;
 
 int virHostCPUStatsAssign(virNodeCPUStatsPtr param,
                           const char *name,
@@ -68,16 +70,33 @@ int virHostCPUGetSocket(unsigned int cpu, unsigned int *socket);
 int virHostCPUGetDie(unsigned int cpu, unsigned int *die);
 int virHostCPUGetCore(unsigned int cpu, unsigned int *core);
 
-virBitmapPtr virHostCPUGetSiblingsList(unsigned int cpu);
+virBitmap *virHostCPUGetSiblingsList(unsigned int cpu);
 #endif
 
 int virHostCPUGetOnline(unsigned int cpu, bool *online);
 
-unsigned int virHostCPUGetMicrocodeVersion(void);
+unsigned int
+virHostCPUGetMicrocodeVersion(virArch hostArch) G_NO_INLINE;
 
 int virHostCPUGetMSR(unsigned long index,
                      uint64_t *msr);
 
-virHostCPUTscInfoPtr virHostCPUGetTscInfo(void);
+struct kvm_cpuid2 *virHostCPUGetCPUID(void);
+
+virHostCPUTscInfo *virHostCPUGetTscInfo(void);
 
 int virHostCPUGetSignature(char **signature);
+
+int virHostCPUGetPhysAddrSize(const virArch hostArch,
+                              unsigned int *size);
+
+int virHostCPUGetHaltPollTime(pid_t pid,
+                              unsigned long long *haltPollSuccess,
+                              unsigned long long *haltPollFail);
+
+void virHostCPUX86GetCPUID(uint32_t leaf,
+                           uint32_t extended,
+                           uint32_t *eax,
+                           uint32_t *ebx,
+                           uint32_t *ecx,
+                           uint32_t *edx);

@@ -124,9 +124,12 @@ static int testRotatingFileInitOne(const char *filename,
         VIR_DEBUG("Deleting %s", filename);
         unlink(filename);
     } else {
-        VIR_DEBUG("Creating %s size %zu", filename, (size_t)size);
         char buf[1024];
-        int fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0700);
+        VIR_AUTOCLOSE fd = -1;
+
+        VIR_DEBUG("Creating %s size %zu", filename, (size_t)size);
+
+        fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0700);
         if (fd < 0) {
             fprintf(stderr, "Cannot create %s\n", filename);
             return -1;
@@ -139,12 +142,10 @@ static int testRotatingFileInitOne(const char *filename,
 
             if (safewrite(fd, buf, towrite) != towrite) {
                 fprintf(stderr, "Cannot write to %s\n", filename);
-                VIR_FORCE_CLOSE(fd);
                 return -1;
             }
             size -= towrite;
         }
-        VIR_FORCE_CLOSE(fd);
     }
     return 0;
 }
@@ -163,7 +164,7 @@ static int testRotatingFileInitFiles(off_t baseSize,
 
 static int testRotatingFileWriterNew(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -206,7 +207,7 @@ static int testRotatingFileWriterNew(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterAppend(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -249,7 +250,7 @@ static int testRotatingFileWriterAppend(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterTruncate(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -292,7 +293,7 @@ static int testRotatingFileWriterTruncate(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterRolloverNone(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -335,7 +336,7 @@ static int testRotatingFileWriterRolloverNone(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterRolloverOne(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -380,7 +381,7 @@ static int testRotatingFileWriterRolloverOne(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterRolloverAppend(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -423,7 +424,7 @@ static int testRotatingFileWriterRolloverAppend(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterRolloverMany(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     char buf[512];
 
@@ -472,7 +473,7 @@ static int testRotatingFileWriterRolloverMany(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileWriterRolloverLineBreak(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     const char *buf = "The quick brown fox jumps over the lazy dog\n"
         "The wizard quickly jinxed the gnomes before they vaporized\n";
@@ -514,7 +515,7 @@ static int testRotatingFileWriterRolloverLineBreak(const void *data G_GNUC_UNUSE
 
 static int testRotatingFileWriterLargeFile(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int ret = -1;
     const char *buf = "The quick brown fox jumps over the lazy dog\n"
         "The wizard quickly jinxed the gnomes before they vaporized\n";
@@ -556,7 +557,7 @@ static int testRotatingFileWriterLargeFile(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileReaderOne(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileReaderPtr file;
+    virRotatingFileReader *file;
     int ret = -1;
     char buf[512];
     ssize_t got;
@@ -588,7 +589,7 @@ static int testRotatingFileReaderOne(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileReaderAll(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileReaderPtr file;
+    virRotatingFileReader *file;
     int ret = -1;
     char buf[768];
     ssize_t got;
@@ -620,7 +621,7 @@ static int testRotatingFileReaderAll(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileReaderPartial(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileReaderPtr file;
+    virRotatingFileReader *file;
     int ret = -1;
     char buf[600];
     ssize_t got;
@@ -652,7 +653,7 @@ static int testRotatingFileReaderPartial(const void *data G_GNUC_UNUSED)
 
 static int testRotatingFileReaderSeek(const void *data G_GNUC_UNUSED)
 {
-    virRotatingFileReaderPtr file;
+    virRotatingFileReader *file;
     int ret = -1;
     char buf[600];
     ssize_t got;

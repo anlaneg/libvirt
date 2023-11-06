@@ -36,7 +36,6 @@ struct _virNetworkEvent {
     bool dummy;
 };
 typedef struct _virNetworkEvent virNetworkEvent;
-typedef virNetworkEvent *virNetworkEventPtr;
 
 struct _virNetworkEventLifecycle {
     virNetworkEvent parent;
@@ -45,12 +44,22 @@ struct _virNetworkEventLifecycle {
     int detail;
 };
 typedef struct _virNetworkEventLifecycle virNetworkEventLifecycle;
-typedef virNetworkEventLifecycle *virNetworkEventLifecyclePtr;
 
-static virClassPtr virNetworkEventClass;
-static virClassPtr virNetworkEventLifecycleClass;
+struct _virNetworkEventMetadataChange {
+    virNetworkEvent parent;
+
+    int type;
+    char *nsuri;
+};
+typedef struct _virNetworkEventMetadataChange virNetworkEventMetadataChange;
+
+static virClass *virNetworkEventClass;
+static virClass *virNetworkEventLifecycleClass;
+static virClass *virNetworkEventMetadataChangeClass;
+
 static void virNetworkEventDispose(void *obj);
 static void virNetworkEventLifecycleDispose(void *obj);
+static void virNetworkEventMetadataChangeDispose(void *obj);
 
 static int
 virNetworkEventsOnceInit(void)
@@ -61,6 +70,9 @@ virNetworkEventsOnceInit(void)
     if (!VIR_CLASS_NEW(virNetworkEventLifecycle, virNetworkEventClass))
         return -1;
 
+    if (!VIR_CLASS_NEW(virNetworkEventMetadataChange, virNetworkEventClass))
+        return -1;
+
     return 0;
 }
 
@@ -69,7 +81,7 @@ VIR_ONCE_GLOBAL_INIT(virNetworkEvents);
 static void
 virNetworkEventDispose(void *obj)
 {
-    virNetworkEventPtr event = obj;
+    virNetworkEvent *event = obj;
     VIR_DEBUG("obj=%p", event);
 }
 
@@ -77,41 +89,51 @@ virNetworkEventDispose(void *obj)
 static void
 virNetworkEventLifecycleDispose(void *obj)
 {
-    virNetworkEventLifecyclePtr event = obj;
+    virNetworkEventLifecycle *event = obj;
     VIR_DEBUG("obj=%p", event);
 }
 
 
 static void
 virNetworkEventDispatchDefaultFunc(virConnectPtr conn,
-                                   virObjectEventPtr event,
+                                   virObjectEvent *event,
                                    virConnectObjectEventGenericCallback cb,
                                    void *cbopaque)
 {
-    virNetworkPtr net = virGetNetwork(conn, event->meta.name, event->meta.uuid);
-    if (!net)
+    g_autoptr(virNetwork) net = NULL;
+
+    if (!(net = virGetNetwork(conn, event->meta.name, event->meta.uuid)))
         return;
 
     switch ((virNetworkEventID)event->eventID) {
     case VIR_NETWORK_EVENT_ID_LIFECYCLE:
         {
-            virNetworkEventLifecyclePtr networkLifecycleEvent;
+            virNetworkEventLifecycle *networkLifecycleEvent;
 
-            networkLifecycleEvent = (virNetworkEventLifecyclePtr)event;
+            networkLifecycleEvent = (virNetworkEventLifecycle *)event;
             ((virConnectNetworkEventLifecycleCallback)cb)(conn, net,
                                                           networkLifecycleEvent->type,
                                                           networkLifecycleEvent->detail,
                                                           cbopaque);
-            goto cleanup;
+            return;
+        }
+
+    case VIR_NETWORK_EVENT_ID_METADATA_CHANGE:
+        {
+            virNetworkEventMetadataChange *metadataChangeEvent;
+
+            metadataChangeEvent = (virNetworkEventMetadataChange *)event;
+            ((virConnectNetworkEventMetadataChangeCallback)cb)(conn, net,
+                                                               metadataChangeEvent->type,
+                                                               metadataChangeEvent->nsuri,
+                                                               cbopaque);
+            return;
         }
 
     case VIR_NETWORK_EVENT_ID_LAST:
         break;
     }
     VIR_WARN("Unexpected event ID %d", event->eventID);
-
- cleanup:
-    virObjectUnref(net);
 }
 
 
@@ -134,7 +156,7 @@ virNetworkEventDispatchDefaultFunc(virConnectPtr conn,
  */
 int
 virNetworkEventStateRegisterID(virConnectPtr conn,
-                               virObjectEventStatePtr state,
+                               virObjectEventState *state,
                                virNetworkPtr net,
                                int eventID,
                                virConnectNetworkEventGenericCallback cb,
@@ -178,7 +200,7 @@ virNetworkEventStateRegisterID(virConnectPtr conn,
  */
 int
 virNetworkEventStateRegisterClient(virConnectPtr conn,
-                                   virObjectEventStatePtr state,
+                                   virObjectEventState *state,
                                    virNetworkPtr net,
                                    int eventID,
                                    virConnectNetworkEventGenericCallback cb,
@@ -211,13 +233,13 @@ virNetworkEventStateRegisterClient(virConnectPtr conn,
  *
  * Create a new network lifecycle event.
  */
-virObjectEventPtr
+virObjectEvent *
 virNetworkEventLifecycleNew(const char *name,
                             const unsigned char *uuid,
                             int type,
                             int detail)
 {
-    virNetworkEventLifecyclePtr event;
+    virNetworkEventLifecycle *event;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     if (virNetworkEventsInitialize() < 0)
@@ -233,5 +255,62 @@ virNetworkEventLifecycleNew(const char *name,
     event->type = type;
     event->detail = detail;
 
-    return (virObjectEventPtr)event;
+    return (virObjectEvent *)event;
+}
+
+
+static void
+virNetworkEventMetadataChangeDispose(void *obj)
+{
+    virNetworkEventMetadataChange *event = obj;
+    VIR_DEBUG("obj=%p", event);
+
+    g_free(event->nsuri);
+}
+
+
+static virObjectEvent *
+virNetworkEventMetadataChangeNew(const char *name,
+                                 unsigned char *uuid,
+                                 int type,
+                                 const char *nsuri)
+{
+    virNetworkEventMetadataChange *event;
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+    if (virNetworkEventsInitialize() < 0)
+        return NULL;
+
+    virUUIDFormat(uuid, uuidstr);
+    if (!(event = virObjectEventNew(virNetworkEventMetadataChangeClass,
+                                    virNetworkEventDispatchDefaultFunc,
+                                    VIR_NETWORK_EVENT_ID_METADATA_CHANGE,
+                                    0, name, uuid, uuidstr)))
+        return NULL;
+
+    event->type = type;
+    event->nsuri = g_strdup(nsuri);
+
+    return (virObjectEvent *)event;
+}
+
+
+virObjectEvent *
+virNetworkEventMetadataChangeNewFromObj(virNetworkObj *obj,
+                                        int type,
+                                        const char *nsuri)
+{
+    virNetworkDef *def = virNetworkObjGetDef(obj);
+    return virNetworkEventMetadataChangeNew(def->name, def->uuid,
+                                            type, nsuri);
+}
+
+
+virObjectEvent *
+virNetworkEventMetadataChangeNewFromNet(virNetworkPtr net,
+                                        int type,
+                                        const char *nsuri)
+{
+    return virNetworkEventMetadataChangeNew(net->name, net->uuid,
+                                            type, nsuri);
 }

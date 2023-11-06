@@ -36,20 +36,21 @@
 # include <windows.h>
 #endif
 
-#include "viralloc.h"
 #include "virhostmem.h"
 #include "virerror.h"
-#include "virarch.h"
 #include "virfile.h"
 #include "virtypedparam.h"
 #include "virstring.h"
 #include "virnuma.h"
 #include "virlog.h"
+#include "virthread.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.hostmem");
 
+static unsigned long long virHostTHPPMDSize; /* in kibibytes */
+static virOnceControl virHostMemGetTHPSizeOnce = VIR_ONCE_CONTROL_INITIALIZER;
 
 #ifdef __FreeBSD__
 # define BSD_MEMORY_STATS_ALL 4
@@ -79,7 +80,7 @@ virHostMemGetStatsFreeBSD(virNodeMemoryStatsPtr params,
 
     if ((*nparams) != BSD_MEMORY_STATS_ALL) {
         virReportInvalidArg(nparams,
-                            _("nparams in %s must be %d"),
+                            _("nparams in %1$s must be %2$d"),
                             __FUNCTION__, BSD_MEMORY_STATS_ALL);
         return -1;
     }
@@ -92,7 +93,7 @@ virHostMemGetStatsFreeBSD(virNodeMemoryStatsPtr params,
         if (sysctlbyname(sysctl_map[i].sysctl_name, &value,
                          &value_size, NULL, 0) < 0) {
             virReportSystemError(errno,
-                                 _("sysctl failed for '%s'"),
+                                 _("sysctl failed for '%1$s'"),
                                  sysctl_map[i].sysctl_name);
             return -1;
         }
@@ -100,7 +101,7 @@ virHostMemGetStatsFreeBSD(virNodeMemoryStatsPtr params,
         param = &params[j++];
         if (virStrcpyStatic(param->field, sysctl_map[i].field) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Field '%s' too long for destination"),
+                           _("Field '%1$s' too long for destination"),
                            sysctl_map[i].field);
             return -1;
         }
@@ -112,13 +113,13 @@ virHostMemGetStatsFreeBSD(virNodeMemoryStatsPtr params,
 
         if (sysctlbyname("vfs.bufspace", &bufpages, &bufpages_size, NULL, 0) < 0) {
             virReportSystemError(errno,
-                                 _("sysctl failed for '%s'"),
+                                 _("sysctl failed for '%1$s'"),
                                  "vfs.bufspace");
             return -1;
         }
         if (virStrcpyStatic(param->field, VIR_NODE_MEMORY_STATS_BUFFERS) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Field '%s' too long for destination"),
+                           _("Field '%1$s' too long for destination"),
                            VIR_NODE_MEMORY_STATS_BUFFERS);
             return -1;
         }
@@ -148,7 +149,7 @@ virHostMemGetStatsLinux(FILE *meminfo,
     int found = 0;
     int nr_param;
     char line[1024];
-    char meminfo_hdr[VIR_NODE_MEMORY_STATS_FIELD_LENGTH];
+    char meminfo_hdr[VIR_NODE_MEMORY_STATS_FIELD_LENGTH + 1];
     unsigned long val;
     struct field_conv {
         const char *meminfo_hdr;  /* meminfo header */
@@ -175,7 +176,7 @@ virHostMemGetStatsLinux(FILE *meminfo,
 
     if ((*nparams) != nr_param) {
         virReportInvalidArg(nparams,
-                            _("nparams in %s must be %d"),
+                            _("nparams in %1$s must be %2$d"),
                             __FUNCTION__, nr_param);
         return -1;
     }
@@ -207,8 +208,10 @@ virHostMemGetStatsLinux(FILE *meminfo,
             buf = p;
         }
 
-        if (sscanf(buf, "%s %lu kB", meminfo_hdr, &val) < 2)
+# define MEM_MAX_LEN G_STRINGIFY(VIR_NODE_MEMORY_STATS_FIELD_LENGTH)
+        if (sscanf(buf, "%" MEM_MAX_LEN "s %lu kB", meminfo_hdr, &val) < 2)
             continue;
+# undef MEM_MAX_LEN
 
         for (j = 0; field_conv[j].meminfo_hdr != NULL; j++) {
             struct field_conv *convp = &field_conv[j];
@@ -272,7 +275,7 @@ virHostMemGetStats(int cellNum G_GNUC_UNUSED,
 
             if (cellNum > max_node) {
                 virReportInvalidArg(cellNum,
-                                    _("cellNum in %s must be less than or equal to %d"),
+                                    _("cellNum in %1$s must be less than or equal to %2$d"),
                                     __FUNCTION__, max_node);
                 return -1;
             }
@@ -284,7 +287,7 @@ virHostMemGetStats(int cellNum G_GNUC_UNUSED,
 
         if (!meminfo) {
             virReportSystemError(errno,
-                                 _("cannot open %s"), meminfo_path);
+                                 _("cannot open %1$s"), meminfo_path);
             return -1;
         }
         ret = virHostMemGetStatsLinux(meminfo, cellNum, params, nparams);
@@ -311,14 +314,13 @@ virHostMemSetParameterValue(virTypedParameterPtr param)
     int rc = -1;
 
     char *field = strchr(param->field, '_');
-    sa_assert(field);
     field++;
     path = g_strdup_printf("%s/%s", SYSFS_MEMORY_SHARED_PATH, field);
 
     strval = g_strdup_printf("%u", param->value.ui);
 
     if ((rc = virFileWriteStr(path, strval, 0)) < 0) {
-        virReportSystemError(-rc, _("failed to set %s"), param->field);
+        virReportSystemError(-rc, _("failed to set %1$s"), param->field);
         return -1;
     }
 
@@ -336,14 +338,13 @@ virHostMemParametersAreAllSupported(virTypedParameterPtr params,
         virTypedParameterPtr param = &params[i];
 
         char *field = strchr(param->field, '_');
-        sa_assert(field);
         field++;
         path = g_strdup_printf("%s/%s", SYSFS_MEMORY_SHARED_PATH, field);
 
         if (!virFileExists(path)) {
             virReportError(VIR_ERR_OPERATION_INVALID,
-                           _("Parameter '%s' is not supported by "
-                             "this kernel"), param->field);
+                           _("Parameter '%1$s' is not supported by this kernel"),
+                           param->field);
             return false;
         }
     }
@@ -352,16 +353,15 @@ virHostMemParametersAreAllSupported(virTypedParameterPtr params,
 }
 #endif
 
+#ifdef __linux__
 int
 virHostMemSetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
                         int nparams G_GNUC_UNUSED,
                         unsigned int flags)
 {
-    virCheckFlags(0, -1);
-
-#ifdef __linux__
     size_t i;
-    int rc;
+
+    virCheckFlags(0, -1);
 
     if (virTypedParamsValidate(params, nparams,
                                VIR_NODE_MEMORY_SHARED_PAGES_TO_SCAN,
@@ -377,20 +377,25 @@ virHostMemSetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
         return -1;
 
     for (i = 0; i < nparams; i++) {
-        rc = virHostMemSetParameterValue(&params[i]);
-
-        if (rc < 0)
+        if (virHostMemSetParameterValue(&params[i]) < 0)
             return -1;
     }
 
     return 0;
-#else
-    virReportError(VIR_ERR_NO_SUPPORT, "%s",
-                   _("node set memory parameters not implemented"
-                     " on this platform"));
-    return -1;
-#endif
 }
+#else
+int
+virHostMemSetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
+                        int nparams G_GNUC_UNUSED,
+                        unsigned int flags)
+{
+    virCheckFlags(0, -1);
+
+    virReportError(VIR_ERR_NO_SUPPORT, "%s",
+                   _("node set memory parameters not implemented on this platform"));
+    return -1;
+}
+#endif
 
 #ifdef __linux__
 static int
@@ -426,7 +431,7 @@ virHostMemGetParameterValue(const char *field,
 
     if (rc < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("failed to parse %s"), field);
+                       _("failed to parse %1$s"), field);
         return -1;
     }
 
@@ -435,14 +440,12 @@ virHostMemGetParameterValue(const char *field,
 #endif
 
 #define NODE_MEMORY_PARAMETERS_NUM 8
+#ifdef __linux__
 int
 virHostMemGetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
                         int *nparams G_GNUC_UNUSED,
                         unsigned int flags)
 {
-    virCheckFlags(VIR_TYPED_PARAM_STRING_OKAY, -1);
-
-#ifdef __linux__
     unsigned int pages_to_scan;
     unsigned int sleep_millisecs;
     unsigned int merge_across_nodes;
@@ -453,6 +456,8 @@ virHostMemGetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
     unsigned long long full_scans = 0;
     size_t i;
     int ret;
+
+    virCheckFlags(VIR_TYPED_PARAM_STRING_OKAY, -1);
 
     if ((*nparams) == 0) {
         *nparams = NODE_MEMORY_PARAMETERS_NUM;
@@ -570,13 +575,20 @@ virHostMemGetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
     }
 
     return 0;
-#else
-    virReportError(VIR_ERR_NO_SUPPORT, "%s",
-                   _("node get memory parameters not implemented"
-                     " on this platform"));
-    return -1;
-#endif
 }
+#else
+int
+virHostMemGetParameters(virTypedParameterPtr params G_GNUC_UNUSED,
+                        int *nparams G_GNUC_UNUSED,
+                        unsigned int flags)
+{
+    virCheckFlags(VIR_TYPED_PARAM_STRING_OKAY, -1);
+
+    virReportError(VIR_ERR_NO_SUPPORT, "%s",
+                   _("node get memory parameters not implemented on this platform"));
+    return -1;
+}
+#endif
 
 
 #ifdef WIN32
@@ -600,7 +612,7 @@ typedef WINBOOL(WINAPI *PFN_MS_EX) (lMEMORYSTATUSEX*);
 static unsigned long long
 virHostMemGetTotal(void)
 {
-#if defined HAVE_SYSCTLBYNAME
+#if defined WITH_SYSCTLBYNAME
     /* This works on freebsd & macOS. */
     unsigned long long physmem = 0;
     size_t len = sizeof(physmem);
@@ -661,7 +673,7 @@ virHostMemGetTotal(void)
 static unsigned long long
 virHostMemGetAvailable(void)
 {
-#if defined HAVE_SYSCTLBYNAME
+#if defined WITH_SYSCTLBYNAME
     /* This works on freebsd and macOS */
     unsigned long long usermem = 0;
     size_t len = sizeof(usermem);
@@ -726,7 +738,7 @@ virHostMemGetCellsFreeFake(unsigned long long *freeMems,
 {
     if (startCell != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("start cell %d out of range (0-%d)"),
+                       _("start cell %1$d out of range (0-%2$d)"),
                        startCell, 0);
         return -1;
     }
@@ -771,7 +783,7 @@ virHostMemGetCellsFree(unsigned long long *freeMems,
 
     if (startCell > maxCell) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("start cell %d out of range (0-%d)"),
+                       _("start cell %1$d out of range (0-%2$d)"),
                        startCell, maxCell);
         return -1;
     }
@@ -830,17 +842,23 @@ virHostMemGetFreePages(unsigned int npages,
                        unsigned int *pages,
                        int startCell,
                        unsigned int cellCount,
+                       int lastCell,
                        unsigned long long *counts)
 {
-    int cell, lastCell;
+    int cell;
     size_t i, ncounts = 0;
 
-    if ((lastCell = virNumaGetMaxNode()) < 0)
-        return 0;
+    if (!virNumaIsAvailable() && lastCell == 0 &&
+        startCell == 0 && cellCount == 1) {
+        /* As a special case, if we were built without numactl and want to
+         * fetch info on the fake NUMA node set startCell to -1 to make the
+         * loop below fetch overall info. */
+        startCell = -1;
+    }
 
     if (startCell > lastCell) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("start cell %d out of range (0-%d)"),
+                       _("start cell %1$d out of range (0-%2$d)"),
                        startCell, lastCell);
         return -1;
     }
@@ -874,17 +892,23 @@ virHostMemAllocPages(unsigned int npages,
                      unsigned long long *pageCounts,
                      int startCell,
                      unsigned int cellCount,
+                     int lastCell,
                      bool add)
 {
-    int cell, lastCell;
+    int cell;
     size_t i, ncounts = 0;
 
-    if ((lastCell = virNumaGetMaxNode()) < 0)
-        return 0;
+    if (!virNumaIsAvailable() && lastCell == 0 &&
+        startCell == 0 && cellCount == 1) {
+        /* As a special case, if we were built without numactl and want to
+         * allocate hugepages on the fake NUMA node set startCell to -1 to make
+         * the loop below operate on NUMA agnostic sysfs paths. */
+        startCell = -1;
+    }
 
     if (startCell > lastCell) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("start cell %d out of range (0-%d)"),
+                       _("start cell %1$d out of range (0-%2$d)"),
                        startCell, lastCell);
         return -1;
     }
@@ -904,4 +928,55 @@ virHostMemAllocPages(unsigned int npages,
     }
 
     return ncounts;
+}
+
+#if defined(__linux__)
+# define HPAGE_PMD_SIZE_PATH "/sys/kernel/mm/transparent_hugepage/hpage_pmd_size"
+static void
+virHostMemGetTHPSizeSysfs(unsigned long long *size)
+{
+    if (virFileReadValueUllong(size, "%s", HPAGE_PMD_SIZE_PATH) < 0) {
+        VIR_WARN("unable to get THP PMD size: %s", g_strerror(errno));
+        return;
+    }
+
+    /* Size is now in bytes. Convert to KiB. */
+    *size >>= 10;
+}
+#endif /* defined(__linux__) */
+
+
+static void
+virHostMemGetTHPSizeOnceInit(void)
+{
+#if defined(__linux__)
+    virHostMemGetTHPSizeSysfs(&virHostTHPPMDSize);
+#else /* !defined(__linux__) */
+    VIR_WARN("Getting THP size not ported yet");
+#endif /* !defined(__linux__) */
+}
+
+
+/**
+ * virHostMemGetTHPSize:
+ * @size: returned size of THP in kibibytes
+ *
+ * Obtain Transparent Huge Page size in kibibytes. The size
+ * depends on host architecture and kernel. Because of virOnce(),
+ * do not rely on errno in case of failure.
+ *
+ * Returns: 0 on success,
+ *         -1 on failure.
+ */
+int
+virHostMemGetTHPSize(unsigned long long *size)
+{
+    if (virOnce(&virHostMemGetTHPSizeOnce, virHostMemGetTHPSizeOnceInit) < 0)
+        return -1;
+
+    if (virHostTHPPMDSize == 0)
+        return -1;
+
+    *size = virHostTHPPMDSize;
+    return 0;
 }

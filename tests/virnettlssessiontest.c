@@ -23,14 +23,10 @@
 #include "testutils.h"
 #include "virnettlshelpers.h"
 #include "virutil.h"
-#include "virerror.h"
-#include "viralloc.h"
 #include "virlog.h"
 #include "virfile.h"
-#include "vircommand.h"
-#include "virsocket.h"
 
-#if !defined WIN32 && HAVE_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
+#if !defined WIN32 && WITH_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
 
 # define VIR_FROM_THIS VIR_FROM_RPC
 
@@ -54,7 +50,7 @@ static ssize_t testWrite(const char *buf, size_t len, void *opaque)
 {
     int *fd = opaque;
 
-    return write(*fd, buf, len);
+    return write(*fd, buf, len); /* sc_avoid_write */
 }
 
 static ssize_t testRead(char *buf, size_t len, void *opaque)
@@ -77,10 +73,10 @@ static ssize_t testRead(char *buf, size_t len, void *opaque)
 static int testTLSSessionInit(const void *opaque)
 {
     struct testTLSSessionData *data = (struct testTLSSessionData *)opaque;
-    virNetTLSContextPtr clientCtxt = NULL;
-    virNetTLSContextPtr serverCtxt = NULL;
-    virNetTLSSessionPtr clientSess = NULL;
-    virNetTLSSessionPtr serverSess = NULL;
+    virNetTLSContext *clientCtxt = NULL;
+    virNetTLSContext *serverCtxt = NULL;
+    virNetTLSSession *clientSess = NULL;
+    virNetTLSSession *serverSess = NULL;
     int ret = -1;
     int channel[2];
     bool clientShake = false;
@@ -277,6 +273,7 @@ mymain(void)
             ret = -1; \
     } while (0)
 
+    VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT
 # define TLS_CERT_REQ(varname, cavarname, \
                       co, cn, an1, an2, ia1, ia2, bce, bcc, bci, \
                       kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo) \
@@ -460,6 +457,8 @@ mymain(void)
     DO_SESS_TEST("cacertchain-sess.pem", servercertlevel3areq.filename, clientcertlevel2breq.filename,
                  false, false, "libvirt.org", NULL);
 
+    VIR_WARNINGS_RESET
+
     testTLSDiscardCert(&clientcertreq);
     testTLSDiscardCert(&clientcertaltreq);
 
@@ -483,7 +482,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virrandom"))
+VIR_TEST_MAIN(mymain);
 
 #else
 

@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include "remote_protocol.h"
 #include "rpc/virnetserverprogram.h"
 #include "rpc/virnetserverclient.h"
 
@@ -36,5 +35,5 @@ extern virNetServerProgramProc qemuProcs[];
 extern size_t qemuNProcs;
 
 void remoteClientFree(void *data);
-void *remoteClientNew(virNetServerClientPtr client,
+void *remoteClientNew(virNetServerClient *client,
                       void *opaque);

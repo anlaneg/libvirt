@@ -18,14 +18,18 @@
 
 #include <config.h>
 
+#include "qemu/qemu_command.h"
 #include "qemu/qemu_hotplug.h"
 #include "qemu/qemu_process.h"
+#include "testutilsqemu.h"
 #include "conf/domain_conf.h"
 #include "virdevmapper.h"
-#include "virutil.h"
 #include "virmock.h"
+#include <fcntl.h>
 
-static int (*real_virGetDeviceID)(const char *path, int *maj, int *min);
+#define LIBVIRT_QEMU_MONITOR_PRIV_H_ALLOW
+#include "qemu/qemu_monitor_priv.h"
+
 static bool (*real_virFileExists)(const char *path);
 
 static void
@@ -34,12 +38,11 @@ init_syms(void)
     if (real_virFileExists)
         return;
 
-    VIR_MOCK_REAL_INIT(virGetDeviceID);
     VIR_MOCK_REAL_INIT(virFileExists);
 }
 
 unsigned long long
-qemuDomainGetUnplugTimeout(virDomainObjPtr vm)
+qemuDomainGetUnplugTimeout(virDomainObj *vm)
 {
     /* Wait only 100ms for DEVICE_DELETED event. Give a greater
      * timeout in case of PSeries guest to be consistent with the
@@ -52,34 +55,17 @@ qemuDomainGetUnplugTimeout(virDomainObjPtr vm)
 
 int
 virDevMapperGetTargets(const char *path,
-                       char ***devPaths)
+                       GSList **devPaths)
 {
     *devPaths = NULL;
 
     if (STREQ(path, "/dev/mapper/virt")) {
-        *devPaths = g_new(char *, 4);
-        (*devPaths)[0] = g_strdup("/dev/block/8:0");  /* /dev/sda */
-        (*devPaths)[1] = g_strdup("/dev/block/8:16"); /* /dev/sdb */
-        (*devPaths)[2] = g_strdup("/dev/block/8:32"); /* /dev/sdc */
-        (*devPaths)[3] = NULL;
+        *devPaths = g_slist_prepend(*devPaths, g_strdup("/dev/block/8:32")); /* /dev/sdc */
+        *devPaths = g_slist_prepend(*devPaths, g_strdup("/dev/block/8:16")); /* /dev/sdb */
+        *devPaths = g_slist_prepend(*devPaths, g_strdup("/dev/block/8:0")); /* /dev/sda */
     }
 
     return 0;
-}
-
-
-int
-virGetDeviceID(const char *path, int *maj, int *min)
-{
-    init_syms();
-
-    if (STREQ(path, "/dev/mapper/virt")) {
-        *maj = 254;
-        *min = 0;
-        return 0;
-    }
-
-    return real_virGetDeviceID(path, maj, min);
 }
 
 
@@ -96,13 +82,41 @@ virFileExists(const char *path)
 
 
 int
-qemuProcessStartManagedPRDaemon(virDomainObjPtr vm G_GNUC_UNUSED)
+qemuProcessStartManagedPRDaemon(virDomainObj *vm G_GNUC_UNUSED)
 {
     return 0;
 }
 
 
 void
-qemuProcessKillManagedPRDaemon(virDomainObjPtr vm G_GNUC_UNUSED)
+qemuProcessKillManagedPRDaemon(virDomainObj *vm G_GNUC_UNUSED)
 {
+}
+
+int
+qemuVDPAConnect(const char *devicepath G_GNUC_UNUSED)
+{
+    /* need a valid fd or sendmsg won't work. Just open /dev/null */
+    return open("/dev/null", O_RDONLY);
+}
+
+
+int
+qemuProcessPrepareHostBackendChardevHotplug(virDomainObj *vm,
+                                            virDomainDeviceDef *dev)
+{
+    return qemuDomainDeviceBackendChardevForeachOne(dev,
+                                                    testQemuPrepareHostBackendChardevOne,
+                                                    vm);
+}
+
+
+/* we don't really want to send fake FDs across the monitor */
+int
+qemuMonitorIOWriteWithFD(qemuMonitor *mon,
+                         const char *data,
+                         size_t len,
+                         int fd G_GNUC_UNUSED)
+{
+    return write(mon->fd, data, len); /* sc_avoid_write */
 }

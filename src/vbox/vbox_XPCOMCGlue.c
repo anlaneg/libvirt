@@ -34,11 +34,8 @@
 #include "vbox_XPCOMCGlue.h"
 #include "internal.h"
 #include "viralloc.h"
-#include "virutil.h"
 #include "virlog.h"
-#include "virerror.h"
 #include "virfile.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_VBOX
 
@@ -89,7 +86,7 @@ tryLoadOne(const char *dir, bool setAppHome, bool ignoreMissing,
 
         if (!virFileExists(name)) {
             if (!ignoreMissing)
-                VIR_ERROR(_("Library '%s' doesn't exist"), name);
+                VIR_ERROR(_("Library '%1$s' doesn't exist"), name);
 
             VIR_FREE(name);
             return -1;
@@ -114,7 +111,7 @@ tryLoadOne(const char *dir, bool setAppHome, bool ignoreMissing,
 
     if (hVBoxXPCOMC == NULL) {
         /*
-         * FIXME: Don't warn in this case as it currently breaks make check
+         * FIXME: Don't warn in this case as it currently breaks ninja test
          *        on systems without VirtualBox.
          */
         if (dir != NULL)
@@ -127,7 +124,7 @@ tryLoadOne(const char *dir, bool setAppHome, bool ignoreMissing,
         dlsym(hVBoxXPCOMC, VBOX_GET_XPCOMC_FUNCTIONS_SYMBOL_NAME);
 
     if (pfnGetFunctions == NULL) {
-        VIR_ERROR(_("Could not dlsym %s from '%s': %s"),
+        VIR_ERROR(_("Could not dlsym %1$s from '%2$s': %3$s"),
                   VBOX_GET_XPCOMC_FUNCTIONS_SYMBOL_NAME, name, dlerror());
         goto cleanup;
     }
@@ -135,7 +132,7 @@ tryLoadOne(const char *dir, bool setAppHome, bool ignoreMissing,
     pVBoxFuncs_v2_2 = pfnGetFunctions(VBOX_XPCOMC_VERSION);
 
     if (pVBoxFuncs_v2_2 == NULL) {
-        VIR_ERROR(_("Calling %s from '%s' failed"),
+        VIR_ERROR(_("Calling %1$s from '%2$s' failed"),
                   VBOX_GET_XPCOMC_FUNCTIONS_SYMBOL_NAME, name);
         goto cleanup;
     }
@@ -152,8 +149,7 @@ tryLoadOne(const char *dir, bool setAppHome, bool ignoreMissing,
 
  cleanup:
     if (hVBoxXPCOMC != NULL && result < 0) {
-        dlclose(hVBoxXPCOMC);
-        hVBoxXPCOMC = NULL;
+        g_clear_pointer(&hVBoxXPCOMC, dlclose);
     }
 
     VIR_FREE(name);
@@ -215,25 +211,6 @@ VBoxCGlueInit(unsigned int *version)
     /* No luck, return failure. */
     return -1;
 }
-
-
-/**
- * Terminate the C glue library.
- */
-void
-VBoxCGlueTerm(void)
-{
-    if (hVBoxXPCOMC != NULL) {
-#if 0 /* VBoxRT.so doesn't like being reloaded. See @bugref{3725}. */
-        dlclose(g_hVBoxXPCOMC);
-#endif
-        hVBoxXPCOMC = NULL;
-    }
-
-    pVBoxFuncs_v2_2 = NULL;
-    g_pfnGetFunctions = NULL;
-}
-
 
 
 /*

@@ -8,8 +8,10 @@
 #
 
 # Flag listening for secure TLS connections on the public TCP/IP port.
-# NB, must pass the --listen flag to the @DAEMON_NAME@ process for this to
-# have any effect.
+#
+# To enable listening sockets with the 'libvirtd' daemon it's also required to
+# pass the '--listen' flag on the commandline of the daemon.
+# This is not needed with 'virtproxyd'.
 #
 # This setting is not required or honoured if using systemd socket
 # activation.
@@ -21,8 +23,10 @@
 #listen_tls = 0
 
 # Listen for unencrypted TCP connections on the public TCP/IP port.
-# NB, must pass the --listen flag to the @DAEMON_NAME@ process for this to
-# have any effect.
+#
+# To enable listening sockets with the 'libvirtd' daemon it's also required to
+# pass the '--listen' flag on the commandline of the daemon.
+# This is not needed with 'virtproxyd'.
 #
 # This setting is not required or honoured if using systemd socket
 # activation.
@@ -40,7 +44,7 @@
 # This can be a port number, or service name
 #
 # This setting is not required or honoured if using systemd socket
-# activation with systemd version >= 227
+# activation.
 #
 #tls_port = "16514"
 
@@ -48,7 +52,7 @@
 # This can be a port number, or service name
 #
 # This setting is not required or honoured if using systemd socket
-# activation with systemd version >= 227
+# activation.
 #
 #tcp_port = "16509"
 
@@ -117,7 +121,7 @@
 # Set the name of the directory in which sockets will be found/created.
 #
 # This setting is not required or honoured if using systemd socket
-# activation with systemd version >= 227
+# activation.
 #
 #unix_sock_dir = "@runstatedir@/libvirt"
 
@@ -126,6 +130,8 @@
 #################################################################
 #
 # Authentication.
+#
+# There are the following choices available:
 #
 #  - none: do not perform auth checks. If you can connect to the
 #          socket you are allowed. This is suitable if there are
@@ -144,21 +150,39 @@
 #            full read/write access (aka sudo like), while anyone
 #            is allowed read/only access.
 #
+
 # Set an authentication scheme for UNIX read-only sockets
+#
 # By default socket permissions allow anyone to connect
 #
-# To restrict monitoring of domains you may wish to enable
-# an authentication mechanism here
-#auth_unix_ro = "none"
-
-# Set an authentication scheme for UNIX read-write sockets
-# By default socket permissions only allow root. If PolicyKit
-# support was compiled into libvirt, the default will be to
-# use 'polkit' auth.
+# If libvirt was compiled without support for 'polkit', then
+# no access control checks are done, but libvirt still only
+# allows execution of APIs which don't change state.
 #
-# If the unix_sock_rw_perms are changed you may wish to enable
-# an authentication mechanism here
-#auth_unix_rw = "none"
+# If libvirt was compiled with support for 'polkit', then
+# the libvirt socket will perform a check with polkit after
+# connections. The default policy still allows any local
+# user access.
+#
+# To restrict monitoring of domains you may wish to either
+# enable 'sasl' here, or change the polkit policy definition.
+#auth_unix_ro = "@default_auth@"
+
+# Set an authentication scheme for UNIX read-write sockets.
+#
+# If libvirt was compiled without support for 'polkit', then
+# the systemd .socket files will use SocketMode=0600 by default
+# thus only allowing root user to connect, and 'auth_unix_rw'
+# will default to 'none'.
+#
+# If libvirt was compiled with support for 'polkit', then
+# the systemd .socket files will use SocketMode=0666 which
+# allows any user to connect and 'auth_unix_rw' will default
+# to 'polkit'. If you disable use of 'polkit' here, then it
+# is essential to change the systemd SocketMode parameter
+# back to 0600, to avoid an insecure configuration.
+#
+#auth_unix_rw = "@default_auth@"
 @CUT_ENABLE_IP@
 
 # Change the authentication scheme for TCP sockets.
@@ -177,6 +201,14 @@
 # It is possible to make use of any SASL authentication
 # mechanism as well, by using 'sasl' for this option
 #auth_tls = "none"
+
+# Enforce a minimum SSF value for TCP sockets
+#
+# The default minimum is currently 56 (single-DES) which will
+# be raised to 112 in the future.
+#
+# This option can be used to set values higher than 112
+#tcp_min_ssf = 112
 @END@
 
 
@@ -262,9 +294,12 @@
 #
 #    "C=GB,ST=London,L=London,O=Red Hat,CN=*"
 #
-# See the g_pattern_match function for the format of the wildcards:
+# Any * matches any number of consecutive spaces, like a simplified glob(7).
 #
-# https://developer.gnome.org/glib/stable/glib-Glob-style-pattern-matching.html
+# The format of the DN for a particular certificate can be queried
+# using:
+#
+#    virt-pki-query-dn clientcert.pem
 #
 # NB If this is an empty list, no client can connect, so comment out
 # entirely rather than using empty list to disable these checks
@@ -339,6 +374,7 @@
 # connection. To avoid one client monopolizing the server
 # this should be a small fraction of the global max_workers
 # parameter.
+# Setting this too low may cause keepalive timeouts.
 #max_client_requests = 5
 
 # Same processing controls, but this time for the admin interface.

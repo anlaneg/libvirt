@@ -23,25 +23,31 @@
 #include "virbuffer.h"
 
 int
-testQEMUSchemaValidate(virJSONValuePtr obj,
-                       virJSONValuePtr root,
-                       virHashTablePtr schema,
+testQEMUSchemaValidate(virJSONValue *obj,
+                       virJSONValue *root,
+                       GHashTable *schema,
                        bool allowDeprecated,
-                       virBufferPtr debug);
+                       virBuffer *debug);
 
 int
 testQEMUSchemaValidateCommand(const char *command,
-                              virJSONValuePtr arguments,
-                              virHashTablePtr schema,
+                              virJSONValue *arguments,
+                              GHashTable *schema,
                               bool allowDeprecated,
                               bool allowRemoved,
-                              virBufferPtr debug);
+                              bool allowIncomplete,
+                              virBuffer *debug);
 
-virJSONValuePtr
+int
+testQEMUSchemaEntryMatchTemplate(virJSONValue *schemaentry,
+                                 ...);
+
+
+virJSONValue *
 testQEMUSchemaGetLatest(const char* arch);
 
-virHashTablePtr
+GHashTable *
 testQEMUSchemaLoadLatest(const char *arch);
 
-virHashTablePtr
+GHashTable *
 testQEMUSchemaLoad(const char *filename);

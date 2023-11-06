@@ -22,29 +22,54 @@
 
 #include "internal.h"
 #include "virjson.h"
-
-typedef struct _virLogHandler virLogHandler;
-typedef virLogHandler *virLogHandlerPtr;
-
+#include "log_daemon_config.h"
+#include "virobject.h"
+#include "virrotatingfile.h"
 
 typedef void (*virLogHandlerShutdownInhibitor)(bool inhibit,
                                                void *opaque);
 
-virLogHandlerPtr virLogHandlerNew(bool privileged,
-                                  size_t max_size,
-                                  size_t max_backups,
-                                  virLogHandlerShutdownInhibitor inhibitor,
-                                  void *opaque);
-virLogHandlerPtr virLogHandlerNewPostExecRestart(virJSONValuePtr child,
-                                                 bool privileged,
-                                                 size_t max_size,
-                                                 size_t max_backups,
-                                                 virLogHandlerShutdownInhibitor inhibitor,
-                                                 void *opaque);
+typedef struct _virLogHandlerLogFile virLogHandlerLogFile;
+struct _virLogHandlerLogFile {
+    virRotatingFileWriter *file;
+    int watch;
+    int pipefd; /* Read from QEMU via this */
+    bool drained;
 
-void virLogHandlerFree(virLogHandlerPtr handler);
+    char *driver;
+    unsigned char domuuid[VIR_UUID_BUFLEN];
+    char *domname;
+};
 
-int virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
+typedef struct _virLogHandler virLogHandler;
+struct _virLogHandler {
+    virObjectLockable parent;
+
+    bool privileged;
+    virLogDaemonConfig *config;
+
+    int cleanup_log_timer;
+
+    virLogHandlerLogFile **files;
+    size_t nfiles;
+
+    virLogHandlerShutdownInhibitor inhibitor;
+    void *opaque;
+};
+
+virLogHandler *virLogHandlerNew(bool privileged,
+                                virLogDaemonConfig *config,
+                                virLogHandlerShutdownInhibitor inhibitor,
+                                void *opaque);
+virLogHandler *virLogHandlerNewPostExecRestart(virJSONValue *child,
+                                               bool privileged,
+                                               virLogDaemonConfig *config,
+                                               virLogHandlerShutdownInhibitor inhibitor,
+                                               void *opaque);
+
+void virLogHandlerFree(virLogHandler *handler);
+
+int virLogHandlerDomainOpenLogFile(virLogHandler *handler,
                                    const char *driver,
                                    const unsigned char *domuuid,
                                    const char *domname,
@@ -53,20 +78,20 @@ int virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
                                    ino_t *inode,
                                    off_t *offset);
 
-int virLogHandlerDomainGetLogFilePosition(virLogHandlerPtr handler,
+int virLogHandlerDomainGetLogFilePosition(virLogHandler *handler,
                                           const char *path,
                                           unsigned int flags,
                                           ino_t *inode,
                                           off_t *offset);
 
-char *virLogHandlerDomainReadLogFile(virLogHandlerPtr handler,
+char *virLogHandlerDomainReadLogFile(virLogHandler *handler,
                                      const char *path,
                                      ino_t inode,
                                      off_t offset,
                                      size_t maxlen,
                                      unsigned int flags);
 
-int virLogHandlerDomainAppendLogFile(virLogHandlerPtr handler,
+int virLogHandlerDomainAppendLogFile(virLogHandler *handler,
                                      const char *driver,
                                      const unsigned char *domuuid,
                                      const char *domname,
@@ -74,4 +99,4 @@ int virLogHandlerDomainAppendLogFile(virLogHandlerPtr handler,
                                      const char *message,
                                      unsigned int flags);
 
-virJSONValuePtr virLogHandlerPreExecRestart(virLogHandlerPtr handler);
+virJSONValue *virLogHandlerPreExecRestart(virLogHandler *handler);

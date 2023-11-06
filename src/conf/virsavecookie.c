@@ -32,18 +32,17 @@
 VIR_LOG_INIT("conf.savecookie");
 
 
-static int
-virSaveCookieParseNode(xmlXPathContextPtr ctxt,
-                       virObjectPtr *obj,
-                       virSaveCookieCallbacksPtr saveCookie)
+int
+virSaveCookieParse(xmlXPathContextPtr ctxt,
+                   virObject **obj,
+                   virSaveCookieCallbacks *saveCookie)
 {
+    VIR_XPATH_NODE_AUTORESTORE(ctxt)
+
     *obj = NULL;
 
-    if (!virXMLNodeNameEqual(ctxt->node, "cookie")) {
-        virReportError(VIR_ERR_XML_ERROR, "%s",
-                       _("XML does not contain expected 'cookie' element"));
-        return -1;
-    }
+    if (!(ctxt->node = virXPathNode("./cookie", ctxt)))
+        return 0;
 
     if (!saveCookie || !saveCookie->parse)
         return 0;
@@ -53,59 +52,29 @@ virSaveCookieParseNode(xmlXPathContextPtr ctxt,
 
 
 int
-virSaveCookieParse(xmlXPathContextPtr ctxt,
-                   virObjectPtr *obj,
-                   virSaveCookieCallbacksPtr saveCookie)
-{
-    VIR_XPATH_NODE_AUTORESTORE(ctxt);
-    int ret = -1;
-
-    *obj = NULL;
-
-    if (!(ctxt->node = virXPathNode("./cookie", ctxt))) {
-        ret = 0;
-        goto cleanup;
-    }
-
-    ret = virSaveCookieParseNode(ctxt, obj, saveCookie);
-
- cleanup:
-    return ret;
-}
-
-
-int
 virSaveCookieParseString(const char *xml,
-                         virObjectPtr *obj,
-                         virSaveCookieCallbacksPtr saveCookie)
+                         virObject **obj,
+                         virSaveCookieCallbacks *saveCookie)
 {
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    int ret = -1;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
 
     *obj = NULL;
 
-    if (!xml) {
-        ret = 0;
-        goto cleanup;
-    }
+    if (!xml || !saveCookie || !saveCookie->parse)
+        return 0;
 
-    if (!(doc = virXMLParseStringCtxt(xml, _("(save cookie)"), &ctxt)))
-        goto cleanup;
+    if (!(doc = virXMLParse(NULL, xml, _("(save cookie)"), "cookie", &ctxt, NULL, false)))
+        return -1;
 
-    ret = virSaveCookieParseNode(ctxt, obj, saveCookie);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
-    return ret;
+    return saveCookie->parse(ctxt, obj);
 }
 
 
 int
-virSaveCookieFormatBuf(virBufferPtr buf,
-                       virObjectPtr obj,
-                       virSaveCookieCallbacksPtr saveCookie)
+virSaveCookieFormatBuf(virBuffer *buf,
+                       virObject *obj,
+                       virSaveCookieCallbacks *saveCookie)
 {
     if (!obj || !saveCookie || !saveCookie->format)
         return 0;
@@ -124,17 +93,13 @@ virSaveCookieFormatBuf(virBufferPtr buf,
 
 
 char *
-virSaveCookieFormat(virObjectPtr obj,
-                    virSaveCookieCallbacksPtr saveCookie)
+virSaveCookieFormat(virObject *obj,
+                    virSaveCookieCallbacks *saveCookie)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (virSaveCookieFormatBuf(&buf, obj, saveCookie) < 0)
-        goto error;
+        return NULL;
 
     return virBufferContentAndReset(&buf);
-
- error:
-    virBufferFreeAndReset(&buf);
-    return NULL;
 }

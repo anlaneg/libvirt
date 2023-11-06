@@ -28,7 +28,6 @@
 #include "internal.h"
 #include "testutils.h"
 #include "virnetworkportdef.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -36,23 +35,19 @@
 static int
 testCompareXMLToXMLFiles(const char *expected)
 {
-    char *actual = NULL;
-    int ret = -1;
+    g_autofree char *actual = NULL;
     g_autoptr(virNetworkPortDef) dev = NULL;
 
-    if (!(dev = virNetworkPortDefParseFile(expected)))
-        goto cleanup;
+    if (!(dev = virNetworkPortDefParse(NULL, expected, 0)))
+        return -1;
 
     if (!(actual = virNetworkPortDefFormat(dev)))
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(actual, expected) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    VIR_FREE(actual);
-    return ret;
+    return 0;
 }
 
 struct testInfo {
@@ -63,17 +58,12 @@ static int
 testCompareXMLToXMLHelper(const void *data)
 {
     const struct testInfo *info = data;
-    int ret = -1;
-    char *xml = NULL;
+    g_autofree char *xml = NULL;
 
     xml = g_strdup_printf("%s/virnetworkportxml2xmldata/%s.xml", abs_srcdir,
                           info->name);
 
-    ret = testCompareXMLToXMLFiles(xml);
-
-    VIR_FREE(xml);
-
-    return ret;
+    return testCompareXMLToXMLFiles(xml);
 }
 
 static int
@@ -94,6 +84,7 @@ mymain(void)
     DO_TEST("plug-bridge-mactbl");
     DO_TEST("plug-direct");
     DO_TEST("plug-hostdev-pci");
+    DO_TEST("plug-hostdev-pci-unmanaged");
     DO_TEST("plug-network");
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

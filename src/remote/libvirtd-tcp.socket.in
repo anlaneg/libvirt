@@ -1,15 +1,11 @@
 [Unit]
-Description=@name@ non-TLS IP socket
-Before=@service@.service
-BindsTo=@service@.socket
-After=@service@.socket
-@deps@
+Description=libvirt legacy monolithic daemon non-TLS IP socket
+BindsTo=libvirtd.socket
+After=libvirtd.socket
 
 [Socket]
-# This must match the @sysconfdir@/libvirt/@service@.conf tcp_port setting
-# when using systemd version < 227
 ListenStream=16509
-Service=@service@.service
+Service=libvirtd.service
 
 [Install]
 WantedBy=sockets.target

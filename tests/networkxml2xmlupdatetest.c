@@ -8,8 +8,6 @@
 #include "internal.h"
 #include "testutils.h"
 #include "network_conf.h"
-#include "testutilsqemu.h"
-#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -19,15 +17,15 @@ testCompareXMLToXMLFiles(const char *netxml, const char *updatexml,
                          unsigned int command, unsigned int section,
                          int parentIndex, bool expectFailure)
 {
-    char *updateXmlData = NULL;
-    char *actual = NULL;
+    g_autofree char *updateXmlData = NULL;
+    g_autofree char *actual = NULL;
     int ret = -1;
-    virNetworkDefPtr def = NULL;
+    g_autoptr(virNetworkDef) def = NULL;
 
     if (virTestLoadFile(updatexml, &updateXmlData) < 0)
-        goto error;
+        return -1;
 
-    if (!(def = virNetworkDefParseFile(netxml, NULL)))
+    if (!(def = virNetworkDefParse(NULL, netxml, NULL, false)))
         goto fail;
 
     if (virNetworkDefUpdateSection(def, command, section, parentIndex,
@@ -39,7 +37,7 @@ testCompareXMLToXMLFiles(const char *netxml, const char *updatexml,
 
     if (!expectFailure) {
         if (virTestCompareToFile(actual, outxml) < 0)
-            goto error;
+            return -1;
     }
 
     ret = 0;
@@ -54,10 +52,6 @@ testCompareXMLToXMLFiles(const char *netxml, const char *updatexml,
             ret = 0;
         }
     }
- error:
-    VIR_FREE(updateXmlData);
-    VIR_FREE(actual);
-    virNetworkDefFree(def);
     return ret;
 }
 
@@ -78,9 +72,9 @@ testCompareXMLToXMLHelper(const void *data)
 {
     const struct testInfo *info = data;
     int result = -1;
-    char *netxml = NULL;
-    char *updatexml = NULL;
-    char *outxml = NULL;
+    g_autofree char *netxml = NULL;
+    g_autofree char *updatexml = NULL;
+    g_autofree char *outxml = NULL;
 
     netxml = g_strdup_printf("%s/networkxml2xmlin/%s.xml",
                              abs_srcdir, info->netxml);
@@ -92,10 +86,6 @@ testCompareXMLToXMLHelper(const void *data)
     result = testCompareXMLToXMLFiles(netxml, updatexml, outxml, info->flags,
                                       info->command, info->section,
                                       info->parentIndex, info->expectFailure);
-
-    VIR_FREE(netxml);
-    VIR_FREE(updatexml);
-    VIR_FREE(outxml);
 
     return result;
 }

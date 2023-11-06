@@ -22,6 +22,7 @@
 #include "testutils.h"
 #include "testutilsqemu.h"
 #include "security/security_manager.h"
+#include "security/security_util.h"
 #include "conf/domain_conf.h"
 #include "qemu/qemu_domain.h"
 #include "qemu/qemu_security.h"
@@ -29,17 +30,17 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 struct testData {
-    virQEMUDriverPtr driver;
+    virQEMUDriver *driver;
     const char *file; /* file name to load VM def XML from; qemuxml2argvdata/ */
 };
 
 
 static int
-prepareObjects(virQEMUDriverPtr driver,
+prepareObjects(virQEMUDriver *driver,
                const char *xmlname,
-               virDomainObjPtr *vm_ret)
+               virDomainObj **vm_ret)
 {
-    qemuDomainObjPrivatePtr priv;
+    qemuDomainObjPrivate *priv;
     g_autoptr(virDomainObj) vm = NULL;
     g_autofree char *filename = NULL;
     g_autofree char *domxml = NULL;
@@ -53,7 +54,6 @@ prepareObjects(virQEMUDriverPtr driver,
     if (!(vm = virDomainObjNew(driver->xmlopt)))
         return -1;
 
-    vm->pid = -1;
     priv = vm->privateData;
     priv->chardevStdioLogd = false;
     priv->rememberOwner = true;
@@ -64,6 +64,8 @@ prepareObjects(virQEMUDriverPtr driver,
     if (!(priv->qemuCaps = qemuTestParseCapabilitiesArch(VIR_ARCH_X86_64, latestCapsFile)))
         return -1;
 
+    virFileCacheClear(driver->qemuCapsCache);
+
     if (qemuTestCapsCacheInsert(driver->qemuCapsCache, priv->qemuCaps) < 0)
         return -1;
 
@@ -71,6 +73,9 @@ prepareObjects(virQEMUDriverPtr driver,
                                             driver->xmlopt,
                                             NULL,
                                             0)))
+        return -1;
+
+    if (virSecurityManagerGenLabel(driver->securityManager, vm->def) < 0)
         return -1;
 
     *vm_ret = g_steal_pointer(&vm);
@@ -83,7 +88,7 @@ testDomain(const void *opaque)
 {
     const struct testData *data = opaque;
     g_autoptr(virDomainObj) vm = NULL;
-    VIR_AUTOSTRINGLIST notRestored = NULL;
+    g_autoptr(GHashTable) notRestored = virHashNew(NULL);
     size_t i;
     int ret = -1;
 
@@ -91,21 +96,19 @@ testDomain(const void *opaque)
         return -1;
 
     for (i = 0; i < vm->def->ndisks; i++) {
-        virStorageSourcePtr src = vm->def->disks[i]->src;
-        virStorageSourcePtr n;
+        virStorageSource *src = vm->def->disks[i]->src;
+        virStorageSource *n;
 
         if (!src)
             continue;
 
         if (virStorageSourceIsLocalStorage(src) && src->path &&
-            (src->shared || src->readonly) &&
-            virStringListAdd(&notRestored, src->path) < 0)
-            return -1;
+            (src->shared || src->readonly))
+            g_hash_table_insert(notRestored, g_strdup(src->path), NULL);
 
         for (n = src->backingStore; virStorageSourceIsBacking(n); n = n->backingStore) {
-            if (virStorageSourceIsLocalStorage(n) && n->path &&
-                virStringListAdd(&notRestored, n->path) < 0)
-                return -1;
+            if (virStorageSourceIsLocalStorage(n) && n->path)
+                g_hash_table_insert(notRestored, g_strdup(n->path), NULL);
         }
     }
 
@@ -119,7 +122,7 @@ testDomain(const void *opaque)
 
     qemuSecurityRestoreAllLabel(data->driver, vm, false);
 
-    if (checkPaths((const char **) notRestored) < 0)
+    if (checkPaths(notRestored) < 0)
         goto cleanup;
 
     ret = 0;
@@ -134,7 +137,15 @@ static int
 mymain(void)
 {
     virQEMUDriver driver;
+    virSecurityManager *stack = NULL;
+    virSecurityManager *dac = NULL;
+#ifdef WITH_SELINUX
+    virSecurityManager *selinux = NULL;
+#endif
     int ret = 0;
+
+    if (!virSecurityXATTRNamespaceDefined())
+        return EXIT_AM_SKIP;
 
     if (virInitialize() < 0 ||
         qemuTestDriverInit(&driver) < 0)
@@ -142,14 +153,44 @@ mymain(void)
 
     /* Now fix the secdriver */
     virObjectUnref(driver.securityManager);
-    if (!(driver.securityManager = virSecurityManagerNewDAC("test", 1000, 1000,
-                                                            VIR_SECURITY_MANAGER_PRIVILEGED |
-                                                            VIR_SECURITY_MANAGER_DYNAMIC_OWNERSHIP,
-                                                            NULL))) {
+
+    if (!(dac = virSecurityManagerNewDAC("test", 1000, 1000,
+                                         VIR_SECURITY_MANAGER_PRIVILEGED |
+                                         VIR_SECURITY_MANAGER_DYNAMIC_OWNERSHIP,
+                                         NULL))) {
         fprintf(stderr, "Cannot initialize DAC security driver");
         ret = -1;
         goto cleanup;
     }
+
+    if (!(stack = virSecurityManagerNewStack(dac))) {
+        fprintf(stderr, "Cannot initialize stack security driver");
+        ret = -1;
+        goto cleanup;
+    }
+    dac = NULL;
+
+#if WITH_SELINUX
+    selinux = virSecurityManagerNew("selinux", "test",
+                                    VIR_SECURITY_MANAGER_PRIVILEGED |
+                                    VIR_SECURITY_MANAGER_DEFAULT_CONFINED |
+                                    VIR_SECURITY_MANAGER_REQUIRE_CONFINED);
+    if (!selinux) {
+        fprintf(stderr, "Cannot initialize selinux security driver");
+        ret = -1;
+        goto cleanup;
+    }
+
+    if (virSecurityManagerStackAddNested(stack, selinux) < 0) {
+        fprintf(stderr, "Cannot add selinux security driver onto stack");
+        ret = -1;
+        goto cleanup;
+    }
+    selinux = NULL;
+#endif
+
+    driver.securityManager = g_steal_pointer(&stack);
+
 
 #define DO_TEST_DOMAIN(f) \
     do { \
@@ -173,15 +214,15 @@ mymain(void)
     DO_TEST_DOMAIN("disk-detect-zeroes");
     DO_TEST_DOMAIN("disk-error-policy");
     DO_TEST_DOMAIN("disk-floppy");
-    DO_TEST_DOMAIN("disk-floppy-q35-2_11");
-    DO_TEST_DOMAIN("disk-floppy-q35-2_9");
+    DO_TEST_DOMAIN("disk-floppy-q35");
     DO_TEST_DOMAIN("disk-network-gluster");
     DO_TEST_DOMAIN("disk-network-iscsi");
     DO_TEST_DOMAIN("disk-network-nbd");
     DO_TEST_DOMAIN("disk-network-rbd");
     DO_TEST_DOMAIN("disk-network-sheepdog");
     DO_TEST_DOMAIN("disk-network-source-auth");
-    DO_TEST_DOMAIN("disk-network-tlsx509");
+    DO_TEST_DOMAIN("disk-network-tlsx509-nbd");
+    DO_TEST_DOMAIN("disk-network-tlsx509-vxhs");
     DO_TEST_DOMAIN("disk-readonly-disk");
     DO_TEST_DOMAIN("disk-scsi");
     DO_TEST_DOMAIN("disk-scsi-device-auto");
@@ -198,9 +239,9 @@ mymain(void)
     DO_TEST_DOMAIN("memory-hotplug-nvdimm-pmem");
     DO_TEST_DOMAIN("memory-hotplug-nvdimm-readonly");
     DO_TEST_DOMAIN("net-vhostuser");
-    DO_TEST_DOMAIN("os-firmware-bios");
-    DO_TEST_DOMAIN("os-firmware-efi");
-    DO_TEST_DOMAIN("os-firmware-efi-secboot");
+    DO_TEST_DOMAIN("firmware-auto-bios");
+    DO_TEST_DOMAIN("firmware-auto-efi");
+    DO_TEST_DOMAIN("firmware-auto-efi-loader-secure");
     DO_TEST_DOMAIN("pci-bridge-many-disks");
     DO_TEST_DOMAIN("tseg-explicit-size");
     DO_TEST_DOMAIN("usb-redir-unix");
@@ -213,7 +254,12 @@ mymain(void)
 
  cleanup:
     qemuTestDriverFree(&driver);
-    return ret;
+#ifdef WITH_SELINUX
+    virObjectUnref(selinux);
+#endif
+    virObjectUnref(dac);
+    virObjectUnref(stack);
+    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 VIR_TEST_MAIN_PRELOAD(mymain,

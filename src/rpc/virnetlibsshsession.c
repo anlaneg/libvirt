@@ -31,6 +31,7 @@
 #include "virstring.h"
 #include "virauth.h"
 #include "virbuffer.h"
+#include "virsecureerase.h"
 
 #define VIR_FROM_THIS VIR_FROM_LIBSSH
 
@@ -40,7 +41,7 @@ VIR_LOG_INIT("rpc.netlibsshsession");
 
 /* TRACE_LIBSSH=<level> enables tracing in libssh itself.
  * The meaning of <level> is described here:
- * http://api.libssh.org/master/group__libssh__log.html
+ * https://api.libssh.org/master/group__libssh__log.html
  *
  * The LIBVIRT_LIBSSH_DEBUG environment variable can be used
  * to set/override the level of libssh debug.
@@ -64,13 +65,10 @@ typedef enum {
 
 
 typedef struct _virNetLibsshAuthMethod virNetLibsshAuthMethod;
-typedef virNetLibsshAuthMethod *virNetLibsshAuthMethodPtr;
-
 struct _virNetLibsshAuthMethod {
     virNetLibsshAuthMethods method;
     int ssh_flags;  /* SSH_AUTH_METHOD_* for this auth method */
 
-    char *password;
     char *filename;
 
     int tries;
@@ -95,7 +93,7 @@ struct _virNetLibsshSession {
     virConnectAuthPtr cred;
     char *authPath;
     size_t nauths;
-    virNetLibsshAuthMethodPtr *auths;
+    virNetLibsshAuthMethod **auths;
 
     /* channel stuff */
     char *channelCommand;
@@ -108,24 +106,11 @@ struct _virNetLibsshSession {
 };
 
 static void
-virNetLibsshSessionAuthMethodsFree(virNetLibsshSessionPtr sess)
-{
-    size_t i;
-
-    for (i = 0; i < sess->nauths; i++) {
-        VIR_DISPOSE_STRING(sess->auths[i]->password);
-        VIR_FREE(sess->auths[i]->filename);
-        VIR_FREE(sess->auths[i]);
-    }
-
-    VIR_FREE(sess->auths);
-    sess->nauths = 0;
-}
-
-static void
 virNetLibsshSessionDispose(void *obj)
 {
-    virNetLibsshSessionPtr sess = obj;
+    virNetLibsshSession *sess = obj;
+    size_t i;
+
     VIR_DEBUG("sess=0x%p", sess);
 
     if (!sess)
@@ -142,16 +127,21 @@ virNetLibsshSessionDispose(void *obj)
         ssh_free(sess->session);
     }
 
-    virNetLibsshSessionAuthMethodsFree(sess);
+    for (i = 0; i < sess->nauths; i++) {
+        g_free(sess->auths[i]->filename);
+        g_free(sess->auths[i]);
+    }
 
-    VIR_FREE(sess->channelCommand);
-    VIR_FREE(sess->hostname);
-    VIR_FREE(sess->knownHostsFile);
-    VIR_FREE(sess->authPath);
-    VIR_FREE(sess->username);
+    g_free(sess->auths);
+
+    g_free(sess->channelCommand);
+    g_free(sess->hostname);
+    g_free(sess->knownHostsFile);
+    g_free(sess->authPath);
+    g_free(sess->username);
 }
 
-static virClassPtr virNetLibsshSessionClass;
+static virClass *virNetLibsshSessionClass;
 static int
 virNetLibsshSessionOnceInit(void)
 {
@@ -180,29 +170,22 @@ virNetLibsshSessionOnceInit(void)
 }
 VIR_ONCE_GLOBAL_INIT(virNetLibsshSession);
 
-static virNetLibsshAuthMethodPtr
-virNetLibsshSessionAuthMethodNew(virNetLibsshSessionPtr sess)
+static virNetLibsshAuthMethod *
+virNetLibsshSessionAuthMethodNew(virNetLibsshSession *sess)
 {
-    virNetLibsshAuthMethodPtr auth;
+    virNetLibsshAuthMethod *auth;
 
-    if (VIR_ALLOC(auth) < 0)
-        goto error;
+    auth = g_new0(virNetLibsshAuthMethod, 1);
 
-    if (VIR_EXPAND_N(sess->auths, sess->nauths, 1) < 0)
-        goto error;
-
+    VIR_EXPAND_N(sess->auths, sess->nauths, 1);
     sess->auths[sess->nauths - 1] = auth;
 
     return auth;
-
- error:
-    VIR_FREE(auth);
-    return NULL;
 }
 
 /* string representation of public key of remote server */
 static char *
-virLibsshServerKeyAsString(virNetLibsshSessionPtr sess)
+virLibsshServerKeyAsString(virNetLibsshSession *sess)
 {
     int ret;
     ssh_key key;
@@ -212,14 +195,14 @@ virLibsshServerKeyAsString(virNetLibsshSessionPtr sess)
 
     if (ssh_get_server_publickey(sess->session, &key) != SSH_OK) {
         virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("failed to get the key of the current "
-                         "session"));
+                       _("failed to get the key of the current session"));
         return NULL;
     }
 
-    /* calculate remote key hash, using SHA1 algorithm that is
-     * usual in OpenSSH. The returned value must be freed */
-    ret = ssh_get_publickey_hash(key, SSH_PUBLICKEY_HASH_SHA1,
+    /* calculate remote key hash, using SHA256 algorithm that is
+     * the default in modern OpenSSH, fallback to SHA1 for older
+     * libssh. The returned value must be freed */
+    ret = ssh_get_publickey_hash(key, SSH_PUBLICKEY_HASH_SHA256,
                                  &keyhash, &keyhashlen);
     ssh_key_free(key);
     if (ret < 0) {
@@ -232,27 +215,6 @@ virLibsshServerKeyAsString(virNetLibsshSessionPtr sess)
     ssh_clean_pubkey_hash(&keyhash);
 
     return str;
-}
-
-static int
-virCredTypeForPrompt(virConnectAuthPtr cred, char echo)
-{
-    size_t i;
-
-    for (i = 0; i < cred->ncredtype; ++i) {
-        int type = cred->credtype[i];
-        if (echo) {
-            if (type == VIR_CRED_ECHOPROMPT)
-                return type;
-        } else {
-            if (type == VIR_CRED_PASSPHRASE ||
-                type == VIR_CRED_NOECHOPROMPT) {
-                return type;
-            }
-        }
-    }
-
-    return -1;
 }
 
 static int
@@ -274,7 +236,7 @@ virLengthForPromptString(const char *str)
  * return value: 0 on success, -1 on error
  */
 static int
-virNetLibsshCheckHostKey(virNetLibsshSessionPtr sess)
+virNetLibsshCheckHostKey(virNetLibsshSession *sess)
 {
     int state;
     char *keyhashstr;
@@ -298,10 +260,7 @@ virNetLibsshCheckHostKey(virNetLibsshSessionPtr sess)
 
         /* host key verification failed */
         virReportError(VIR_ERR_AUTH_FAILED,
-                       _("!!! SSH HOST KEY VERIFICATION FAILED !!!: "
-                         "Identity of host '%s:%d' differs from stored identity. "
-                         "Please verify the new host key '%s' to avoid possible "
-                         "man in the middle attack. The key is stored in '%s'."),
+                       _("!!! SSH HOST KEY VERIFICATION FAILED !!!: Identity of host '%1$s:%2$d' differs from stored identity. Please verify the new host key '%3$s' to avoid possible man in the middle attack. The key is stored in '%4$s'."),
                        sess->hostname, sess->port,
                        keyhashstr, sess->knownHostsFile);
 
@@ -312,60 +271,37 @@ virNetLibsshCheckHostKey(virNetLibsshSessionPtr sess)
     case SSH_SERVER_NOT_KNOWN:
         /* key was not found, query to add it to database */
         if (sess->hostKeyVerify == VIR_NET_LIBSSH_HOSTKEY_VERIFY_NORMAL) {
-            virConnectCredential askKey;
-            int cred_type;
-            char *tmp;
+            g_autoptr(virConnectCredential) cred = NULL;
+            g_autofree char *prompt = NULL;
 
             /* ask to add the key */
             if (!sess->cred || !sess->cred->cb) {
                 virReportError(VIR_ERR_LIBSSH, "%s",
-                               _("No user interaction callback provided: "
-                                 "Can't verify the session host key"));
+                               _("No user interaction callback provided: Can't verify the session host key"));
                 return -1;
             }
-
-            cred_type = virCredTypeForPrompt(sess->cred, 1 /* echo */);
-            if (cred_type == -1) {
-                virReportError(VIR_ERR_LIBSSH, "%s",
-                               _("no suitable callback for host key "
-                                 "verification"));
-                return -1;
-            }
-
-            /* prepare data for the callback */
-            memset(&askKey, 0, sizeof(virConnectCredential));
-            askKey.type = cred_type;
 
             keyhashstr = virLibsshServerKeyAsString(sess);
             if (!keyhashstr)
                 return -1;
 
-            tmp = g_strdup_printf(_("Accept SSH host key with hash '%s' for " "host '%s:%d' (%s/%s)?"),
-                                  keyhashstr, sess->hostname, sess->port, "y", "n");
-            askKey.prompt = tmp;
+            prompt = g_strdup_printf(_("Accept SSH host key with hash '%1$s' for host '%2$s:%3$d' (%4$s/%5$s)?"),
+                                     keyhashstr, sess->hostname, sess->port, "y", "n");
 
-            if (sess->cred->cb(&askKey, 1, sess->cred->cbdata)) {
-                virReportError(VIR_ERR_LIBSSH, "%s",
-                               _("failed to retrieve decision to accept "
-                                 "host key"));
-                VIR_FREE(tmp);
+            if (!(cred = virAuthAskCredential(sess->cred, prompt, true))) {
                 ssh_string_free_char(keyhashstr);
                 return -1;
             }
 
-            VIR_FREE(tmp);
-
-            if (!askKey.result ||
-                STRCASENEQ(askKey.result, "y")) {
+            if (!cred->result ||
+                STRCASENEQ(cred->result, "y")) {
                 virReportError(VIR_ERR_LIBSSH,
-                               _("SSH host key for '%s' (%s) was not accepted"),
+                               _("SSH host key for '%1$s' (%2$s) was not accepted"),
                                sess->hostname, keyhashstr);
                 ssh_string_free_char(keyhashstr);
-                VIR_FREE(askKey.result);
                 return -1;
             }
             ssh_string_free_char(keyhashstr);
-            VIR_FREE(askKey.result);
         }
 
         /* write the host key file, if specified */
@@ -373,7 +309,7 @@ virNetLibsshCheckHostKey(virNetLibsshSessionPtr sess)
             if (ssh_session_update_known_hosts(sess->session) < 0) {
                 errmsg = ssh_get_error(sess->session);
                 virReportError(VIR_ERR_LIBSSH,
-                               _("failed to write known_host file '%s': %s"),
+                               _("failed to write known_host file '%1$s': %2$s"),
                                sess->knownHostsFile,
                                errmsg);
                 return -1;
@@ -385,7 +321,7 @@ virNetLibsshCheckHostKey(virNetLibsshSessionPtr sess)
     case SSH_SERVER_ERROR:
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("failed to validate SSH host key: %s"),
+                       _("failed to validate SSH host key: %1$s"),
                        errmsg);
         return -1;
 
@@ -409,64 +345,36 @@ virNetLibsshAuthenticatePrivkeyCb(const char *prompt,
                                   int verify G_GNUC_UNUSED,
                                   void *userdata)
 {
-    virNetLibsshSessionPtr sess = userdata;
-    virConnectCredential retr_passphrase;
-    int cred_type;
-    char *actual_prompt = NULL;
-    int p;
+    virNetLibsshSession *sess = userdata;
+    g_autofree char *actual_prompt = NULL;
+    g_autoptr(virConnectCredential) cred = NULL;
 
     /* request user's key password */
     if (!sess->cred || !sess->cred->cb) {
         virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("No user interaction callback provided: "
-                         "Can't retrieve private key passphrase"));
+                       _("No user interaction callback provided: Can't retrieve private key passphrase"));
         return -1;
-    }
-
-    cred_type = virCredTypeForPrompt(sess->cred, echo);
-    if (cred_type == -1) {
-        virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("no suitable callback for input of key passphrase"));
-        goto error;
     }
 
     actual_prompt = g_strndup(prompt, virLengthForPromptString(prompt));
 
-    memset(&retr_passphrase, 0, sizeof(virConnectCredential));
-    retr_passphrase.type = cred_type;
-    retr_passphrase.prompt = actual_prompt;
+    if (!(cred = virAuthAskCredential(sess->cred, actual_prompt, echo)))
+        return -1;
 
-    if (sess->cred->cb(&retr_passphrase, 1, sess->cred->cbdata)) {
-        virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("failed to retrieve private key passphrase: "
-                         "callback has failed"));
-        goto error;
-    }
-
-    p = virStrncpy(buf, retr_passphrase.result,
-                   retr_passphrase.resultlen, len);
-    VIR_DISPOSE_STRING(retr_passphrase.result);
-    if (p < 0) {
+    if (virStrcpy(buf, cred->result, len) < 0) {
         virReportError(VIR_ERR_LIBSSH, "%s",
                        _("passphrase is too long for the buffer"));
-        goto error;
+        return -1;
     }
 
-    VIR_FREE(actual_prompt);
-
     return 0;
-
- error:
-    VIR_FREE(actual_prompt);
-    return -1;
 }
 
 static int
-virNetLibsshImportPrivkey(virNetLibsshSessionPtr sess,
-                          virNetLibsshAuthMethodPtr priv,
+virNetLibsshImportPrivkey(virNetLibsshSession *sess,
+                          virNetLibsshAuthMethod *priv,
                           ssh_key *ret_key)
 {
-    int err;
     int ret;
     ssh_key key;
 
@@ -476,31 +384,25 @@ virNetLibsshImportPrivkey(virNetLibsshSessionPtr sess,
      * failed or libssh did.
      */
     virResetLastError();
-    ret = ssh_pki_import_privkey_file(priv->filename, priv->password,
+    ret = ssh_pki_import_privkey_file(priv->filename, NULL,
                                       virNetLibsshAuthenticatePrivkeyCb,
                                       sess, &key);
     if (ret == SSH_EOF) {
         virReportError(VIR_ERR_AUTH_FAILED,
-                       _("error while reading private key '%s'"),
+                       _("error while reading private key '%1$s'"),
                        priv->filename);
-        err = SSH_AUTH_ERROR;
-        goto error;
+        return SSH_AUTH_ERROR;
     } else if (ret == SSH_ERROR) {
         if (virGetLastErrorCode() == VIR_ERR_OK) {
             virReportError(VIR_ERR_AUTH_FAILED,
-                           _("error while opening private key '%s', wrong "
-                             "passphrase?"),
+                           _("error while opening private key '%1$s', wrong passphrase?"),
                            priv->filename);
         }
-        err = SSH_AUTH_ERROR;
-        goto error;
+        return SSH_AUTH_ERROR;
     }
 
     *ret_key = key;
     return SSH_AUTH_SUCCESS;
-
- error:
-    return err;
 }
 
 
@@ -509,8 +411,8 @@ virNetLibsshImportPrivkey(virNetLibsshSessionPtr sess,
  * returns SSH_AUTH_* values
  */
 static int
-virNetLibsshAuthenticatePrivkey(virNetLibsshSessionPtr sess,
-                                virNetLibsshAuthMethodPtr priv)
+virNetLibsshAuthenticatePrivkey(virNetLibsshSession *sess,
+                                virNetLibsshAuthMethod *priv)
 {
     int err;
     int ret;
@@ -526,7 +428,7 @@ virNetLibsshAuthenticatePrivkey(virNetLibsshSessionPtr sess,
     ret = ssh_pki_import_pubkey_file(tmp, &public_key);
     if (ret == SSH_ERROR) {
         virReportError(VIR_ERR_AUTH_FAILED,
-                       _("error while reading public key '%s'"),
+                       _("error while reading public key '%1$s'"),
                        tmp);
         err = SSH_AUTH_ERROR;
         goto error;
@@ -540,8 +442,7 @@ virNetLibsshAuthenticatePrivkey(virNetLibsshSessionPtr sess,
         ret = ssh_pki_export_privkey_to_pubkey(private_key, &public_key);
         if (ret == SSH_ERROR) {
             virReportError(VIR_ERR_AUTH_FAILED,
-                           _("cannot export the public key from the "
-                             "private key '%s'"),
+                           _("cannot export the public key from the private key '%1$s'"),
                            priv->filename);
             err = SSH_AUTH_ERROR;
             goto error;
@@ -589,52 +490,60 @@ virNetLibsshAuthenticatePrivkey(virNetLibsshSessionPtr sess,
  * returns SSH_AUTH_* values
  */
 static int
-virNetLibsshAuthenticatePassword(virNetLibsshSessionPtr sess,
-                                 virNetLibsshAuthMethodPtr priv)
+virNetLibsshAuthenticatePassword(virNetLibsshSession *sess)
 {
+    g_autofree char *password = NULL;
     const char *errmsg;
     int rc = SSH_AUTH_ERROR;
 
     VIR_DEBUG("sess=%p", sess);
 
-    if (priv->password) {
-        /* tunelled password authentication */
-        if ((rc = ssh_userauth_password(sess->session, NULL,
-                                        priv->password)) == 0)
-            return SSH_AUTH_SUCCESS;
-    } else {
-        /* password authentication with interactive password request */
-        if (!sess->cred || !sess->cred->cb) {
-            virReportError(VIR_ERR_LIBSSH, "%s",
-                           _("Can't perform authentication: "
-                             "Authentication callback not provided"));
-            return SSH_AUTH_ERROR;
-        }
-
-        /* Try the authenticating the set amount of times. The server breaks the
-         * connection if maximum number of bad auth tries is exceeded */
-        while (true) {
-            VIR_AUTODISPOSE_STR password = NULL;
-
-            if (!(password = virAuthGetPasswordPath(sess->authPath, sess->cred,
-                                                    "ssh", sess->username,
-                                                    sess->hostname)))
-                return SSH_AUTH_ERROR;
-
-            /* tunelled password authentication */
-            if ((rc = ssh_userauth_password(sess->session, NULL,
-                                            password)) == 0)
-                return SSH_AUTH_SUCCESS;
-
-            if (rc != SSH_AUTH_DENIED)
-                break;
-        }
+    /* password authentication with interactive password request */
+    if (!sess->cred || !sess->cred->cb) {
+        virReportError(VIR_ERR_LIBSSH, "%s",
+                       _("Can't perform authentication: Authentication callback not provided"));
+        return SSH_AUTH_ERROR;
     }
 
-    /* error path */
+    /* first try to get password from config */
+    if (virAuthGetCredential("ssh", sess->hostname, "password", sess->authPath,
+                             &password) < 0)
+        return SSH_AUTH_ERROR;
+
+    if (password) {
+        rc = ssh_userauth_password(sess->session, NULL, password);
+        virSecureEraseString(password);
+
+        if (rc == 0)
+            return SSH_AUTH_SUCCESS;
+        else if (rc != SSH_AUTH_DENIED)
+            goto error;
+    }
+
+    /* Try the authenticating the set amount of times. The server breaks the
+     * connection if maximum number of bad auth tries is exceeded */
+    while (true) {
+        g_autoptr(virConnectCredential) cred = NULL;
+        g_autofree char *prompt = NULL;
+
+        prompt = g_strdup_printf(_("Enter %1$s's password for %2$s"),
+                                 sess->username, sess->hostname);
+
+        if (!(cred = virAuthAskCredential(sess->cred, prompt, false)))
+            return SSH_AUTH_ERROR;
+
+        rc = ssh_userauth_password(sess->session, NULL, cred->result);
+
+        if (rc == 0)
+            return SSH_AUTH_SUCCESS;
+        else if (rc != SSH_AUTH_DENIED)
+            break;
+    }
+
+ error:
     errmsg = ssh_get_error(sess->session);
     virReportError(VIR_ERR_AUTH_FAILED,
-                   _("authentication failed: %s"), errmsg);
+                   _("authentication failed: %1$s"), errmsg);
     return rc;
 }
 
@@ -643,8 +552,8 @@ virNetLibsshAuthenticatePassword(virNetLibsshSessionPtr sess,
  * returns SSH_AUTH_* values
  */
 static int
-virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
-                                            virNetLibsshAuthMethodPtr priv)
+virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSession *sess,
+                                            virNetLibsshAuthMethod *priv)
 {
     int ret;
     const char *errmsg;
@@ -653,9 +562,7 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
     /* request user's key password */
     if (!sess->cred || !sess->cred->cb) {
         virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("No user interaction callback provided: "
-                         "Can't get input from keyboard interactive "
-                         "authentication"));
+                       _("No user interaction callback provided: Can't get input from keyboard interactive authentication"));
         return SSH_AUTH_ERROR;
     }
 
@@ -664,7 +571,7 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
     while (ret == SSH_AUTH_INFO) {
         const char *name, *instruction;
         int nprompts, iprompt;
-        virBuffer buff = VIR_BUFFER_INITIALIZER;
+        g_auto(virBuffer) buff = VIR_BUFFER_INITIALIZER;
 
         name = ssh_userauth_kbdint_getname(sess->session);
         instruction = ssh_userauth_kbdint_getinstruction(sess->session);
@@ -682,31 +589,22 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
             virBufferAddChar(&buff, '\n');
 
         for (iprompt = 0; iprompt < nprompts; ++iprompt) {
-            virConnectCredential retr_passphrase;
             const char *promptStr;
             int promptStrLen;
             char echo;
-            char *prompt = NULL;
-            int cred_type;
+            g_autofree char *prompt = NULL;
+            g_autoptr(virConnectCredential) cred = NULL;
 
             /* get the prompt */
             promptStr = ssh_userauth_kbdint_getprompt(sess->session, iprompt,
                                                       &echo);
             promptStrLen = virLengthForPromptString(promptStr);
 
-            cred_type = virCredTypeForPrompt(sess->cred, echo);
-            if (cred_type == -1) {
-                virReportError(VIR_ERR_LIBSSH, "%s",
-                               _("no suitable callback for input of keyboard "
-                                 "response"));
-                goto prompt_error;
-            }
-
             /* create the prompt for the user, using the instruction
              * buffer if specified
              */
             if (virBufferUse(&buff) > 0) {
-                virBuffer prompt_buff = VIR_BUFFER_INITIALIZER;
+                g_auto(virBuffer) prompt_buff = VIR_BUFFER_INITIALIZER;
 
                 virBufferAddBuffer(&prompt_buff, &buff);
                 virBufferAdd(&prompt_buff, promptStr, promptStrLen);
@@ -716,45 +614,19 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
                 prompt = g_strndup(promptStr, promptStrLen);
             }
 
-            memset(&retr_passphrase, 0, sizeof(virConnectCredential));
-            retr_passphrase.type = cred_type;
-            retr_passphrase.prompt = prompt;
+            if (!(cred = virAuthAskCredential(sess->cred, prompt, echo)))
+                return SSH_AUTH_ERROR;
 
-            if (retr_passphrase.type == -1) {
-                virReportError(VIR_ERR_LIBSSH, "%s",
-                               _("no suitable callback for input of key "
-                                 "passphrase"));
-                goto prompt_error;
-            }
-
-            if (sess->cred->cb(&retr_passphrase, 1, sess->cred->cbdata)) {
-                virReportError(VIR_ERR_LIBSSH, "%s",
-                               _("failed to retrieve keyboard interactive "
-                                 "result: callback has failed"));
-                goto prompt_error;
-            }
-
-            VIR_FREE(prompt);
-
-            ret = ssh_userauth_kbdint_setanswer(sess->session, iprompt,
-                                                retr_passphrase.result);
-            VIR_DISPOSE_STRING(retr_passphrase.result);
-            if (ret < 0) {
+            if (ssh_userauth_kbdint_setanswer(sess->session, iprompt,
+                                              cred->result) < 0) {
                 errmsg = ssh_get_error(sess->session);
                 virReportError(VIR_ERR_AUTH_FAILED,
-                               _("authentication failed: %s"), errmsg);
-                goto prompt_error;
+                               _("authentication failed: %1$s"), errmsg);
+                return SSH_AUTH_ERROR;
             }
 
             continue;
-
-         prompt_error:
-            VIR_FREE(prompt);
-            virBufferFreeAndReset(&buff);
-            return SSH_AUTH_ERROR;
         }
-
-        virBufferFreeAndReset(&buff);
 
         ret = ssh_userauth_kbdint(sess->session, NULL, NULL);
         ++try;
@@ -766,7 +638,7 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
         /* error path */
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_AUTH_FAILED,
-                       _("authentication failed: %s"), errmsg);
+                       _("authentication failed: %1$s"), errmsg);
     }
 
     return ret;
@@ -774,9 +646,9 @@ virNetLibsshAuthenticateKeyboardInteractive(virNetLibsshSessionPtr sess,
 
 /* select auth method and authenticate */
 static int
-virNetLibsshAuthenticate(virNetLibsshSessionPtr sess)
+virNetLibsshAuthenticate(virNetLibsshSession *sess)
 {
-    virNetLibsshAuthMethodPtr auth;
+    virNetLibsshAuthMethod *auth;
     bool no_method = false;
     bool auth_failed = false;
     const char *errmsg;
@@ -796,7 +668,7 @@ virNetLibsshAuthenticate(virNetLibsshSessionPtr sess)
     if (ret == SSH_AUTH_ERROR) {
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("Failed to authenticate as 'none': %s"),
+                       _("Failed to authenticate as 'none': %1$s"),
                        errmsg);
         return -1;
     }
@@ -821,11 +693,13 @@ virNetLibsshAuthenticate(virNetLibsshSessionPtr sess)
             break;
         case VIR_NET_LIBSSH_AUTH_AGENT:
             /* try to authenticate using ssh-agent */
+#ifndef WIN32
             ret = ssh_userauth_agent(sess->session, NULL);
+#endif
             if (ret == SSH_AUTH_ERROR) {
                 errmsg = ssh_get_error(sess->session);
                 virReportError(VIR_ERR_LIBSSH,
-                               _("failed to authenticate using agent: %s"),
+                               _("failed to authenticate using agent: %1$s"),
                                errmsg);
             }
             break;
@@ -835,7 +709,7 @@ virNetLibsshAuthenticate(virNetLibsshSessionPtr sess)
             break;
         case VIR_NET_LIBSSH_AUTH_PASSWORD:
             /* try to authenticate with password */
-            ret = virNetLibsshAuthenticatePassword(sess, auth);
+            ret = virNetLibsshAuthenticatePassword(sess);
             break;
         }
 
@@ -853,16 +727,14 @@ virNetLibsshAuthenticate(virNetLibsshSessionPtr sess)
     if (sess->nauths == 1) {
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("failed to authenticate: %s"),
+                       _("failed to authenticate: %1$s"),
                        errmsg);
     } else if (no_method && !auth_failed) {
         virReportError(VIR_ERR_AUTH_FAILED, "%s",
-                       _("None of the requested authentication methods "
-                         "are supported by the server"));
+                       _("None of the requested authentication methods are supported by the server"));
     } else {
         virReportError(VIR_ERR_AUTH_FAILED, "%s",
-                       _("All provided authentication methods with credentials "
-                         "were rejected by the server"));
+                       _("All provided authentication methods with credentials were rejected by the server"));
     }
 
     return -1;
@@ -870,7 +742,7 @@ virNetLibsshAuthenticate(virNetLibsshSessionPtr sess)
 
 /* open channel */
 static int
-virNetLibsshOpenChannel(virNetLibsshSessionPtr sess)
+virNetLibsshOpenChannel(virNetLibsshSession *sess)
 {
     const char *errmsg;
 
@@ -878,7 +750,7 @@ virNetLibsshOpenChannel(virNetLibsshSessionPtr sess)
     if (!sess->channel) {
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("failed to create libssh channel: %s"),
+                       _("failed to create libssh channel: %1$s"),
                        errmsg);
         return -1;
     }
@@ -886,7 +758,7 @@ virNetLibsshOpenChannel(virNetLibsshSessionPtr sess)
     if (ssh_channel_open_session(sess->channel) != SSH_OK) {
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("failed to open ssh channel: %s"),
+                       _("failed to open ssh channel: %1$s"),
                        errmsg);
         return -1;
     }
@@ -894,7 +766,7 @@ virNetLibsshOpenChannel(virNetLibsshSessionPtr sess)
     if (ssh_channel_request_exec(sess->channel, sess->channelCommand) != SSH_OK) {
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("failed to execute command '%s': %s"),
+                       _("failed to execute command '%1$s': %2$s"),
                        sess->channelCommand,
                        errmsg);
         return -1;
@@ -909,7 +781,7 @@ virNetLibsshOpenChannel(virNetLibsshSessionPtr sess)
 
 /* validate if all required parameters are configured */
 static int
-virNetLibsshValidateConfig(virNetLibsshSessionPtr sess)
+virNetLibsshValidateConfig(virNetLibsshSession *sess)
 {
     size_t i;
     bool has_auths = false;
@@ -922,8 +794,7 @@ virNetLibsshValidateConfig(virNetLibsshSessionPtr sess)
     }
     if (!has_auths) {
         virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("No authentication methods and credentials "
-                         "provided"));
+                       _("No authentication methods and credentials provided"));
         return -1;
     }
 
@@ -947,7 +818,7 @@ virNetLibsshValidateConfig(virNetLibsshSessionPtr sess)
 
 /* ### PUBLIC API ### */
 int
-virNetLibsshSessionAuthSetCallback(virNetLibsshSessionPtr sess,
+virNetLibsshSessionAuthSetCallback(virNetLibsshSession *sess,
                                    virConnectAuthPtr auth)
 {
     virObjectLock(sess);
@@ -957,133 +828,94 @@ virNetLibsshSessionAuthSetCallback(virNetLibsshSessionPtr sess,
 }
 
 int
-virNetLibsshSessionAuthAddPasswordAuth(virNetLibsshSessionPtr sess,
-                                       virURIPtr uri)
+virNetLibsshSessionAuthAddPasswordAuth(virNetLibsshSession *sess,
+                                       virURI *uri)
 {
-    int ret;
-    virNetLibsshAuthMethodPtr auth;
+    virNetLibsshAuthMethod *auth;
+
+    virObjectLock(sess);
 
     if (uri) {
         VIR_FREE(sess->authPath);
 
         if (virAuthGetConfigFilePathURI(uri, &sess->authPath) < 0) {
-            ret = -1;
-            goto cleanup;
+            virObjectUnlock(sess);
+            return -1;
         }
     }
 
-    virObjectLock(sess);
-
-    if (!(auth = virNetLibsshSessionAuthMethodNew(sess))) {
-        ret = -1;
-        goto cleanup;
-    }
-
+    auth = virNetLibsshSessionAuthMethodNew(sess);
     auth->method = VIR_NET_LIBSSH_AUTH_PASSWORD;
     auth->ssh_flags = SSH_AUTH_METHOD_PASSWORD;
 
-    ret = 0;
-
- cleanup:
     virObjectUnlock(sess);
-    return ret;
+    return 0;
 }
 
 int
-virNetLibsshSessionAuthAddAgentAuth(virNetLibsshSessionPtr sess)
+virNetLibsshSessionAuthAddAgentAuth(virNetLibsshSession *sess G_GNUC_UNUSED)
 {
-    int ret;
-    virNetLibsshAuthMethodPtr auth;
+#ifdef WIN32
+    virReportError(VIR_ERR_LIBSSH, "%s",
+                   _("Agent authentication is not supported on this host"));
+    return -1;
+#else
+    virNetLibsshAuthMethod *auth;
 
     virObjectLock(sess);
 
-    if (!(auth = virNetLibsshSessionAuthMethodNew(sess))) {
-        ret = -1;
-        goto cleanup;
-    }
-
+    auth = virNetLibsshSessionAuthMethodNew(sess);
     auth->method = VIR_NET_LIBSSH_AUTH_AGENT;
     auth->ssh_flags = SSH_AUTH_METHOD_PUBLICKEY;
 
-    ret = 0;
-
- cleanup:
     virObjectUnlock(sess);
-    return ret;
+    return 0;
+#endif
 }
 
 int
-virNetLibsshSessionAuthAddPrivKeyAuth(virNetLibsshSessionPtr sess,
-                                      const char *keyfile,
-                                      const char *password)
+virNetLibsshSessionAuthAddPrivKeyAuth(virNetLibsshSession *sess,
+                                      const char *keyfile)
 {
-    int ret;
-    virNetLibsshAuthMethodPtr auth;
-    VIR_AUTODISPOSE_STR pass = NULL;
-    char *file = NULL;
+    virNetLibsshAuthMethod *auth;
 
     if (!keyfile) {
         virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("Key file path must be provided "
-                         "for private key authentication"));
-        ret = -1;
-        goto error;
+                       _("Key file path must be provided for private key authentication"));
+        return -1;
     }
 
     virObjectLock(sess);
 
-    file = g_strdup(keyfile);
-    pass = g_strdup(password);
-
-    if (!(auth = virNetLibsshSessionAuthMethodNew(sess))) {
-        ret = -1;
-        goto error;
-    }
-
-    auth->password = g_steal_pointer(&pass);
-    auth->filename = file;
+    auth = virNetLibsshSessionAuthMethodNew(sess);
+    auth->filename = g_strdup(keyfile);
     auth->method = VIR_NET_LIBSSH_AUTH_PRIVKEY;
     auth->ssh_flags = SSH_AUTH_METHOD_PUBLICKEY;
 
-    ret = 0;
-
- cleanup:
     virObjectUnlock(sess);
-    return ret;
-
- error:
-    VIR_FREE(file);
-    goto cleanup;
+    return 0;
 }
 
 int
-virNetLibsshSessionAuthAddKeyboardAuth(virNetLibsshSessionPtr sess,
+virNetLibsshSessionAuthAddKeyboardAuth(virNetLibsshSession *sess,
                                        int tries)
 {
-    int ret;
-    virNetLibsshAuthMethodPtr auth;
+    virNetLibsshAuthMethod *auth;
 
     virObjectLock(sess);
 
-    if (!(auth = virNetLibsshSessionAuthMethodNew(sess))) {
-        ret = -1;
-        goto cleanup;
-    }
+    auth = virNetLibsshSessionAuthMethodNew(sess);
 
     auth->tries = tries;
     auth->method = VIR_NET_LIBSSH_AUTH_KEYBOARD_INTERACTIVE;
     auth->ssh_flags = SSH_AUTH_METHOD_INTERACTIVE;
 
-    ret = 0;
-
- cleanup:
     virObjectUnlock(sess);
-    return ret;
-
+    return 0;
 }
 
 void
-virNetLibsshSessionSetChannelCommand(virNetLibsshSessionPtr sess,
+virNetLibsshSessionSetChannelCommand(virNetLibsshSession *sess,
                                       const char *command)
 {
     virObjectLock(sess);
@@ -1096,7 +928,7 @@ virNetLibsshSessionSetChannelCommand(virNetLibsshSessionPtr sess,
 }
 
 int
-virNetLibsshSessionSetHostKeyVerification(virNetLibsshSessionPtr sess,
+virNetLibsshSessionSetHostKeyVerification(virNetLibsshSession *sess,
                                           const char *hostname,
                                           int port,
                                           const char *hostsfile,
@@ -1146,9 +978,9 @@ virNetLibsshSessionSetHostKeyVerification(virNetLibsshSessionPtr sess,
 }
 
 /* allocate and initialize a libssh session object */
-virNetLibsshSessionPtr virNetLibsshSessionNew(const char *username)
+virNetLibsshSession *virNetLibsshSessionNew(const char *username)
 {
-    virNetLibsshSessionPtr sess = NULL;
+    virNetLibsshSession *sess = NULL;
 
     if (virNetLibsshSessionInitialize() < 0)
         goto error;
@@ -1165,7 +997,7 @@ virNetLibsshSessionPtr virNetLibsshSessionNew(const char *username)
 
     sess->username = g_strdup(username);
 
-    VIR_DEBUG("virNetLibsshSessionPtr: %p, ssh_session: %p",
+    VIR_DEBUG("virNetLibsshSession *: %p, ssh_session: %p",
               sess, sess->session);
 
     /* set blocking mode for libssh until handshake is complete */
@@ -1186,7 +1018,7 @@ virNetLibsshSessionPtr virNetLibsshSessionNew(const char *username)
 }
 
 int
-virNetLibsshSessionConnect(virNetLibsshSessionPtr sess,
+virNetLibsshSessionConnect(virNetLibsshSession *sess,
                            int sock)
 {
     int ret;
@@ -1196,7 +1028,7 @@ virNetLibsshSessionConnect(virNetLibsshSessionPtr sess,
 
     if (!sess || sess->state != VIR_NET_LIBSSH_STATE_NEW) {
         virReportError(VIR_ERR_LIBSSH, "%s",
-                       _("Invalid virNetLibsshSessionPtr"));
+                       _("Invalid virNetLibsshSession *"));
         return -1;
     }
 
@@ -1220,7 +1052,7 @@ virNetLibsshSessionConnect(virNetLibsshSessionPtr sess,
     if (ret < 0) {
         errmsg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_NO_CONNECT,
-                       _("SSH session handshake failed: %s"),
+                       _("SSH session handshake failed: %1$s"),
                        errmsg);
         goto error;
     }
@@ -1253,7 +1085,7 @@ virNetLibsshSessionConnect(virNetLibsshSessionPtr sess,
 
 /* do a read from a ssh channel, used instead of normal read on socket */
 ssize_t
-virNetLibsshChannelRead(virNetLibsshSessionPtr sess,
+virNetLibsshChannelRead(virNetLibsshSession *sess,
                         char *buf,
                         size_t len)
 {
@@ -1265,8 +1097,7 @@ virNetLibsshChannelRead(virNetLibsshSessionPtr sess,
     if (sess->state != VIR_NET_LIBSSH_STATE_HANDSHAKE_COMPLETE) {
         if (sess->state == VIR_NET_LIBSSH_STATE_ERROR_REMOTE)
             virReportError(VIR_ERR_LIBSSH,
-                           _("Remote program terminated "
-                             "with non-zero code: %d"),
+                           _("Remote program terminated with non-zero code: %1$d"),
                            sess->channelCommandReturnValue);
         else
             virReportError(VIR_ERR_LIBSSH, "%s",
@@ -1351,7 +1182,7 @@ virNetLibsshChannelRead(virNetLibsshSessionPtr sess,
  eof:
         if (ssh_channel_get_exit_status(sess->channel)) {
             virReportError(VIR_ERR_LIBSSH,
-                           _("Remote command terminated with non-zero code: %d"),
+                           _("Remote command terminated with non-zero code: %1$d"),
                            ssh_channel_get_exit_status(sess->channel));
             sess->channelCommandReturnValue = ssh_channel_get_exit_status(sess->channel);
             sess->state = VIR_NET_LIBSSH_STATE_ERROR_REMOTE;
@@ -1375,7 +1206,7 @@ virNetLibsshChannelRead(virNetLibsshSessionPtr sess,
 }
 
 ssize_t
-virNetLibsshChannelWrite(virNetLibsshSessionPtr sess,
+virNetLibsshChannelWrite(virNetLibsshSession *sess,
                          const char *buf,
                          size_t len)
 {
@@ -1386,7 +1217,7 @@ virNetLibsshChannelWrite(virNetLibsshSessionPtr sess,
     if (sess->state != VIR_NET_LIBSSH_STATE_HANDSHAKE_COMPLETE) {
         if (sess->state == VIR_NET_LIBSSH_STATE_ERROR_REMOTE)
             virReportError(VIR_ERR_LIBSSH,
-                           _("Remote program terminated with non-zero code: %d"),
+                           _("Remote program terminated with non-zero code: %1$d"),
                            sess->channelCommandReturnValue);
         else
             virReportError(VIR_ERR_LIBSSH, "%s",
@@ -1398,7 +1229,7 @@ virNetLibsshChannelWrite(virNetLibsshSessionPtr sess,
     if (ssh_channel_is_eof(sess->channel)) {
         if (ssh_channel_get_exit_status(sess->channel)) {
             virReportError(VIR_ERR_LIBSSH,
-                           _("Remote program terminated with non-zero code: %d"),
+                           _("Remote program terminated with non-zero code: %1$d"),
                            ssh_channel_get_exit_status(sess->channel));
             sess->state = VIR_NET_LIBSSH_STATE_ERROR_REMOTE;
             sess->channelCommandReturnValue = ssh_channel_get_exit_status(sess->channel);
@@ -1423,7 +1254,7 @@ virNetLibsshChannelWrite(virNetLibsshSessionPtr sess,
         sess->state = VIR_NET_LIBSSH_STATE_ERROR;
         msg = ssh_get_error(sess->session);
         virReportError(VIR_ERR_LIBSSH,
-                       _("write failed: %s"), msg);
+                       _("write failed: %1$s"), msg);
     }
 
  cleanup:
@@ -1432,7 +1263,7 @@ virNetLibsshChannelWrite(virNetLibsshSessionPtr sess,
 }
 
 bool
-virNetLibsshSessionHasCachedData(virNetLibsshSessionPtr sess)
+virNetLibsshSessionHasCachedData(virNetLibsshSession *sess)
 {
     bool ret;
 

@@ -28,8 +28,6 @@
 #include "virxml.h"
 
 typedef struct _virNWFilterBindingDef virNWFilterBindingDef;
-typedef virNWFilterBindingDef *virNWFilterBindingDefPtr;
-
 struct _virNWFilterBindingDef {
     char *ownername;
     unsigned char owneruuid[VIR_UUID_BUFLEN];
@@ -37,28 +35,28 @@ struct _virNWFilterBindingDef {
     char *linkdevname;
     virMacAddr mac;
     char *filter;
-    virHashTablePtr filterparams;
+    GHashTable *filterparams;
 };
 
 
 void
-virNWFilterBindingDefFree(virNWFilterBindingDefPtr binding);
-virNWFilterBindingDefPtr
-virNWFilterBindingDefCopy(virNWFilterBindingDefPtr src);
+virNWFilterBindingDefFree(virNWFilterBindingDef *binding);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNWFilterBindingDef, virNWFilterBindingDefFree);
 
-virNWFilterBindingDefPtr
-virNWFilterBindingDefParseNode(xmlDocPtr xml,
-                               xmlNodePtr root);
+virNWFilterBindingDef *
+virNWFilterBindingDefCopy(virNWFilterBindingDef *src);
 
-virNWFilterBindingDefPtr
-virNWFilterBindingDefParseString(const char *xml);
+virNWFilterBindingDef *
+virNWFilterBindingDefParseXML(xmlXPathContextPtr ctxt);
 
-virNWFilterBindingDefPtr
-virNWFilterBindingDefParseFile(const char *filename);
+virNWFilterBindingDef *
+virNWFilterBindingDefParse(const char *xmlStr,
+                           const char *filename,
+                           unsigned int flags);
 
 char *
 virNWFilterBindingDefFormat(const virNWFilterBindingDef *def);
 
 int
-virNWFilterBindingDefFormatBuf(virBufferPtr buf,
+virNWFilterBindingDefFormatBuf(virBuffer *buf,
                                const virNWFilterBindingDef *def);

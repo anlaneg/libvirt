@@ -21,7 +21,6 @@
 #include <signal.h>
 
 #include "testutils.h"
-#include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
 
@@ -41,20 +40,19 @@ struct URIParseData {
     const char *query;
     const char *fragment;
     const char *user;
-    virURIParamPtr params;
+    virURIParam *params;
 };
 
 static int testURIParse(const void *args)
 {
-    int ret = -1;
-    virURIPtr uri = NULL;
+    g_autoptr(virURI) uri = NULL;
     const struct URIParseData *data = args;
-    char *uristr = NULL;
+    g_autofree char *uristr = NULL;
     size_t i;
     bool fail = false;
 
     if (!(uri = virURIParse(data->uri)))
-        goto cleanup;
+        return -1;
 
     if (STRNEQ(uri->scheme, data->scheme)) {
         VIR_TEST_DEBUG("Expected scheme '%s', actual '%s'",
@@ -120,8 +118,7 @@ static int testURIParse(const void *args)
     VIR_FREE(uri->query);
     uri->query = virURIFormatParams(uri);
 
-    if (!(uristr = virURIFormat(uri)))
-        goto cleanup;
+    uristr = virURIFormat(uri);
 
     if (STRNEQ(uristr, data->uri_out)) {
         VIR_TEST_DEBUG("URI did not roundtrip, expect '%s', actual '%s'",
@@ -130,13 +127,9 @@ static int testURIParse(const void *args)
     }
 
     if (fail)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    VIR_FREE(uristr);
-    virURIFree(uri);
-    return ret;
+    return 0;
 }
 
 
@@ -166,6 +159,7 @@ mymain(void)
               *query_out ? "test://example.com/?" query_out : NULL, \
               "test", "example.com", 0, "/", query_in, NULL, NULL, params)
 
+    VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT
     virURIParam params[] = {
         { (char*)"name", (char*)"value", false },
         { NULL, NULL, false },
@@ -216,6 +210,7 @@ mymain(void)
         { (char*)"foo", (char*)"one", false },
         { NULL, NULL, false },
     };
+    VIR_WARNINGS_RESET
 
     TEST_PARAMS("foo=one&bar=two", "", params1);
     TEST_PARAMS("foo=one&foo=two", "", params2);

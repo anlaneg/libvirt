@@ -20,9 +20,9 @@
 
 #include <config.h>
 #include "virsh-nwfilter.h"
+#include "virsh-util.h"
 
 #include "internal.h"
-#include "virbuffer.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "vsh-table.h"
@@ -34,7 +34,7 @@ virshCommandOptNWFilterBy(vshControl *ctl, const vshCmd *cmd,
     virNWFilterPtr nwfilter = NULL;
     const char *n = NULL;
     const char *optname = "nwfilter";
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     virCheckFlags(VIRSH_BYUUID | VIRSH_BYNAME, NULL);
 
@@ -61,7 +61,7 @@ virshCommandOptNWFilterBy(vshControl *ctl, const vshCmd *cmd,
     }
 
     if (!nwfilter)
-        vshError(ctl, _("failed to get nwfilter '%s'"), n);
+        vshError(ctl, _("failed to get nwfilter '%1$s'"), n);
 
     return nwfilter;
 }
@@ -82,33 +82,42 @@ static const vshCmdInfo info_nwfilter_define[] = {
 static const vshCmdOptDef opts_nwfilter_define[] = {
     VIRSH_COMMON_OPT_FILE(N_("file containing an XML network "
                              "filter description")),
+    {.name = "validate",
+     .type = VSH_OT_BOOL,
+     .help = N_("validate the XML against the schema")
+    },
     {.name = NULL}
 };
 
 static bool
 cmdNWFilterDefine(vshControl *ctl, const vshCmd *cmd)
 {
-    virNWFilterPtr nwfilter;
+    g_autoptr(virshNWFilter) nwfilter = NULL;
     const char *from = NULL;
     bool ret = true;
-    char *buffer;
-    virshControlPtr priv = ctl->privData;
+    g_autofree char *buffer = NULL;
+    unsigned int flags = 0;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
 
+    if (vshCommandOptBool(cmd, "validate"))
+        flags |= VIR_NWFILTER_DEFINE_VALIDATE;
+
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
-    nwfilter = virNWFilterDefineXML(priv->conn, buffer);
-    VIR_FREE(buffer);
+    if (flags)
+        nwfilter = virNWFilterDefineXMLFlags(priv->conn, buffer, flags);
+    else
+        nwfilter = virNWFilterDefineXML(priv->conn, buffer);
 
     if (nwfilter != NULL) {
-        vshPrintExtra(ctl, _("Network filter %s defined from %s\n"),
+        vshPrintExtra(ctl, _("Network filter %1$s defined from %2$s\n"),
                       virNWFilterGetName(nwfilter), from);
-        virNWFilterFree(nwfilter);
     } else {
-        vshError(ctl, _("Failed to define network filter from %s"), from);
+        vshError(ctl, _("Failed to define network filter from %1$s"), from);
         ret = false;
     }
     return ret;
@@ -140,7 +149,7 @@ static const vshCmdOptDef opts_nwfilter_undefine[] = {
 static bool
 cmdNWFilterUndefine(vshControl *ctl, const vshCmd *cmd)
 {
-    virNWFilterPtr nwfilter;
+    g_autoptr(virshNWFilter) nwfilter = NULL;
     bool ret = true;
     const char *name;
 
@@ -148,13 +157,12 @@ cmdNWFilterUndefine(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (virNWFilterUndefine(nwfilter) == 0) {
-        vshPrintExtra(ctl, _("Network filter %s undefined\n"), name);
+        vshPrintExtra(ctl, _("Network filter %1$s undefined\n"), name);
     } else {
-        vshError(ctl, _("Failed to undefine network filter %s"), name);
+        vshError(ctl, _("Failed to undefine network filter %1$s"), name);
         ret = false;
     }
 
-    virNWFilterFree(nwfilter);
     return ret;
 }
 
@@ -178,29 +186,37 @@ static const vshCmdOptDef opts_nwfilter_dumpxml[] = {
      .help = N_("network filter name or uuid"),
      .completer = virshNWFilterNameCompleter,
     },
+    {.name = "xpath",
+     .type = VSH_OT_STRING,
+     .flags = VSH_OFLAG_REQ_OPT,
+     .completer = virshCompleteEmpty,
+     .help = N_("xpath expression to filter the XML document")
+    },
+    {.name = "wrap",
+     .type = VSH_OT_BOOL,
+     .help = N_("wrap xpath results in an common root element"),
+    },
     {.name = NULL}
 };
 
 static bool
 cmdNWFilterDumpXML(vshControl *ctl, const vshCmd *cmd)
 {
-    virNWFilterPtr nwfilter;
-    bool ret = true;
-    char *dump;
+    g_autoptr(virshNWFilter) nwfilter = NULL;
+    g_autofree char *xml = NULL;
+    bool wrap = vshCommandOptBool(cmd, "wrap");
+    const char *xpath = NULL;
 
     if (!(nwfilter = virshCommandOptNWFilter(ctl, cmd, NULL)))
         return false;
 
-    dump = virNWFilterGetXMLDesc(nwfilter, 0);
-    if (dump != NULL) {
-        vshPrint(ctl, "%s", dump);
-        VIR_FREE(dump);
-    } else {
-        ret = false;
-    }
+    if (vshCommandOptStringQuiet(ctl, cmd, "xpath", &xpath) < 0)
+        return false;
 
-    virNWFilterFree(nwfilter);
-    return ret;
+    if (!(xml = virNWFilterGetXMLDesc(nwfilter, 0)))
+        return false;
+
+    return virshDumpXML(ctl, xml, "nwfilter", xpath, wrap);
 }
 
 static int
@@ -223,28 +239,26 @@ struct virshNWFilterList {
     virNWFilterPtr *filters;
     size_t nfilters;
 };
-typedef struct virshNWFilterList *virshNWFilterListPtr;
 
 static void
-virshNWFilterListFree(virshNWFilterListPtr list)
+virshNWFilterListFree(struct virshNWFilterList *list)
 {
     size_t i;
 
     if (list && list->filters) {
         for (i = 0; i < list->nfilters; i++) {
-            if (list->filters[i])
-                virNWFilterFree(list->filters[i]);
+            virshNWFilterFree(list->filters[i]);
         }
-        VIR_FREE(list->filters);
+        g_free(list->filters);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
-static virshNWFilterListPtr
+static struct virshNWFilterList *
 virshNWFilterListCollect(vshControl *ctl,
                          unsigned int flags)
 {
-    virshNWFilterListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshNWFilterList *list = g_new0(struct virshNWFilterList, 1);
     size_t i;
     int ret;
     virNWFilterPtr filter;
@@ -252,7 +266,7 @@ virshNWFilterListCollect(vshControl *ctl,
     size_t deleted = 0;
     int nfilters = 0;
     char **names = NULL;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     /* try the list with flags support (0.10.2 and later) */
     if ((ret = virConnectListAllNWFilters(priv->conn,
@@ -286,7 +300,7 @@ virshNWFilterListCollect(vshControl *ctl,
     if (nfilters == 0)
         return list;
 
-    names = vshMalloc(ctl, sizeof(char *) * nfilters);
+    names = g_new0(char *, nfilters);
 
     nfilters = virConnectListNWFilters(priv->conn, names, nfilters);
     if (nfilters < 0) {
@@ -294,7 +308,7 @@ virshNWFilterListCollect(vshControl *ctl,
         goto cleanup;
     }
 
-    list->filters = vshMalloc(ctl, sizeof(virNWFilterPtr) * nfilters);
+    list->filters = g_new0(virNWFilterPtr, nfilters);
     list->nfilters = 0;
 
     /* get the network filters */
@@ -325,8 +339,7 @@ virshNWFilterListCollect(vshControl *ctl,
     VIR_FREE(names);
 
     if (!success) {
-        virshNWFilterListFree(list);
-        list = NULL;
+        g_clear_pointer(&list, virshNWFilterListFree);
     }
 
     return list;
@@ -355,8 +368,8 @@ cmdNWFilterList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
     size_t i;
     char uuid[VIR_UUID_STRING_BUFLEN];
     bool ret = false;
-    virshNWFilterListPtr list = NULL;
-    vshTablePtr table = NULL;
+    struct virshNWFilterList *list = NULL;
+    g_autoptr(vshTable) table = NULL;
 
     if (!(list = virshNWFilterListCollect(ctl, 0)))
         return false;
@@ -380,7 +393,6 @@ cmdNWFilterList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 
     ret = true;
  cleanup:
-    vshTableFree(table);
     virshNWFilterListFree(list);
     return ret;
 }
@@ -412,9 +424,9 @@ static bool
 cmdNWFilterEdit(vshControl *ctl, const vshCmd *cmd)
 {
     bool ret = false;
-    virNWFilterPtr nwfilter = NULL;
-    virNWFilterPtr nwfilter_edited = NULL;
-    virshControlPtr priv = ctl->privData;
+    g_autoptr(virshNWFilter) nwfilter = NULL;
+    g_autoptr(virshNWFilter) nwfilter_edited = NULL;
+    virshControl *priv = ctl->privData;
 
     nwfilter = virshCommandOptNWFilter(ctl, cmd, NULL);
     if (nwfilter == NULL)
@@ -423,9 +435,8 @@ cmdNWFilterEdit(vshControl *ctl, const vshCmd *cmd)
 #define EDIT_GET_XML virNWFilterGetXMLDesc(nwfilter, 0)
 #define EDIT_NOT_CHANGED \
     do { \
-        vshPrintExtra(ctl, _("Network filter %s XML " \
-                        "configuration not changed.\n"), \
-                 virNWFilterGetName(nwfilter)); \
+        vshPrintExtra(ctl, _("Network filter %1$s XML configuration not changed.\n"), \
+                      virNWFilterGetName(nwfilter)); \
         ret = true; \
         goto edit_cleanup; \
     } while (0)
@@ -433,17 +444,12 @@ cmdNWFilterEdit(vshControl *ctl, const vshCmd *cmd)
     (nwfilter_edited = virNWFilterDefineXML(priv->conn, doc_edited))
 #include "virsh-edit.c"
 
-    vshPrintExtra(ctl, _("Network filter %s XML configuration edited.\n"),
+    vshPrintExtra(ctl, _("Network filter %1$s XML configuration edited.\n"),
                   virNWFilterGetName(nwfilter_edited));
 
     ret = true;
 
  cleanup:
-    if (nwfilter)
-        virNWFilterFree(nwfilter);
-    if (nwfilter_edited)
-        virNWFilterFree(nwfilter_edited);
-
     return ret;
 }
 
@@ -457,7 +463,7 @@ virshCommandOptNWFilterBindingBy(vshControl *ctl,
     virNWFilterBindingPtr binding = NULL;
     const char *n = NULL;
     const char *optname = "binding";
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     virCheckFlags(0, NULL);
 
@@ -475,7 +481,7 @@ virshCommandOptNWFilterBindingBy(vshControl *ctl,
     binding = virNWFilterBindingLookupByPortDev(priv->conn, n);
 
     if (!binding)
-        vshError(ctl, _("failed to get nwfilter binding '%s'"), n);
+        vshError(ctl, _("failed to get nwfilter binding '%1$s'"), n);
 
     return binding;
 }
@@ -497,6 +503,10 @@ static const vshCmdInfo info_nwfilter_binding_create[] = {
 static const vshCmdOptDef opts_nwfilter_binding_create[] = {
     VIRSH_COMMON_OPT_FILE(N_("file containing an XML network "
                              "filter binding description")),
+    {.name = "validate",
+     .type = VSH_OT_BOOL,
+     .help = N_("validate the XML against the schema")
+    },
     {.name = NULL}
 };
 
@@ -505,28 +515,30 @@ cmdNWFilterBindingCreate(vshControl *ctl, const vshCmd *cmd)
 {
     virNWFilterBindingPtr binding;
     const char *from = NULL;
-    bool ret = true;
-    char *buffer;
-    virshControlPtr priv = ctl->privData;
+    g_autofree char *buffer = NULL;
+    unsigned int flags = 0;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
 
+    if (vshCommandOptBool(cmd, "validate"))
+        flags |= VIR_NWFILTER_BINDING_CREATE_VALIDATE;
+
     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
         return false;
 
-    binding = virNWFilterBindingCreateXML(priv->conn, buffer, 0);
-    VIR_FREE(buffer);
+    binding = virNWFilterBindingCreateXML(priv->conn, buffer, flags);
 
-    if (binding != NULL) {
-        vshPrintExtra(ctl, _("Network filter binding on %s created from %s\n"),
-                      virNWFilterBindingGetPortDev(binding), from);
-        virNWFilterBindingFree(binding);
-    } else {
-        vshError(ctl, _("Failed to create network filter from %s"), from);
-        ret = false;
+    if (!binding) {
+        vshError(ctl, _("Failed to create network filter from %1$s"), from);
+        return false;
     }
-    return ret;
+
+    vshPrintExtra(ctl, _("Network filter binding on %1$s created from %2$s\n"),
+                  virNWFilterBindingGetPortDev(binding), from);
+    virNWFilterBindingFree(binding);
+    return true;
 }
 
 
@@ -564,9 +576,9 @@ cmdNWFilterBindingDelete(vshControl *ctl, const vshCmd *cmd)
         return false;
 
     if (virNWFilterBindingDelete(binding) == 0) {
-        vshPrintExtra(ctl, _("Network filter binding on %s deleted\n"), portdev);
+        vshPrintExtra(ctl, _("Network filter binding on %1$s deleted\n"), portdev);
     } else {
-        vshError(ctl, _("Failed to delete network filter binding on %s"), portdev);
+        vshError(ctl, _("Failed to delete network filter binding on %1$s"), portdev);
         ret = false;
     }
 
@@ -595,6 +607,16 @@ static const vshCmdOptDef opts_nwfilter_binding_dumpxml[] = {
      .help = N_("network filter binding portdev"),
      .completer = virshNWFilterBindingNameCompleter,
     },
+    {.name = "xpath",
+     .type = VSH_OT_STRING,
+     .flags = VSH_OFLAG_REQ_OPT,
+     .completer = virshCompleteEmpty,
+     .help = N_("xpath expression to filter the XML document")
+    },
+    {.name = "wrap",
+     .type = VSH_OT_BOOL,
+     .help = N_("wrap xpath results in an common root element"),
+    },
     {.name = NULL}
 };
 
@@ -603,19 +625,19 @@ cmdNWFilterBindingDumpXML(vshControl *ctl, const vshCmd *cmd)
 {
     virNWFilterBindingPtr binding;
     bool ret = true;
-    char *dump;
+    g_autofree char *xml = NULL;
+    bool wrap = vshCommandOptBool(cmd, "wrap");
+    const char *xpath = NULL;
 
     if (!(binding = virshCommandOptNWFilterBinding(ctl, cmd, NULL)))
         return false;
 
-    dump = virNWFilterBindingGetXMLDesc(binding, 0);
-    if (dump != NULL) {
-        vshPrint(ctl, "%s", dump);
-        VIR_FREE(dump);
-    } else {
-        ret = false;
-    }
+    if (!(xml = virNWFilterBindingGetXMLDesc(binding, 0)))
+        goto cleanup;
 
+    ret = virshDumpXML(ctl, xml, "nwfilter-binding", xpath, wrap);
+
+ cleanup:
     virNWFilterBindingFree(binding);
     return ret;
 }
@@ -642,11 +664,10 @@ struct virshNWFilterBindingList {
     virNWFilterBindingPtr *bindings;
     size_t nbindings;
 };
-typedef struct virshNWFilterBindingList *virshNWFilterBindingListPtr;
 
 
 static void
-virshNWFilterBindingListFree(virshNWFilterBindingListPtr list)
+virshNWFilterBindingListFree(struct virshNWFilterBindingList *list)
 {
     size_t i;
 
@@ -655,20 +676,20 @@ virshNWFilterBindingListFree(virshNWFilterBindingListPtr list)
             if (list->bindings[i])
                 virNWFilterBindingFree(list->bindings[i]);
         }
-        VIR_FREE(list->bindings);
+        g_free(list->bindings);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
 
-static virshNWFilterBindingListPtr
+static struct virshNWFilterBindingList *
 virshNWFilterBindingListCollect(vshControl *ctl,
                                 unsigned int flags)
 {
-    virshNWFilterBindingListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshNWFilterBindingList *list = g_new0(struct virshNWFilterBindingList, 1);
     int ret;
     bool success = false;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if ((ret = virConnectListAllNWFilterBindings(priv->conn,
                                                  &list->bindings,
@@ -689,8 +710,7 @@ virshNWFilterBindingListCollect(vshControl *ctl,
 
  cleanup:
     if (!success) {
-        virshNWFilterBindingListFree(list);
-        list = NULL;
+        g_clear_pointer(&list, virshNWFilterBindingListFree);
     }
 
     return list;
@@ -719,8 +739,8 @@ cmdNWFilterBindingList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     size_t i;
     bool ret = false;
-    virshNWFilterBindingListPtr list = NULL;
-    vshTablePtr table = NULL;
+    struct virshNWFilterBindingList *list = NULL;
+    g_autoptr(vshTable) table = NULL;
 
     if (!(list = virshNWFilterBindingListCollect(ctl, 0)))
         return false;
@@ -743,7 +763,6 @@ cmdNWFilterBindingList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 
     ret = true;
  cleanup:
-    vshTableFree(table);
     virshNWFilterBindingListFree(list);
     return ret;
 }

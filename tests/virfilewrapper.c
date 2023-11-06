@@ -23,10 +23,8 @@
 # include <fcntl.h>
 
 # include "viralloc.h"
-# include "virfile.h"
 # include "virfilewrapper.h"
 # include "virmock.h"
-# include "virstring.h"
 
 
 /* Mapping for prefix overrides */
@@ -56,7 +54,11 @@ static void init_syms(void)
     VIR_MOCK_REAL_INIT(access);
     VIR_MOCK_REAL_INIT(mkdir);
     VIR_MOCK_REAL_INIT(open);
+# if defined(__APPLE__) && defined(__x86_64__)
+    VIR_MOCK_REAL_INIT_ALIASED(opendir, "opendir$INODE64");
+# else
     VIR_MOCK_REAL_INIT(opendir);
+# endif
     VIR_MOCK_REAL_INIT(execv);
     VIR_MOCK_REAL_INIT(execve);
 }
@@ -74,13 +76,8 @@ virFileWrapperAddPrefix(const char *prefix,
 
     init_syms();
 
-    if (VIR_APPEND_ELEMENT_QUIET(prefixes, nprefixes, prefix) < 0 ||
-        VIR_APPEND_ELEMENT_QUIET(overrides, noverrides, override) < 0) {
-        VIR_FREE(prefixes);
-        VIR_FREE(overrides);
-        fprintf(stderr, "Unable to add path override for '%s'\n", prefix);
-        abort();
-    }
+    VIR_APPEND_ELEMENT(prefixes, nprefixes, prefix);
+    VIR_APPEND_ELEMENT(overrides, noverrides, override);
 }
 
 
@@ -159,12 +156,7 @@ int access(const char *path, int mode)
     return real_access(newpath ? newpath : path, mode);
 }
 
-# ifdef __APPLE__
-int _open(const char *path, int flags, ...) __asm("_open");
-int _open(const char *path, int flags, ...)
-# else
 int open(const char *path, int flags, ...)
-# endif
 {
     g_autofree char *newpath = NULL;
     va_list ap;

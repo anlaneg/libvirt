@@ -18,48 +18,9 @@
 
 #pragma once
 
-#include <stdarg.h>
-
 #include "internal.h"
 
 #define VIR_INT64_STR_BUFLEN 21
-
-char **virStringSplitCount(const char *string,
-                           const char *delim,
-                           size_t max_tokens,
-                           size_t *tokcount)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-
-char **virStringSplit(const char *string,
-                      const char *delim,
-                      size_t max_tokens)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-
-char *virStringListJoin(const char **strings,
-                        const char *delim)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-
-int virStringListAdd(char ***strings,
-                     const char *item);
-void virStringListRemove(char ***strings,
-                         const char *item);
-
-int virStringListMerge(char ***dst,
-                       char ***src);
-
-int virStringListCopy(char ***dst,
-                      const char **src);
-
-void virStringListFree(char **strings);
-void virStringListAutoFree(char ***strings);
-void virStringListFreeCount(char **strings,
-                            size_t count);
-
-bool virStringListHasString(const char **strings,
-                            const char *needle);
-char *virStringListGetFirstWithPrefix(char **strings,
-                                      const char *prefix)
-    ATTRIBUTE_NONNULL(2);
 
 int virStrToLong_i(char const *s,
                    char **end_ptr,
@@ -76,11 +37,6 @@ int virStrToLong_uip(char const *s,
                      char **end_ptr,
                      int base,
                      unsigned int *result)
-    G_GNUC_WARN_UNUSED_RESULT;
-int virStrToLong_l(char const *s,
-                   char **end_ptr,
-                   int base,
-                   long *result)
     G_GNUC_WARN_UNUSED_RESULT;
 int virStrToLong_ul(char const *s,
                     char **end_ptr,
@@ -117,27 +73,16 @@ int virDoubleToStr(char **strp, double number)
 
 void virSkipSpaces(const char **str) ATTRIBUTE_NONNULL(1);
 void virSkipSpacesAndBackslash(const char **str) ATTRIBUTE_NONNULL(1);
+void virSkipToDigit(const char **str) ATTRIBUTE_NONNULL(1);
 void virTrimSpaces(char *str, char **endp) ATTRIBUTE_NONNULL(1);
 void virSkipSpacesBackwards(const char *str, char **endp)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 bool virStringIsEmpty(const char *str);
 
-int virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
-    G_GNUC_WARN_UNUSED_RESULT;
-int virStrcpy(char *dest, const char *src, size_t destbytes)
-    G_GNUC_WARN_UNUSED_RESULT;
+int virStrcpy(char *dest, const char *src, size_t destbytes);
 /*string 复制*/
 #define virStrcpyStatic(dest, src) virStrcpy((dest), (src), sizeof(dest))
-
-/* Don't call these directly - use the macros below */
-int virStrdup(char **dest, const char *src)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-
-int virStrndup(char **dest, const char *src, ssize_t n)
-    G_GNUC_WARN_UNUSED_RESULT ATTRIBUTE_NONNULL(1);
-
-size_t virStringListLength(const char * const *strings);
 
 int virStringSortCompare(const void *a, const void *b);
 int virStringSortRevCompare(const void *a, const void *b);
@@ -186,11 +131,7 @@ int virStringParsePort(const char *str,
 int virStringParseYesNo(const char *str,
                         bool *result)
     G_GNUC_WARN_UNUSED_RESULT;
-/**
- * VIR_AUTOSTRINGLIST:
- *
- * Declares a NULL-terminated list of strings which will be automatically freed
- * when the pointer goes out of scope.
- */
-#define VIR_AUTOSTRINGLIST \
-        __attribute__((cleanup(virStringListAutoFree))) char **
+
+int virStringParseVersion(unsigned long long *version,
+                          const char *str,
+                          bool allowMissing);

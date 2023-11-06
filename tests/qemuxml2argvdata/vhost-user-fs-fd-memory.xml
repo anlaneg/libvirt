@@ -30,7 +30,9 @@
       <driver type='virtiofs' queue='1024'/>
       <binary path='/usr/libexec/virtiofsd' xattr='on'>
         <cache mode='always'/>
+        <sandbox mode='chroot'/>
         <lock posix='off' flock='off'/>
+        <thread_pool size='16'/>
       </binary>
       <source dir='/path'/>
       <target dir='mount_tag'/>
@@ -38,6 +40,7 @@
     </filesystem>
     <input type='mouse' bus='ps2'/>
     <input type='keyboard' bus='ps2'/>
+    <audio id='1' type='none'/>
     <memballoon model='none'/>
   </devices>
 </domain>

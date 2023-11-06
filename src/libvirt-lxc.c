@@ -35,6 +35,7 @@
 # include <sys/apparmor.h>
 #endif
 #include "vircgroup.h"
+#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -58,6 +59,8 @@ VIR_LOG_INIT("libvirt-lxc");
  * the setns() system call.
  *
  * Returns the number of opened file descriptors, or -1 on error
+ *
+ * Since: 1.0.2
  */
 int
 virDomainLxcOpenNamespace(virDomainPtr domain,
@@ -114,6 +117,8 @@ virDomainLxcOpenNamespace(virDomainPtr domain,
  * the caller to switch back to its current namespace later
  *
  * Returns 0 on success, -1 on error
+ *
+ * Since: 1.0.2
  */
 int
 virDomainLxcEnterNamespace(virDomainPtr domain,
@@ -181,6 +186,8 @@ virDomainLxcEnterNamespace(virDomainPtr domain,
  * exec() has yet been performed.
  *
  * Returns 0 on success, -1 on error
+ *
+ * Since: 1.0.4
  */
 int
 virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
@@ -204,25 +211,22 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
     if (STREQ(model->model, "selinux")) {
 #ifdef WITH_SELINUX
         if (oldlabel) {
-            security_context_t ctx;
+            char *ctx;
 
             if (getcon(&ctx) < 0) {
                 virReportSystemError(errno,
-                                     _("unable to get PID %d security context"),
+                                     _("unable to get PID %1$d security context"),
                                      getpid());
                 goto error;
             }
 
-            if (strlen((char *) ctx) >= VIR_SECURITY_LABEL_BUFLEN) {
+            if (virStrcpy(oldlabel->label, ctx, VIR_SECURITY_LABEL_BUFLEN) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("security label exceeds "
-                                 "maximum length: %d"),
+                               _("security label exceeds maximum length: %1$d"),
                                VIR_SECURITY_LABEL_BUFLEN - 1);
                 freecon(ctx);
                 goto error;
             }
-
-            strcpy(oldlabel->label, (char *) ctx);
             freecon(ctx);
 
             if ((oldlabel->enforcing = security_getenforce()) < 0) {
@@ -234,7 +238,7 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
 
         if (setexeccon(label->label) < 0) {
             virReportSystemError(errno,
-                            _("Cannot set context %s"),
+                            _("Cannot set context %1$s"),
                             label->label);
             goto error;
         }
@@ -246,7 +250,7 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
     } else if (STREQ(model->model, "apparmor")) {
 #ifdef WITH_APPARMOR
         if (aa_change_profile(label->label) < 0) {
-            virReportSystemError(errno, _("error changing profile to %s"),
+            virReportSystemError(errno, _("error changing profile to %1$s"),
                                  label->label);
             goto error;
         }
@@ -259,7 +263,7 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
         /* nothing todo */
     } else {
         virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED,
-                       _("Security model %s cannot be entered"),
+                       _("Security model %1$s cannot be entered"),
                        model->model);
         goto error;
     }
@@ -284,12 +288,14 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
  * with the container @domain.
  *
  * Returns 0 on success, -1 on error
+ *
+ * Since: 2.0.0
  */
 int virDomainLxcEnterCGroup(virDomainPtr domain,
                             unsigned int flags)
 {
     virConnectPtr conn;
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
 
     VIR_DOMAIN_DEBUG(domain, "flags=0x%x", flags);
 
@@ -307,12 +313,9 @@ int virDomainLxcEnterCGroup(virDomainPtr domain,
     if (virCgroupAddProcess(cgroup, getpid()) < 0)
         goto error;
 
-    virCgroupFree(&cgroup);
-
     return 0;
 
  error:
     virDispatchError(NULL);
-    virCgroupFree(&cgroup);
     return -1;
 }

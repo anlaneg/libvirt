@@ -2,7 +2,9 @@
   <arch>x86_64</arch>
   <model>EPYC</model>
   <vendor>AMD</vendor>
+  <signature family='23' model='1' stepping='1'/>
   <feature name='ht'/>
+  <feature name='monitor'/>
   <feature name='osxsave'/>
   <feature name='xsaves'/>
   <feature name='cmp_legacy'/>
@@ -26,4 +28,7 @@
   <feature name='decodeassists'/>
   <feature name='pause-filter'/>
   <feature name='pfthreshold'/>
+  <feature name='avic'/>
+  <feature name='v-vmsave-vmload'/>
+  <feature name='vgif'/>
 </cpu>

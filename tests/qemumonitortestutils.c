@@ -30,12 +30,10 @@
 #include "qemu/qemu_processpriv.h"
 #include "qemu/qemu_monitor.h"
 #include "qemu/qemu_agent.h"
-#include "qemu/qemu_qapi.h"
 #include "rpc/virnetsocket.h"
 #include "viralloc.h"
 #include "virlog.h"
 #include "virerror.h"
-#include "virstring.h"
 #include "vireventthread.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -70,26 +68,26 @@ struct _qemuMonitorTest {
     size_t outgoingLength;
     size_t outgoingCapacity;
 
-    virNetSocketPtr server;
-    virNetSocketPtr client;
+    virNetSocket *server;
+    virNetSocket *client;
 
     virEventThread *eventThread;
 
-    qemuMonitorPtr mon;
-    qemuAgentPtr agent;
+    qemuMonitor *mon;
+    qemuAgent *agent;
 
     char *tmpdir;
 
     size_t nitems;
-    qemuMonitorTestItemPtr *items;
+    qemuMonitorTestItem **items;
 
-    virDomainObjPtr vm;
-    virHashTablePtr qapischema;
+    virDomainObj *vm;
+    GHashTable *qapischema;
 };
 
 
 static void
-qemuMonitorTestItemFree(qemuMonitorTestItemPtr item)
+qemuMonitorTestItemFree(qemuMonitorTestItem *item)
 {
     if (!item)
         return;
@@ -99,7 +97,7 @@ qemuMonitorTestItemFree(qemuMonitorTestItemPtr item)
     if (item->freecb)
         (item->freecb)(item->opaque);
 
-    VIR_FREE(item);
+    g_free(item);
 }
 
 
@@ -107,7 +105,7 @@ qemuMonitorTestItemFree(qemuMonitorTestItemPtr item)
  * Appends data for a reply to the outgoing buffer
  */
 int
-qemuMonitorTestAddResponse(qemuMonitorTestPtr test,
+qemuMonitorTestAddResponse(qemuMonitorTest *test,
                            const char *response)
 {
     size_t want = strlen(response) + 2;
@@ -117,8 +115,7 @@ qemuMonitorTestAddResponse(qemuMonitorTestPtr test,
 
     if (have < want) {
         size_t need = want - have;
-        if (VIR_EXPAND_N(test->outgoing, test->outgoingCapacity, need) < 0)
-            return -1;
+        VIR_EXPAND_N(test->outgoing, test->outgoingCapacity, need);
     }
 
     want -= 2;
@@ -130,10 +127,10 @@ qemuMonitorTestAddResponse(qemuMonitorTestPtr test,
 
 
 static int
-qemuMonitorTestAddErrorResponseInternal(qemuMonitorTestPtr test,
+qemuMonitorTestAddErrorResponseInternal(qemuMonitorTest *test,
                                         const char *usermsg)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     g_autofree char *escapemsg = NULL;
     g_autofree char *jsonmsg = NULL;
     char *tmp;
@@ -162,7 +159,7 @@ qemuMonitorTestAddErrorResponseInternal(qemuMonitorTestPtr test,
 
 
 int
-qemuMonitorTestAddInvalidCommandResponse(qemuMonitorTestPtr test,
+qemuMonitorTestAddInvalidCommandResponse(qemuMonitorTest *test,
                                          const char *expectedcommand,
                                          const char *actualcommand)
 {
@@ -176,7 +173,7 @@ qemuMonitorTestAddInvalidCommandResponse(qemuMonitorTestPtr test,
 
 
 int G_GNUC_PRINTF(2, 3)
-qemuMonitorTestAddErrorResponse(qemuMonitorTestPtr test, const char *errmsg, ...)
+qemuMonitorTestAddErrorResponse(qemuMonitorTest *test, const char *errmsg, ...)
 {
     va_list msgargs;
     g_autofree char *msg = NULL;
@@ -223,7 +220,7 @@ qemuMonitorTestErrorInvalidCommand(const char *expectedcommand,
 
 
 static int
-qemuMonitorTestProcessCommand(qemuMonitorTestPtr test,
+qemuMonitorTestProcessCommand(qemuMonitorTest *test,
                               const char *cmdstr)
 {
     int ret;
@@ -233,7 +230,7 @@ qemuMonitorTestProcessCommand(qemuMonitorTestPtr test,
     if (test->nitems == 0) {
         qemuMonitorTestError("unexpected command: '%s'", cmdstr);
     } else {
-        qemuMonitorTestItemPtr item = test->items[0];
+        qemuMonitorTestItem *item = test->items[0];
         ret = (item->cb)(test, item, cmdstr);
         qemuMonitorTestItemFree(item);
         if (VIR_DELETE_ELEMENT(test->items, 0, test->nitems) < 0)
@@ -248,18 +245,17 @@ qemuMonitorTestProcessCommand(qemuMonitorTestPtr test,
  * Handles read/write of monitor data on the monitor server side
  */
 static void
-qemuMonitorTestIO(virNetSocketPtr sock,
+qemuMonitorTestIO(virNetSocket *sock,
                   int events,
                   void *opaque)
 {
-    qemuMonitorTestPtr test = opaque;
+    qemuMonitorTest *test = opaque;
     bool err = false;
+    VIR_LOCK_GUARD lock = virLockGuardLock(&test->lock);
 
-    virMutexLock(&test->lock);
-    if (test->quit) {
-        virMutexUnlock(&test->lock);
+    if (test->quit)
         return;
-    }
+
     if (events & VIR_EVENT_HANDLE_WRITABLE) {
         ssize_t ret;
         if ((ret = virNetSocketWrite(sock,
@@ -283,10 +279,7 @@ qemuMonitorTestIO(virNetSocketPtr sock,
         char *t1, *t2;
 
         if ((test->incomingCapacity - test->incomingLength) < 1024) {
-            if (VIR_EXPAND_N(test->incoming, test->incomingCapacity, 1024) < 0) {
-                err = true;
-                goto cleanup;
-            }
+            VIR_EXPAND_N(test->incoming, test->incomingCapacity, 1024);
         }
 
         if ((ret = virNetSocketRead(sock,
@@ -331,8 +324,7 @@ qemuMonitorTestIO(virNetSocketPtr sock,
     if (err) {
         virNetSocketRemoveIOCallback(sock);
         virNetSocketClose(sock);
-        virObjectUnref(test->client);
-        test->client = NULL;
+        g_clear_pointer(&test->client, virObjectUnref);
     } else {
         events = VIR_EVENT_HANDLE_READABLE;
 
@@ -341,33 +333,30 @@ qemuMonitorTestIO(virNetSocketPtr sock,
 
         virNetSocketUpdateIOCallback(sock, events);
     }
-    virMutexUnlock(&test->lock);
 }
 
 
 static void
 qemuMonitorTestWorker(void *opaque)
 {
-    qemuMonitorTestPtr test = opaque;
+    qemuMonitorTest *test = opaque;
 
-    virMutexLock(&test->lock);
-
-    while (!test->quit) {
-        virMutexUnlock(&test->lock);
-
-        if (virEventRunDefaultImpl() < 0) {
-            virMutexLock(&test->lock);
-            test->quit = true;
-            break;
+    while (true) {
+        VIR_WITH_MUTEX_LOCK_GUARD(&test->lock) {
+            if (test->quit) {
+                test->running = false;
+                return;
+            }
         }
 
-        virMutexLock(&test->lock);
+        if (virEventRunDefaultImpl() < 0) {
+            VIR_WITH_MUTEX_LOCK_GUARD(&test->lock) {
+                test->quit = true;
+                test->running = false;
+                return;
+            }
+        }
     }
-
-    test->running = false;
-
-    virMutexUnlock(&test->lock);
-    return;
 }
 
 
@@ -380,7 +369,7 @@ qemuMonitorTestFreeTimer(int timer G_GNUC_UNUSED,
 
 
 void
-qemuMonitorTestFree(qemuMonitorTestPtr test)
+qemuMonitorTestFree(qemuMonitorTest *test)
 {
     size_t i;
     int timer = -1;
@@ -388,13 +377,13 @@ qemuMonitorTestFree(qemuMonitorTestPtr test)
     if (!test)
         return;
 
-    virMutexLock(&test->lock);
-    if (test->running) {
-        test->quit = true;
-        /* HACK: Add a dummy timeout to break event loop */
-        timer = virEventAddTimeout(0, qemuMonitorTestFreeTimer, NULL, NULL);
+    VIR_WITH_MUTEX_LOCK_GUARD(&test->lock) {
+        if (test->running) {
+            test->quit = true;
+            /* HACK: Add a dummy timeout to break event loop */
+            timer = virEventAddTimeout(0, qemuMonitorTestFreeTimer, NULL, NULL);
+        }
     }
-    virMutexUnlock(&test->lock);
 
     if (test->client) {
         virNetSocketRemoveIOCallback(test->client);
@@ -423,8 +412,8 @@ qemuMonitorTestFree(qemuMonitorTestPtr test)
     if (timer != -1)
         virEventRemoveTimeout(timer);
 
-    VIR_FREE(test->incoming);
-    VIR_FREE(test->outgoing);
+    g_free(test->incoming);
+    g_free(test->outgoing);
 
     for (i = 0; i < test->nitems; i++) {
         if (!test->allowUnusedCommands) {
@@ -435,12 +424,12 @@ qemuMonitorTestFree(qemuMonitorTestPtr test)
 
         qemuMonitorTestItemFree(test->items[i]);
     }
-    VIR_FREE(test->items);
+    g_free(test->items);
 
     if (test->tmpdir && rmdir(test->tmpdir) < 0)
         VIR_WARN("Failed to remove tempdir: %s", g_strerror(errno));
 
-    VIR_FREE(test->tmpdir);
+    g_free(test->tmpdir);
 
     if (!test->allowUnusedCommands &&
         test->nitems != 0) {
@@ -448,64 +437,42 @@ qemuMonitorTestFree(qemuMonitorTestPtr test)
     }
 
     virMutexDestroy(&test->lock);
-    VIR_FREE(test);
+    g_free(test);
 }
 
 
-int
-qemuMonitorTestAddHandler(qemuMonitorTestPtr test,
+void
+qemuMonitorTestAddHandler(qemuMonitorTest *test,
                           const char *identifier,
                           qemuMonitorTestResponseCallback cb,
                           void *opaque,
                           virFreeCallback freecb)
 {
-    qemuMonitorTestItemPtr item;
+    qemuMonitorTestItem *item;
 
-    if (VIR_ALLOC(item) < 0)
-        goto error;
+    item = g_new0(qemuMonitorTestItem, 1);
 
     item->identifier = g_strdup(identifier);
     item->cb = cb;
     item->freecb = freecb;
     item->opaque = opaque;
 
-    virMutexLock(&test->lock);
-    if (VIR_APPEND_ELEMENT(test->items, test->nitems, item) < 0) {
-        virMutexUnlock(&test->lock);
-        goto error;
+    VIR_WITH_MUTEX_LOCK_GUARD(&test->lock) {
+        VIR_APPEND_ELEMENT(test->items, test->nitems, item);
     }
-    virMutexUnlock(&test->lock);
-
-    return 0;
-
- error:
-    if (freecb)
-        (freecb)(opaque);
-    VIR_FREE(item);
-    return -1;
 }
 
 void *
-qemuMonitorTestItemGetPrivateData(qemuMonitorTestItemPtr item)
+qemuMonitorTestItemGetPrivateData(qemuMonitorTestItem *item)
 {
     return item ? item->opaque : NULL;
 }
-
-
-typedef struct _qemuMonitorTestCommandArgs qemuMonitorTestCommandArgs;
-typedef qemuMonitorTestCommandArgs *qemuMonitorTestCommandArgsPtr;
-struct _qemuMonitorTestCommandArgs {
-    char *argname;
-    char *argval;
-};
 
 
 struct qemuMonitorTestHandlerData {
     char *command_name;
     char *cmderr;
     char *response;
-    size_t nargs;
-    qemuMonitorTestCommandArgsPtr args;
     char *expectArgs;
 };
 
@@ -513,32 +480,26 @@ static void
 qemuMonitorTestHandlerDataFree(void *opaque)
 {
     struct qemuMonitorTestHandlerData *data = opaque;
-    size_t i;
 
     if (!data)
         return;
 
-    for (i = 0; i < data->nargs; i++) {
-        VIR_FREE(data->args[i].argname);
-        VIR_FREE(data->args[i].argval);
-    }
-
-    VIR_FREE(data->command_name);
-    VIR_FREE(data->cmderr);
-    VIR_FREE(data->response);
-    VIR_FREE(data->args);
-    VIR_FREE(data->expectArgs);
-    VIR_FREE(data);
+    g_free(data->command_name);
+    g_free(data->cmderr);
+    g_free(data->response);
+    g_free(data->expectArgs);
+    g_free(data);
 }
 
 
 /* Returns -1 on error, 0 if validation was successful/not necessary */
 static int
-qemuMonitorTestProcessCommandDefaultValidate(qemuMonitorTestPtr test,
+qemuMonitorTestProcessCommandDefaultValidate(qemuMonitorTest *test,
                                              const char *cmdname,
-                                             virJSONValuePtr args)
+                                             virJSONValue *args)
 {
     g_auto(virBuffer) debug = VIR_BUFFER_INITIALIZER;
+    bool allowIncomplete = false;
 
     if (!test->qapischema)
         return 0;
@@ -550,13 +511,14 @@ qemuMonitorTestProcessCommandDefaultValidate(qemuMonitorTestPtr test,
         return -1;
     }
 
-    /* 'device_add' needs to be skipped as it does not have fully defined schema */
+    /* The schema of 'device_add' is incomplete so we relax the validator */
     if (STREQ(cmdname, "device_add"))
-        return 0;
+        allowIncomplete = true;
 
     if (testQEMUSchemaValidateCommand(cmdname, args, test->qapischema,
                                       test->skipValidationDeprecated,
                                       test->skipValidationRemoved,
+                                      allowIncomplete,
                                       &debug) < 0) {
         if (virTestGetDebug() == 2) {
             g_autofree char *argstr = NULL;
@@ -582,13 +544,13 @@ qemuMonitorTestProcessCommandDefaultValidate(qemuMonitorTestPtr test,
 
 
 static int
-qemuMonitorTestProcessCommandDefault(qemuMonitorTestPtr test,
-                                     qemuMonitorTestItemPtr item,
+qemuMonitorTestProcessCommandDefault(qemuMonitorTest *test,
+                                     qemuMonitorTestItem *item,
                                      const char *cmdstr)
 {
     struct qemuMonitorTestHandlerData *data = item->opaque;
     g_autoptr(virJSONValue) val = NULL;
-    virJSONValuePtr cmdargs = NULL;
+    virJSONValue *cmdargs = NULL;
     const char *cmdname;
 
     if (!(val = virJSONValueFromString(cmdstr)))
@@ -613,34 +575,35 @@ qemuMonitorTestProcessCommandDefault(qemuMonitorTestPtr test,
 
 
 int
-qemuMonitorTestAddItem(qemuMonitorTestPtr test,
+qemuMonitorTestAddItem(qemuMonitorTest *test,
                        const char *command_name,
                        const char *response)
 {
     struct qemuMonitorTestHandlerData *data;
 
-    if (VIR_ALLOC(data) < 0)
-        return -1;
+    data = g_new0(struct qemuMonitorTestHandlerData, 1);
 
     data->command_name = g_strdup(command_name);
     data->response = g_strdup(response);
 
-    return qemuMonitorTestAddHandler(test,
-                                     command_name,
-                                     qemuMonitorTestProcessCommandDefault,
-                                     data, qemuMonitorTestHandlerDataFree);
+    qemuMonitorTestAddHandler(test,
+                              command_name,
+                              qemuMonitorTestProcessCommandDefault,
+                              data, qemuMonitorTestHandlerDataFree);
+
+    return 0;
 }
 
 
 static int
-qemuMonitorTestProcessCommandVerbatim(qemuMonitorTestPtr test,
-                                      qemuMonitorTestItemPtr item,
+qemuMonitorTestProcessCommandVerbatim(qemuMonitorTest *test,
+                                      qemuMonitorTestItem *item,
                                       const char *cmdstr)
 {
     struct qemuMonitorTestHandlerData *data = item->opaque;
     g_autofree char *reformatted = NULL;
     g_autoptr(virJSONValue) json = NULL;
-    virJSONValuePtr cmdargs;
+    virJSONValue *cmdargs;
     const char *cmdname;
     int ret = -1;
 
@@ -662,7 +625,8 @@ qemuMonitorTestProcessCommandVerbatim(qemuMonitorTestPtr test,
         ret = qemuMonitorTestAddResponse(test, data->response);
     } else {
         if (data->cmderr) {
-            qemuMonitorTestError("%s: %s", data->cmderr, cmdstr);
+            qemuMonitorTestError("%s: %s expected %s",
+                                 data->cmderr, cmdstr, data->command_name);
         } else {
             qemuMonitorTestErrorInvalidCommand(data->command_name, cmdstr);
         }
@@ -687,83 +651,66 @@ qemuMonitorTestProcessCommandVerbatim(qemuMonitorTestPtr test,
  * Returns 0 when command was successfully added, -1 on error.
  */
 int
-qemuMonitorTestAddItemVerbatim(qemuMonitorTestPtr test,
+qemuMonitorTestAddItemVerbatim(qemuMonitorTest *test,
                                const char *command,
                                const char *cmderr,
                                const char *response)
 {
     struct qemuMonitorTestHandlerData *data;
+    char *reformatted = NULL;
 
-    if (VIR_ALLOC(data) < 0)
+    if (!(reformatted = virJSONStringReformat(command, false)))
         return -1;
+
+    data = g_new0(struct qemuMonitorTestHandlerData, 1);
 
     data->response = g_strdup(response);
     data->cmderr = g_strdup(cmderr);
+    data->command_name = g_steal_pointer(&reformatted);
 
-    data->command_name = virJSONStringReformat(command, false);
-    if (!data->command_name)
-        goto error;
+    qemuMonitorTestAddHandler(test,
+                              command,
+                              qemuMonitorTestProcessCommandVerbatim,
+                              data, qemuMonitorTestHandlerDataFree);
 
-    return qemuMonitorTestAddHandler(test,
-                                     command,
-                                     qemuMonitorTestProcessCommandVerbatim,
-                                     data, qemuMonitorTestHandlerDataFree);
-
- error:
-    qemuMonitorTestHandlerDataFree(data);
-    return -1;
+    return 0;
 }
 
 
 static int
-qemuMonitorTestProcessGuestAgentSync(qemuMonitorTestPtr test,
-                                     qemuMonitorTestItemPtr item G_GNUC_UNUSED,
+qemuMonitorTestProcessGuestAgentSync(qemuMonitorTest *test,
+                                     qemuMonitorTestItem *item G_GNUC_UNUSED,
                                      const char *cmdstr)
 {
-    virJSONValuePtr val = NULL;
-    virJSONValuePtr args;
+    g_autoptr(virJSONValue) val = NULL;
+    virJSONValue *args;
     unsigned long long id;
     const char *cmdname;
-    char *retmsg = NULL;
-    int ret = -1;
+    g_autofree char *retmsg = NULL;
 
     if (!(val = virJSONValueFromString(cmdstr)))
         return -1;
 
-    if (!(cmdname = virJSONValueObjectGetString(val, "execute"))) {
-        ret = qemuMonitorTestAddErrorResponse(test, "Missing guest-sync command name");
-        goto cleanup;
-    }
+    if (!(cmdname = virJSONValueObjectGetString(val, "execute")))
+        return qemuMonitorTestAddErrorResponse(test, "Missing guest-sync command name");
 
-    if (STRNEQ(cmdname, "guest-sync")) {
-        ret = qemuMonitorTestAddInvalidCommandResponse(test, "guest-sync", cmdname);
-        goto cleanup;
-    }
+    if (STRNEQ(cmdname, "guest-sync"))
+        return qemuMonitorTestAddInvalidCommandResponse(test, "guest-sync", cmdname);
 
-    if (!(args = virJSONValueObjectGet(val, "arguments"))) {
-        ret = qemuMonitorTestAddErrorResponse(test, "Missing arguments for guest-sync");
-        goto cleanup;
-    }
+    if (!(args = virJSONValueObjectGet(val, "arguments")))
+        return qemuMonitorTestAddErrorResponse(test, "Missing arguments for guest-sync");
 
-    if (virJSONValueObjectGetNumberUlong(args, "id", &id)) {
-        ret = qemuMonitorTestAddErrorResponse(test, "Missing id for guest sync");
-        goto cleanup;
-    }
+    if (virJSONValueObjectGetNumberUlong(args, "id", &id))
+        return qemuMonitorTestAddErrorResponse(test, "Missing id for guest sync");
 
     retmsg = g_strdup_printf("{\"return\":%llu}", id);
 
-
-    ret = qemuMonitorTestAddResponse(test, retmsg);
-
- cleanup:
-    virJSONValueFree(val);
-    VIR_FREE(retmsg);
-    return ret;
+    return qemuMonitorTestAddResponse(test, retmsg);
 }
 
 
 int
-qemuMonitorTestAddAgentSyncResponse(qemuMonitorTestPtr test)
+qemuMonitorTestAddAgentSyncResponse(qemuMonitorTest *test)
 {
     if (!test->agent) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -771,253 +718,25 @@ qemuMonitorTestAddAgentSyncResponse(qemuMonitorTestPtr test)
         return -1;
     }
 
-    return qemuMonitorTestAddHandler(test,
-                                     "agent-sync",
-                                     qemuMonitorTestProcessGuestAgentSync,
-                                     NULL, NULL);
-}
+    qemuMonitorTestAddHandler(test,
+                              "agent-sync",
+                              qemuMonitorTestProcessGuestAgentSync,
+                              NULL, NULL);
 
-
-static int
-qemuMonitorTestProcessCommandWithArgs(qemuMonitorTestPtr test,
-                                      qemuMonitorTestItemPtr item,
-                                      const char *cmdstr)
-{
-    struct qemuMonitorTestHandlerData *data = item->opaque;
-    virJSONValuePtr val = NULL;
-    virJSONValuePtr args;
-    virJSONValuePtr argobj;
-    char *argstr = NULL;
-    const char *cmdname;
-    size_t i;
-    int ret = -1;
-
-    if (!(val = virJSONValueFromString(cmdstr)))
-        return -1;
-
-    if (!(cmdname = virJSONValueObjectGetString(val, "execute"))) {
-        qemuMonitorTestError("Missing command name in %s", cmdstr);
-        goto cleanup;
-    }
-
-    if (data->command_name &&
-        STRNEQ(data->command_name, cmdname)) {
-        qemuMonitorTestErrorInvalidCommand(data->command_name, cmdname);
-        goto cleanup;
-    }
-
-    if (!(args = virJSONValueObjectGet(val, "arguments"))) {
-        qemuMonitorTestError("Missing arguments section for command '%s'",
-                             NULLSTR(data->command_name));
-        goto cleanup;
-    }
-
-    /* validate the args */
-    for (i = 0; i < data->nargs; i++) {
-        qemuMonitorTestCommandArgsPtr arg = &data->args[i];
-        if (!(argobj = virJSONValueObjectGet(args, arg->argname))) {
-            qemuMonitorTestError("Missing argument '%s' for command '%s'",
-                                 arg->argname,
-                                 NULLSTR(data->command_name));
-            goto cleanup;
-        }
-
-        /* convert the argument to string */
-        if (!(argstr = virJSONValueToString(argobj, false)))
-            goto cleanup;
-
-        /* verify that the argument value is expected */
-        if (STRNEQ(argstr, arg->argval)) {
-            qemuMonitorTestError("Invalid value of argument '%s' of command '%s': "
-                                 "expected '%s' got '%s'",
-                                 arg->argname,
-                                 NULLSTR(data->command_name),
-                                 arg->argval, argstr);
-            goto cleanup;
-        }
-
-        VIR_FREE(argstr);
-    }
-
-    /* arguments checked out, return the response */
-    ret = qemuMonitorTestAddResponse(test, data->response);
-
- cleanup:
-    VIR_FREE(argstr);
-    virJSONValueFree(val);
-    return ret;
-}
-
-
-
-/* this allows to add a responder that is able to check
- * a (shallow) structure of arguments for a command */
-int
-qemuMonitorTestAddItemParams(qemuMonitorTestPtr test,
-                             const char *cmdname,
-                             const char *response,
-                             ...)
-{
-    struct qemuMonitorTestHandlerData *data;
-    const char *argname;
-    const char *argval;
-    va_list args;
-
-    va_start(args, response);
-
-    if (VIR_ALLOC(data) < 0)
-        goto error;
-
-    data->command_name = g_strdup(cmdname);
-    data->response = g_strdup(response);
-
-    while ((argname = va_arg(args, char *))) {
-        size_t i;
-        if (!(argval = va_arg(args, char *))) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           "Missing argument value for argument '%s'",
-                           argname);
-            goto error;
-        }
-
-        i = data->nargs;
-        if (VIR_EXPAND_N(data->args, data->nargs, 1))
-            goto error;
-
-        data->args[i].argname = g_strdup(argname);
-        data->args[i].argval = g_strdup(argval);
-    }
-
-    va_end(args);
-
-    return qemuMonitorTestAddHandler(test,
-                                     cmdname,
-                                     qemuMonitorTestProcessCommandWithArgs,
-                                     data, qemuMonitorTestHandlerDataFree);
-
- error:
-    va_end(args);
-    qemuMonitorTestHandlerDataFree(data);
-    return -1;
-}
-
-
-static int
-qemuMonitorTestProcessCommandWithArgStr(qemuMonitorTestPtr test,
-                                        qemuMonitorTestItemPtr item,
-                                        const char *cmdstr)
-{
-    struct qemuMonitorTestHandlerData *data = item->opaque;
-    virJSONValuePtr val = NULL;
-    virJSONValuePtr args;
-    char *argstr = NULL;
-    const char *cmdname;
-    int ret = -1;
-
-    if (!(val = virJSONValueFromString(cmdstr)))
-        return -1;
-
-    if (!(cmdname = virJSONValueObjectGetString(val, "execute"))) {
-        qemuMonitorTestError("Missing command name in %s", cmdstr);
-        goto cleanup;
-    }
-
-    if (STRNEQ(data->command_name, cmdname)) {
-        qemuMonitorTestErrorInvalidCommand(data->command_name, cmdname);
-        goto cleanup;
-    }
-
-    if (!(args = virJSONValueObjectGet(val, "arguments"))) {
-        qemuMonitorTestError("Missing arguments section for command '%s'",
-                             data->command_name);
-        goto cleanup;
-    }
-
-    /* convert the arguments to string */
-    if (!(argstr = virJSONValueToString(args, false)))
-        goto cleanup;
-
-    /* verify that the argument value is expected */
-    if (STRNEQ(argstr, data->expectArgs)) {
-        qemuMonitorTestError("%s: expected arguments: '%s', got: '%s'",
-                             data->command_name,
-                             data->expectArgs, argstr);
-        goto cleanup;
-    }
-
-    /* arguments checked out, return the response */
-    ret = qemuMonitorTestAddResponse(test, data->response);
-
- cleanup:
-    VIR_FREE(argstr);
-    virJSONValueFree(val);
-    return ret;
-}
-
-
-/**
- * qemuMonitorTestAddItemExpect:
- *
- * @test: test monitor object
- * @cmdname: command name
- * @cmdargs: expected arguments of the command
- * @apostrophe: convert apostrophes (') in @cmdargs to quotes (")
- * @response: simulated response of the command
- *
- * Simulates a qemu monitor command. Checks that the 'arguments' of the qmp
- * command are expected. If @apostrophe is true apostrophes are converted to
- * quotes for simplification of writing the strings into code.
- */
-int
-qemuMonitorTestAddItemExpect(qemuMonitorTestPtr test,
-                             const char *cmdname,
-                             const char *cmdargs,
-                             bool apostrophe,
-                             const char *response)
-{
-    struct qemuMonitorTestHandlerData *data;
-
-    if (VIR_ALLOC(data) < 0)
-        goto error;
-
-    data->command_name = g_strdup(cmdname);
-    data->response = g_strdup(response);
-    data->expectArgs = g_strdup(cmdargs);
-
-    if (apostrophe) {
-        char *tmp = data->expectArgs;
-
-        while (*tmp != '\0') {
-            if (*tmp == '\'')
-                *tmp = '"';
-
-            tmp++;
-        }
-    }
-
-    return qemuMonitorTestAddHandler(test,
-                                     cmdname,
-                                     qemuMonitorTestProcessCommandWithArgStr,
-                                     data, qemuMonitorTestHandlerDataFree);
-
- error:
-    qemuMonitorTestHandlerDataFree(data);
-    return -1;
+    return 0;
 }
 
 
 static void
-qemuMonitorTestEOFNotify(qemuMonitorPtr mon G_GNUC_UNUSED,
-                         virDomainObjPtr vm G_GNUC_UNUSED,
-                         void *opaque G_GNUC_UNUSED)
+qemuMonitorTestEOFNotify(qemuMonitor *mon G_GNUC_UNUSED,
+                         virDomainObj *vm G_GNUC_UNUSED)
 {
 }
 
 
 static void
-qemuMonitorTestErrorNotify(qemuMonitorPtr mon G_GNUC_UNUSED,
-                           virDomainObjPtr vm G_GNUC_UNUSED,
-                           void *opaque G_GNUC_UNUSED)
+qemuMonitorTestErrorNotify(qemuMonitor *mon G_GNUC_UNUSED,
+                           virDomainObj *vm G_GNUC_UNUSED)
 {
 }
 
@@ -1030,8 +749,8 @@ static qemuMonitorCallbacks qemuMonitorTestCallbacks = {
 
 
 static void
-qemuMonitorTestAgentNotify(qemuAgentPtr agent G_GNUC_UNUSED,
-                           virDomainObjPtr vm G_GNUC_UNUSED)
+qemuMonitorTestAgentNotify(qemuAgent *agent G_GNUC_UNUSED,
+                           virDomainObj *vm G_GNUC_UNUSED)
 {
 }
 
@@ -1042,17 +761,16 @@ static qemuAgentCallbacks qemuMonitorTestAgentCallbacks = {
 };
 
 
-static qemuMonitorTestPtr
-qemuMonitorCommonTestNew(virDomainXMLOptionPtr xmlopt,
-                         virDomainObjPtr vm,
-                         virDomainChrSourceDefPtr src)
+static qemuMonitorTest *
+qemuMonitorCommonTestNew(virDomainXMLOption *xmlopt,
+                         virDomainObj *vm,
+                         virDomainChrSourceDef *src)
 {
-    qemuMonitorTestPtr test = NULL;
-    char *path = NULL;
-    char *tmpdir_template = NULL;
+    g_autoptr(qemuMonitorTest) test = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *tmpdir_template = NULL;
 
-    if (VIR_ALLOC(test) < 0)
-        goto error;
+    test = g_new0(qemuMonitorTest, 1);
 
     if (virMutexInit(&test->lock) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -1066,7 +784,7 @@ qemuMonitorCommonTestNew(virDomainXMLOptionPtr xmlopt,
     if (!(test->tmpdir = g_mkdtemp(tmpdir_template))) {
         virReportSystemError(errno, "%s",
                              "Failed to create temporary directory");
-        goto error;
+        return NULL;
     }
 
     tmpdir_template = NULL;
@@ -1078,14 +796,14 @@ qemuMonitorCommonTestNew(virDomainXMLOptionPtr xmlopt,
     } else {
         test->vm = virDomainObjNew(xmlopt);
         if (!test->vm)
-            goto error;
-        if (!(test->vm->def = virDomainDefNew()))
-            goto error;
+            return NULL;
+        if (!(test->vm->def = virDomainDefNew(xmlopt)))
+            return NULL;
     }
 
     if (virNetSocketNewListenUNIX(path, 0700, geteuid(), getegid(),
                                   &test->server) < 0)
-        goto error;
+        return NULL;
 
     memset(src, 0, sizeof(*src));
     src->type = VIR_DOMAIN_CHR_TYPE_UNIX;
@@ -1094,21 +812,14 @@ qemuMonitorCommonTestNew(virDomainXMLOptionPtr xmlopt,
     path = NULL;
 
     if (virNetSocketListen(test->server, 1) < 0)
-        goto error;
+        return NULL;
 
-    return test;
-
- error:
-    VIR_FREE(path);
-    VIR_FREE(tmpdir_template);
-    qemuMonitorTestFree(test);
-    return NULL;
-
+    return g_steal_pointer(&test);
 }
 
 
 static int
-qemuMonitorCommonTestInit(qemuMonitorTestPtr test)
+qemuMonitorCommonTestInit(qemuMonitorTest *test)
 {
     int events = VIR_EVENT_HANDLE_READABLE;
 
@@ -1131,16 +842,11 @@ qemuMonitorCommonTestInit(qemuMonitorTestPtr test)
                                   NULL) < 0)
         return -1;
 
-    virMutexLock(&test->lock);
-    if (virThreadCreate(&test->thread,
-                        true,
-                        qemuMonitorTestWorker,
-                        test) < 0) {
-        virMutexUnlock(&test->lock);
-        return -1;
+    VIR_WITH_MUTEX_LOCK_GUARD(&test->lock) {
+        if (virThreadCreate(&test->thread, true, qemuMonitorTestWorker, test) < 0)
+            return -1;
+        test->started = test->running = true;
     }
-    test->started = test->running = true;
-    virMutexUnlock(&test->lock);
 
     return 0;
 }
@@ -1161,17 +867,14 @@ qemuMonitorCommonTestInit(qemuMonitorTestPtr test)
 /* We skip the normal handshake reply of "{\"execute\":\"qmp_capabilities\"}" */
 
 
-qemuMonitorTestPtr
-qemuMonitorTestNew(virDomainXMLOptionPtr xmlopt,
-                   virDomainObjPtr vm,
-                   virQEMUDriverPtr driver,
+qemuMonitorTest *
+qemuMonitorTestNew(virDomainXMLOption *xmlopt,
+                   virDomainObj *vm,
                    const char *greeting,
-                   virHashTablePtr schema)
+                   GHashTable *schema)
 {
-    qemuMonitorTestPtr test = NULL;
-    virDomainChrSourceDef src;
-
-    memset(&src, 0, sizeof(src));
+    g_autoptr(qemuMonitorTest) test = NULL;
+    virDomainChrSourceDef src = { 0 };
 
     if (!(test = qemuMonitorCommonTestNew(xmlopt, vm, &src)))
         goto error;
@@ -1182,11 +885,8 @@ qemuMonitorTestNew(virDomainXMLOptionPtr xmlopt,
     test->qapischema = schema;
     if (!(test->mon = qemuMonitorOpen(test->vm,
                                       &src,
-                                      true,
-                                      0,
                                       virEventThreadGetContext(test->eventThread),
-                                      &qemuMonitorTestCallbacks,
-                                      driver)))
+                                      &qemuMonitorTestCallbacks)))
         goto error;
 
     virObjectLock(test->mon);
@@ -1202,11 +902,10 @@ qemuMonitorTestNew(virDomainXMLOptionPtr xmlopt,
 
     virDomainChrSourceDefClear(&src);
 
-    return test;
+    return g_steal_pointer(&test);
 
  error:
     virDomainChrSourceDefClear(&src);
-    qemuMonitorTestFree(test);
     return NULL;
 }
 
@@ -1224,21 +923,21 @@ qemuMonitorTestNew(virDomainXMLOptionPtr xmlopt,
  *
  * Returns the monitor object on success; NULL on error.
  */
-qemuMonitorTestPtr
+qemuMonitorTest *
 qemuMonitorTestNewFromFile(const char *fileName,
-                           virDomainXMLOptionPtr xmlopt,
+                           virDomainXMLOption *xmlopt,
                            bool simple)
 {
-    qemuMonitorTestPtr test = NULL;
-    char *json = NULL;
+    g_autoptr(qemuMonitorTest) test = NULL;
+    g_autofree char *json = NULL;
     char *tmp;
     char *singleReply;
 
     if (virTestLoadFile(fileName, &json) < 0)
-        goto cleanup;
+        return NULL;
 
     if (simple && !(test = qemuMonitorTestNewSimple(xmlopt)))
-        goto cleanup;
+        return NULL;
 
     /* Our JSON parser expects replies to be separated by a newline character.
      * Hence we must preprocess the file a bit. */
@@ -1256,12 +955,12 @@ qemuMonitorTestNewFromFile(const char *fileName,
 
             if (test) {
                 if (qemuMonitorTestAddItem(test, NULL, singleReply) < 0)
-                    goto error;
+                    return NULL;
             } else {
                 /* Create new mocked monitor with our greeting */
-                if (!(test = qemuMonitorTestNew(xmlopt, NULL, NULL,
+                if (!(test = qemuMonitorTestNew(xmlopt, NULL,
                                                 singleReply, NULL)))
-                    goto error;
+                    return NULL;
             }
 
             if (!eof) {
@@ -1276,16 +975,9 @@ qemuMonitorTestNewFromFile(const char *fileName,
     }
 
     if (test && qemuMonitorTestAddItem(test, NULL, singleReply) < 0)
-        goto error;
+        return NULL;
 
- cleanup:
-    VIR_FREE(json);
-    return test;
-
- error:
-    qemuMonitorTestFree(test);
-    test = NULL;
-    goto cleanup;
+    return g_steal_pointer(&test);
 }
 
 
@@ -1298,7 +990,7 @@ qemuMonitorTestNewFromFile(const char *fileName,
  * to test some negative scenarios which would not use all commands.
  */
 void
-qemuMonitorTestAllowUnusedCommands(qemuMonitorTestPtr test)
+qemuMonitorTestAllowUnusedCommands(qemuMonitorTest *test)
 {
     test->allowUnusedCommands = true;
 }
@@ -1321,7 +1013,7 @@ qemuMonitorTestAllowUnusedCommands(qemuMonitorTestPtr test)
  * argument is removed it will still fail validation.
  */
 void
-qemuMonitorTestSkipDeprecatedValidation(qemuMonitorTestPtr test,
+qemuMonitorTestSkipDeprecatedValidation(qemuMonitorTest *test,
                                         bool allowRemoved)
 {
     test->skipValidationDeprecated = true;
@@ -1330,23 +1022,113 @@ qemuMonitorTestSkipDeprecatedValidation(qemuMonitorTestPtr test,
 
 
 static int
-qemuMonitorTestFullAddItem(qemuMonitorTestPtr test,
+qemuMonitorTestFullAddItem(qemuMonitorTest *test,
                            const char *filename,
                            const char *command,
                            const char *response,
                            size_t line)
 {
-    char *cmderr;
-    int ret;
+    g_autofree char *cmderr = NULL;
 
     cmderr = g_strdup_printf("wrong expected command in %s:%zu: ", filename, line);
 
-    ret = qemuMonitorTestAddItemVerbatim(test, command, cmderr, response);
-
-    VIR_FREE(cmderr);
-    return ret;
+    return qemuMonitorTestAddItemVerbatim(test, command, cmderr, response);
 }
 
+
+/**
+ * qemuMonitorTestProcessFileEntries:
+ * @inputstr: input file contents (modified)
+ * @fileName: File name of @inputstr (for error reporting)
+ * @items: filled with command, reply tuples
+ * @nitems: Count of elements in @items.
+ *
+ * Process a monitor interaction file.
+ *
+ * The file contains a sequence of JSON commands and reply objects separated by
+ * empty lines. A command is followed by a reply.
+ */
+int
+qemuMonitorTestProcessFileEntries(char *inputstr,
+                                  const char *fileName,
+                                  struct qemuMonitorTestCommandReplyTuple **items,
+                                  size_t *nitems)
+{
+    size_t nalloc = 0;
+    char *tmp = inputstr;
+    size_t line = 0;
+    char *command = inputstr;
+    char *response = NULL;
+    size_t commandln = 0;
+
+    *items = NULL;
+    *nitems = 0;
+
+    while ((tmp = strchr(tmp, '\n'))) {
+        line++;
+
+        /* eof */
+        if (!tmp[1])
+            break;
+
+        /* concatenate block which was broken up for readability */
+        if (*(tmp + 1) != '\n') {
+            *tmp = ' ';
+            tmp++;
+            continue;
+        }
+
+        /* We've seen a new line, increment the counter */
+        line++;
+
+        /* Cut off a single reply. */
+        *(tmp + 1) = '\0';
+
+        if (response) {
+            struct qemuMonitorTestCommandReplyTuple *item;
+
+            VIR_RESIZE_N(*items, nalloc, *nitems, 1);
+
+            item = *items + *nitems;
+
+            item->command = g_steal_pointer(&command);
+            item->reply = g_steal_pointer(&response);
+            item->line = commandln;
+            (*nitems)++;
+        }
+
+        /* Move the @tmp and @singleReply. */
+        tmp += 2;
+
+        if (!command) {
+            commandln = line;
+            command = tmp;
+        } else {
+            response = tmp;
+        }
+    }
+
+    if (command) {
+        struct qemuMonitorTestCommandReplyTuple *item;
+
+        if (!response) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "missing response for command "
+                           "on line '%zu' in '%s'", commandln, fileName);
+            return -1;
+        }
+
+        VIR_RESIZE_N(*items, nalloc, *nitems, 1);
+
+        item = *items + *nitems;
+
+        item->command = g_steal_pointer(&command);
+        item->reply = g_steal_pointer(&response);
+        item->line = commandln;
+        (*nitems)++;
+    }
+
+    return 0;
+}
 
 /**
  * qemuMonitorTestNewFromFileFull:
@@ -1364,96 +1146,44 @@ qemuMonitorTestFullAddItem(qemuMonitorTestPtr test,
  *
  * Returns the monitor object on success; NULL on error.
  */
-qemuMonitorTestPtr
+qemuMonitorTest *
 qemuMonitorTestNewFromFileFull(const char *fileName,
-                               virQEMUDriverPtr driver,
-                               virDomainObjPtr vm,
-                               virHashTablePtr qmpschema)
+                               virQEMUDriver *driver,
+                               virDomainObj *vm,
+                               GHashTable *qmpschema)
 {
-    qemuMonitorTestPtr ret = NULL;
-    char *jsonstr = NULL;
-    char *tmp;
-    size_t line = 0;
-
-    char *command = NULL;
-    char *response = NULL;
-    size_t commandln = 0;
+    g_autoptr(qemuMonitorTest) ret = NULL;
+    g_autofree char *jsonstr = NULL;
+    g_autofree struct qemuMonitorTestCommandReplyTuple *items = NULL;
+    size_t nitems = 0;
+    size_t i;
 
     if (virTestLoadFile(fileName, &jsonstr) < 0)
         return NULL;
 
-    if (!(ret = qemuMonitorTestNew(driver->xmlopt, vm, driver, NULL,
-                                   qmpschema)))
-        goto cleanup;
+    if (!(ret = qemuMonitorTestNew(driver->xmlopt, vm, NULL, qmpschema)))
+        return NULL;
 
-    tmp = jsonstr;
-    command = tmp;
-    while ((tmp = strchr(tmp, '\n'))) {
-        line++;
+    if (qemuMonitorTestProcessFileEntries(jsonstr, fileName, &items, &nitems) < 0)
+        return NULL;
 
-        /* eof */
-        if (!tmp[1])
-            break;
+    for (i = 0; i < nitems; i++) {
+        struct qemuMonitorTestCommandReplyTuple *item = items + i;
 
-        /* concatenate block which was broken up for readability */
-        if (*(tmp + 1) != '\n') {
-            *tmp = ' ';
-            tmp++;
-            continue;
-        }
-
-        /* Cut off a single reply. */
-        *(tmp + 1) = '\0';
-
-        if (response) {
-            if (qemuMonitorTestFullAddItem(ret, fileName, command,
-                                           response, commandln) < 0)
-                goto error;
-            command = NULL;
-            response = NULL;
-        }
-
-        /* Move the @tmp and @singleReply. */
-        tmp += 2;
-
-        if (!command) {
-            commandln = line;
-            command = tmp;
-        } else {
-            response = tmp;
-        }
+        if (qemuMonitorTestFullAddItem(ret, fileName, item->command, item->reply,
+                                       item->line) < 0)
+            return NULL;
     }
 
-    if (command) {
-        if (!response) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "missing response for command "
-                           "on line '%zu' in '%s'", commandln, fileName);
-            goto error;
-        }
-
-        if (qemuMonitorTestFullAddItem(ret, fileName, command,
-                                       response, commandln) < 0)
-            goto error;
-    }
-
- cleanup:
-    VIR_FREE(jsonstr);
-    return ret;
-
- error:
-    qemuMonitorTestFree(ret);
-    ret = NULL;
-    goto cleanup;
+    return g_steal_pointer(&ret);
 }
 
 
-qemuMonitorTestPtr
-qemuMonitorTestNewAgent(virDomainXMLOptionPtr xmlopt)
+qemuMonitorTest *
+qemuMonitorTestNewAgent(virDomainXMLOption *xmlopt)
 {
-    qemuMonitorTestPtr test = NULL;
-    virDomainChrSourceDef src;
-
-    memset(&src, 0, sizeof(src));
+    g_autoptr(qemuMonitorTest) test = NULL;
+    virDomainChrSourceDef src = { 0 };
 
     if (!(test = qemuMonitorCommonTestNew(xmlopt, NULL, &src)))
         goto error;
@@ -1464,8 +1194,7 @@ qemuMonitorTestNewAgent(virDomainXMLOptionPtr xmlopt)
     if (!(test->agent = qemuAgentOpen(test->vm,
                                       &src,
                                       virEventThreadGetContext(test->eventThread),
-                                      &qemuMonitorTestAgentCallbacks,
-                                      false)))
+                                      &qemuMonitorTestAgentCallbacks)))
         goto error;
 
     virObjectLock(test->agent);
@@ -1475,31 +1204,30 @@ qemuMonitorTestNewAgent(virDomainXMLOptionPtr xmlopt)
 
     virDomainChrSourceDefClear(&src);
 
-    return test;
+    return g_steal_pointer(&test);
 
  error:
     virDomainChrSourceDefClear(&src);
-    qemuMonitorTestFree(test);
     return NULL;
 }
 
 
-qemuMonitorPtr
-qemuMonitorTestGetMonitor(qemuMonitorTestPtr test)
+qemuMonitor *
+qemuMonitorTestGetMonitor(qemuMonitorTest *test)
 {
     return test->mon;
 }
 
 
-qemuAgentPtr
-qemuMonitorTestGetAgent(qemuMonitorTestPtr test)
+qemuAgent *
+qemuMonitorTestGetAgent(qemuMonitorTest *test)
 {
     return test->agent;
 }
 
 
-virDomainObjPtr
-qemuMonitorTestGetDomainObj(qemuMonitorTestPtr test)
+virDomainObj *
+qemuMonitorTestGetDomainObj(qemuMonitorTest *test)
 {
     return test->vm;
 }

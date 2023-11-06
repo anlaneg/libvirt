@@ -23,24 +23,26 @@
 #include "vircommand.h"
 #include "viralloc.h"
 #include "virerror.h"
-#include "virstring.h"
+#include "virlog.h"
 #include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
+VIR_LOG_INIT("util.netdevbandwidth");
+
 void
-virNetDevBandwidthFree(virNetDevBandwidthPtr def)
+virNetDevBandwidthFree(virNetDevBandwidth *def)
 {
     if (!def)
         return;
 
-    VIR_FREE(def->in);
-    VIR_FREE(def->out);
-    VIR_FREE(def);
+    g_free(def->in);
+    g_free(def->out);
+    g_free(def);
 }
 
 static void
-virNetDevBandwidthCmdAddOptimalQuantum(virCommandPtr cmd,
+virNetDevBandwidthCmdAddOptimalQuantum(virCommand *cmd,
                                        const virNetDevBandwidthRate *rate)
 {
     const unsigned long long mtu = 1500;
@@ -102,8 +104,7 @@ virNetDevBandwidthManipulateFilter(const char *ifname,
                                    bool create_new)
 {
     int ret = -1;
-    char *filter_id = NULL;
-    virCommandPtr cmd = NULL;
+    g_autofree char *filter_id = NULL;
     unsigned char ifmac[VIR_MAC_BUFLEN];
     char *mac[2] = {NULL, NULL};
 
@@ -113,13 +114,15 @@ virNetDevBandwidthManipulateFilter(const char *ifname,
         goto cleanup;
     }
 
-    /* u32 filters must have 800:: prefix. Don't ask. */
-    filter_id = g_strdup_printf("800::%u", id);
+    /* u32 filters must have 800:: prefix. Don't ask. Furthermore, handles
+     * start at 800. Therefore, we want the filter ID to look like this:
+     *   800::(800 + id) */
+    filter_id = g_strdup_printf("800::%u", 800 + id);
 
     if (remove_old) {
+        g_autoptr(virCommand) cmd = virCommandNew(TC);
         int cmd_ret = 0;
 
-        cmd = virCommandNew(TC);
         virCommandAddArgList(cmd, "filter", "del", "dev", ifname,
                              "prio", "2", "handle",  filter_id, "u32", NULL);
 
@@ -129,14 +132,13 @@ virNetDevBandwidthManipulateFilter(const char *ifname,
     }
 
     if (create_new) {
+        g_autoptr(virCommand) cmd = virCommandNew(TC);
         virMacAddrGetRaw(ifmac_ptr, ifmac);
 
         mac[0] = g_strdup_printf("0x%02x%02x%02x%02x", ifmac[2],
                                  ifmac[3], ifmac[4], ifmac[5]);
         mac[1] = g_strdup_printf("0x%02x%02x", ifmac[0], ifmac[1]);
 
-        virCommandFree(cmd);
-        cmd = virCommandNew(TC);
         /* Okay, this not nice. But since libvirt does not necessarily track
          * interface IP address(es), and tc fw filter simply refuse to use
          * ebtables marks, we need to use u32 selector to match MAC address.
@@ -157,8 +159,6 @@ virNetDevBandwidthManipulateFilter(const char *ifname,
  cleanup:
     VIR_FREE(mac[1]);
     VIR_FREE(mac[0]);
-    VIR_FREE(filter_id);
-    virCommandFree(cmd);
     return ret;
 }
 
@@ -193,8 +193,9 @@ virNetDevBandwidthSet(const char *ifname,
                       bool swapped)
 {
     int ret = -1;
-    virNetDevBandwidthRatePtr rx = NULL, tx = NULL; /* From domain POV */
-    virCommandPtr cmd = NULL;
+    virNetDevBandwidthRate *rx = NULL; /* From domain POV */
+    virNetDevBandwidthRate *tx = NULL; /* From domain POV */
+    virCommand *cmd = NULL;
     char *average = NULL;
     char *peak = NULL;
     char *burst = NULL;
@@ -207,15 +208,13 @@ virNetDevBandwidthSet(const char *ifname,
 
     if (geteuid() != 0) {
         virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                       _("Network bandwidth tuning is not available"
-                         " in session mode"));
+                       _("Network bandwidth tuning is not available in session mode"));
         return -1;
     }
 
     if (!ifname) {
         virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                       _("Unable to set bandwidth for interface because "
-                         "device name is unknown"));
+                       _("Unable to set bandwidth for interface because device name is unknown"));
         return -1;
     }
 
@@ -360,7 +359,17 @@ virNetDevBandwidthSet(const char *ifname,
 
     if (rx) {
         average = g_strdup_printf("%llukbps", rx->average);
-        burst = g_strdup_printf("%llukb", rx->burst ? rx->burst : rx->average);
+
+        if (rx->burst) {
+            burst = g_strdup_printf("%llukb", rx->burst);
+        } else {
+            /* Internally, tc uses uint to store burst size (in bytes).
+             * Therefore, the largest value we can set is UINT_MAX bytes.
+             * We're outputting the vale in KiB though. */
+            unsigned long long avg = MIN(rx->average, UINT_MAX / 1024);
+
+            burst = g_strdup_printf("%llukb", avg);
+        }
 
         virCommandFree(cmd);
         cmd = virCommandNew(TC);
@@ -408,26 +417,23 @@ virNetDevBandwidthClear(const char *ifname)
 {
     int ret = 0;
     int dummy; /* for ignoring the exit status */
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) rootcmd = NULL;
+    g_autoptr(virCommand) ingresscmd = NULL;
 
     if (!ifname)
        return 0;
 
-    cmd = virCommandNew(TC);
-    virCommandAddArgList(cmd, "qdisc", "del", "dev", ifname, "root", NULL);
+    rootcmd = virCommandNew(TC);
+    virCommandAddArgList(rootcmd, "qdisc", "del", "dev", ifname, "root", NULL);
 
-    if (virCommandRun(cmd, &dummy) < 0)
+    if (virCommandRun(rootcmd, &dummy) < 0)
         ret = -1;
 
-    virCommandFree(cmd);
+    ingresscmd = virCommandNew(TC);
+    virCommandAddArgList(ingresscmd, "qdisc",  "del", "dev", ifname, "ingress", NULL);
 
-    cmd = virCommandNew(TC);
-    virCommandAddArgList(cmd, "qdisc",  "del", "dev", ifname, "ingress", NULL);
-
-    if (virCommandRun(cmd, &dummy) < 0)
+    if (virCommandRun(ingresscmd, &dummy) < 0)
         ret = -1;
-
-    virCommandFree(cmd);
 
     return ret;
 }
@@ -441,42 +447,28 @@ virNetDevBandwidthClear(const char *ifname)
  * 0 otherwise.
  */
 int
-virNetDevBandwidthCopy(virNetDevBandwidthPtr *dest,
+virNetDevBandwidthCopy(virNetDevBandwidth **dest,
                        const virNetDevBandwidth *src)
 {
-    int ret = -1;
-
     *dest = NULL;
     if (!src) {
         /* nothing to be copied */
         return 0;
     }
 
-    if (VIR_ALLOC(*dest) < 0)
-        goto cleanup;
+    *dest = g_new0(virNetDevBandwidth, 1);
 
     if (src->in) {
-        if (VIR_ALLOC((*dest)->in) < 0)
-            goto cleanup;
+        (*dest)->in = g_new0(virNetDevBandwidthRate, 1);
         memcpy((*dest)->in, src->in, sizeof(*src->in));
     }
 
     if (src->out) {
-        if (VIR_ALLOC((*dest)->out) < 0) {
-            VIR_FREE((*dest)->in);
-            goto cleanup;
-        }
+        (*dest)->out = g_new0(virNetDevBandwidthRate, 1);
         memcpy((*dest)->out, src->out, sizeof(*src->out));
     }
 
-    ret = 0;
-
- cleanup:
-    if (ret < 0) {
-        virNetDevBandwidthFree(*dest);
-        *dest = NULL;
-    }
-    return ret;
+    return 0;
 }
 
 bool
@@ -542,21 +534,21 @@ virNetDevBandwidthEqual(const virNetDevBandwidth *a,
  */
 int
 virNetDevBandwidthPlug(const char *brname,
-                       virNetDevBandwidthPtr net_bandwidth,
+                       virNetDevBandwidth *net_bandwidth,
                        const virMacAddr *ifmac_ptr,
-                       virNetDevBandwidthPtr bandwidth,
+                       virNetDevBandwidth *bandwidth,
                        unsigned int id)
 {
-    int ret = -1;
-    virCommandPtr cmd = NULL;
-    char *class_id = NULL;
-    char *qdisc_id = NULL;
-    char *floor = NULL;
-    char *ceil = NULL;
+    g_autoptr(virCommand) cmd1 = NULL;
+    g_autoptr(virCommand) cmd2 = NULL;
+    g_autofree char *class_id = NULL;
+    g_autofree char *qdisc_id = NULL;
+    g_autofree char *floor = NULL;
+    g_autofree char *ceil = NULL;
     char ifmacStr[VIR_MAC_STRING_BUFLEN];
 
     if (id <= 2) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, _("Invalid class ID %d"), id);
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Invalid class ID %1$d"), id);
         return -1;
     }
 
@@ -564,8 +556,7 @@ virNetDevBandwidthPlug(const char *brname,
 
     if (!net_bandwidth || !net_bandwidth->in) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("Bridge '%s' has no QoS set, therefore "
-                         "unable to set 'floor' on '%s'"),
+                       _("Bridge '%1$s' has no QoS set, therefore unable to set 'floor' on '%2$s'"),
                        brname, ifmacStr);
         return -1;
     }
@@ -577,37 +568,28 @@ virNetDevBandwidthPlug(const char *brname,
                            net_bandwidth->in->peak :
                            net_bandwidth->in->average);
 
-    cmd = virCommandNew(TC);
-    virCommandAddArgList(cmd, "class", "add", "dev", brname, "parent", "1:1",
+    cmd1 = virCommandNew(TC);
+    virCommandAddArgList(cmd1, "class", "add", "dev", brname, "parent", "1:1",
                          "classid", class_id, "htb", "rate", floor,
                          "ceil", ceil, NULL);
-    virNetDevBandwidthCmdAddOptimalQuantum(cmd, bandwidth->in);
+    virNetDevBandwidthCmdAddOptimalQuantum(cmd1, bandwidth->in);
 
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
+    if (virCommandRun(cmd1, NULL) < 0)
+        return -1;
 
-    virCommandFree(cmd);
-    cmd = virCommandNew(TC);
-    virCommandAddArgList(cmd, "qdisc", "add", "dev", brname, "parent",
+    cmd2 = virCommandNew(TC);
+    virCommandAddArgList(cmd2, "qdisc", "add", "dev", brname, "parent",
                          class_id, "handle", qdisc_id, "sfq", "perturb",
                          "10", NULL);
 
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
+    if (virCommandRun(cmd2, NULL) < 0)
+        return -1;
 
     if (virNetDevBandwidthManipulateFilter(brname, ifmac_ptr, id,
                                            class_id, false, true) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(ceil);
-    VIR_FREE(floor);
-    VIR_FREE(qdisc_id);
-    VIR_FREE(class_id);
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 
 /*
@@ -623,48 +605,41 @@ int
 virNetDevBandwidthUnplug(const char *brname,
                          unsigned int id)
 {
-    int ret = -1;
     int cmd_ret = 0;
-    virCommandPtr cmd = NULL;
-    char *class_id = NULL;
-    char *qdisc_id = NULL;
+    g_autoptr(virCommand) cmd1 = NULL;
+    g_autoptr(virCommand) cmd2 = NULL;
+    g_autofree char *class_id = NULL;
+    g_autofree char *qdisc_id = NULL;
 
     if (id <= 2) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, _("Invalid class ID %d"), id);
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Invalid class ID %1$d"), id);
         return -1;
     }
 
     class_id = g_strdup_printf("1:%x", id);
     qdisc_id = g_strdup_printf("%x:", id);
 
-    cmd = virCommandNew(TC);
-    virCommandAddArgList(cmd, "qdisc", "del", "dev", brname,
+    cmd1 = virCommandNew(TC);
+    virCommandAddArgList(cmd1, "qdisc", "del", "dev", brname,
                          "handle", qdisc_id, NULL);
 
     /* Don't threat tc errors as fatal, but
      * try to remove as much as possible */
-    if (virCommandRun(cmd, &cmd_ret) < 0)
-        goto cleanup;
+    if (virCommandRun(cmd1, &cmd_ret) < 0)
+        return -1;
 
     if (virNetDevBandwidthManipulateFilter(brname, NULL, id,
                                            NULL, true, false) < 0)
-        goto cleanup;
+        return -1;
 
-    virCommandFree(cmd);
-    cmd = virCommandNew(TC);
-    virCommandAddArgList(cmd, "class", "del", "dev", brname,
+    cmd2 = virCommandNew(TC);
+    virCommandAddArgList(cmd2, "class", "del", "dev", brname,
                          "classid", class_id, NULL);
 
-    if (virCommandRun(cmd, &cmd_ret) < 0)
-        goto cleanup;
+    if (virCommandRun(cmd2, &cmd_ret) < 0)
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(qdisc_id);
-    VIR_FREE(class_id);
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 
 /**
@@ -684,14 +659,13 @@ virNetDevBandwidthUnplug(const char *brname,
 int
 virNetDevBandwidthUpdateRate(const char *ifname,
                              unsigned int id,
-                             virNetDevBandwidthPtr bandwidth,
+                             virNetDevBandwidth *bandwidth,
                              unsigned long long new_rate)
 {
-    int ret = -1;
-    virCommandPtr cmd = NULL;
-    char *class_id = NULL;
-    char *rate = NULL;
-    char *ceil = NULL;
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *class_id = NULL;
+    g_autofree char *rate = NULL;
+    g_autofree char *ceil = NULL;
 
     class_id = g_strdup_printf("1:%x", id);
     rate = g_strdup_printf("%llukbps", new_rate);
@@ -705,17 +679,7 @@ virNetDevBandwidthUpdateRate(const char *ifname,
                          "ceil", ceil, NULL);
     virNetDevBandwidthCmdAddOptimalQuantum(cmd, bandwidth->in);
 
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(class_id);
-    VIR_FREE(rate);
-    VIR_FREE(ceil);
-    return ret;
+    return virCommandRun(cmd, NULL);
 }
 
 /**
@@ -753,4 +717,51 @@ virNetDevBandwidthUpdateFilter(const char *ifname,
  cleanup:
     VIR_FREE(class_id);
     return ret;
+}
+
+
+
+/**
+ * virNetDevBandwidthSetRootQDisc:
+ * @ifname: the interface name
+ * @qdisc: queueing discipline to set
+ *
+ * For given interface @ifname set its root queueing discipline
+ * to @qdisc. This can be used to replace the default qdisc
+ * (usually pfifo_fast or whatever is set in
+ * /proc/sys/net/core/default_qdisc) with different qdisc.
+ *
+ * Returns: 0 on success,
+ *         -1 if failed to exec tc (with error reported)
+ *         -2 if tc failed (with no error reported)
+ */
+int
+virNetDevBandwidthSetRootQDisc(const char *ifname,
+                               const char *qdisc)
+{
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *outbuf = NULL;
+    g_autofree char *errbuf = NULL;
+    int status;
+
+    /* Ideally, we would have a netlink implementation and just
+     * call it here.  But honestly, I tried and failed miserably.
+     * Fallback to spawning tc. */
+    cmd = virCommandNewArgList(TC, "qdisc", "add", "dev", ifname,
+                               "root", "handle", "0:", qdisc,
+                               NULL);
+
+    virCommandAddEnvString(cmd, "LC_ALL=C");
+    virCommandSetOutputBuffer(cmd, &outbuf);
+    virCommandSetErrorBuffer(cmd, &errbuf);
+
+    if (virCommandRun(cmd, &status) < 0)
+        return -1;
+
+    if (status != 0) {
+        VIR_DEBUG("Setting qdisc failed: output='%s' err='%s'", outbuf, errbuf);
+        return -2;
+    }
+
+    return 0;
 }
