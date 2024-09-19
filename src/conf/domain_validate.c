@@ -1504,7 +1504,7 @@ virDomainDeviceValidateAliasImpl(const virDomainDef *def,
 
 int
 virDomainDeviceValidateAliasForHotplug(virDomainObj *vm,
-                                       virDomainDeviceDef *dev,
+                                       virDomainDeviceDef *dev/*由xml解析来的内容*/,
                                        unsigned int flags)
 {
     virDomainDef *persDef = NULL;

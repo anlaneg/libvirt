@@ -138,6 +138,7 @@ qemuHostdevNeedsVFIO(const virDomainHostdevDef *hostdev)
 }
 
 
+/*检查host是否支持passthrough vfio*/
 bool
 qemuHostdevHostSupportsPassthroughVFIO(void)
 {
@@ -181,8 +182,8 @@ int
 qemuHostdevPreparePCIDevices(virQEMUDriver *driver,
                              const char *name/*domain名称*/,
                              const unsigned char *uuid/*domain的uuid*/,
-                             virDomainHostdevDef **hostdevs/*要准备的host设备*/,
-                             int nhostdevs/*host设备数目*/,
+                             virDomainHostdevDef **hostdevs/*准备添加的host设备*/,
+                             int nhostdevs/*要添加的host设备数目*/,
                              unsigned int flags)
 {
     /*检查后端是否支持*/

@@ -45,11 +45,11 @@ struct _virDomainObjList {
 
     /* uuid string -> virDomainObj  mapping
      * for O(1), lookup-by-uuid */
-    GHashTable *objs;//通过uuid映射vm
+    GHashTable *objs;//hashtable，可通过uuid映射vm对象
 
     /* name -> virDomainObj mapping for O(1),
      * lookup-by-name */
-    GHashTable *objsName;//通过name映射uuid
+    GHashTable *objsName;//hashtable,可通过name映射uuid
 };
 
 
@@ -73,6 +73,7 @@ virDomainObjList *virDomainObjListNew(void)
     if (!(doms = virObjectRWLockableNew(virDomainObjListClass)))
         return NULL;
 
+    /*创建hashtable，这两个hash表均映射的是vm,故这里通过引用计数方式进行销毁*/
     doms->objs = virHashNew(virObjectUnref);
     doms->objsName = virHashNew(virObjectUnref);
     return doms;
@@ -83,6 +84,7 @@ static void virDomainObjListDispose(void *obj)
 {
     virDomainObjList *doms = obj;
 
+    /*移除两hashtable中所有元素*/
     g_clear_pointer(&doms->objs, g_hash_table_unref);
     g_clear_pointer(&doms->objsName, g_hash_table_unref);
 }

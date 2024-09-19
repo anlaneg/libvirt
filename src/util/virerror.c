@@ -237,7 +237,9 @@ virLastErrorObject(void)
     virErrorPtr err;
     err = virThreadLocalGet(&virLastErr);
     if (!err) {
+    	/*未初始化，先初始化virErrorPtr*/
         err = g_new0(virError, 1);
+        /*设置virLastErr*/
         if (virThreadLocalSet(&virLastErr, err) < 0)
             g_clear_pointer(&err, g_free);
     }
@@ -473,6 +475,7 @@ virErrorRestore(virErrorPtr *savederr)
 void
 virResetError(virErrorPtr err)
 {
+	/*清空virError*/
     if (err == NULL)
         return;
     VIR_FREE(err->message);
@@ -511,6 +514,7 @@ virFreeError(virErrorPtr err)
 void
 virResetLastError(void)
 {
+	/*重置当前线程的virError*/
     virErrorPtr err = virLastErrorObject();
     if (err)
         virResetError(err);
@@ -872,9 +876,9 @@ virRaiseErrorInternal(const char *filename,
  * immediately if a callback is found and store it for later handling.
  */
 void
-virRaiseErrorFull(const char *filename,
-                  const char *funcname,
-                  size_t linenr,
+virRaiseErrorFull(const char *filename,/*文件名称*/
+                  const char *funcname,/*函数名称*/
+                  size_t linenr,/*行号*/
                   int domain,
                   int code,
                   virErrorLevel level,

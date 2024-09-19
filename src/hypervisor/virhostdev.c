@@ -85,13 +85,16 @@ static int virHostdevIsPCINodeDeviceUsed(virPCIDeviceAddress *devAddr, void *opa
     if (actual) {
         const char *actual_drvname = NULL;
         const char *actual_domname = NULL;
+        /*取这个设备在用的驱动名称及domain名称*/
         virPCIDeviceGetUsedBy(actual, &actual_drvname, &actual_domname);
 
         if (helperData->usesVFIO &&
             STREQ_NULLABLE(actual_drvname, helperData->driverName) &&
             STREQ_NULLABLE(actual_domname, helperData->domainName))
+        	/*两者相等，直接返回0*/
             return 0;
 
+        /*被其使用，且不可调和，报错*/
         if (actual_drvname && actual_domname)
             virReportError(VIR_ERR_OPERATION_INVALID,
                            _("PCI device %1$s is in use by driver %2$s, domain %3$s"),
@@ -231,12 +234,14 @@ virHostdevGetPCIHostDevice(const virDomainHostdevDef *hostdev,
 
     if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS ||
         hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI)
+    	/*本函数仅处理hostdev,且device为pci设备的情况*/
         return 0;
 
-    /*构造pci设备*/
     if (!virPCIDeviceExists(&pcisrc->addr))
+    	/*给定的地址在当前设备上不存在*/
         return -2;
 
+    /*构造pci设备*/
     actual = virPCIDeviceNew(&pcisrc->addr);
 
     if (!actual)
@@ -248,6 +253,7 @@ virHostdevGetPCIHostDevice(const virDomainHostdevDef *hostdev,
     	/*指明使用vfio驱动*/
         virPCIDeviceSetStubDriverType(actual, VIR_PCI_STUB_DRIVER_VFIO);
     } else if (pcisrc->backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_XEN) {
+    	/*指明使用xen*/
         virPCIDeviceSetStubDriverType(actual, VIR_PCI_STUB_DRIVER_XEN);
     } else {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -260,6 +266,7 @@ virHostdevGetPCIHostDevice(const virDomainHostdevDef *hostdev,
     return 0;
 }
 
+/*将这一组hostdevs对象，转换为pcidevs*/
 static virPCIDeviceList *
 virHostdevGetPCIHostDeviceList(virDomainHostdevDef **hostdevs, int nhostdevs)
 {
@@ -274,6 +281,7 @@ virHostdevGetPCIHostDeviceList(virDomainHostdevDef **hostdevs, int nhostdevs)
         virDomainHostdevDef *hostdev = hostdevs[i];
         g_autoptr(virPCIDevice) pci = NULL;
 
+        /*按配置初始化构造pci对象*/
         if (virHostdevGetPCIHostDevice(hostdev, &pci) == -1)
             return NULL;
 
@@ -316,8 +324,8 @@ virHostdevIsVirtualFunction(virDomainHostdevDef *hostdev)
 static int
 virHostdevNetDevice(virDomainHostdevDef *hostdev,
                     int pfNetDevIdx,
-                    char **linkdev,
-                    int *vf)
+                    char **linkdev/*出参，pf名称*/,
+                    int *vf/*出参，vf索引号*/)
 {
     g_autofree char *sysfs_path = NULL;
 
@@ -338,6 +346,7 @@ virHostdevNetDevice(virDomainHostdevDef *hostdev,
          * end up calling this function.
          */
         if (virPCIGetNetName(sysfs_path, 0, NULL, linkdev) < 0)
+        	/*设备不是vf,直接获取pf名称*/
             return -1;
 
         if (!(*linkdev)) {
@@ -438,7 +447,7 @@ virHostdevSaveNetConfig(virDomainHostdevDef *hostdev,
         return -1;
     }
 
-    if (virHostdevNetDevice(hostdev, -1, &linkdev, &vf) < 0)
+    if (virHostdevNetDevice(hostdev, -1, &linkdev/*pf名称*/, &vf/*vf编号*/) < 0)
         return -1;
 
     if (virNetDevSaveNetConfig(linkdev, vf, stateDir, true) < 0)
@@ -618,6 +627,7 @@ virHostdevResetAllPCIDevices(virHostdevManager *mgr,
          * a PCI reset on a device doesn't require any information other than
          * the address, which 'pci' already contains */
         VIR_DEBUG("Resetting PCI device %s", virPCIDeviceGetName(pci));
+        /*对这些pci设备执行reset*/
         if (virPCIDeviceReset(pci, mgr->activePCIHostdevs,
                               mgr->inactivePCIHostdevs) < 0) {
             VIR_ERROR(_("Failed to reset PCI device: %1$s"),
@@ -666,12 +676,12 @@ virHostdevReattachAllPCIDevices(virHostdevManager *mgr,
 
 static int
 virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
-                                const char *drv_name,
-                                const char *dom_name,
-                                const unsigned char *uuid,
-                                virPCIDeviceList *pcidevs,
-                                virDomainHostdevDef **hostdevs,
-                                int nhostdevs,
+                                const char *drv_name/*驱动名称，例如QEMU*/,
+                                const char *dom_name/*vm名称*/,
+                                const unsigned char *uuid/*vm对应的uuid*/,
+                                virPCIDeviceList *pcidevs/*由hostdevs转换而来的pcidevs对象*/,
+                                virDomainHostdevDef **hostdevs/*要添加的一组hostdev*/,
+                                int nhostdevs/*hostdevs数目*/,
                                 unsigned int flags)
 {
     int last_processed_hostdev_vf = -1;
@@ -694,6 +704,7 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
     for (i = 0; i < virPCIDeviceListCount(pcidevs); i++) {
         virPCIDevice *pci = virPCIDeviceListGet(pcidevs, i);
         bool strict_acs_check = !!(flags & VIR_HOSTDEV_STRICT_ACS_CHECK);
+        /*检查此设备是否使用vfio*/
         bool usesVFIO = (virPCIDeviceGetStubDriverType(pci) == VIR_PCI_STUB_DRIVER_VFIO);
         struct virHostdevIsPCINodeDeviceUsedData data = {mgr, drv_name, dom_name, false};
         int hdrType = -1;
@@ -702,6 +713,7 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
             goto cleanup;
 
         if (hdrType != VIR_PCI_HEADER_ENDPOINT) {
+        	/*透传只容许endpoint类型的pci设备*/
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Non-endpoint PCI devices cannot be assigned to guests"));
             goto cleanup;
@@ -716,8 +728,9 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
 
         /* The device is in use by other active domain if
          * the dev is in list activePCIHostdevs. */
-        devAddr = virPCIDeviceGetAddress(pci);
+        devAddr = virPCIDeviceGetAddress(pci);/*取设备地址*/
         if (virHostdevIsPCINodeDeviceUsed(devAddr, &data))
+        	/*已被使用，跳出*/
             goto cleanup;
 
         /* VFIO devices belonging to same IOMMU group can't be
@@ -727,6 +740,7 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
             if (virPCIDeviceAddressIOMMUGroupIterate(devAddr,
                                                      virHostdevIsPCINodeDeviceUsed,
                                                      &data) < 0)
+            	/*vfio设备属于相同的iommu group,则不能分享给不两只的guest*/
                 goto cleanup;
         }
     }
@@ -735,6 +749,7 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
      * current device config
      */
     for (i = 0; i < nhostdevs; i++) {
+    	/*保存设备的net config到state dir*/
         if (virHostdevSaveNetConfig(hostdevs[i], mgr->stateDir) < 0)
             goto cleanup;
     }
@@ -745,7 +760,7 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
         virPCIDevice *pci = virPCIDeviceListGet(pcidevs, i);
 
         if (virPCIDeviceGetManaged(pci)) {
-
+        	/*配置了managed*/
             /* We can't look up the actual device because it has not been
              * created yet: virPCIDeviceDetach() will insert a copy of 'pci'
              * into the list of inactive devices, and that copy will be the
@@ -938,11 +953,11 @@ virHostdevPreparePCIDevicesImpl(virHostdevManager *mgr,
 
 int
 virHostdevPreparePCIDevices(virHostdevManager *mgr,
-                            const char *drv_name,
-                            const char *dom_name,
-                            const unsigned char *uuid,
-                            virDomainHostdevDef **hostdevs,
-                            int nhostdevs,
+                            const char *drv_name/*驱动名称*/,
+                            const char *dom_name/*vm名称*/,
+                            const unsigned char *uuid/*vm的uuid*/,
+                            virDomainHostdevDef **hostdevs/*要添加的一组hostdev*/,
+                            int nhostdevs/*要添加的hostdev设备数目*/,
                             unsigned int flags)
 {
     g_autoptr(virPCIDeviceList) pcidevs = NULL;
@@ -951,6 +966,7 @@ virHostdevPreparePCIDevices(virHostdevManager *mgr,
         return 0;
 
     if (!(pcidevs = virHostdevGetPCIHostDeviceList(hostdevs, nhostdevs)))
+    	/*转换pcidevs失败*/
         return -1;
 
     return virHostdevPreparePCIDevicesImpl(mgr, drv_name, dom_name, uuid,

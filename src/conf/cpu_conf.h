@@ -137,6 +137,7 @@ typedef struct _virCPUDef virCPUDef;
 struct _virCPUDef {
     int refs;
     int type;           /* enum virCPUType */
+    /*vcpu模式，例如‘host-passthrough’*/
     int mode;           /* enum virCPUMode */
     virCPUMatch match;
     virCPUCheck check;

@@ -89,11 +89,11 @@ VIR_LOG_INIT("libvirt");
 
 #define MAX_DRIVERS 21
 
-//用于记录已注册的ConnectDriver
+//用于记录系统已注册的ConnectDriver（例如：qemuConnectDriver）
 static virConnectDriver *virConnectDriverTab[MAX_DRIVERS];
 //已注册的ConnectDriver总数
 static int virConnectDriverTabCount;
-//用于记录已注册的StateDriver
+//用于记录系统已注册的StateDriver（例如：qemuStateDriver）
 static virStateDriver *virStateDriverTab[MAX_DRIVERS];
 //用于记录已注册的stateDriver总数
 static int virStateDriverTabCount;
@@ -533,15 +533,17 @@ virSetSharedNWFilterDriver(virNWFilterDriver *driver)
  */
 //注册链接driver
 int
-virRegisterConnectDriver(virConnectDriver *driver,
+virRegisterConnectDriver(virConnectDriver *driver/*要注册的驱动*/,
                          bool setSharedDrivers/*是否使用公享的driver*/)
 {
+	/*显示驱动，驱动名称*/
     VIR_DEBUG("driver=%p name=%s", driver,
               driver ? NULLSTR(driver->hypervisorDriver->name) : "(null)");
 
     /*driver不能为空*/
     virCheckNonNullArgReturn(driver, -1);
-    //注册的连接driver过多
+
+    //已注册的连接driver数目过多
     if (virConnectDriverTabCount >= MAX_DRIVERS) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Too many drivers, cannot register %1$s"),
@@ -549,11 +551,12 @@ virRegisterConnectDriver(virConnectDriver *driver,
         return -1;
     }
 
+    /*显示待注册的driver名称及driver编号*/
     VIR_DEBUG("registering %s as driver %d",
            driver->hypervisorDriver->name, virConnectDriverTabCount);
 
-    //是否使用sharedDriver
     if (setSharedDrivers) {
+    	/*使用共享driver时，如果driver本身未提供以下相关驱动，则使用共享的driver*/
         if (driver->interfaceDriver == NULL)
             driver->interfaceDriver = virSharedInterfaceDriver;
         if (driver->networkDriver == NULL)
@@ -983,11 +986,14 @@ virConnectOpenInternal(const char *name,
     if (uristr) {
         char *alias = NULL;
 
+        /*flags没有禁用别名，进行*/
         if (!(flags & VIR_CONNECT_NO_ALIASES) &&
             virURIResolveAlias(conf, uristr, &alias) < 0)
+        	/*按别名进行解析时遇到错误*/
             return NULL;
 
         if (alias) {
+        	/*按别名解析成功，将alias更正为实名*/
             g_free(uristr);
             uristr = g_steal_pointer(&alias);
         }
@@ -1042,6 +1048,7 @@ virConnectOpenInternal(const char *name,
                 return NULL;
 
             if (!g_path_is_absolute(root)) {
+            	/*地址必须为绝对地址*/
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                                _("root path must be absolute"));
                 return NULL;

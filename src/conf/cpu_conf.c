@@ -388,7 +388,7 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
             return -1;
     }
 
-    def = virCPUDefNew();
+    def = virCPUDefNew();/*初始化cpu对象*/
 
     if (type == VIR_CPU_TYPE_AUTO) {
         if (virXPathBoolean("boolean(./arch)", ctxt)) {
@@ -402,16 +402,17 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
             def->type = VIR_CPU_TYPE_GUEST;
         }
     } else {
-        def->type = type;
+        def->type = type;/*采用指明的type*/
     }
 
+    /*解析cpu属性，例如：<cpu mode='host-passthrough' >*/
     if ((cpuMode = virXMLPropString(ctxt->node, "mode"))) {
         if (def->type == VIR_CPU_TYPE_HOST) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("Attribute mode is only allowed for guest CPU"));
             return -1;
         } else {
-            def->mode = virCPUModeTypeFromString(cpuMode);
+            def->mode = virCPUModeTypeFromString(cpuMode);/*设置vcpu模式*/
 
             if (def->mode < 0) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,

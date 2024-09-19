@@ -1933,6 +1933,7 @@ virFileFindResourceFull(const char *filename,
     else
         path = installdir;
 
+    /*确定filename文件对应的全路径*/
     fullFilename = g_strdup_printf("%s%s%s", prefix, filename, suffix);
     ret = g_build_filename(path, fullFilename, NULL);
 

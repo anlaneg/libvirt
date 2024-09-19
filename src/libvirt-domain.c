@@ -6607,11 +6607,11 @@ virDomainDefineXML(virConnectPtr conn, const char *xml)
         virDomainPtr ret;
         ret = conn->driver->domainDefineXML(conn, xml);
         if (!ret)
-            goto error;
+            goto error;/*define domain时出错*/
         return ret;
     }
 
-    virReportUnsupportedError();
+    virReportUnsupportedError();/*指定驱动不支持*/
 
  error:
     virDispatchError(conn);

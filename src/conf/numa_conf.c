@@ -838,6 +838,7 @@ virDomainNumaDefNodeCacheParseXML(virDomainNuma *def,
 }
 
 
+/*解析cpu/numa配置*/
 int
 virDomainNumaDefParseXML(virDomainNuma *def,
                          xmlXPathContextPtr ctxt)

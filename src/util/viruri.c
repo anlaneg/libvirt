@@ -294,11 +294,13 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
     size_t alias_len;
 
     alias_len = strlen(alias);
+    /*遍历别名数组*/
     while (*aliases) {
         char *offset;
         size_t safe;
 
         if (!(offset = strchr(*aliases, '='))) {
+        	/*别名配置不包含'='符号，报错*/
             virReportError(VIR_ERR_CONF_SYNTAX,
                            _("Malformed 'uri_aliases' config entry '%1$s', expected 'alias=uri://host/path'"),
                            *aliases);
@@ -307,6 +309,7 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
 
         safe = strspn(*aliases, URI_ALIAS_CHARS);
         if (safe < (offset - *aliases)) {
+        	/*别名配置中包含有不容许的字符*/
             virReportError(VIR_ERR_CONF_SYNTAX,
                            _("Malformed 'uri_aliases' config entry '%1$s', aliases may only contain 'a-Z, 0-9, _, -'"),
                            *aliases);
@@ -317,6 +320,7 @@ virURIFindAliasMatch(char *const*aliases, const char *alias,
             STREQLEN(*aliases, alias, alias_len)) {
             VIR_DEBUG("Resolved alias '%s' to '%s'",
                       alias, offset+1);
+            /*匹配成功，返回此别名对应的URL*/
             *uri = g_strdup(offset + 1);
             return 0;
         }
@@ -349,12 +353,12 @@ virURIResolveAlias(virConf *conf, const char *alias, char **uri)
 
     *uri = NULL;
 
-    /*取uri别名数组*/
+    /*自配置中取uri别名数组*/
     if (virConfGetValueStringList(conf, "uri_aliases", false, &aliases) < 0)
         return -1;
 
     if (aliases && *aliases) {
-        /*执行别名匹配*/
+        /*配置了，别名，且别名数组不为空，执行别名匹配*/
         ret = virURIFindAliasMatch(aliases, alias, uri);
     } else {
         ret = 0;

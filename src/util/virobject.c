@@ -35,7 +35,7 @@ VIR_LOG_INIT("util.object");
 static unsigned int magicCounter = 0xCAFE0000;
 
 struct _virClass {
-    virClass *parent;
+    virClass *parent;/*父类*/
 
     GType type;
     unsigned int magic;
@@ -377,7 +377,7 @@ virObjectUnref(void *anyobj)
     if (VIR_OBJECT_NOTVALID(obj))
         return;
 
-    g_object_unref(anyobj);
+    g_object_unref(anyobj);/*obj引用计数减少*/
     PROBE(OBJECT_UNREF, "obj=%p", obj);
 }
 

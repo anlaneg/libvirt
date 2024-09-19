@@ -373,6 +373,7 @@ virNetDevSetMAC(const char *ifname,
 int virNetDevGetMAC(const char *ifname,
                     virMacAddr *macaddr)
 {
+	/*读取设备ifname对应的mac地址*/
     struct ifreq ifr;
     VIR_AUTOCLOSE fd = -1;
 
@@ -718,6 +719,7 @@ virNetDevSetRcvAllMulti(const char *ifname,
 static int
 virNetDevGetIFFlag(const char *ifname, int flag, bool *val)
 {
+	/*检查ifname是否up*/
     struct ifreq ifr;
     VIR_AUTOCLOSE fd = -1;
 
@@ -1305,6 +1307,7 @@ virNetDevGetVirtualFunctionIndex(const char *pfname, const char *vfname,
 int
 virNetDevGetPhysicalFunction(const char *ifname, char **pfname)
 {
+	/*通过vf名称获取pf名称*/
     g_autofree char *physfn_sysfs_path = NULL;
 
     if (virNetDevSysfsDeviceFile(&physfn_sysfs_path, ifname, "physfn") < 0)
@@ -1389,6 +1392,7 @@ virNetDevGetVirtualFunctionInfo(const char *vfname, char **pfname,
         return -1;
     }
 
+    /*利用pf, vf名称获取vf的索引号*/
     if (virNetDevGetVirtualFunctionIndex(*pfname, vfname, vf) < 0)
         goto cleanup;
 
@@ -1827,6 +1831,7 @@ virNetDevVFInterfaceStats(virPCIDeviceAddress *vfAddr,
     if (virPCIGetVirtualFunctionInfo(vfSysfsPath, -1, &pfname, &vf) < 0)
         return -1;
 
+    /*针对pf接口执行linkdump,返回dump的内容tb*/
     if (virNetlinkDumpLink(pfname, -1, &nlData, tb, 0, 0) < 0)
         return -1;
 
@@ -1883,7 +1888,7 @@ virNetDevVFInterfaceStats(virPCIDeviceAddress *vfAddr,
  *
  */
 int
-virNetDevSaveNetConfig(const char *linkdev, int vf,
+virNetDevSaveNetConfig(const char *linkdev/*vf名称*/, int vf,
                        const char *stateDir,
                        bool saveVlan)
 {
@@ -1902,10 +1907,10 @@ virNetDevSaveNetConfig(const char *linkdev, int vf,
         pfDevName = linkdev;
 
         /* linkdev should get the VF's netdev name (or NULL if none) */
-        if (virNetDevPFGetVF(pfDevName, vf, &vfDevOrig) < 0)
+        if (virNetDevPFGetVF(pfDevName, vf, &vfDevOrig/*vf设备名称*/) < 0)
             return -1;
 
-        linkdev = vfDevOrig;
+        linkdev = vfDevOrig;/*当前为vf更新设备名称*/
         saveVlan = true;
 
     } else if (virNetDevIsVirtualFunction(linkdev) == 1) {
@@ -1916,7 +1921,7 @@ virNetDevSaveNetConfig(const char *linkdev, int vf,
 
         if (virNetDevGetVirtualFunctionInfo(linkdev, &pfDevOrig, &vf) < 0)
             return -1;
-        pfDevName = pfDevOrig;
+        pfDevName = pfDevOrig;/*设置当前pf设备名称*/
     }
 
     if (pfDevName) {
@@ -1934,6 +1939,7 @@ virNetDevSaveNetConfig(const char *linkdev, int vf,
          * explicitly enable the PF in the host system network config.
          */
         if (virNetDevGetOnline(pfDevName, &pfIsOnline) < 0)
+        	/*获取online标志失败*/
             return -1;
 
         if (!pfIsOnline) {
@@ -1973,6 +1979,7 @@ virNetDevSaveNetConfig(const char *linkdev, int vf,
 
     if (linkdev) {
         if (virNetDevGetMAC(linkdev, &oldMAC) < 0)
+        	/*读取mac地址失败*/
             return -1;
 
         /* for interfaces with no pfDevName (i.e. not a VF, this will

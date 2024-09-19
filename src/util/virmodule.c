@@ -119,9 +119,11 @@ virModuleLoad(const char *path,
     if (!(rethandle = virModuleLoadFile(path)))
         goto cleanup;
 
+    /*取注册符号*/
     if (!(regsym = virModuleLoadFunc(rethandle, path, regfunc)))
         goto cleanup;
 
+    /*调用函数*/
     if ((*regsym)() < 0) {
         /* regsym() should report an error itself, but lets
          * just make sure */

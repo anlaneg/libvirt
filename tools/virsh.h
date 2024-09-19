@@ -101,7 +101,7 @@
 #define VIRSH_COMMON_OPT_FILE_FULL(_helpstr, required) \
     {.name = "file", \
      .type = required ? VSH_OT_DATA : VSH_OT_STRING, \
-     .flags = required ? VSH_OFLAG_REQ : VSH_OFLAG_NONE, \
+     .flags = required ? VSH_OFLAG_REQ/*此选项必要求*/ : VSH_OFLAG_NONE, \
      .completer = virshCompletePathLocalExisting, \
      .help = _helpstr \
     }

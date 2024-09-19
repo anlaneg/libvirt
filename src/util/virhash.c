@@ -64,6 +64,7 @@ static int virHashTableSeedOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virHashTableSeed);
 
 
+/*字符串hashcode*/
 static unsigned int
 virHashTableStringKey(const void *vkey)
 {
@@ -83,11 +84,11 @@ virHashTableStringKey(const void *vkey)
  * Returns the newly created object.
  */
 GHashTable *
-virHashNew(GDestroyNotify dataFree)
+virHashNew(GDestroyNotify dataFree/*用于指定value的释放函数*/)
 {
     ignore_value(virHashTableSeedInitialize());
 
-    return g_hash_table_new_full(virHashTableStringKey, g_str_equal, g_free, dataFree);
+    return g_hash_table_new_full(virHashTableStringKey, g_str_equal/*通过字符串比对key*/, g_free/*通过free释放key*/, dataFree);
 }
 
 

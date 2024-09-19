@@ -814,7 +814,7 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(vshCmd, vshCommandFree);
  * is set. No error messages are issued if a value is returned.
  */
 static int
-vshCommandOpt(const vshCmd *cmd, const char *name, vshCmdOpt **opt/*出参，对应的选项*/,
+vshCommandOpt(const vshCmd *cmd, const char *name/*选项名*/, vshCmdOpt **opt/*出参，对应的选项*/,
               bool needData)
 {
     /*取cmd选项*/
@@ -825,6 +825,7 @@ vshCommandOpt(const vshCmd *cmd, const char *name, vshCmdOpt **opt/*出参，对
     /* See if option is valid and/or required.  */
     *opt = NULL;
 
+    /*在cmd->def->opts中查找对应的name*/
     while (valid && valid->name) {
         if (STREQ(name, valid->name))
             break;
@@ -1051,7 +1052,7 @@ vshCommandOptStringQuiet(vshControl *ctl G_GNUC_UNUSED, const vshCmd *cmd,
 int
 vshCommandOptStringReq(vshControl *ctl,
                        const vshCmd *cmd,
-                       const char *name,
+                       const char *name/*选项名*/,
                        const char **value)
 {
     vshCmdOpt *arg;
@@ -1061,6 +1062,7 @@ vshCommandOptStringReq(vshControl *ctl,
     /* clear out the value */
     *value = NULL;
 
+    /*获取name对应的选项*/
     ret = vshCommandOpt(cmd, name, &arg, true);
     /* option is not required and not present */
     if (ret == 0)

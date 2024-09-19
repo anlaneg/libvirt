@@ -1301,6 +1301,7 @@ remoteConnectOpen(virConnectPtr conn,
          */
         if (!conn->uri->server && !virURICheckUnixSocket(conn->uri)) {
             if (virHasDriverForURIScheme(driver))
+            	/*通过scheme检查，未发现可处理些scheme的driver*/
                 return VIR_DRV_OPEN_DECLINED;
 
             if (monolithic_daemon)

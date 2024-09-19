@@ -7120,6 +7120,7 @@ void qemuDomainObjCheckHostdevTaint(virQEMUDriver *driver,
                                     qemuLogContext *logCtxt)
 {
     if (!virHostdevIsSCSIDevice(hostdev))
+    	/*非scsi device,直接返回*/
         return;
 
     if (hostdev->source.subsys.u.scsi.rawio == VIR_TRISTATE_BOOL_YES)
@@ -11338,8 +11339,10 @@ qemuDomainPrepareHostdevPCI(virDomainHostdevDef *hostdev,
     /* assign defaults for hostdev passthrough */
     switch (*backend) {
     case VIR_DOMAIN_HOSTDEV_PCI_BACKEND_DEFAULT:
+    	/*未明确指定后端，自动检测来明确*/
         if (supportsPassthroughVFIO) {
             if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VFIO_PCI)) {
+            	/*有vfio-pci功能，后端指明为vfio*/
                 *backend = VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO;
             } else {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -11347,6 +11350,7 @@ qemuDomainPrepareHostdevPCI(virDomainHostdevDef *hostdev,
                 return -1;
             }
         } else {
+        	/*主机不支持vfio passthrough,报错*/
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("host doesn't support passthrough of host PCI devices"));
             return -1;
@@ -11355,6 +11359,7 @@ qemuDomainPrepareHostdevPCI(virDomainHostdevDef *hostdev,
 
     case VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO:
         if (!supportsPassthroughVFIO) {
+        	/*指明了vfio，但主机不支持，报错*/
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("host doesn't support VFIO PCI passthrough"));
             return false;
@@ -11362,11 +11367,13 @@ qemuDomainPrepareHostdevPCI(virDomainHostdevDef *hostdev,
         break;
 
     case VIR_DOMAIN_HOSTDEV_PCI_BACKEND_KVM:
+    	/*kvm不支持*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("host doesn't support legacy PCI passthrough"));
         return false;
 
     case VIR_DOMAIN_HOSTDEV_PCI_BACKEND_XEN:
+    	/*xen不支持*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("QEMU does not support device assignment mode '%1$s'"),
                        virDomainHostdevSubsysPCIBackendTypeToString(*backend));
@@ -11393,6 +11400,7 @@ qemuDomainPrepareHostdev(virDomainHostdevDef *hostdev,
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI:
         return qemuDomainPrepareHostdevSCSI(hostdev, priv);
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+    	/*hostdev为pci设备情况*/
         return qemuDomainPrepareHostdevPCI(hostdev, priv->qemuCaps);
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST:
@@ -12060,6 +12068,7 @@ qemuDomainDeviceBackendChardevForeachOne(virDomainDeviceDef *dev,
         return cb(dev, dev->data.disk->src->vhostuser, opaque);
 
     case VIR_DOMAIN_DEVICE_NET:
+    	/*要添加的是网络设备,除vhostuser，其它需要通过cb进行检查*/
         if (virDomainNetGetActualType(dev->data.net) != VIR_DOMAIN_NET_TYPE_VHOSTUSER)
             return 0;
 
@@ -12110,7 +12119,7 @@ qemuDomainDeviceBackendChardevForeachOne(virDomainDeviceDef *dev,
     case VIR_DOMAIN_DEVICE_INPUT:
     case VIR_DOMAIN_DEVICE_SOUND:
     case VIR_DOMAIN_DEVICE_VIDEO:
-    case VIR_DOMAIN_DEVICE_HOSTDEV:
+    case VIR_DOMAIN_DEVICE_HOSTDEV:/*要添加的是hostdev*/
     case VIR_DOMAIN_DEVICE_WATCHDOG:
     case VIR_DOMAIN_DEVICE_CONTROLLER:
     case VIR_DOMAIN_DEVICE_GRAPHICS:

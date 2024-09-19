@@ -195,7 +195,9 @@ virDeviceInfoPCIAddressExtensionIsPresent(const virDomainDeviceInfo *info)
            virZPCIDeviceAddressIsPresent(&info->addr.pci.zpci);
 }
 
-/*解析pci地址，例如：<address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>*/
+/*解析pci地址，填充addr，例如：
+ * <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+ * */
 int
 virPCIDeviceAddressParseXML(xmlNodePtr node,
                             virPCIDeviceAddress *addr)

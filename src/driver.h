@@ -85,7 +85,7 @@ struct _virConnectDriver {
      *  - NULL list indicates wildcard supporting all schemes
      */
     const char **uriSchemes;/*uri起始模式符，容许有多个*/
-    virHypervisorDriver *hypervisorDriver;
+    virHypervisorDriver *hypervisorDriver;/*此hypervisor对应的驱动*/
     virInterfaceDriver *interfaceDriver;
     virNetworkDriver *networkDriver;
     virNodeDeviceDriver *nodeDeviceDriver;

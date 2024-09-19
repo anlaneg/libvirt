@@ -1462,6 +1462,7 @@ typedef struct _virHypervisorDriver virHypervisorDriver;
  *  - close
  */
 struct _virHypervisorDriver {
+	/*记录驱动名称*/
     const char *name; /* the name of the driver */
     //在拿不到defaultURI时，各驱动逐个尝试，获取相应uri
     virDrvConnectURIProbe connectURIProbe;
@@ -1550,8 +1551,8 @@ struct _virHypervisorDriver {
     virDrvDomainCreate domainCreate;
     virDrvDomainCreateWithFlags domainCreateWithFlags;
     virDrvDomainCreateWithFiles domainCreateWithFiles;
-    virDrvDomainDefineXML domainDefineXML;
-    virDrvDomainDefineXMLFlags domainDefineXMLFlags;
+    virDrvDomainDefineXML domainDefineXML;/*此回调负责define domain*/
+    virDrvDomainDefineXMLFlags domainDefineXMLFlags;/*此回调负责define domain,但容许带flags*/
     virDrvDomainUndefine domainUndefine;
     virDrvDomainUndefineFlags domainUndefineFlags;
     /*为domain添加设备*/

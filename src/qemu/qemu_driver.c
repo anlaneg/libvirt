@@ -6400,8 +6400,8 @@ qemuDomainCreate(virDomainPtr dom)
 
 static virDomainPtr
 qemuDomainDefineXMLFlags(virConnectPtr conn,
-                         const char *xml,
-                         unsigned int flags)
+                         const char *xml/*define domain时用的xml*/,
+                         unsigned int flags/*define xml时指定的flags,可以为0*/)
 {
     virQEMUDriver *driver = conn->privateData;
     g_autoptr(virDomainDef) def = NULL;
@@ -6477,7 +6477,7 @@ qemuDomainDefineXMLFlags(virConnectPtr conn,
 static virDomainPtr
 qemuDomainDefineXML(virConnectPtr conn, const char *xml)
 {
-    return qemuDomainDefineXMLFlags(conn, xml, 0);
+    return qemuDomainDefineXMLFlags(conn, xml, 0/*将此flags定为0*/);
 }
 
 static int
@@ -6642,8 +6642,8 @@ qemuCheckDiskConfigAgainstDomain(const virDomainDef *def,
 
 
 static int
-qemuDomainAttachDeviceConfig(virDomainDef *vmdef,
-                             virDomainDeviceDef *dev,
+qemuDomainAttachDeviceConfig(virDomainDef *vmdef/*要attach设备的虚拟机*/,
+                             virDomainDeviceDef *dev/*要attach的设备*/,
                              virQEMUCaps *qemuCaps,
                              unsigned int parse_flags,
                              virDomainXMLOption *xmlopt)
@@ -6660,6 +6660,7 @@ qemuDomainAttachDeviceConfig(virDomainDef *vmdef,
 
     switch (dev->type) {
     case VIR_DOMAIN_DEVICE_DISK:
+    	/*attach disk设备*/
         disk = dev->data.disk;
         if (virDomainDiskIndexByName(vmdef, disk->dst, true) >= 0) {
             virReportError(VIR_ERR_OPERATION_INVALID,
@@ -6676,7 +6677,7 @@ qemuDomainAttachDeviceConfig(virDomainDef *vmdef,
         break;
 
     case VIR_DOMAIN_DEVICE_NET:
-        /*向vm中加入网络设备*/
+        /*向vm中增加网络设备*/
         net = dev->data.net;
         if (virDomainNetInsert(vmdef, net))
             return -1;
@@ -6684,20 +6685,26 @@ qemuDomainAttachDeviceConfig(virDomainDef *vmdef,
         break;
 
     case VIR_DOMAIN_DEVICE_SOUND:
+    	/*attach声卡设备*/
         sound = dev->data.sound;
         VIR_APPEND_ELEMENT(vmdef->sounds, vmdef->nsounds, sound);
         dev->data.sound = NULL;
         break;
 
     case VIR_DOMAIN_DEVICE_HOSTDEV:
+    	/*增加hostdev,例如网络设备*/
         hostdev = dev->data.hostdev;
         if (virDomainHostdevFind(vmdef, hostdev, NULL) >= 0) {
+        	/*待添加的vmdef,已在hostdev中存在，报错*/
             virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                            _("device is already in the domain configuration"));
             return -1;
         }
+        /*将设备添加进数组*/
         if (virDomainHostdevInsert(vmdef, hostdev))
             return -1;
+
+        /*已传递，故将源位置置为NULL*/
         dev->data.hostdev = NULL;
         break;
 
@@ -7227,7 +7234,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObj *vm,
     virObjectEvent *event = NULL;
     g_autoptr(virDomainDef) vmdef = NULL;
     g_autoptr(virQEMUDriverConfig) cfg = NULL;
-    g_autoptr(virDomainDeviceDef) devConf = NULL;
+    g_autoptr(virDomainDeviceDef) devConf = NULL;/*记录解析的对象*/
     virDomainDeviceDef devConfSave = { 0 };
     g_autoptr(virDomainDeviceDef) devLive = NULL;
     unsigned int parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE |
@@ -7269,7 +7276,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObj *vm,
                                          false) < 0)
             return -1;
 
-        /*为vm添加此设备*/
+        /*为vm添加此设备（仅配置）*/
         if (qemuDomainAttachDeviceConfig(vmdef, devConf, priv->qemuCaps,
                                          parse_flags,
                                          driver->xmlopt) < 0)
@@ -7277,6 +7284,8 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObj *vm,
     }
 
     if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+    	/*virsh attach-device时，此flags被指明*/
+    	/*解析得到需要添加的设备*/
         if (!(devLive = virDomainDeviceDefParse(xml, vm->def,
                                                 driver->xmlopt, priv->qemuCaps,
                                                 parse_flags)))
@@ -7362,7 +7371,7 @@ qemuDomainAttachDeviceFlags(virDomainPtr dom/*要操作的domain*/,
 /*为qemu动态添加设备*/
 static int
 qemuDomainAttachDevice(virDomainPtr dom,
-                       const char *xml)
+                       const char *xml/*设备对应的xml*/)
 {
     return qemuDomainAttachDeviceFlags(dom, xml, VIR_DOMAIN_AFFECT_LIVE);
 }
@@ -20040,7 +20049,9 @@ static virHypervisorDriver qemuHypervisorDriver = {
     .connectNumOfDefinedDomains = qemuConnectNumOfDefinedDomains, /* 0.2.0 */
     .domainCreate = qemuDomainCreate, /* 0.2.0 */
     .domainCreateWithFlags = qemuDomainCreateWithFlags, /* 0.8.2 */
+	/*利用xml定义domain*/
     .domainDefineXML = qemuDomainDefineXML, /* 0.2.0 */
+	/*利用xml定义domain(with flags)*/
     .domainDefineXMLFlags = qemuDomainDefineXMLFlags, /* 1.2.12 */
     .domainUndefine = qemuDomainUndefine, /* 0.2.0 */
     .domainUndefineFlags = qemuDomainUndefineFlags, /* 0.9.4 */
@@ -20235,6 +20246,7 @@ static virStateDriver qemuStateDriver = {
     .stateShutdownWait = qemuStateShutdownWait,
 };
 
+/*此函数将在daemonInitialize中被加载so调用*/
 int qemuRegister(void)
 {
 	//注册connectDriver,用于管理Driver

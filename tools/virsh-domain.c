@@ -8331,6 +8331,7 @@ static const vshCmdOptDef opts_define[] = {
     {.name = NULL}
 };
 
+/*处理xml定义虚机*/
 static bool
 cmdDefine(vshControl *ctl, const vshCmd *cmd)
 {
@@ -8353,9 +8354,11 @@ cmdDefine(vshControl *ctl, const vshCmd *cmd)
     if (flags)
         dom = virDomainDefineXMLFlags(priv->conn, buffer, flags);
     else
+    	/*普通解析并定义vm*/
         dom = virDomainDefineXML(priv->conn, buffer);
 
     if (!dom) {
+    	/*define vm失败*/
         vshError(ctl, _("Failed to define domain from %1$s"), from);
         return false;
     }
@@ -13808,7 +13811,7 @@ cmdDomDirtyRateCalc(vshControl *ctl, const vshCmd *cmd)
 
 
 const vshCmdDef domManagementCmds[] = {
-        //设备添加
+    //设备添加
     {.name = "attach-device",
      .handler = cmdAttachDevice,
      .opts = opts_attach_device,

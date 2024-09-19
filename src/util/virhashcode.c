@@ -60,6 +60,7 @@ static inline uint32_t fmix(uint32_t h)
 }
 
 
+/*hashcode生成函数*/
 uint32_t virHashCodeGen(const void *key, size_t len, uint32_t seed)
 {
     const uint8_t *blocks;

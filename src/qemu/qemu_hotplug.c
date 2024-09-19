@@ -1477,8 +1477,8 @@ qemuDomainAttachNetDevice(virQEMUDriver *driver,
 /*附加pci设备*/
 static int
 qemuDomainAttachHostPCIDevice(virQEMUDriver *driver,
-                              virDomainObj *vm,
-                              virDomainHostdevDef *hostdev)
+                              virDomainObj *vm/*要添加设备的vm*/,
+                              virDomainHostdevDef *hostdev/*要添加的pci设备*/)
 {
     qemuDomainObjPrivate *priv = vm->privateData;
     virDomainDeviceDef dev = { VIR_DOMAIN_DEVICE_HOSTDEV,
@@ -1494,12 +1494,13 @@ qemuDomainAttachHostPCIDevice(virQEMUDriver *driver,
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     unsigned int flags = 0;
 
+    /*要增加的设备最终会放在此变量中，提前扩充空间*/
     VIR_REALLOC_N(vm->def->hostdevs, vm->def->nhostdevs + 1);
 
     if (!cfg->relaxedACS)
         flags |= VIR_HOSTDEV_STRICT_ACS_CHECK;
     if (qemuHostdevPreparePCIDevices(driver, vm->def->name,
-                                     vm->def->uuid, &hostdev, 1, flags) < 0)
+                                     vm->def->uuid, &hostdev, 1/*只加一个设备*/, flags) < 0)
         return -1;
 
     if (qemuDomainAdjustMaxMemLockHostdev(vm, hostdev) < 0)
@@ -2758,10 +2759,11 @@ qemuDomainAttachMediatedDevice(virQEMUDriver *driver,
 
 static int
 qemuDomainAttachHostDevice(virQEMUDriver *driver,
-                           virDomainObj *vm,
-                           virDomainHostdevDef *hostdev)
+                           virDomainObj *vm/*要添加hostdev的vm*/,
+                           virDomainHostdevDef *hostdev/*要添加的hostdev*/)
 {
     if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS) {
+    	/*此函数必须应用于hostdev*/
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("hotplug is not supported for hostdev mode '%1$s'"),
                        virDomainHostdevModeTypeToString(hostdev->mode));
@@ -2769,10 +2771,12 @@ qemuDomainAttachHostDevice(virQEMUDriver *driver,
     }
 
     if (qemuDomainPrepareHostdev(hostdev, vm->privateData) < 0)
+    	/*检查主机不支持，报错*/
         return -1;
 
     switch (hostdev->source.subsys.type) {
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+    	/*源设备为pci设备*/
         if (qemuDomainAttachHostPCIDevice(driver, vm,
                                           hostdev) < 0)
             return -1;
@@ -3314,6 +3318,7 @@ qemuDomainAttachDeviceLive(virDomainObj *vm,
     if (qemuDomainDeviceBackendChardevForeachOne(dev,
                                                  qemuDomainPrepareChardevSourceOne,
                                                  &chardevBackendData) < 0)
+    	/*后端校验失败，返回-1*/
         return -1;
 
     switch (dev->type) {
@@ -3351,6 +3356,7 @@ qemuDomainAttachDeviceLive(virDomainObj *vm,
         break;
 
     case VIR_DOMAIN_DEVICE_HOSTDEV:
+    	/*hostdev设备添加*/
         qemuDomainObjCheckHostdevTaint(driver, vm, dev->data.hostdev, NULL);
         ret = qemuDomainAttachHostDevice(driver, vm,
                                          dev->data.hostdev);

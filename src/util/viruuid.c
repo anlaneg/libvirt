@@ -48,9 +48,11 @@ int
 virUUIDGenerate(unsigned char *uuid)
 {
     if (uuid == NULL)
+    	/*参数为空，返回-1*/
         return -1;
 
     if (virRandomBytes(uuid, VIR_UUID_BUFLEN) < 0)
+    	/*生成随机值失败，返回-1*/
         return -1;
 
     /*
@@ -69,8 +71,8 @@ virUUIDGenerate(unsigned char *uuid)
      *  Msb0  Msb1  Msb2  Description
      *   1     0     x    The variant specified in this document.
      */
-    uuid[6] = (uuid[6] & 0x0F) | (4 << 4);
-    uuid[8] = (uuid[8] & 0x3F) | (2 << 6);
+    uuid[6] = (uuid[6] & 0x0F) | (4 << 4);/*将此字节的高4位，设置为0100b*/
+    uuid[8] = (uuid[8] & 0x3F) | (2 << 6);/*将此字节高位置为‘1’*/
 
     return 0;
 }
@@ -145,7 +147,7 @@ virUUIDParse(const char *uuidstr, unsigned char *uuid)
 const char *
 virUUIDFormat(const unsigned char *uuid, char *uuidstr)
 {
-    //显示字符串格式的uuid
+    //格式化uuid为字符串形式
     g_snprintf(uuidstr, VIR_UUID_STRING_BUFLEN,
                "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                uuid[0], uuid[1], uuid[2], uuid[3],

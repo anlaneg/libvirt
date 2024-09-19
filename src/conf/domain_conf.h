@@ -63,8 +63,8 @@ typedef enum {
     VIR_DOMAIN_DEVICE_NONE = 0,
     VIR_DOMAIN_DEVICE_DISK,
     VIR_DOMAIN_DEVICE_LEASE,
-    VIR_DOMAIN_DEVICE_FS,
-    VIR_DOMAIN_DEVICE_NET,
+    VIR_DOMAIN_DEVICE_FS,/*通过filesystem指定*/
+    VIR_DOMAIN_DEVICE_NET,/*通过interface指明*/
     VIR_DOMAIN_DEVICE_INPUT,
     VIR_DOMAIN_DEVICE_SOUND,
     VIR_DOMAIN_DEVICE_VIDEO,
@@ -92,17 +92,17 @@ typedef enum {
 } virDomainDeviceType;
 
 struct _virDomainDeviceDef {
-    virDomainDeviceType type;
+    virDomainDeviceType type;/*设备类型*/
     union {
         virDomainDiskDef *disk;
         virDomainControllerDef *controller;
         virDomainLeaseDef *lease;
-        virDomainFSDef *fs;
+        virDomainFSDef *fs;/*文件系统设备*/
         virDomainNetDef *net;/*网络设备*/
         virDomainInputDef *input;
         virDomainSoundDef *sound;
         virDomainVideoDef *video;
-        virDomainHostdevDef *hostdev;
+        virDomainHostdevDef *hostdev;/*hostdev设备，例如pci网卡*/
         virDomainWatchdogDef *watchdog;
         virDomainGraphicsDef *graphics;
         virDomainHubDef *hub;
@@ -248,7 +248,7 @@ struct _virDomainHostdevSubsysUSB {
 struct _virDomainHostdevSubsysPCI {
     /*host端设备地址*/
     virPCIDeviceAddress addr; /* host address */
-    /*host后端方式，例如kvm,vfio*/
+    /*host后端方式，例如kvm,vfio，当采用qemu时，当前支持为vfio*/
     virDomainHostdevSubsysPCIBackendType backend;
 
     virBitmap *origstates;
@@ -318,7 +318,7 @@ struct _virDomainHostdevSubsysSCSIVHost {
 };
 
 struct _virDomainHostdevSubsys {
-    virDomainHostdevSubsysType type;
+    virDomainHostdevSubsysType type;/*指明采用哪种子系统，例如pci*/
     union {
         virDomainHostdevSubsysUSB usb;
         virDomainHostdevSubsysPCI pci;/*pci设备*/
@@ -375,7 +375,7 @@ struct _virDomainHostdevDef {
 
     virDomainHostdevMode mode;
     virDomainStartupPolicy startupPolicy;
-    bool managed;/*是否指明managed属性*/
+    bool managed;/*标明interface标签是否指明了managed属性*/
     bool missing;
     bool readonly;
     bool shareable;
@@ -893,7 +893,7 @@ typedef enum {
     VIR_DOMAIN_NET_TYPE_BRIDGE,
     VIR_DOMAIN_NET_TYPE_INTERNAL,
     VIR_DOMAIN_NET_TYPE_DIRECT,
-    VIR_DOMAIN_NET_TYPE_HOSTDEV,
+    VIR_DOMAIN_NET_TYPE_HOSTDEV,/*host设备直通*/
     VIR_DOMAIN_NET_TYPE_UDP,
     VIR_DOMAIN_NET_TYPE_VDPA,
     VIR_DOMAIN_NET_TYPE_NULL,
@@ -2394,7 +2394,7 @@ typedef enum {
 VIR_ENUM_DECL(virDomainOsDefFirmwareFeature);
 
 struct _virDomainOSDef {
-    int type;/*domain os类型，例如VIR_DOMAIN_OSTYPE_HVM*/
+    int type;/*domain os类型，例如hvm(VIR_DOMAIN_OSTYPE_HVM)*/
     virDomainOsDefFirmware firmware;
     int *firmwareFeatures;
     virArch arch;/*例如x86时，采用VIR_ARCH_X86_64*/
@@ -2699,7 +2699,7 @@ void virBlkioDeviceArrayClear(virBlkioDevice *deviceWeights,
                               int ndevices);
 
 struct _virDomainResourceDef {
-    char *partition;
+    char *partition;/*来源于：<partition>/machine</partition>*/
     char *appid;
 };
 
@@ -2771,7 +2771,7 @@ struct _virDomainResctrlDef {
 
 
 struct _virDomainVcpuDef {
-    bool online;
+    bool online;/*指明此cpu是否online*/
     virTristateBool hotpluggable;
     unsigned int order;
 
@@ -2785,14 +2785,14 @@ struct _virDomainVcpuDef {
 struct _virDomainBlkiotune {
     unsigned int weight;
 
-    size_t ndevices;
-    virBlkioDevice *devices;
+    size_t ndevices;/*blkiotune/device设备总数*/
+    virBlkioDevice *devices;/*解析blkiotune/device标签对应的设备列表*/
 };
 
 struct _virDomainMemtune {
     /* total memory size including memory modules in kibibytes, this field
      * should be accessed only via accessors */
-    unsigned long long total_memory;
+    unsigned long long total_memory;/*配置的总内存*/
     unsigned long long cur_balloon; /* in kibibytes, capped at ulong thanks
                                        to virDomainGetInfo */
 
@@ -2952,8 +2952,8 @@ struct _virDomainVirtioOptions {
 struct _virDomainDef {
 	/*domain使用哪种虚拟化技术*/
     int virtType; /* enum virDomainVirtType */
-    int id;//domain id号
-    unsigned char uuid[VIR_UUID_BUFLEN];//uuid数组
+    int id;//domain id号（默认为-1）
+    unsigned char uuid[VIR_UUID_BUFLEN];//domain对应的uuid
 
     unsigned char genid[VIR_UUID_BUFLEN];
     bool genidRequested;
@@ -2964,17 +2964,17 @@ struct _virDomainDef {
     char *description;/* /domin/description 标签指定 */
 
     virDomainBlkiotune blkio;
-    virDomainMemtune mem;
+    virDomainMemtune mem;/*由/domain/memory相关标签指定*/
 
-    virDomainVcpuDef **vcpus;
-    size_t maxvcpus;
+    virDomainVcpuDef **vcpus;/*每个cpu一个vcpu对象*/
+    size_t maxvcpus;/*/domain/vcpu标签指明的vcpu最大数*/
     /* set if the vcpu definition was specified individually */
     bool individualvcpus;
-    virDomainCpuPlacementMode placement_mode;
+    virDomainCpuPlacementMode placement_mode;/*vcpu节点的placement属性*/
     virBitmap *cpumask;
 
-    size_t niothreadids;
-    virDomainIOThreadIDDef **iothreadids;
+    size_t niothreadids;/*来自标签iothreads，指明线程总数*/
+    virDomainIOThreadIDDef **iothreadids;/*每个线程一个对象*/
 
     virDomainDefaultIOThreadDef *defaultIOThread;
 
@@ -2988,7 +2988,7 @@ struct _virDomainDef {
     virDomainIdMapDef idmap;
 
     /* These 3 are based on virDomainLifecycleAction enum flags */
-    int onReboot;
+    int onReboot;/*来源于onreboot标签，例如<on_reboot>restart</on_reboot>*/
     int onPoweroff;
     int onCrash;
 
@@ -2999,11 +2999,11 @@ struct _virDomainDef {
     virDomainPerfDef perf;
 
     virDomainOSDef os;
-    char *emulator;/*采用那个模拟器*/
+    char *emulator;/*采用那个模拟器，例如/usr/bin/qemu-system-x86_64*/
     /* Most {caps_,hyperv_,kvm_,}feature options utilize a virTristateSwitch
      * to handle support. A few assign specific data values to the option.
      * See virDomainDefFeaturesCheckABIStability() for details. */
-    int features[VIR_DOMAIN_FEATURE_LAST];
+    int features[VIR_DOMAIN_FEATURE_LAST];/*来源于features配置*/
     int caps_features[VIR_DOMAIN_PROCES_CAPS_FEATURE_LAST];
     int hyperv_features[VIR_DOMAIN_HYPERV_LAST];
     virDomainFeatureKVM *kvm_features;

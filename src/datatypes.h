@@ -520,8 +520,7 @@ struct _virConnect {
     virURI *uri;          /* connection URI */
 
     /* The underlying hypervisor driver and network driver. */
-    //hypervisor对应的Driver
-    virHypervisorDriver *driver;
+    virHypervisorDriver *driver;//hypervisor对应的Driver
     //network对应的driver
     virNetworkDriver *networkDriver;
     //interface对应的driver

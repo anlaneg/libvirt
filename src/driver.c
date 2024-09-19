@@ -49,7 +49,7 @@ VIR_LOG_INIT("driver");
 
 int
 virDriverLoadModule(const char *name,
-                    const char *regfunc,
+                    const char *regfunc/*注册函数名*/,
                     bool required)
 {
     g_autofree char *modfile = NULL;

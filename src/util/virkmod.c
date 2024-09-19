@@ -25,10 +25,11 @@
 #include "vircommand.h"
 
 static int
-doModprobe(const char *opts, const char *module, char **outbuf, char **errbuf)
+doModprobe(const char *opts/*选项参数*/, const char *module/*模块名称*/, char **outbuf, char **errbuf)
 {
     g_autoptr(virCommand) cmd = NULL;
 
+    /*构造modprobe命令行*/
     cmd = virCommandNewArgList(MODPROBE, opts, NULL);
     if (module)
         virCommandAddArg(cmd, module);
@@ -73,6 +74,7 @@ virKModLoad(const char *module)
 {
     char *errbuf = NULL;
 
+    /*即便module处于blacklist中，也加载*/
     if (doModprobe("-b", module, NULL, &errbuf) < 0)
         return errbuf;
 

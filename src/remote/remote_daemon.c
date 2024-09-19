@@ -164,7 +164,7 @@ static int daemonInitialize(void)
         return -1;
 # endif
 # ifdef WITH_QEMU
-    /*加载qemu*/
+    /*加载qemu driver，调用qemuRegister函数*/
     if (virDriverLoadModule("qemu", "qemuRegister", false) < 0)
         return -1;
 # endif

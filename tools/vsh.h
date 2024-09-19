@@ -138,6 +138,7 @@ struct _vshCmdOptDef {
     /*选项数据类型*/
     vshCmdOptType type;         /* option type */
     unsigned int flags;         /* flags */
+    /*帮助信息*/
     const char *help;           /* non-NULL help string; or for VSH_OT_ALIAS
                                  * the name of a later public option */
     vshCompleter completer;         /* option completer */
@@ -171,6 +172,7 @@ enum {
  * vshCmdDef - command definition
  */
 struct _vshCmdDef {
+	/*cmd关键字*/
     const char *name;           /* name of command, or NULL for list end */
     /*命令处理函数*/
     bool (*handler) (vshControl *, const vshCmd *);    /* command handler */

@@ -65,13 +65,16 @@ VIR_ENUM_IMPL(virPCIHeader,
 struct _virPCIDevice {
     virPCIDeviceAddress address;
 
+    /*pci设备名称*/
     char          *name;              /* domain:bus:slot.function */
+    /*pci设备对应的vendor，device信息*/
     char          id[PCI_ID_LEN];     /* product vendor */
+    /*pci设备config文件路径，例如/sys/bus/pci/devices/0000\:d8\:00.1/config*/
     char          *path;
 
     /* The driver:domain which uses the device */
-    char          *used_by_drvname;
-    char          *used_by_domname;
+    char          *used_by_drvname;/*设备被哪个驱动在使用*/
+    char          *used_by_domname;/*设备被哪个doamin在使用*/
 
     /* The following 5 items are only valid after virPCIDeviceInit()
      * has been called for the virPCIDevice object. This is *not* done
@@ -87,7 +90,7 @@ struct _virPCIDevice {
 
     bool          managed;/*是否配置了managed*/
 
-    virPCIStubDriver stubDriverType;/*指明驱动xen,vfio*/
+    virPCIStubDriver stubDriverType;/*指明驱动xen,vfio,使用qemu时，使用vfio*/
     char            *stubDriverName; /* if blank, use default for type */
 
     /* used by reattach function */
@@ -348,13 +351,15 @@ virPCIDeviceGetCurrentDriverNameAndType(virPCIDevice *dev,
 
 
 static int
-virPCIDeviceConfigOpenInternal(virPCIDevice *dev, bool readonly, bool fatal)
+virPCIDeviceConfigOpenInternal(virPCIDevice *dev, bool readonly/*是否采用只读打开*/, bool fatal)
 {
     int fd;
 
+    /*打开pci设备的config文件*/
     fd = open(dev->path, readonly ? O_RDONLY : O_RDWR);
 
     if (fd < 0) {
+    	/*打开失败，报错*/
         if (fatal) {
             virReportSystemError(errno,
                                  _("Failed to open config space file '%1$s'"),
@@ -398,6 +403,7 @@ virPCIDeviceConfigClose(virPCIDevice *dev, int cfgfd)
 }
 
 
+/*自pci设备的config文件中读取指定位置（pos），读取buflen长度的内容*/
 static int
 virPCIDeviceRead(virPCIDevice *dev,
                  int cfgfd,
@@ -405,11 +411,11 @@ virPCIDeviceRead(virPCIDevice *dev,
                  uint8_t *buf,
                  unsigned int buflen)
 {
-    memset(buf, 0, buflen);
+    memset(buf, 0, buflen);/*buffer清零*/
     errno = 0;
 
-    if (lseek(cfgfd, pos, SEEK_SET) != pos ||
-        saferead(cfgfd, buf, buflen) != buflen) {
+    if (lseek(cfgfd, pos, SEEK_SET) != pos/*切到pos位置*/ ||
+        saferead(cfgfd, buf, buflen) != buflen/*读取指定数量字长*/) {
         VIR_DEBUG("Failed to read %u bytes at %u from '%s' : %s",
                  buflen, pos, dev->path, g_strerror(errno));
         return -1;
@@ -442,6 +448,7 @@ static uint8_t
 virPCIDeviceRead8(virPCIDevice *dev, int cfgfd, unsigned int pos)
 {
     uint8_t buf;
+    /*自pos位置，读取1个字节*/
     virPCIDeviceRead(dev, cfgfd, pos, &buf, sizeof(buf));
     return buf;
 }
@@ -450,6 +457,7 @@ static uint16_t
 virPCIDeviceRead16(virPCIDevice *dev, int cfgfd, unsigned int pos)
 {
     uint8_t buf[2];
+    /*自pos位置，读取2个字节（网络序）*/
     virPCIDeviceRead(dev, cfgfd, pos, &buf[0], sizeof(buf));
     return (buf[0] << 0) | (buf[1] << 8);
 }
@@ -458,6 +466,7 @@ static uint32_t
 virPCIDeviceRead32(virPCIDevice *dev, int cfgfd, unsigned int pos)
 {
     uint8_t buf[4];
+    /*自pos位置，读取4个字节（网络序）*/
     virPCIDeviceRead(dev, cfgfd, pos, &buf[0], sizeof(buf));
     return (buf[0] << 0) | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
 }
@@ -1083,6 +1092,7 @@ virPCIDeviceReset(virPCIDevice *dev,
     if (virPCIGetHeaderType(dev, &hdrType) < 0)
         return -1;
 
+    /*必须是endpoint的pci设备*/
     if (hdrType != VIR_PCI_HEADER_ENDPOINT) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Invalid attempt to reset PCI device %1$s. Only PCI endpoint devices can be reset"),
@@ -1090,6 +1100,7 @@ virPCIDeviceReset(virPCIDevice *dev,
         return -1;
     }
 
+    /*检查是否要执行的是active的设备*/
     if (activeDevs && virPCIDeviceListFind(activeDevs, &dev->address)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Not resetting active device %1$s"), dev->name);
@@ -1113,6 +1124,7 @@ virPCIDeviceReset(virPCIDevice *dev,
 
     VIR_DEBUG("Resetting device %s", dev->name);
 
+    /*打开设备对应的config文件*/
     if ((fd = virPCIDeviceConfigOpenWrite(dev)) < 0)
         goto cleanup;
 
@@ -1132,6 +1144,7 @@ virPCIDeviceReset(virPCIDevice *dev,
      * the function, not the whole device.
      */
     if (dev->has_pm_reset)
+    	/*执行电源管理reset*/
         ret = virPCIDeviceTryPowerManagementReset(dev, fd);
 
     /* Bus reset is not an option with the root bus */
@@ -1159,7 +1172,7 @@ virPCIProbeDriver(const char *driverName)
     g_autofree char *drvpath = NULL;
     g_autofree char *errbuf = NULL;
 
-    drvpath = virPCIDriverDir(driverName);
+    drvpath = virPCIDriverDir(driverName);/*驱动路径*/
 
     /* driver previously loaded, return */
     if (virFileExists(drvpath))
@@ -1172,6 +1185,7 @@ virPCIProbeDriver(const char *driverName)
 
     /* driver loaded after probing */
     if (virFileExists(drvpath))
+    	/*检查driver路径存在，返回0*/
         return 0;
 
  cleanup:
@@ -1275,6 +1289,7 @@ virPCIDeviceBindWithDriverOverride(virPCIDevice *dev,
         return -1;
     }
 
+    /*触发绑定*/
     if (virPCIDeviceRebind(dev) < 0)
         return -1;
 
@@ -1309,6 +1324,7 @@ virPCIDeviceBindToStub(virPCIDevice *dev)
         return -1;
     }
 
+    /*获得driver name,例如：vfio-pci*/
     if (!stubDriverName
         && !(stubDriverName = virPCIStubDriverTypeToString(dev->stubDriverType))) {
         /*申请两个路径内存失败，退出*/
@@ -1367,11 +1383,13 @@ virPCIDeviceDetach(virPCIDevice *dev,
                    virPCIDeviceList *inactiveDevs)
 {
     if (activeDevs && virPCIDeviceListFind(activeDevs, &dev->address)) {
+    	/*此设备不存在*/
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Not detaching active device %1$s"), dev->name);
         return -1;
     }
 
+    /*将设备绑定例如vfio*/
     if (virPCIDeviceBindToStub(dev) < 0)
         return -1;
 
@@ -1508,6 +1526,7 @@ void virPCIDeviceAddressCopy(virPCIDeviceAddress *dst,
     memcpy(dst, src, sizeof(*src));
 }
 
+/*将PCI设备转换为设备地址*/
 char *
 virPCIDeviceAddressAsString(const virPCIDeviceAddress *addr)
 {
@@ -1515,6 +1534,7 @@ virPCIDeviceAddressAsString(const virPCIDeviceAddress *addr)
                            addr->bus, addr->slot, addr->function);
 }
 
+/*检查指定的PCI设备地址是否存在*/
 bool
 virPCIDeviceExists(const virPCIDeviceAddress *addr)
 {
@@ -1552,7 +1572,7 @@ virPCIDeviceNew(const virPCIDeviceAddress *address)
         return NULL;
     }
 
-    /*取vendor,product文件*/
+    /*取vendor,device文件*/
     vendor  = virPCIDeviceReadID(dev, "vendor");
     product = virPCIDeviceReadID(dev, "device");
 
@@ -1812,6 +1832,7 @@ virPCIDeviceListGet(virPCIDeviceList *list,
     return list->devs[idx];
 }
 
+/*取list的长度*/
 size_t
 virPCIDeviceListCount(virPCIDeviceList *list)
 {
@@ -1864,6 +1885,7 @@ virPCIDeviceListFindIndex(virPCIDeviceList *list,
 }
 
 
+/*通过pci设备地址在list中查找virPCIDevice*/
 virPCIDevice *
 virPCIDeviceListFindByIDs(virPCIDeviceList *list,
                           unsigned int domain,
@@ -1885,6 +1907,7 @@ virPCIDeviceListFindByIDs(virPCIDeviceList *list,
 }
 
 
+/*通过pci地址查找对应的virPCIDevice对象*/
 virPCIDevice *
 virPCIDeviceListFind(virPCIDeviceList *list, virPCIDeviceAddress *devAddr)
 {
@@ -2371,6 +2394,7 @@ virPCIGetDeviceAddressFromSysfsLink(const char *device_link)
     g_autofree char *device_path = NULL;
 
     if (!virFileExists(device_link)) {
+    	/*此link不存在*/
         VIR_DEBUG("'%s' does not exist", device_link);
         return NULL;
     }
@@ -2420,6 +2444,7 @@ virPCIGetPhysicalFunction(const char *vf_sysfs_path,
 
     device_link = g_build_filename(vf_sysfs_path, "physfn", NULL);
 
+    /*例如：/sys/bus/pci/devices/0000:3b:01.2/physfn,其中0000:3b:01.2是一个vf*/
     if ((*pf = virPCIGetDeviceAddressFromSysfsLink(device_link))) {
         VIR_DEBUG("PF for VF device '%s': " VIR_PCI_DEVICE_ADDRESS_FMT,
                   vf_sysfs_path,
@@ -2518,17 +2543,19 @@ virPCIIsVirtualFunction(const char *vf_sysfs_device_link)
  * Returns the sriov virtual function index of vf given its pf
  */
 int
-virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link,
-                              const char *vf_sysfs_device_link,
-                              int *vf_index)
+virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link/*pf link地址*/,
+                              const char *vf_sysfs_device_link/*vf link地址*/,
+                              int *vf_index/*出参，vf索引号*/)
 {
     size_t i;
     g_autofree virPCIDeviceAddress *vf_bdf = NULL;
     g_autoptr(virPCIVirtualFunctionList) virt_fns = NULL;
 
+    /*获取到vf地址*/
     if (!(vf_bdf = virPCIGetDeviceAddressFromSysfsLink(vf_sysfs_device_link)))
         return -1;
 
+    /*收集vf列表（组织的是一个list,从0开始排列每个vf)*/
     if (virPCIGetVirtualFunctions(pf_sysfs_device_link, &virt_fns) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Error getting physical function's '%1$s' virtual_functions"),
@@ -2536,6 +2563,7 @@ virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link,
         return -1;
     }
 
+    /*在vf列表中查找vf对应的bdf,返回对应的索引*/
     for (i = 0; i < virt_fns->nfunctions; i++) {
         if (virPCIDeviceAddressEqual(vf_bdf, virt_fns->functions[i].addr)) {
             *vf_index = i;
@@ -2551,7 +2579,7 @@ virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link,
  */
 
 int
-/*构造pci设备路径*/
+/*构造pci设备路径,例如：/sys/bus/pci/devices/0000:3b:00.0*/
 virPCIDeviceAddressGetSysfsFile(virPCIDeviceAddress *addr,
                                 char **pci_sysfs_device_link)
 {
@@ -2689,7 +2717,7 @@ virPCIGetNetName(const char *device_link_sysfs_path,
 int
 virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
                              int pfNetDevIdx,
-                             char **pfname,
+                             char **pfname/*出参，获得pf接口名称*/,
                              int *vf_index)
 {
     g_autofree virPCIDeviceAddress *pf_config_address = NULL;
@@ -2700,6 +2728,7 @@ virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
         return -1;
 
     if (!pf_config_address)
+    	/*无法获得此config addr,直接返回-1*/
         return -1;
 
     if (virPCIDeviceAddressGetSysfsFile(pf_config_address,
@@ -2707,8 +2736,9 @@ virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
         return -1;
     }
 
+    /*利用pf及其下的vf获取vf索引号*/
     if (virPCIGetVirtualFunctionIndex(pf_sysfs_device_path,
-                                      vf_sysfs_device_path, vf_index) < 0) {
+                                      vf_sysfs_device_path, vf_index/*出参，对应的vf索引*/) < 0) {
         return -1;
     }
 
@@ -2726,6 +2756,7 @@ virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
         pfNetDevIdx = 0;
     }
 
+    /*获取vfname,pfname*/
     if (virPCIGetNetName(pf_sysfs_device_path, pfNetDevIdx, vfname, pfname) < 0)
         return -1;
 
@@ -2975,7 +3006,7 @@ virPCIDeviceGetLinkCapSta(virPCIDevice *dev,
     return ret;
 }
 
-
+/*取pci类型（例如：终端，pci桥）*/
 int virPCIGetHeaderType(virPCIDevice *dev, int *hdrType)
 {
     int fd;
@@ -2984,14 +3015,17 @@ int virPCIGetHeaderType(virPCIDevice *dev, int *hdrType)
     *hdrType = -1;
 
     if ((fd = virPCIDeviceConfigOpen(dev)) < 0)
+    	/*打开此pci设备对应的config文件失败*/
         return -1;
 
-    type = virPCIDeviceRead8(dev, fd, PCI_HEADER_TYPE);
+    type = virPCIDeviceRead8(dev, fd, PCI_HEADER_TYPE/*指明偏移量*/);
 
+    /*关闭此fd*/
     virPCIDeviceConfigClose(dev, fd);
 
     type &= PCI_HEADER_TYPE_MASK;
     if (type >= VIR_PCI_HEADER_LAST) {
+    	/*返回的pci类型有误*/
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Unknown PCI header type '%1$d' for device '%2$s'"),
                        type, dev->name);

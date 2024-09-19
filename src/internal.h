@@ -76,11 +76,17 @@
 
 
 /* String equality tests, suggested by Jim Meyering. */
+/*检查两字符串是否相等*/
 #define STREQ(a, b) (strcmp(a, b) == 0)
+/*检查两字符串在忽略大小写情况下，是否相等*/
 #define STRCASEEQ(a, b) (g_ascii_strcasecmp(a, b) == 0)
+/*检查两字符串是否不相等*/
 #define STRNEQ(a, b) (strcmp(a, b) != 0)
+/*检查两字符串在忽略大小写情况下，是否不相等*/
 #define STRCASENEQ(a, b) (g_ascii_strcasecmp(a, b) != 0)
+/*检查两字符串仅比对最大n个长度的情况下是否相等*/
 #define STREQLEN(a, b, n) (strncmp(a, b, n) == 0)
+/*检查两字符串仅比对最大n个长度，且忽略大小写的情况下是否相等*/
 #define STRCASEEQLEN(a, b, n) (g_ascii_strncasecmp(a, b, n) == 0)
 #define STRNEQLEN(a, b, n) (strncmp(a, b, n) != 0)
 #define STRCASENEQLEN(a, b, n) (g_ascii_strncasecmp(a, b, n) != 0)
@@ -270,14 +276,14 @@
 #define virCheckFlags(supported, retval) \
     do { \
         unsigned int __uiflags = flags; \
-        unsigned int __unsuppflags = flags & ~(supported); \
-        if (__uiflags != flags) { \
+        unsigned int __unsuppflags = flags & ~(supported);/*取其它不支持的flags*/ \
+        if (__uiflags != flags) { /**/\
             virReportInvalidArg(flags, \
                                 _("unsupported use of long flags in function %1$s"), \
                                 __FUNCTION__); \
             return retval; \
         } \
-        if (__unsuppflags) { \
+        if (__unsuppflags) { /*包括有其它flags,报错*/\
             virReportInvalidArg(flags, \
                                 _("unsupported flags (0x%1$x) in function %2$s"), \
                                 __unsuppflags, __FUNCTION__); \
@@ -413,6 +419,7 @@
 #define virCheckNonNullArgReturn(argname, retval) \
     do { \
         if (argname == NULL) { \
+        	/*参数名称为空，报错*/\
             virReportInvalidNonNullArg(argname); \
             return retval; \
         } \

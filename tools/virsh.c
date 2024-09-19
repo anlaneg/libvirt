@@ -831,9 +831,9 @@ static const vshCmdDef virshCmds[] = {
 
 //支持的命令group集合（virsh 中的具体命令需要在这此group中查找）
 static const vshCmdGrp cmdGroups[] = {
-    //'attach-device'命令属于domain
+    //'attach-device'命令属于domain组
     {VIRSH_CMD_GRP_DOM_MANAGEMENT, "domain", domManagementCmds},
-	//'list'命令属于monitor
+	//'list'命令属于monitor组
     {VIRSH_CMD_GRP_DOM_MONITORING, "monitor", domMonitoringCmds},
     {VIRSH_CMD_GRP_DOM_EVENTS, "events", domEventCmds},
     {VIRSH_CMD_GRP_HOST_AND_HV, "host", hostAndHypervisorCmds},

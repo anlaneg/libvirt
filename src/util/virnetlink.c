@@ -211,6 +211,7 @@ virNetlinkCreateSocket(int protocol)
 {
     virNetlinkHandle *nlhandle = NULL;
 
+    /*创建netlink socket*/
     if (!(nlhandle = virNetlinkAlloc())) {
         virReportSystemError(errno, "%s",
                              _("cannot allocate nlhandle for netlink"));
@@ -240,6 +241,7 @@ virNetlinkCreateSocket(int protocol)
     return NULL;
 }
 
+/*创建netlink socket,并向kernel发送消息*/
 static virNetlinkHandle *
 virNetlinkSendRequest(struct nl_msg *nl_msg, uint32_t src_pid,
                       struct sockaddr_nl nladdr,
@@ -334,11 +336,13 @@ int virNetlinkCommand(struct nl_msg *nl_msg,
     g_autoptr(virNetlinkHandle) nlhandle = NULL;
     int len = 0;
 
+    /*发送请求消息*/
     if (!(nlhandle = virNetlinkSendRequest(nl_msg, src_pid, nladdr,
                                            protocol, groups)))
         return -1;
 
-    len = nl_recv(nlhandle, &nladdr, (unsigned char **)&temp_resp, NULL);
+    /*收取响应*/
+    len = nl_recv(nlhandle, &nladdr, (unsigned char **)&temp_resp/*响应*/, NULL);
     if (len == 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("nl_recv failed - returned 0 bytes"));
@@ -385,12 +389,13 @@ virNetlinkTalk(const char *ifname,
                virNetlinkMsg *nl_msg,
                uint32_t src_pid,
                uint32_t dst_pid,
-               struct nlmsghdr **resp,
+               struct nlmsghdr **resp/*响应*/,
                unsigned int *resp_len,
                int *error,
                virNetlinkTalkFallback fallback)
 {
-    if (virNetlinkCommand(nl_msg, resp, resp_len,
+	/*向kernel发送netlink消息*/
+    if (virNetlinkCommand(nl_msg, resp/*响应*/, resp_len,
                           src_pid, dst_pid, NETLINK_ROUTE, 0) < 0)
         return -1;
 
@@ -532,8 +537,8 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
     }
 # endif
 
-    if (virNetlinkTalk(ifname, nl_msg, src_pid, dst_pid,
-                       &resp, &resp_len, &error, NULL) < 0) {
+    if (virNetlinkTalk(ifname, nl_msg/*请求消息*/, src_pid, dst_pid,
+                       &resp/*响应*/, &resp_len, &error, NULL) < 0) {
         virReportSystemError(-error,
                              _("error dumping %1$s (%2$d) interface"),
                              ifname, ifindex);

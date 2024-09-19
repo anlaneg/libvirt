@@ -299,6 +299,7 @@ char *
 virXMLPropString(xmlNodePtr node,
                  const char *name)
 {
+	/*自此node中获取name属性*/
     return (char *)xmlGetProp(node, BAD_CAST name);
 }
 
@@ -366,31 +367,38 @@ virXMLNodeContentString(xmlNodePtr node)
 
 static int
 virXMLPropEnumInternal(xmlNodePtr node,
-                       const char *name,
-                       int (*strToInt)(const char *),
-                       virXMLPropFlags flags,
-                       unsigned int *result,
-                       unsigned int defaultResult)
+                       const char *name/*属性名称*/,
+                       int (*strToInt/*字符串转整数*/)(const char *),
+                       virXMLPropFlags flags/*标记，用于控制解析结果及过程*/,
+                       unsigned int *result/*出参，待填充的结果*/,
+                       unsigned int defaultResult/*默认值*/)
 
 {
     g_autofree char *tmp = NULL;
     int ret;
 
+    /*先设置默认值*/
     *result = defaultResult;
 
+    /*取此节点的属性，属性名称为name*/
     if (!(tmp = virXMLPropString(node, name))) {
         if (!(flags & VIR_XML_PROP_REQUIRED))
+        	/*没有注明此属性必须，返回0*/
             return 0;
 
+        /*注明了此属性必须，报错*/
         virReportError(VIR_ERR_XML_ERROR,
                        _("Missing required attribute '%1$s' in element '%2$s'"),
                        name, node->name);
         return -1;
     }
 
+    /*属性值转换为整数*/
     ret = strToInt(tmp);
     if (ret < 0 ||
         ((flags & VIR_XML_PROP_NONZERO) && (ret == 0))) {
+    	/*解析失败
+    	 * 或者注明此属性必须不得为0，但解析值为零，报错*/
         virReportError(VIR_ERR_XML_ERROR,
                        _("Invalid value for attribute '%1$s' in element '%2$s': '%3$s'."),
                        name, node->name, NULLSTR(tmp));
@@ -423,7 +431,7 @@ virXMLPropTristateBool(xmlNodePtr node,
                        virXMLPropFlags flags,
                        virTristateBool *result)
 {
-    flags |= VIR_XML_PROP_NONZERO;
+    flags |= VIR_XML_PROP_NONZERO;/*此属性值不得为0*/
 
     return virXMLPropEnumInternal(node, name, virTristateBoolTypeFromString,
                                   flags, result, VIR_TRISTATE_BOOL_ABSENT);
@@ -505,15 +513,19 @@ virXMLPropInt(xmlNodePtr node,
     *result = defaultResult;
 
     if (!(tmp = virXMLPropString(node, name))) {
+    	/*此node中无此name属性*/
         if (!(flags & VIR_XML_PROP_REQUIRED))
+        	/*如果无此标记，则返回0*/
             return 0;
 
+        /*有此标记，报错，返回-1*/
         virReportError(VIR_ERR_XML_ERROR,
                        _("Missing required attribute '%1$s' in element '%2$s'"),
                        name, node->name);
         return -1;
     }
 
+    /*将此tmp转换为整数*/
     if (virStrToLong_i(tmp, NULL, base, &val) < 0) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("Invalid value for attribute '%1$s' in element '%2$s': '%3$s'. Expected integer value"),
@@ -766,12 +778,12 @@ virXMLPropULongLong(xmlNodePtr node,
  *         or -1 and reports an error on failure.
  */
 int
-virXMLPropEnumDefault(xmlNodePtr node,
-                      const char *name,
-                      int (*strToInt)(const char*),
+virXMLPropEnumDefault(xmlNodePtr node/*节点*/,
+                      const char *name/*属性名称*/,
+                      int (*strToInt)(const char*)/*属性值转换为整数*/,
                       virXMLPropFlags flags,
-                      unsigned int *result,
-                      unsigned int defaultResult)
+                      unsigned int *result/*出参，保存属性值*/,
+                      unsigned int defaultResult/*默认值*/)
 {
     return virXMLPropEnumInternal(node, name, strToInt, flags, result, defaultResult);
 }
@@ -1127,10 +1139,10 @@ virXMLParseHelper(int domcode,
                   const char *filename,/*xml文件,不为空时自此文件加载*/
                   const char *xmlStr,/*文件内容*/
                   const char *url,
-                  const char *rootelement,
+                  const char *rootelement/*根节点名称*/,
                   xmlXPathContextPtr *ctxt,
                   const char *schemafile,
-                  bool validate)
+                  bool validate/*是否校验*/)
 {
     struct virParserData private;
     g_autoptr(xmlParserCtxt) pctxt = NULL;
@@ -1161,13 +1173,13 @@ virXMLParseHelper(int domcode,
                               XML_PARSE_NOWARNING);
     } else {
     	/*通过文件内容，创建xml对象*/
-        xml = xmlCtxtReadDoc(pctxt, BAD_CAST xmlStr, url, NULL,
+        xml = xmlCtxtReadDoc(pctxt, BAD_CAST xmlStr/*文件内容*/, url, NULL,
                              XML_PARSE_NONET |
                              XML_PARSE_NOWARNING);
     }
 
-    //xml对象必须有一个根元素
     if (!xml) {
+    	/*创建xml对象失败*/
         if (virGetLastErrorCode() == VIR_ERR_OK) {
             virGenericReportError(domcode, VIR_ERR_XML_ERROR,
                                   _("failed to parse xml document '%1$s'"),
@@ -1177,6 +1189,7 @@ virXMLParseHelper(int domcode,
         return NULL;
     }
 
+    //xml对象必须有一个根元素
     if (!(rootnode = xmlDocGetRootElement(xml))) {
         virGenericReportError(domcode, VIR_ERR_INTERNAL_ERROR,
                               "%s", _("missing root element"));
@@ -1186,6 +1199,7 @@ virXMLParseHelper(int domcode,
 
     if (rootelement &&
         !virXMLNodeNameEqual(rootnode, rootelement)) {
+    	/*指定了root标签名称，但root节点的名称不是rootelement，报错*/
         virReportError(VIR_ERR_XML_ERROR,
                        _("expecting root element of '%1$s', not '%2$s'"),
                        rootelement, rootnode->name);
@@ -1193,14 +1207,16 @@ virXMLParseHelper(int domcode,
     }
 
     if (ctxt) {
+    	/*创建xpath context*/
         if (!(*ctxt = virXMLXPathContextNew(xml)))
             return NULL;
 
-        /*取根元素*/
+        /*设置根元素为当前node*/
         (*ctxt)->node = rootnode;
     }
 
     if (validate && schemafile != NULL) {
+    	/*指明校验，且schemafile不为NULL，则进行validate*/
         g_autofree char *schema = virFileFindResource(schemafile,
                                                       abs_top_srcdir "/src/conf/schemas",
                                                       PKGDATADIR "/schemas");
@@ -1898,23 +1914,27 @@ int
 virParseScaledValue(const char *xpath,
                     const char *units_xpath,
                     xmlXPathContextPtr ctxt,
-                    unsigned long long *val,
+                    unsigned long long *val/*出参，获取此xpath对应的数字 */,
                     unsigned long long scale,
                     unsigned long long max,
-                    bool required)
+                    bool required/*是否必需*/)
 {
     unsigned long long bytes;
     g_autofree char *xpath_full = NULL;
     g_autofree char *unit = NULL;
     g_autofree char *bytes_str = NULL;
 
-    *val = 0;
+    *val = 0;/*默认为0*/
     xpath_full = g_strdup_printf("string(%s)", xpath);
 
+    /*取此tag对应的字符串*/
     bytes_str = virXPathString(xpath_full, ctxt);
     if (!bytes_str) {
+    	/*无此tag*/
         if (!required)
+        	/*不必须，返回0*/
             return 0;
+        /*必须，返回失败*/
         virReportError(VIR_ERR_XML_ERROR,
                        _("missing element or attribute '%1$s'"),
                        xpath);
@@ -1922,6 +1942,7 @@ virParseScaledValue(const char *xpath,
     }
     VIR_FREE(xpath_full);
 
+    /*将此字符串转换为数字*/
     if (virStrToLong_ullp(bytes_str, NULL, 10, &bytes) < 0) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("Invalid value '%1$s' for element or attribute '%2$s'"),
@@ -1929,12 +1950,16 @@ virParseScaledValue(const char *xpath,
         return -1;
     }
 
+    /*构造units属性名称*/
     if (units_xpath)
          xpath_full = g_strdup_printf("string(%s)", units_xpath);
     else
          xpath_full = g_strdup_printf("string(%s/@unit)", xpath);
+
+    /*取unit属性对应的取值*/
     unit = virXPathString(xpath_full, ctxt);
 
+    /*换算计量单位*/
     if (virScaleInteger(&bytes, unit, scale, max) < 0)
         return -1;
 

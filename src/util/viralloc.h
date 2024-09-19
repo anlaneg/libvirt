@@ -228,7 +228,7 @@ int virDeleteElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
  *
  * These macros are safe to use on arguments with side effects.
  */
-#define VIR_APPEND_ELEMENT(ptr, count, newelem) \
+#define VIR_APPEND_ELEMENT(ptr, count, newelem/*要添加的新元素*/) \
     virAppendElement(&(ptr), sizeof(*(ptr)), &(count), \
                      VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, false)
 #define VIR_APPEND_ELEMENT_COPY(ptr, count, newelem) \
